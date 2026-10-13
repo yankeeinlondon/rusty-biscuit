@@ -1,0 +1,16 @@
+  - const SCRIPT_CONSTANT typescript_script.ts:6:7
+  - unknown ScriptAlias typescript_script.ts:12:1
+  - class ScriptClass typescript_script.ts:8:1
+  - function scriptFunction(): void typescript_script.ts:4:1
+  - method scriptMethod(): void [in ScriptClass] typescript_script.ts:9:3
+=== classes
+typescript_script.ts (TypeScript)
+  class ScriptClass [8:1]
+    Instance Methods (1)
+      - scriptMethod(): void [in ScriptClass] [9:3]
+
+=== functions
+  - function scriptFunction(): void typescript_script.ts:4:1
+  - method scriptMethod(): void [in ScriptClass] typescript_script.ts:9:3
+=== types
+  - class ScriptClass typescript_script.ts:8:1

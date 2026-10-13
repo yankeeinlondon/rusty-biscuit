@@ -1109,9 +1109,8 @@ struct PackagePolicy {
     area: String,
     #[serde(default = "default_true")]
     gates: bool,
-    /// CI-gating tiers this package owns. Contains L1 for a gating package
-    /// with tests; L2 and browser are declared opt-ins. Empty for a gating
-    /// package that declares `tiers = []`, whose only cells are compile checks.
+    /// CI-gating tiers this package owns. Always contains L1 for a gating
+    /// package; L2 and browser are declared opt-ins.
     #[serde(default = "default_tiers")]
     tiers: Vec<Tier>,
     /// L2 terminal backends the package's tests require.
@@ -1522,6 +1521,28 @@ struct ResolvedPlan {
     /// report can name them.
     #[serde(default)]
     reverse_dependencies: Vec<String>,
+    /// Where each scheduled environment's comparison anchor is and why; present
+    /// on a nightly only. Read by `summarize` alone.
+    #[serde(default)]
+    coverage_anchors: Vec<CoverageAnchor>,
+}
+
+/// One environment's comparison anchor, as `summarize` reports it. The planner
+/// owns the shape (`COVERAGE_ANCHOR_FIELDS`); only the fields shown are read.
+#[derive(Clone, Debug, Deserialize)]
+struct CoverageAnchor {
+    environment: String,
+    mode: String,
+    reason: String,
+    /// A full Git object ID, or null for a full-scope fallback.
+    #[serde(default)]
+    anchor: Option<String>,
+    #[serde(default)]
+    policy_delta: Vec<serde_json::Value>,
+    #[serde(default)]
+    inherited_cells: Vec<serde_json::Value>,
+    #[serde(default)]
+    reopened_cells: Vec<serde_json::Value>,
 }
 
 /// A package the plan selected. Only the name is read here: the area travels on
@@ -1706,6 +1727,44 @@ impl PlanEvidence {
     }
 }
 
+/// Refuse a reused cell whose proof could be mistaken for this run's own work.
+///
+/// ## Notes
+///
+/// A reused cell owes no completion record, so the plan's evidence is the only
+/// thing standing behind it. Defaulting an absent or contradictory record to a
+/// pass would let a cell nothing proved read green, and a reused cell carrying
+/// the `ci` origin would read as executed in this run. The producers' verifier
+/// decides whether a receipt qualifies; this only refuses a record that is not
+/// shaped like one it accepted.
+fn check_reused_proof(cell: &PlanCell) -> Result<()> {
+    let name = format!("{}/{}/{}", cell.package, cell.environment, cell.gate);
+    let Some(evidence) = &cell.evidence else {
+        bail!("reused cell {name} carries no evidence record; nothing proves it");
+    };
+    if cell.state != "reused" || !cell.origin.is_reused() {
+        bail!(
+            "reused cell {name} is in state `{}` with origin `{}`; a reused result is \
+             `reused` and produced off this run",
+            cell.state,
+            cell.origin
+        );
+    }
+    if let Some(origin) = evidence.origin.filter(|origin| !origin.is_reused()) {
+        bail!("reused cell {name} cites evidence of origin `{origin}`, which was not produced off this run");
+    }
+    match evidence.outcome.as_deref() {
+        None | Some("fail") => {}
+        Some("pass") => {
+            if evidence.counts.is_some_and(|counts| counts.bad() > 0) {
+                bail!("reused cell {name} records a `pass` outcome with failing counts");
+            }
+        }
+        Some(other) => bail!("reused cell {name} records outcome `{other}`, not `pass` or `fail`"),
+    }
+    Ok(())
+}
+
 /// Turn the plan's cells into the expectations the rollup classifies against.
 ///
 /// ## Errors
@@ -1789,6 +1848,7 @@ fn plan_expected_cells(plan: &ResolvedPlan) -> Result<Vec<ExpectedCell>> {
         }
 
         if cell.execution == "reuse" {
+            check_reused_proof(cell)?;
             let evidence = cell.evidence.as_ref();
             let counts = evidence.and_then(|record| record.counts);
             let mut link = evidence.map(PlanEvidence::link).unwrap_or_default();
@@ -5232,6 +5292,29 @@ fn render_change_report(plan: &ResolvedPlan) -> String {
         "| reverse (reported, not selected) | {} |\n\n",
         render_set(&plan.reverse_dependencies)
     ));
+    if !plan.coverage_anchors.is_empty() {
+        out.push_str(
+            "## Coverage anchors\n\n\
+             | environment | mode | reason | anchor | policy delta | inherited | reopened |\n\
+             | --- | --- | --- | --- | --- | --- | --- |\n",
+        );
+        for anchor in &plan.coverage_anchors {
+            out.push_str(&format!(
+                "| {} | {} | {} | {} | {} | {} | {} |\n",
+                anchor.environment,
+                anchor.mode,
+                anchor.reason,
+                anchor
+                    .anchor
+                    .as_deref()
+                    .map_or_else(|| "none".to_owned(), |sha| format!("`{}`", &sha[..sha.len().min(7)])),
+                anchor.policy_delta.len(),
+                anchor.inherited_cells.len(),
+                anchor.reopened_cells.len(),
+            ));
+        }
+        out.push('\n');
+    }
     out
 }
 

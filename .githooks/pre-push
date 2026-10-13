@@ -708,9 +708,9 @@ else
             *) EVIDENCE_ROOT="$PWD/$EVIDENCE_ROOT" ;;
         esac
         REPORT_DIR="$EVIDENCE_ROOT/$HEAD_SHA/$ENVIRONMENT"
-        NOTES_REF="refs/notes/ci-local/$ENVIRONMENT"
-        git fetch --no-tags "$REMOTE_NAME" "+$NOTES_REF:$NOTES_REF" >/dev/null 2>&1 || true
-        git notes --ref "$NOTES_REF" show "$HEAD_SHA" >"$PRIOR_RECEIPT_FILE" 2>/dev/null || : >"$PRIOR_RECEIPT_FILE"
+        # No prior receipt is fed to record-cells: the note is a collection of
+        # observations now, and `observation_notes.py` unions this run into it
+        # after fetching the remote ref itself, never overwriting local proof.
         if mkdir -p "$REPORT_DIR" && cp -R "$REPORTS_DIR/." "$REPORT_DIR/"; then
             RETAINED=1
         else
@@ -730,12 +730,17 @@ else
             --head "$HEAD_SHA" --environment "$ENVIRONMENT" \
             --report-dir "$REPORT_DIR" --prior-receipt "$PRIOR_RECEIPT_FILE" \
             >"$RECEIPT_FILE"; then
-            git notes --ref "$NOTES_REF" add -f -F "$RECEIPT_FILE" "$HEAD_SHA"
             CELLS="$(jq -r '.cells | length' "$RECEIPT_FILE")"
-            if push_note "$NOTES_REF"; then
+            PUBLISH_STATUS=0
+            python3 "$REPO_ROOT/scripts/ci/observation_notes.py" publish-receipt \
+                --receipt "$RECEIPT_FILE" --head "$HEAD_SHA" \
+                --environment "$ENVIRONMENT" --remote "$REMOTE_NAME" || PUBLISH_STATUS=$?
+            if [ "$PUBLISH_STATUS" -eq 0 ]; then
                 echo "Published $CELLS $ENVIRONMENT cell(s) of evidence for $SHORT_HEAD (base $(git rev-parse --short=9 "$BASE_SHA")). Reports retained under $REPORT_DIR."
-            else
+            elif [ "$PUBLISH_STATUS" -eq 4 ]; then
                 echo "Local evidence recorded but could not be published; CI will retain $ENVIRONMENT." >&2
+            else
+                echo "No validation receipt for $SHORT_HEAD: the observation could not be recorded (see above)." >&2
             fi
         else
             echo "No validation receipt for $SHORT_HEAD: record-cells refused the staged reports (see above)." >&2

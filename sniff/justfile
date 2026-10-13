@@ -100,6 +100,10 @@ test *args="":
         just _test_local_all "sniff --features remote; sniff-detection-cli" {{ args }}
     fi
 
+# List every test Nextest marks SLOW (see the shared `_slow_tests`).
+slow-tests *args="":
+    @just _slow_tests {{ args }}
+
 # Real-terminal (Level-2) tests: CI/CD status-cell styling in sniff-detection-cli.
 # `--features test-fixtures` builds the `render_cicd_fixture` helper the test spawns.
 test-l2 *args="":

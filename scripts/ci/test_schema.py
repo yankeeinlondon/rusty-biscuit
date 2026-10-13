@@ -475,6 +475,10 @@ class SchemaReadmeVersionTests(unittest.TestCase):
             schema.RECEIPT_SCHEMA_VERSION, self.version_in_table("Validation receipt")
         )
         self.assertEqual(
+            schema.COLLECTION_SCHEMA_VERSION,
+            self.version_in_table("Observation collection"),
+        )
+        self.assertEqual(
             schema.SCOPE_RECEIPT_SCHEMA_VERSION, self.version_in_table("Scope receipt")
         )
         self.assertEqual(
@@ -550,6 +554,7 @@ class SchemaChangelogVersionTests(unittest.TestCase):
         expected = {
             "Resolved plan": schema.RESOLVED_PLAN_SCHEMA_VERSION,
             "Validation receipt": schema.RECEIPT_SCHEMA_VERSION,
+            "Observation collection": schema.COLLECTION_SCHEMA_VERSION,
             "Scope receipt": schema.SCOPE_RECEIPT_SCHEMA_VERSION,
             "Expected-test manifest": schema.EXPECTED_MANIFEST_SCHEMA_VERSION,
             "Completion record": schema.COMPLETION_RECORD_SCHEMA_VERSION,
@@ -968,6 +973,225 @@ class ArchiveGuardSharedCorpusTests(unittest.TestCase):
                 )
 
 
+CONTRACT_A, CONTRACT_B = "c" * 64, "d" * 64
+
+
+def coverage_anchor(**overrides: object) -> dict:
+    document = {
+        "environment": "wsl2-ubuntu", "mode": "incremental", "anchor": SHA_A,
+        "reason": "certified-ancestor",
+        "source": {"kind": "nightly-certified", "run_id": 7, "head": SHA_A},
+        "policy_delta": [{"package": "claudine", "gate": "L1"}],
+        "inherited_cells": [{"package": "sniff", "gate": "L1"}],
+        "reopened_cells": [],
+        "required_cells": [
+            {"package": "claudine", "gate": "L1", "contract": CONTRACT_A},
+            {"package": "sniff", "gate": "L1", "contract": CONTRACT_B},
+        ],
+    }
+    document.update(overrides)
+    return document
+
+
+def used_anchor(**overrides: object) -> dict:
+    """A certification's `anchors_used` entry: the plan's anchor less its contracts."""
+    return {k: v for k, v in coverage_anchor(**overrides).items() if k != "required_cells"}
+
+
+def certification(**overrides: object) -> dict:
+    document = {
+        "schema_version": schema.CERTIFICATION_SCHEMA_VERSION,
+        "run_id": 7, "attempt": 1, "workflow_path": ".github/workflows/ci.yml",
+        "event": "schedule", "head": SHA_B, "tree": SHA_A,
+        "environment": "wsl2-ubuntu",
+        "coverage_policy_version": schema.COVERAGE_POLICY_VERSION,
+        "environments_digest": "a" * 64, "plan_identity": "b" * 64,
+        "anchors_used": [used_anchor()],
+        "certified": True,
+        "cells": {"executing": 1, "reused": 0, "accepted_gap": 2, "inherited": 1},
+        "covered_cells": [
+            {"package": "claudine", "gate": "L1", "contract": CONTRACT_A},
+            {"package": "sniff", "gate": "L1", "contract": CONTRACT_B},
+        ],
+        "audits": {"required": 3, "passed": 3},
+    }
+    document.update(overrides)
+    return document
+
+
+class CoverageAnchorValidationTests(unittest.TestCase):
+    """The plan's optional `coverage_anchors`, one edit per cell."""
+
+    def valid(self, *anchors: dict) -> dict:
+        return plan(coverage_anchors=list(anchors or [coverage_anchor()]))
+
+    def test_a_plan_with_an_anchor_per_environment_validates(self):
+        self.assertEqual([], schema.validate_resolved_plan(self.valid()))
+        full = coverage_anchor(
+            environment="windows-latest", mode="full", anchor=None, reason="bootstrap-no-run",
+            source={"kind": "none", "run_id": None, "head": None},
+            policy_delta=[], inherited_cells=[], reopened_cells=[], required_cells=[],
+        )
+        self.assertEqual([], schema.validate_resolved_plan(self.valid(coverage_anchor(), full)))
+
+    def test_a_reopened_cell_is_a_scheduled_cell_and_never_also_inherited(self):
+        # The plan's one cell is claudine/ubuntu-latest/L1.
+        reopened = coverage_anchor(
+            environment="ubuntu-latest", policy_delta=[],
+            reopened_cells=[{"package": "claudine", "gate": "L1"}],
+        )
+        self.assertEqual([], schema.validate_resolved_plan(self.valid(reopened)))
+        unscheduled = coverage_anchor(reopened_cells=[{"package": "claudine", "gate": "L1"}])
+        self.assertIn(
+            "malformed-receipt: resolved plan coverage_anchors entry 'wsl2-ubuntu' reopens "
+            "a cell the plan does not schedule",
+            schema.validate_resolved_plan(self.valid(unscheduled)),
+        )
+
+    def test_the_field_is_optional_and_never_empty(self):
+        self.assertEqual([], schema.validate_resolved_plan(plan()))
+        self.assertTrue(schema.validate_resolved_plan(plan(coverage_anchors=[])))
+        self.assertTrue(schema.validate_resolved_plan(plan(coverage_anchors=None)))
+        self.assertTrue(schema.validate_resolved_plan(plan(coverage_anchors="x")))
+
+    def test_every_field_shape_and_contradiction_is_rejected(self):
+        edits = {}
+        control = coverage_anchor()
+        for field in schema.COVERAGE_ANCHOR_FIELDS:
+            edits[f"{field} absent"] = {k: v for k, v in control.items() if k != field}
+            edits[f"{field} null"] = {**control, field: None}
+            edits[f"{field} wrong type"] = {**control, field: 3}
+        edits.update({
+            "unknown field": {**control, "extra": 1},
+            "unknown reason": {**control, "reason": "because"},
+            "reason implies full": {**control, "reason": "bootstrap-no-run"},
+            "full with an anchor": {**control, "mode": "full", "reason": "bootstrap-no-run",
+                                    "source": {"kind": "none", "run_id": None, "head": None}},
+            "anchor not a sha": {**control, "anchor": "abc"},
+            "source run id zero": {**control, "source": {"kind": "nightly-certified", "run_id": 0, "head": SHA_A}},
+            "source missing head": {**control, "source": {"kind": "nightly-certified", "run_id": 7}},
+            "delta cell unknown gate": {**control, "policy_delta": [{"package": "a", "gate": "fuzz"}]},
+            "inherited cell extra key": {**control, "inherited_cells": [{"package": "a", "gate": "L1", "x": 1}]},
+            "reopened cell unknown gate": {**control, "reopened_cells": [{"package": "a", "gate": "fuzz"}]},
+            "reopened cell also inherited": {**control, "reopened_cells": [{"package": "sniff", "gate": "L1"}]},
+            "full fallback reopens": {**control, "mode": "full", "anchor": None, "reason": "bootstrap-no-run",
+                                      "source": {"kind": "none", "run_id": None, "head": None},
+                                      "policy_delta": [], "inherited_cells": [],
+                                      "reopened_cells": [{"package": "claudine", "gate": "L1"}]},
+            "unknown environment": {**control, "environment": "beos"},
+            "required cell without a contract": {**control, "required_cells": [
+                {"package": "claudine", "gate": "L1"}, control["required_cells"][1],
+            ]},
+            "required cell contract not a digest": {**control, "required_cells": [
+                {"package": "claudine", "gate": "L1", "contract": "abc"}, control["required_cells"][1],
+            ]},
+            "required cell wrong element type": {**control, "required_cells": ["claudine/L1"]},
+            "required cell repeated": {**control, "required_cells": [
+                *control["required_cells"], control["required_cells"][0],
+            ]},
+            "delta names an unrequired cell": {**control, "required_cells": control["required_cells"][1:]},
+            "inherited names an unrequired cell": {**control, "required_cells": control["required_cells"][:1]},
+            "reopened names an unrequired cell": {**control, "reopened_cells": [{"package": "zeta", "gate": "L1"}]},
+        })
+        for label, entry in edits.items():
+            with self.subTest(edit=label):
+                self.assertTrue(
+                    schema.validate_resolved_plan(self.valid(entry)),
+                    "a malformed anchor must never validate",
+                )
+
+    def test_two_anchors_for_one_environment_are_refused(self):
+        self.assertTrue(schema.validate_resolved_plan(self.valid(coverage_anchor(), coverage_anchor())))
+
+
+class CertificationValidationTests(unittest.TestCase):
+    def test_the_control_validates_and_names_a_stable_artifact(self):
+        self.assertEqual([], schema.validate_certification(certification()))
+        name = schema.certification_name("wsl2-ubuntu", SHA_B, "a" * 64)
+        self.assertEqual(f"ci-coverage-v1-wsl2-ubuntu-{SHA_B}-{'a' * 16}", name)
+        with self.assertRaises(ValueError):
+            schema.certification_name("beos", SHA_B, "a" * 64)
+        with self.assertRaises(ValueError):
+            schema.certification_name("wsl2-ubuntu", "abc", "a" * 64)
+
+    def test_the_digest_follows_the_scheduling_events_alone(self):
+        before = {"name": "windows-latest", "events": ["pull_request", "push"], "runner": "x"}
+        after = {"name": "windows-latest", "events": ["schedule", "workflow_dispatch"], "runner": "y"}
+        self.assertNotEqual(schema.policy_digest(before), schema.policy_digest(after))
+        self.assertEqual(
+            schema.policy_digest(after),
+            schema.policy_digest({**after, "runner": "z", "capabilities": {}}),
+        )
+        self.assertEqual(
+            schema.policy_digest({"name": "a", "events": ["push", "schedule"]}),
+            schema.policy_digest({"name": "a", "events": ["schedule", "push"]}),
+        )
+
+    def test_version_is_read_before_the_fields(self):
+        for version in (2, True, 1.0, None, "1"):
+            with self.subTest(version=version):
+                problems = schema.validate_certification({"schema_version": version})
+                self.assertEqual(1, len(problems))
+                self.assertTrue(problems[0].startswith("unknown-schema-version:"))
+
+    def test_every_field_and_shape_edit_is_rejected(self):
+        control = certification()
+        edits = {}
+        for field in schema.CERTIFICATION_FIELDS:
+            if field == "schema_version":
+                continue
+            edits[f"{field} absent"] = {k: v for k, v in control.items() if k != field}
+            edits[f"{field} null"] = {**control, field: None}
+            edits[f"{field} wrong type"] = {**control, field: 3.5}
+        edits.update({
+            "unknown field": {**control, "extra": 1},
+            "run id zero": {**control, "run_id": 0},
+            "run id bool": {**control, "run_id": True},
+            "event unknown": {**control, "event": "cron"},
+            "anchors empty": {**control, "anchors_used": []},
+            "anchors one wrong": {**control, "anchors_used": [used_anchor(), 5]},
+            "anchor carries its contracts": {**control, "anchors_used": [coverage_anchor()]},
+            "certified but audit short": {**control, "audits": {"required": 3, "passed": 2}},
+            "covered disagrees with counts": {**control, "covered_cells": []},
+            "covered repeats a cell": {**control, "covered_cells": [
+                {"package": "a", "gate": "L1", "contract": CONTRACT_A},
+                {"package": "a", "gate": "L1", "contract": CONTRACT_A},
+            ], "cells": {"executing": 2, "reused": 0, "accepted_gap": 0, "inherited": 0}},
+            "covered cell wrong gate": {**control, "covered_cells": [
+                {"package": "a", "gate": "fuzz", "contract": CONTRACT_A},
+                {"package": "b", "gate": "L1", "contract": CONTRACT_B},
+            ]},
+            "covered cell without a contract": {**control, "covered_cells": [
+                {"package": "a", "gate": "L1"}, {"package": "b", "gate": "L1", "contract": CONTRACT_B},
+            ]},
+            "covered cell contract null": {**control, "covered_cells": [
+                {"package": "a", "gate": "L1", "contract": None},
+                {"package": "b", "gate": "L1", "contract": CONTRACT_B},
+            ]},
+            "covered cell contract short": {**control, "covered_cells": [
+                {"package": "a", "gate": "L1", "contract": "c" * 16},
+                {"package": "b", "gate": "L1", "contract": CONTRACT_B},
+            ]},
+            "count negative": {**control, "cells": {**control["cells"], "executing": -1}},
+            "count bool": {**control, "cells": {**control["cells"], "executing": True}},
+            "digest not hex": {**control, "environments_digest": "xyz"},
+            "audit counts negative": {**control, "audits": {"required": -1, "passed": -1}},
+        })
+        for label, document in edits.items():
+            with self.subTest(edit=label):
+                self.assertTrue(schema.validate_certification(document))
+
+    def test_an_honestly_uncertified_document_is_still_well_formed(self):
+        document = certification(certified=False, audits={"required": 3, "passed": 1})
+        self.assertEqual([], schema.validate_certification(document))
+
+    def test_empty_covered_cells_are_a_real_empty_only_with_zero_counts(self):
+        document = certification(
+            covered_cells=[], cells={"executing": 0, "reused": 0, "accepted_gap": 4, "inherited": 0},
+        )
+        self.assertEqual([], schema.validate_certification(document))
+
+
 class ResolvedPlanValidationTests(unittest.TestCase):
     def test_a_well_formed_plan_validates(self):
         self.assertEqual(schema.validate_resolved_plan(plan()), [])
@@ -1113,29 +1337,49 @@ class ResolvedPlanValidationTests(unittest.TestCase):
             ]
         )
         self.assertIn(
-            "malformed-receipt: package claudine carries an exclusion exactly when it "
-            "gates nothing without a no_tests_reason",
+            "malformed-receipt: package claudine carries an exclusion but gates something",
             schema.validate_resolved_plan(document),
         )
 
-    def test_a_package_declaring_no_tests_may_gate_nothing_without_an_exclusion(self):
-        document = plan(
-            packages=[package(gates=[], tiers=[], no_tests_reason="placeholder")]
-        )
-        self.assertNotIn(
-            "malformed-receipt: package claudine carries an exclusion exactly when it "
-            "gates nothing without a no_tests_reason",
-            schema.validate_resolved_plan(document),
-        )
-
-    def test_a_no_tests_reason_on_a_package_with_tiers_is_refused(self):
+    def test_a_package_gating_nothing_needs_an_exclusion_while_anything_is_scheduled(self):
         self.assertIn(
-            "malformed-receipt: package claudine no_tests_reason must be a non-empty "
-            "string on a package whose tiers are empty",
-            schema.validate_resolved_plan(
-                plan(packages=[package(no_tests_reason="placeholder")])
-            ),
+            "malformed-receipt: package claudine gates nothing without an exclusion",
+            schema.validate_resolved_plan(plan(packages=[package(gates=[])], cells=[])),
         )
+
+    def test_a_fully_proven_push_may_select_packages_that_gate_nothing(self):
+        # A push whose pull request proved every environment it schedules
+        # plans none, so its packages gate nothing and carry no exclusion.
+        problems = schema.validate_resolved_plan(
+            plan(packages=[package(gates=[])], cells=[], environments=[])
+        )
+        self.assertFalse([problem for problem in problems if "exclusion" in problem], problems)
+
+    def test_an_unimplemented_marker_must_be_well_formed(self):
+        good = {"reason": "not built yet", "tests_found": False}
+        self.assertEqual(
+            [],
+            [p for p in schema.validate_resolved_plan(
+                plan(packages=[package(tiers=[], unimplemented=good)])
+            ) if "unimplemented" in p],
+        )
+        for marker, fragment in (
+            ("yes", "must be {reason, tests_found}"),
+            ({"reason": "x"}, "must be {reason, tests_found}"),
+            ({"reason": "", "tests_found": False}, "non-empty string"),
+            ({"reason": "x", "tests_found": "no"}, "must be a boolean"),
+        ):
+            with self.subTest(marker=marker):
+                problems = schema.validate_resolved_plan(
+                    plan(packages=[package(tiers=[], unimplemented=marker)])
+                )
+                self.assertTrue(any(fragment in p for p in problems), problems)
+
+    def test_a_package_without_tests_cannot_declare_a_test_tier(self):
+        problems = schema.validate_resolved_plan(
+            plan(packages=[package(unimplemented={"reason": "x", "tests_found": False})])
+        )
+        self.assertTrue(any("has no tests but declares tiers" in p for p in problems), problems)
 
     def test_a_dependent_seam_that_is_not_an_object_is_refused(self):
         self.assertIn(
@@ -1818,6 +2062,223 @@ class ReceiptValidationTests(unittest.TestCase):
         self.assertTrue(any("non-empty list" in problem for problem in problems), problems)
 
 
+class ReceiptReaderRobustnessTests(unittest.TestCase):
+    """Defects found in the version-2 reader: each used to crash or misread."""
+
+    def test_the_version_is_read_before_the_field_set(self):
+        problems = schema.validate_receipt({"schema_version": 9})
+        self.assertEqual(1, len(problems))
+        self.assertTrue(problems[0].startswith("unknown-schema-version:"), problems)
+
+    def test_a_boolean_or_float_is_not_a_version(self):
+        for version in (True, 2.0, "2", None):
+            with self.subTest(version=version):
+                problems = schema.validate_receipt(receipt(schema_version=version))
+                self.assertEqual(1, len(problems))
+                self.assertTrue(problems[0].startswith("unknown-schema-version:"), problems)
+        problems = schema.validate_receipt({"schema_version": True})
+        self.assertTrue(problems[0].startswith("unknown-schema-version:"), problems)
+
+    def test_a_cell_that_is_not_an_object_is_a_problem_not_a_crash(self):
+        problems = schema.validate_receipt(receipt(cells=["alpha", 123, None]))
+        self.assertTrue(problems)
+        self.assertTrue(all(p.startswith("malformed-receipt:") for p in problems), problems)
+
+    def test_a_bad_test_filter_on_the_first_cell_is_a_problem_not_a_crash(self):
+        for bad in ("", "  ", 123, None):
+            with self.subTest(test_filter=bad):
+                problems = schema.validate_receipt(
+                    receipt(cells=[receipt_cell(test_filter=bad)])
+                )
+                self.assertTrue(
+                    any("test_filter" in problem for problem in problems), problems
+                )
+
+    def test_a_boolean_duration_or_exit_code_is_refused(self):
+        for field, value in (("duration_s", True), ("exit_code", True), ("exit_code", 1.5)):
+            with self.subTest(field=field, value=value):
+                problems = schema.validate_receipt(
+                    receipt(cells=[receipt_cell(**{field: value})])
+                )
+                self.assertTrue(any(field in problem for problem in problems), problems)
+
+    def test_a_null_build_or_report_is_refused(self):
+        for overrides in ({"build": None}, {"report": None}):
+            with self.subTest(overrides=overrides):
+                self.assertTrue(
+                    schema.validate_receipt(receipt(cells=[receipt_cell(**overrides)]))
+                )
+
+
+class StrictJsonTests(unittest.TestCase):
+    def test_a_plain_document_parses(self):
+        self.assertEqual({"a": [1, 2.5, None]}, schema.loads_strict('{"a":[1,2.5,null]}'))
+
+    def test_the_refusals(self):
+        for text in (
+            '{"a":1,"a":2}',
+            '{"a":{"b":1,"b":2}}',
+            '{"a":NaN}',
+            '{"a":Infinity}',
+            '{"a":-Infinity}',
+            '{"a":1} trailing',
+            '{"a":1}{"b":2}',
+            "",
+            "{",
+        ):
+            with self.subTest(text=text):
+                with self.assertRaises(ValueError):
+                    schema.loads_strict(text)
+
+
+def observation(**overrides: object) -> dict:
+    body = {
+        "producer": {
+            "kind": "hook",
+            "host": {"os": "MacOS", "kernel": "Darwin 27.0.0", "report_dir": "/evidence"},
+        },
+        "base": SHA_A,
+        "scope_identity": "0123456789abcdef",
+        "completion": "complete",
+        "cell": receipt_cell(),
+        "reports": [
+            {"path": "claudine-L1.xml", "sha256": "ab" * 32, "bytes": 12, "store": "host-dir"}
+        ],
+    }
+    body.update(overrides)
+    return {"observation_id": schema.observation_identity(body), **body}
+
+
+def collection(*observations: dict, **overrides: object) -> dict:
+    document = {
+        "schema_version": schema.COLLECTION_SCHEMA_VERSION,
+        "environment": "macos-latest",
+        "head": SHA_B,
+        "tree": SHA_T,
+        "observations": sorted(observations, key=lambda o: o["observation_id"]),
+    }
+    document.update(overrides)
+    return document
+
+
+class CollectionValidationTests(unittest.TestCase):
+    def test_a_well_formed_collection_validates_and_round_trips(self):
+        document = collection(observation())
+        self.assertEqual([], schema.validate_collection(document))
+        again = json.loads(schema.canonical(document))
+        self.assertEqual(schema.canonical(document), schema.canonical(again))
+        self.assertEqual([], schema.validate_collection(again))
+
+    def test_an_empty_collection_is_valid_zero_proof(self):
+        self.assertEqual([], schema.validate_collection(collection()))
+
+    def test_the_version_is_read_first(self):
+        problems = schema.validate_collection({"schema_version": 4})
+        self.assertTrue(problems[0].startswith("unknown-schema-version:"), problems)
+        problems = schema.validate_collection({"schema_version": True})
+        self.assertTrue(problems[0].startswith("unknown-schema-version:"), problems)
+
+    def test_an_id_is_the_identity_of_the_rest(self):
+        forged = {**observation(), "observation_id": "ab" * 32}
+        problems = schema.validate_collection(collection(forged))
+        self.assertTrue(problems[0].startswith("observation-id-mismatch:"), problems)
+
+    def test_the_observation_id_changes_with_any_field(self):
+        first = observation()
+        second = observation(completion="partial")
+        self.assertNotEqual(first["observation_id"], second["observation_id"])
+        self.assertEqual(first["observation_id"], observation()["observation_id"])
+
+    def test_proof_is_required_unless_the_producer_is_a_hook(self):
+        rig = observation(
+            producer={
+                "kind": "rig",
+                "host": {"os": "Windows", "kernel": "10", "report_dir": "C:/evidence"},
+            }
+        )
+        problems = schema.validate_collection(collection(rig))
+        self.assertTrue(problems[0].startswith("observation-proof-missing:"), problems)
+        proven = observation(
+            producer=rig["producer"],
+            proof={
+                "nextest_version": "0.9",
+                "target": "x86_64-pc-windows-msvc",
+                "expected_listing_digest": "ab" * 32,
+                "completion_record_digest": "cd" * 32,
+            },
+        )
+        self.assertEqual([], schema.validate_collection(collection(proven)))
+
+    def test_a_hosted_producer_names_its_run(self):
+        hosted = observation(
+            producer={"kind": "hosted", "host": {"os": "Linux", "kernel": "6"}},
+            proof={
+                "nextest_version": "0.9",
+                "target": "x86_64-unknown-linux-gnu",
+                "expected_listing_digest": "ab" * 32,
+                "completion_record_digest": "cd" * 32,
+            },
+            reports=[
+                {"path": "claudine-L1.xml", "sha256": "ab" * 32, "bytes": 1, "store": "artifact"}
+            ],
+        )
+        problems = schema.validate_collection(collection(hosted))
+        self.assertTrue(any("needs 'workflow'" in p for p in problems), problems)
+
+    def test_a_retry_must_name_a_present_observation_of_the_same_cell(self):
+        first = observation()
+        dangling = observation(retry_of="ab" * 32, scope_identity="1111111111111111")
+        problems = schema.validate_collection(collection(first, dangling))
+        self.assertTrue(any(p.startswith("observation-link-invalid") for p in problems), problems)
+        other_cell = observation(
+            cell=receipt_cell(package="other", report="o.xml"),
+            retry_of=first["observation_id"],
+            reports=[{"path": "o.xml", "sha256": "ab" * 32, "bytes": 1, "store": "host-dir"}],
+        )
+        problems = schema.validate_collection(collection(first, other_cell))
+        self.assertTrue(any("another cell" in p for p in problems), problems)
+
+    def test_a_valid_retry_chain_validates(self):
+        first = observation()
+        second = observation(retry_of=first["observation_id"], scope_identity="2222222222222222")
+        third = observation(retry_of=second["observation_id"], scope_identity="3333333333333333")
+        self.assertEqual([], schema.validate_collection(collection(first, second, third)))
+
+    def test_observations_must_be_sorted_and_unique(self):
+        a, b = observation(), observation(scope_identity="2222222222222222")
+        document = collection(a, b)
+        document["observations"].reverse()
+        self.assertTrue(schema.validate_collection(document))
+        document["observations"] = [a, a]
+        self.assertTrue(
+            any(p.startswith("conflicting-evidence") for p in schema.validate_collection(document))
+        )
+
+    def test_a_complete_cell_must_be_cited_by_its_reports(self):
+        problems = schema.validate_collection(collection(observation(reports=[])))
+        self.assertTrue(problems[0].startswith("observation-report-unavailable:"), problems)
+
+    def test_a_host_dir_report_needs_a_report_dir(self):
+        host_less = observation(
+            producer={"kind": "hook", "host": {"os": "MacOS", "kernel": "Darwin"}}
+        )
+        problems = schema.validate_collection(collection(host_less))
+        self.assertTrue(any("names no report_dir" in p for p in problems), problems)
+
+    def test_the_contract_artifact_publishes_the_collection(self):
+        published = schema.contract()["receipt"]["collection"]
+        self.assertEqual(schema.COLLECTION_SCHEMA_VERSION, published["schema_version"])
+        self.assertEqual(list(schema.OBSERVATION_PRODUCER_KINDS), published["producer_kinds"])
+        for code in (
+            "observation-link-invalid",
+            "observation-id-mismatch",
+            "observation-report-unavailable",
+            "observation-proof-missing",
+        ):
+            self.assertIn(code, schema.REJECTIONS)
+
+
+
 def scope_receipt(**overrides: object) -> dict:
     document = {
         "schema_version": schema.SCOPE_RECEIPT_SCHEMA_VERSION,
@@ -2014,6 +2475,28 @@ class CompletionRecordValidationTests(unittest.TestCase):
         lean = completion_record(gate="check", reports=[])
         del lean["nextest_version"]
         self.assertEqual([], schema.validate_completion_record(lean))
+
+    def test_the_version_is_read_before_the_field_set(self):
+        for version in (2, True, 1.0, "1"):
+            with self.subTest(version=version):
+                problems = schema.validate_completion_record({"schema_version": version})
+                self.assertEqual(1, len(problems))
+                self.assertTrue(problems[0].startswith("completion-manifest-schema:"), problems)
+
+    def test_run_and_attempt_are_typed(self):
+        for overrides in (
+            {"run": 123},
+            {"run": ""},
+            {"run": None},
+            {"attempt": "1"},
+            {"attempt": True},
+            {"attempt": 0},
+            {"attempt": None},
+        ):
+            with self.subTest(overrides=overrides):
+                self.assertTrue(
+                    schema.validate_completion_record(completion_record(**overrides))
+                )
 
     def test_a_record_missing_a_required_binding_is_rejected(self):
         for field in ("head", "run", "attempt", "reports", "complete"):

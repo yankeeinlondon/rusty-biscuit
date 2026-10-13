@@ -105,12 +105,14 @@ companion-suites = [
     "test_constraints.py",
     "test_cross_check.py",
     "test_evidence_reuse.py",
+    "test_hosted_observations.py",
     "test_local_evidence.py",
     "test_publish_gaps.py",
     "test_resolved_plan.py",
     "test_reuse_validation.py",
     "test_runner_loss.py",
     "test_schema.py",
+    "test_seed.py",
 ]
 # `ci-rollup`'s round-trip test runs the real planner, and the planner opens the
 # workspace with `cargo metadata`. Environments without a toolchain render a

@@ -76,6 +76,10 @@ sanity:
 test *args="":
     @just _test_all "{{ LIBRARY }} --features image; {{ CLI }}" {{ args }}
 
+# List every test Nextest marks SLOW (see the shared `_slow_tests`).
+slow-tests *args="":
+    @just _slow_tests {{ args }}
+
 # Level-2 real-terminal tests. Skips cleanly if the harness is unavailable
 # unless `BISCUIT_TEST_LEVEL_REQUIRED=2` is set in the environment.
 test-l2 *args="":

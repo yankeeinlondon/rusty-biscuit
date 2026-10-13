@@ -2,7 +2,7 @@
 name = "reaper"
 version = "0.1.0"
 edition = "2024"
-license = "AGPL-3.0-only"
+license = "MIT"
 description = "Deterministic web-page and site context extraction (placeholder; see reaper/features)"
 
 [lib]
@@ -10,5 +10,4 @@ name = "reaper"
 path = "src/lib.rs"
 
 [package.metadata.ci.tests]
-tiers = []
-no-tests-reason = "placeholder library; its implementation is still being specified"
+unimplemented = "not implemented yet, so there are no tests to run"

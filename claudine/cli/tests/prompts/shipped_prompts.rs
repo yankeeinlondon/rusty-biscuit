@@ -293,3 +293,138 @@ fn shipped_implement_router_reads_absent_optional_inputs_unguarded() {
     assert!(!launched.exists(), "no provider may start:\n{rendered}");
     assert!(!fixture.audio_spool().exists(), "no audio may be published");
 }
+
+/// Copies the shipped prompt corpus into the fixture and stages a plan case
+/// at `fixes/case/` with the given phase position.
+#[cfg(unix)]
+fn stage_implement_plan_case(fixture: &CliProcessFixture, phase: u32, total_phases: u32) -> (PathBuf, PathBuf, PathBuf) {
+    let source_prompts = workspace_root().join("prompts");
+    let prompts = fixture.cwd().join("prompts");
+    let mut shipped = Vec::new();
+    collect_markdown_files(&source_prompts, &mut shipped);
+    for source in shipped {
+        let destination = prompts.join(source.strip_prefix(&source_prompts).unwrap());
+        std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        std::fs::copy(&source, &destination).unwrap();
+    }
+
+    let case = fixture.cwd().join("fixes/case");
+    std::fs::create_dir_all(&case).unwrap();
+    let spec = case.join("spec.md");
+    let plan = case.join("plan.md");
+    write(&spec, "---\nimplemented: false\n---\n# Spec\n");
+    write(&plan, &format!("---\ntotal_phases: {total_phases}\nphase: {phase}\n---\n# Plan\n"));
+    (prompts.join("_implement/implement-plan.md"), plan, spec)
+}
+
+#[cfg(unix)]
+fn run_implement_plan(fixture: &CliProcessFixture, target: &Path, plan: &Path, phase: u32) -> (std::process::Output, String) {
+    let output = fixture
+        .command()
+        .arg("compose")
+        .arg(target)
+        .arg(format!("plan={}", plan.display()))
+        .arg(format!("phase={phase}"))
+        .args(["--goose", "-y"])
+        .output()
+        .unwrap();
+    let rendered = common::strip_ansi(&format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    ));
+    (output, rendered)
+}
+
+/// Every prompt that ends by writing completion frontmatter transcludes the
+/// rule that a non-interactive agent must not end its turn while background
+/// work is pending: ending the turn exits the session, which is how final
+/// phases lost their `implemented` flags.
+#[test]
+fn shipped_implement_prompts_transclude_finish_before_exit() {
+    let prompts = workspace_root().join("prompts");
+    let snippet = std::fs::read_to_string(prompts.join("_finish-before-exit.md")).expect("shipped snippet");
+    assert!(snippet.contains("never end your turn with work pending"), "{snippet}");
+    for prompt in [
+        "implement-plan.md",
+        "implement-review-findings-plan.md",
+        "implement-suggestions.md",
+        "implement-review.md",
+    ] {
+        let body = std::fs::read_to_string(prompts.join("_implement").join(prompt)).unwrap();
+        assert!(
+            body.contains("::file \"../_finish-before-exit.md\""),
+            "{prompt} must transclude the finish-before-exit rule"
+        );
+    }
+}
+
+/// Only the final phase asks the agent to set `implemented: true` on the plan,
+/// log and spec.
+#[cfg(unix)]
+#[test]
+fn shipped_implement_plan_final_phase_delivers_completion_flags() {
+    for (phase, is_final) in [(2, true), (1, false)] {
+        let fixture = CliProcessFixture::named(&format!("shipped-implement-final-phase-{phase}"));
+        fixture.initialize_repository();
+        fixture.seed_user_config();
+        let (target, plan, spec) = stage_implement_plan_case(&fixture, phase, 2);
+        let capture = fixture.cwd().join("delivered-prompt.txt");
+        write_executable(
+            &fixture.bin_dir().join("goose"),
+            &format!("#!/bin/sh\n{{ printf '%s\\n' \"$@\"; cat; }} > '{}'\nexit 17\n", capture.display()),
+        );
+
+        let (_, rendered) = run_implement_plan(&fixture, &target, &plan, phase);
+        let delivered = std::fs::read_to_string(&capture)
+            .unwrap_or_else(|_| panic!("the provider must launch for phase {phase}:\n{rendered}"));
+
+        assert!(delivered.contains(&format!("# Implement Phase {phase} of 2")), "{delivered}");
+        assert_eq!(
+            delivered.contains("### Final Phase: Mark the Implementation Complete"),
+            is_final,
+            "phase {phase}:\n{delivered}"
+        );
+        if is_final {
+            assert!(spec.ends_with("fixes/case/spec.md"));
+            assert!(delivered.contains("on the spec (fixes/case/spec.md)"), "the spec must be named:\n{delivered}");
+            assert!(delivered.contains("`completed_phase`: `2`"), "{delivered}");
+            assert_eq!(delivered.matches("`implemented`: `true`").count(), 2, "plan/log and spec:\n{delivered}");
+        } else {
+            assert!(!delivered.contains("`implemented`: `true`"), "a non-final phase must not mark completion:\n{delivered}");
+        }
+    }
+}
+
+/// A final phase whose agent exits cleanly without writing the completion
+/// flags is surfaced by the success stack; one that wrote them is not.
+#[cfg(unix)]
+#[test]
+fn shipped_implement_plan_warns_when_final_phase_exits_without_flags() {
+    const WARNING: &str = "finished without setting `implemented: true`";
+    for writes_flags in [false, true] {
+        let fixture = CliProcessFixture::named(&format!("shipped-implement-missing-flags-{writes_flags}"));
+        fixture.initialize_repository();
+        fixture.seed_user_config();
+        let (target, plan, spec) = stage_implement_plan_case(&fixture, 2, 2);
+        let script = if writes_flags {
+            format!(
+                "#!/bin/sh\ncat > /dev/null\nprintf -- '---\\ntotal_phases: 2\\nphase: 2\\nimplemented: true\\n---\\n# Plan\\n' > '{}'\nprintf -- '---\\nimplemented: true\\n---\\n# Spec\\n' > '{}'\nexit 0\n",
+                plan.display(),
+                spec.display()
+            )
+        } else {
+            "#!/bin/sh\ncat > /dev/null\nexit 0\n".to_string()
+        };
+        write_executable(&fixture.bin_dir().join("goose"), &script);
+
+        let (_, rendered) = run_implement_plan(&fixture, &target, &plan, 2);
+
+        assert!(rendered.contains("phase **2**") || rendered.contains("phase 2"), "the phase must run:\n{rendered}");
+        assert_eq!(
+            rendered.contains(WARNING),
+            !writes_flags,
+            "writes_flags={writes_flags}:\n{rendered}"
+        );
+    }
+}

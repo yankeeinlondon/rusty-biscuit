@@ -9,6 +9,8 @@ use biscuit_file::FileReference;
 use rayon::prelude::*;
 use tree_sitter::Node;
 
+use crate::analysis::counters::count_shared_context_steps;
+use crate::file::source_file::{SourceFile, file_identity};
 use crate::file::tree_file::TreeFile;
 use crate::scanner::collect_files;
 use crate::shared::{ProgrammingLanguage, SymbolKind, SymbolKindV2, SymbolRecord};
@@ -39,7 +41,8 @@ impl GodFiles {
     }
 
     /// All candidate god files (>= 400 *physical* lines), discovered by a
-    /// cheap parallel newline scan. Cached after first call.
+    /// cheap parallel newline scan, as file identities
+    /// ([`file_identity`]). Cached after first call.
     pub fn candidates(&self) -> &Vec<PathBuf> {
         self.candidates
             .get_or_init(|| discover_candidates(&self.root))
@@ -51,7 +54,9 @@ impl GodFiles {
     pub fn analysis(&self) -> &Vec<GodAnalysis> {
         self.analysis.get_or_init(|| {
             let candidates = self.candidates().to_vec();
-            let root = self.root.clone();
+            // Candidates are file identities, so the root they are reported
+            // relative to must be one too.
+            let root = file_identity(&self.root);
 
             let mut analyses: Vec<GodAnalysis> = candidates
                 .into_par_iter()
@@ -93,7 +98,12 @@ fn discover_candidates(root: &Path) -> Vec<PathBuf> {
             if !language.is_programming_language() {
                 return None;
             }
-            let physical_lines = count_physical_lines(&path).ok()?;
+            // A file has at most one physical line per byte, so a smaller
+            // file is rejected without reading it.
+            if fs::metadata(&path).is_ok_and(|metadata| metadata.len() < MODERATE_MIN_SLOC as u64) {
+                return None;
+            }
+            let physical_lines = count_physical_lines(&fs::read(&path).ok()?);
             if physical_lines >= MODERATE_MIN_SLOC {
                 Some((path, physical_lines))
             } else {
@@ -107,43 +117,48 @@ fn discover_candidates(root: &Path) -> Vec<PathBuf> {
     with_lines.into_iter().map(|(path, _)| path).collect()
 }
 
-/// Count physical lines (newlines) in a file without parsing.
-fn count_physical_lines(path: &Path) -> std::io::Result<usize> {
-    let bytes = fs::read(path)?;
+/// Count physical lines (newlines) in a file's bytes without parsing.
+fn count_physical_lines(bytes: &[u8]) -> usize {
     // Count newline characters; if the file does not end with a newline,
     // the last line is still counted by adding 1 when there is content.
-    let newline_count = memchr::memchr_iter(b'\n', &bytes).count();
+    let newline_count = memchr::memchr_iter(b'\n', bytes).count();
     if bytes.is_empty() {
-        Ok(0)
+        0
     } else if bytes.last() == Some(&b'\n') {
-        Ok(newline_count)
+        newline_count
     } else {
-        Ok(newline_count + 1)
+        newline_count + 1
     }
 }
 
-/// Analyze a single candidate file, returning `None` if it drops below the
-/// moderate threshold.
+/// Analyze a single candidate file (already a file identity), returning
+/// `None` if it drops below the moderate threshold.
 fn analyze_single_file(path: &Path, root: &Path) -> Option<GodAnalysis> {
-    let physical_lines = count_physical_lines(path).ok()?;
+    // One read: the line count and the parse see the same bytes.
+    let bytes = fs::read(path).ok()?;
+    let physical_lines = count_physical_lines(&bytes);
     let language = ProgrammingLanguage::from_path(path)?;
+    let parsed = String::from_utf8(bytes)
+        .ok()
+        .and_then(|text| SourceFile::from_identity(path.to_path_buf(), path, None, text).ok())
+        .map(SourceFile::parse);
 
-    let (effective_sloc, parsed_data) = match TreeFile::new(path) {
-        Ok(tree_file) => {
-            let source = tree_file.source().to_string();
-            let metrics = compute_sloc_metrics(&source, Some(&tree_file));
+    let (effective_sloc, parsed_data) = match parsed {
+        Some(Ok(tree_file)) => {
+            let source = tree_file.source();
+            let metrics = compute_sloc_metrics(source, Some(&tree_file));
             let comment_ranges = tree_file.comment_ranges().unwrap_or_default();
             let records = tree_file.symbol_records().unwrap_or_default();
             let imports = tree_file.imported_symbols().unwrap_or_default();
 
-            let blocks_data = compute_symbol_blocks(&source, &records, &comment_ranges);
+            let blocks_data = compute_symbol_blocks(source, &records, &comment_ranges);
             let top_level = collect_top_level(&records);
             let top_level_symbol_count = top_level.len();
             let kind_histogram = build_kind_histogram(&top_level);
             let max_nesting_depth = compute_max_nesting_depth(&tree_file);
             let import_fan_out = imports.len();
-            let todo_fixme_count = count_todo_fixme(&source, &comment_ranges);
-            let comment_density = compute_comment_density(physical_lines, &source, &comment_ranges);
+            let todo_fixme_count = count_todo_fixme(source, &comment_ranges);
+            let comment_density = compute_comment_density(physical_lines, source, &comment_ranges);
 
             let signals = SignalBundle {
                 effective_sloc: metrics.effective_sloc,
@@ -169,8 +184,8 @@ fn analyze_single_file(path: &Path, root: &Path) -> Option<GodAnalysis> {
                 }),
             )
         }
-        Err(_) => {
-            // Unparseable fallback: band using physical lines.
+        Some(Err(_)) | None => {
+            // Unreadable as source or unparseable: band using physical lines.
             (physical_lines, None)
         }
     };
@@ -558,14 +573,16 @@ fn compute_symbol_blocks(
         })
         .collect();
 
-    // Attach container call-outs to block entries that are structural containers.
-    attach_many_members(source, records, &coverage, &mut blocks);
-
     // Rank descending by SLOC.
     blocks.sort_by(|a, b| b.sloc.cmp(&a.sloc).then_with(|| a.name.cmp(&b.name)));
 
     let truncated = blocks.len().saturating_sub(MAX_BLOCKS);
     blocks.truncate(MAX_BLOCKS);
+
+    // Attach container call-outs to the retained blocks that are structural
+    // containers. A call-out never changes the ranking, and each block reads
+    // every record, so a dropped block is not worth that read.
+    attach_many_members(source, records, &coverage, &mut blocks);
 
     BlocksResult { blocks, truncated }
 }
@@ -645,6 +662,18 @@ fn attach_many_members(
         };
 
         let (container_start, container_end, _, _) = container_span;
+        // The containers strictly inside this one: the only ones that can
+        // own a member before it does.
+        let nested: Vec<(usize, usize)> = container_spans
+            .iter()
+            .map(|(_, (c_start, c_end, _, _))| (*c_start, *c_end))
+            .filter(|&(c_start, c_end)| {
+                c_start >= container_start
+                    && c_end <= container_end
+                    && (c_start > container_start || c_end < container_end)
+            })
+            .collect();
+        count_shared_context_steps(records.len() + container_spans.len());
 
         let members: Vec<&SymbolRecord> = records
             .iter()
@@ -661,13 +690,9 @@ fn attach_many_members(
                 // Direct ownership only: reject members enclosed by a tighter
                 // container nested within this one (e.g. methods of a nested
                 // class), so an outer container is not inflated by descendants.
-                !container_spans.iter().any(|(_, (c_start, c_end, _, _))| {
-                    let (c_start, c_end) = (*c_start, *c_end);
-                    let strictly_inside = c_start >= container_start
-                        && c_end <= container_end
-                        && (c_start > container_start || c_end < container_end);
-                    strictly_inside && m_start > c_start && m_end <= c_end
-                })
+                !nested
+                    .iter()
+                    .any(|&(c_start, c_end)| m_start > c_start && m_end <= c_end)
             })
             .collect();
 
@@ -711,8 +736,8 @@ fn is_container_kind(kind: SymbolKindV2) -> bool {
 /// Collect the records with no owning symbol — the file's top-level symbols.
 ///
 /// A symbol is top-level only when it has neither a recorded container name
-/// (`module_path`) nor a declaration span enclosed by another symbol. Relying
-/// on `module_path` alone over-reports: the parse pass does not consistently
+/// (`container_name`) nor a declaration span enclosed by another symbol. Relying
+/// on `container_name` alone over-reports: the parse pass does not consistently
 /// populate it for locals and parameters, so those would masquerade as
 /// file-scope symbols. Span containment is the authoritative corrective signal
 /// — a parameter or local always sits inside its owning function's declaration
@@ -723,7 +748,7 @@ fn collect_top_level(records: &[SymbolRecord]) -> Vec<&SymbolRecord> {
     records
         .iter()
         .enumerate()
-        .filter(|(i, r)| r.identity.module_path.is_none() && !enclosed[*i])
+        .filter(|(i, r)| r.identity.container_name.is_none() && !enclosed[*i])
         .map(|(_, r)| r)
         .collect()
 }
@@ -1198,18 +1223,45 @@ mod tests {
 
     #[test]
     fn physical_line_counter_counts_correctly() {
+        assert_eq!(count_physical_lines(b"a\nb\nc"), 3);
+        assert_eq!(count_physical_lines(b"a\nb\nc\n"), 3);
+        assert_eq!(count_physical_lines(b""), 0);
+        assert_eq!(count_physical_lines(b"single"), 1);
+        assert_eq!(count_physical_lines(b"a\r\nb\r\nc"), 3, "CRLF ends a line at its LF");
+        assert_eq!(count_physical_lines(b"a\r\nb\r\n"), 2);
+        assert_eq!(count_physical_lines(b"\n\n"), 2);
+    }
+
+    /// The size pre-reject only skips files that cannot reach the line
+    /// threshold: 400 bytes of newlines are 400 lines and still a candidate,
+    /// 399 bytes are not.
+    #[test]
+    fn candidate_discovery_size_screen_keeps_the_line_threshold() {
         let dir = TempDir::new().unwrap();
-        let path = temp_file(&dir, "count.rs", "a\nb\nc");
-        assert_eq!(count_physical_lines(&path).unwrap(), 3);
+        temp_file(&dir, "exact.rs", &"\n".repeat(MODERATE_MIN_SLOC));
+        temp_file(&dir, "short.rs", &"\n".repeat(MODERATE_MIN_SLOC - 1));
+        temp_file(&dir, "crlf.rs", &"x\r\n".repeat(MODERATE_MIN_SLOC));
+        let names: Vec<String> = GodFiles::new(dir.path())
+            .candidates()
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["crlf.rs", "exact.rs"]);
+    }
 
-        let path2 = temp_file(&dir, "count2.rs", "a\nb\nc\n");
-        assert_eq!(count_physical_lines(&path2).unwrap(), 3);
-
-        let path3 = temp_file(&dir, "count3.rs", "");
-        assert_eq!(count_physical_lines(&path3).unwrap(), 0);
-
-        let path4 = temp_file(&dir, "count4.rs", "single");
-        assert_eq!(count_physical_lines(&path4).unwrap(), 1);
+    /// A candidate that is not UTF-8 is still reported from its one read,
+    /// banded by the physical lines of those bytes.
+    #[test]
+    fn analysis_bands_a_non_utf8_candidate_by_its_physical_lines() {
+        let dir = TempDir::new().unwrap();
+        let mut bytes = "let x = 1;\n".repeat(MODERATE_MIN_SLOC + 50).into_bytes();
+        bytes.extend_from_slice(b"\xff\xfe\n");
+        std::fs::write(dir.path().join("bytes.rs"), &bytes).unwrap();
+        let god_files = GodFiles::new(dir.path());
+        let analysis = god_files.analysis();
+        assert_eq!(analysis.len(), 1);
+        assert_eq!(analysis[0].effective_sloc, MODERATE_MIN_SLOC + 51);
+        assert!(analysis[0].note.as_deref().is_some_and(|note| note.contains("banded by physical line count")));
     }
 
     // ========================================================================
@@ -1581,6 +1633,44 @@ class BigClass:
         assert_eq!(structural_members[0].identity.name, "method_a");
     }
 
+    /// Container call-outs are computed for the retained blocks only, so the
+    /// records read grow with the file, not with the file times its
+    /// containers; the call-outs of the retained blocks are unchanged.
+    #[test]
+    fn many_member_callouts_read_records_for_retained_blocks_only() {
+        fn class_source(classes: usize) -> String {
+            let mut source = String::new();
+            for class in 0..classes {
+                source.push_str(&format!("class Big{class}:\n"));
+                for method in 0..12 {
+                    source.push_str(&format!("    def m{method}(self):\n        return {method}\n"));
+                }
+            }
+            source
+        }
+        let steps_for = |classes: usize| {
+            let dir = TempDir::new().unwrap();
+            let path = temp_file(&dir, "many.py", &class_source(classes));
+            let tree_file = TreeFile::new(&path).unwrap();
+            let records = tree_file.symbol_records().unwrap();
+            let comment_ranges = tree_file.comment_ranges().unwrap_or_default();
+            let before = crate::work_counters();
+            let result = compute_symbol_blocks(tree_file.source(), &records, &comment_ranges);
+            let steps = crate::work_counters().since(before).shared_context_steps;
+            assert_eq!(result.blocks.len(), MAX_BLOCKS);
+            assert!(
+                result.blocks.iter().all(|block| block.many_members.as_ref().map(|c| c.member_count) == Some(12)),
+                "every retained class keeps its call-out"
+            );
+            steps
+        };
+
+        let small = steps_for(20);
+        let large = steps_for(40);
+        assert!(small > 0, "the call-outs read the records");
+        assert!(large <= 2 * small + 16, "{small} steps for 20 classes, {large} for 40");
+    }
+
     /// Find the callout attached to the first block matching `name`.
     fn callout_for<'a>(blocks: &'a [SymbolBlock], name: &str) -> Option<&'a ContainerCallout> {
         blocks
@@ -1698,7 +1788,7 @@ class BigClass:
     fn top_level_excludes_locals_and_parameters() {
         // Public-boundary reproduction: ten top-level functions, each with one
         // parameter and many local assignments. The locals and parameters have
-        // no recorded container, so the old `module_path.is_none()` test
+        // no recorded container, so the old `container_name.is_none()` test
         // counted all of them as top-level (hundreds of phantom Variables and
         // Parameters) and emitted a wildly inflated ManyUnrelatedTopLevel hint.
         let dir = TempDir::new().unwrap();
@@ -2270,15 +2360,19 @@ x = 1
             SourceFacet, SymbolId, SymbolKindData, TextPoint, TextSpan, TypeFacet, VisibilityFacet,
         };
         SymbolRecord {
-            schema_version: SchemaVersion::V2_0,
+            schema_version: SchemaVersion::CURRENT,
             id: SymbolId(String::new()),
             language: ProgrammingLanguage::Rust,
             kind: SymbolKindV2::Function,
+            scope: crate::shared::SymbolScope::Item,
             identity: IdentityFacet {
                 name: String::new(),
                 display_name: String::new(),
-                qualified_name: None,
-                module_path: None,
+                qualified_name: String::new(),
+                is_namespace_rooted: false,
+                container_name: None,
+                keyword: None,
+                container_kind: None,
                 stable_key: String::new(),
             },
             source: SourceFacet {
@@ -2297,12 +2391,11 @@ x = 1
             type_info: TypeFacet::default(),
             relations: Default::default(),
             semantics: SemanticFacet::default(),
+            metrics: None,
             provenance: ProvenanceFacet {
                 extractor: String::new(),
                 extractor_version: String::new(),
                 parse_pass: AnalysisPass::Parse.as_str().to_string(),
-                created_at_epoch_ms: 0,
-                updated_at_epoch_ms: 0,
             },
             kind_data: SymbolKindData::Unknown,
             extensions: Default::default(),

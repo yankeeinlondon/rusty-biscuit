@@ -26,5 +26,4 @@ required = false
 reason = "Thin CLI wrapper around research; no measurable hot paths."
 
 [package.metadata.ci.tests]
-tiers = []
-no-tests-reason = "thin clap front end; behavior is tested in the research library"
+unimplemented = "not implemented yet, so there are no tests to run"

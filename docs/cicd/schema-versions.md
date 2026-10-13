@@ -14,6 +14,8 @@ or `fixes/`, in whichever lifecycle directory holds them now.
 |---|---|---|---|
 | [Resolved plan](#resolved-plan) | 7 | `scripts/ci/schema.py::RESOLVED_PLAN_SCHEMA_VERSION` | `.github/ci/schemas/contract.json` (regenerated), `ci-rollup.rs::PLAN_SCHEMA_VERSION`, `test_toolkit::archive_guard::PLAN_SCHEMA_VERSION`, the `.githooks/tests/fixtures/plan-*.json` fixtures and `affected_scope_stub.py` |
 | [Validation receipt](#validation-receipt) | 2 (reads 1) | `schema.py::RECEIPT_SCHEMA_VERSION`, `LEGACY_RECEIPT_SCHEMA_VERSION` | — |
+| [Observation collection](#observation-collection) | 3 | `schema.py::COLLECTION_SCHEMA_VERSION` | — (its cells are the version-2 receipt cell, so `RECEIPT_SCHEMA_VERSION` does not move) |
+| [Coverage certification](#coverage-certification) | 1 | `schema.py::CERTIFICATION_SCHEMA_VERSION`, `COVERAGE_POLICY_VERSION` | — (read by `reuse_validation.py`; no Rust reader) |
 | [Scope receipt](#scope-receipt) | 1 | `schema.py::SCOPE_RECEIPT_SCHEMA_VERSION` | — |
 | [Expected-test manifest](#expected-test-manifest) | 2 | `schema.py::EXPECTED_MANIFEST_SCHEMA_VERSION` | `ci-rollup.rs::EXPECTED_MANIFEST_SCHEMA_VERSION` stays **1** on purpose (see below) |
 | [Completion record](#completion-record) | 1 | `schema.py::COMPLETION_RECORD_SCHEMA_VERSION` | `ci-rollup.rs::COMPLETION_RECORD_SCHEMA_VERSION` |
@@ -66,7 +68,7 @@ The document that describes everything one run will do. Field contract:
 | 5, 6 (unreleased) | On the direct-cell-execution branch: one dispatch row per executing cell, so every execution input has to come from the plan. Adds `skip_policy`, area `execution_path`, per-cell `profile` and `requires_node` (5), then an executing L2 cell's `backends` (6). Never reached `main` under these numbers. | `2026-09-19-direct-cell-execution` |
 | 7 | The union of `main`'s 5 and the branch's 6. The optional per-cell `companions_only` (a lint cell whose required work is its companions) arrives with it. | both of the above |
 | 7 (amended) | The optional per-cell `test_filter`: an L1 cell narrowed to the tests that read a changed file. No bump, because absence means exactly what every version-7 plan already meant — the whole tier — and a plan is only ever read by the code at the head it was resolved for, so no reader meets the field without understanding it. | `2026-09-22-test-input-blind-spot` |
-| 7 (amended) | The optional package-record `no_tests_reason`, present exactly when the package declares `tiers = []`: its `tiers` are empty, its cells are `lint` and `check` only, and its `gates` may be empty without an `exclusion`. No bump, for the `test_filter` reason: absence means what every version-7 plan already meant — the package has a test tier. | the declared test-less package fix |
+| 7 (amended) | The optional package `unimplemented: {reason, tests_found}`, and a selected gating package may now carry an empty gate list without an exclusion when the plan schedules no environment or the package is `unimplemented` with no tests. No bump: absence means what it always did, and only the same head's code reads the plan. | `2026-10-08-windows-to-nightly` |
 
 A scope receipt from any earlier generation misses once as `scope-schema`.
 
@@ -83,6 +85,42 @@ under `refs/notes/ci-local/<environment>` and read by
 | 2 (amended) | The optional per-cell `test_filter`: the narrowing a test-input run applied. Such a cell satisfies only the plan cell with the same filter, on the exact tree, from any host (`docs/cicd/test-inputs.md`). No bump: a reader that predates it would see an ordinary L1 cell on the host's environment, and the only such reader is the same head's code. | `2026-09-22-test-input-blind-spot` |
 
 Every plan bump since has left this at 2 on purpose.
+
+## Observation collection
+
+What a note under `refs/notes/ci-local/<environment>` carries from version 3 on:
+one commit's **observations**, each one run of one cell by one producer. A note
+used to hold a single receipt, so a second package, a retry, or a second host at
+the same head overwrote the first; a collection is unioned instead. The format
+and the publication rules are in the
+[evidence documentation](../../.github/ci/schemas/README.md#observation-collection).
+
+| Version | Change | Source |
+|---|---|---|
+| 3 | Introduced. Version-1 and -2 notes stay readable as one observation per cell and are never upgraded in place; an older reader that meets a version-3 note fails safe (the cells execute). The observation's `cell` is the unchanged version-2 receipt cell, which is why `RECEIPT_SCHEMA_VERSION` stays at 2. | `2026-10-08-windows-to-nightly` |
+
+The Python readers now check the version **before** the field set and accept only
+an exact integer, as the rules above always required: a boolean `true` or the
+float `2.0` is no longer version 1 or 2, and a duplicate key, `NaN`,
+`Infinity`, or trailing content is refused while loading rather than parsed
+last-wins.
+
+## Coverage certification
+
+What a scheduled nightly publishes per environment so a later nightly can use it
+as that environment's comparison anchor: an artifact named by environment, head,
+and the identity of the environment's scheduling policy, holding the cells the
+environment is proven for and the audit counts that justify `certified`. The
+resolved plan stays at its version: its `coverage_anchors` is optional and
+present only on a nightly, so no other plan changes by a byte. The format and the
+anchor reasons are in the
+[evidence documentation](../../.github/ci/schemas/README.md#coverage-certification-and-anchors).
+
+| Version | Change | Source |
+|---|---|---|
+| 1 | Introduced. `COVERAGE_POLICY_VERSION` (1) is the certification contract's own policy version; a certification below it earns no credit. | `2026-10-08-windows-to-nightly` |
+| 1 (amended) | Each `covered_cells` entry gains a required `contract`, the cell's coverage contract digest, so a later nightly inherits a cell only while what it must prove is unchanged; `anchors_used` entries omit the plan's new `required_cells`. The plan's optional `coverage_anchors` entries gain `required_cells`, and the planner's anchor input carries the contracts on `covered_cells`. No bump, because no certification had been published yet: the document had no reader outside the change that defined it. A document of the earlier shape is refused as malformed, which costs one full-scope nightly for that environment. | `2026-10-08-windows-to-nightly` |
+| 1 (amended again) | `anchors_used` entries, like the plan's optional `coverage_anchors` entries, gain a required `reopened_cells`: the cells the anchor covers that the plan selects anyway because published evidence (a later qualifying failure, or results nothing orders) requires them to execute. A reopened cell is a plan cell and never also inherited, and the writer refuses an anchor that both inherits and reopens one cell. No bump, for the same reason: still nothing published. | `2026-10-08-windows-to-nightly` |
 
 ## Scope receipt
 

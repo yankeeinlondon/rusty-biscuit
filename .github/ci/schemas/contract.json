@@ -30,7 +30,8 @@
       "event": false,
       "deferred_environments": false,
       "proven_environments": false,
-      "producing_environments": false
+      "producing_environments": false,
+      "coverage_anchors": false
     },
     "area": {
       "area": true,
@@ -56,9 +57,9 @@
       "native": true,
       "requires_toolchain": false,
       "exclusion": false,
-      "no_tests_reason": false,
       "input_paths": false,
-      "dependent_seam": false
+      "dependent_seam": false,
+      "unimplemented": false
     },
     "cell": {
       "package": true,
@@ -157,7 +158,73 @@
       "mode": false,
       "paths": false,
       "reason": true
+    },
+    "coverage_anchor": {
+      "environment": true,
+      "mode": true,
+      "anchor": true,
+      "reason": true,
+      "source": true,
+      "policy_delta": true,
+      "inherited_cells": true,
+      "reopened_cells": true,
+      "required_cells": true
+    },
+    "coverage_source": {
+      "kind": true,
+      "run_id": true,
+      "head": true
     }
+  },
+  "certification": {
+    "schema_version": 1,
+    "coverage_policy_version": 1,
+    "document": {
+      "schema_version": true,
+      "run_id": true,
+      "attempt": true,
+      "workflow_path": true,
+      "event": true,
+      "head": true,
+      "tree": true,
+      "environment": true,
+      "coverage_policy_version": true,
+      "environments_digest": true,
+      "plan_identity": true,
+      "anchors_used": true,
+      "certified": true,
+      "cells": true,
+      "covered_cells": true,
+      "audits": true
+    },
+    "audits": {
+      "required": true,
+      "passed": true
+    },
+    "cell_counts": [
+      "executing",
+      "reused",
+      "accepted_gap",
+      "inherited"
+    ],
+    "anchor_modes": [
+      "incremental",
+      "full"
+    ],
+    "anchor_reasons": [
+      "bootstrap-no-run",
+      "api-failure",
+      "search-exhausted",
+      "policy-uncertified",
+      "no-qualifying-ancestor",
+      "certified-ancestor",
+      "legacy-wsl2-ancestor"
+    ],
+    "anchor_source_kinds": [
+      "nightly-certified",
+      "nightly-legacy",
+      "none"
+    ]
   },
   "receipt": {
     "schema_version": 2,
@@ -197,6 +264,65 @@
       "os": true,
       "kernel": true,
       "report_dir": true
+    },
+    "collection": {
+      "schema_version": 3,
+      "size_limit": 262144,
+      "document": {
+        "schema_version": true,
+        "environment": true,
+        "head": true,
+        "tree": true,
+        "observations": true
+      },
+      "observation": {
+        "observation_id": true,
+        "retry_of": false,
+        "producer": true,
+        "base": true,
+        "scope_identity": true,
+        "completion": true,
+        "cell": true,
+        "proof": false,
+        "reports": true,
+        "features": false
+      },
+      "producer": {
+        "kind": true,
+        "host": true,
+        "workflow": false,
+        "run_id": false,
+        "attempt": false,
+        "seed_id": false
+      },
+      "producer_kinds": [
+        "hook",
+        "rig",
+        "hosted",
+        "seed"
+      ],
+      "host": {
+        "os": true,
+        "kernel": true,
+        "label": false,
+        "report_dir": false
+      },
+      "proof": {
+        "nextest_version": true,
+        "target": true,
+        "expected_listing_digest": true,
+        "completion_record_digest": false
+      },
+      "report": {
+        "path": true,
+        "sha256": true,
+        "bytes": true,
+        "store": true
+      },
+      "report_stores": [
+        "host-dir",
+        "artifact"
+      ]
     },
     "counts": [
       "total",
@@ -413,6 +539,10 @@
       "v1-requires-exact-tree",
       "v1-not-equivalence-eligible",
       "v1-is-pass-only",
+      "observation-link-invalid",
+      "observation-id-mismatch",
+      "observation-report-unavailable",
+      "observation-proof-missing",
       "skip-policy-cell",
       "skip-policy-expired",
       "skip-policy-provenance"

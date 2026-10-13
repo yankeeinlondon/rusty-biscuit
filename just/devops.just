@@ -363,38 +363,17 @@ _install path pkg_name binary="" *args="":
     fi
     just _play drop-4 || exit 0
 
-# commits all the staged changes with OpenCode (model is MODEL or COMMIT_MODEL)
-[arg("agent")]
-[arg("model")]
-[arg("yolo")]
-commit yolo="true" agent="opencode" model="":
+# commits all the staged changes with the agent and model set in prompts/commit.md
+commit *args="":
     #!/usr/bin/env bash
     set -euo pipefail
-    model=""
-    if [[ ! -z "{{ model }}" ]]; then
-        model="--model {{ model }}"
-    else
-        if [[ "{{ agent }}" == "opencode" ]]; then
-            if [[ -z "{{ model }}" ]]; then
-                model="--model minimax/MiniMax-M3"
-            fi
-        fi
-    fi
-    yolo=""
-    if [[ "{{ yolo }}" == "true" ]]; then
-        yolo="-y"
-    fi
     echo ""
     echo -e "Committing staged changes in the {{ bold }}Rusty Biscuit{{ reset }} monorepo to git"
-    if [[ -z "$model" ]]; then
-        echo -e "{{ dim }}  - using the {{ italic }}default{{ reset }}{{ dim }}model for the agent{{ reset }}"
-    else
-        echo -e "{{ dim }}  - using the {{ italic }}{{ blue }}${model}{{ reset }}{{ dim }}model{{ reset }}"
-    fi
     echo ""
     echo -e "{{ bold }}{{ blue }}Staged Files:{{ reset }}"
     sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." )
-    claudine compose --{{ agent }} "@prompts/commit.md" --op "commit" --quiet ${yolo} ${model}
+    # `@` resolves from the repo root; a package area has no prompts/commit.md of its own
+    claudine compose "@prompts/commit.md" -y {{ args }}
     just _speak "git commits completed in the $(sniff repo package-area) package area of rusty biscuit"
     sniff repo git-status --compact 2>/dev/null || exit 0
     echo
@@ -1119,6 +1098,28 @@ _test_local_all specs *args="": _storage_preflight
         cargo test "${selected[@]}" ${forwarded[@]+"${forwarded[@]}"} -- \
             --skip level2_ --skip level3_ --skip browser_ --skip real_ --skip slow_ --skip perf_
     fi
+
+# Report every test Nextest marks SLOW for this package area.
+#
+# Runs the area's own `test` recipe, so selection stays exactly what the area
+# gates on — the packages, feature flags, and `_tier_filter L1` expression are
+# not restated here and cannot drift from `test`. Nextest prints each test past
+# the configured `slow-timeout.period` (`.config/nextest.toml`) and repeats the
+# list in its final summary; `--no-fail-fast` keeps that list complete when a
+# test fails. The status flags are Nextest-only, so there is deliberately no
+# `cargo test` fallback: a fallback would have no slow report to print.
+_slow_tests *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
+    if ! "${nextest_bin[@]}" --version >/dev/null 2>&1; then
+        echo "slow-tests: cargo-nextest is required, but '${nextest_bin[*]} --version' failed." >&2
+        exit 1
+    fi
+    echo
+    echo -e "🐌 {{ bold }}Slow tests{{ reset }} — this area's tests past the configured slow-timeout"
+    echo
+    just test --no-fail-fast --status-level slow --final-status-level slow {{ args }}
 
 # Sanity tier across several packages, continuing past failures. See `_run_all`.
 _sanity_all specs *args="":
@@ -2066,12 +2067,13 @@ _check_tier_coverage *args="":
 # ---------------------------------------------------------------------------
 # Canonical lifecycle recipes (testing-best-practices spec, Phase 2).
 #
-# Each package-area justfile exposes the canonical 12-recipe set
-# (sanity, test, test-l2, test-l3, test-browser, test-real, lint, bench,
-# coverage, doctest, fuzz, all) and delegates the per-package boilerplate to
-# the shared `_*` recipes below. Tier filter expressions are documented in
-# `.config/nextest.toml`. Recipes that don't apply to a package are explicit
-# no-ops with an explanatory comment in the package's own justfile.
+# Each package-area justfile exposes the canonical 13-recipe set
+# (sanity, test, slow-tests, test-l2, test-l3, test-browser, test-real, lint,
+# bench, coverage, doctest, fuzz, all) and delegates the per-package
+# boilerplate to the shared `_*` recipes below. Tier filter expressions are
+# documented in `.config/nextest.toml`. Recipes that don't apply to a package
+# are explicit no-ops with an explanatory comment in the package's own
+# justfile.
 # ---------------------------------------------------------------------------
 
 # Sanity tier: fast-confidence subset (≤15s). Lib + bin tests only, with every
@@ -2727,7 +2729,7 @@ _all pkg:
 _check_canonical:
     #!/usr/bin/env bash
     set -euo pipefail
-    required=(sanity test test-l2 test-l3 test-browser test-real lint bench coverage doctest fuzz all)
+    required=(sanity test slow-tests test-l2 test-l3 test-browser test-real lint bench coverage doctest fuzz all)
     summary="$(just --summary 2>/dev/null | tr ' ' '\n')"
     missing=()
     for r in "${required[@]}"; do

@@ -646,9 +646,7 @@ class TargetCoverageTests(PlannerFixture):
         plan = self.plan(force_all=True)
         shapes_seen: set[tuple[str, ...]] = set()
         for record in plan["packages"]:
-            # A package declaring no tests checks every kind on every native
-            # environment; `test_a_package_declaring_no_tests_is_checked_everywhere_native`.
-            if not record["gates"] or "no_tests_reason" in record:
+            if not record["gates"]:
                 continue
             with self.subTest(package=record["package"]):
                 expected = [
@@ -669,36 +667,6 @@ class TargetCoverageTests(PlannerFixture):
         self.assertEqual(
             {(), ("--examples",), ("--benches",), ("--examples", "--benches")}, shapes_seen
         )
-
-    def test_a_package_declaring_no_tests_is_checked_everywhere_native(self) -> None:
-        plan = self.plan(force_all=True)
-        untested = [record for record in plan["packages"] if "no_tests_reason" in record]
-        self.assertTrue(untested, "the workspace must hold a package declaring no tests")
-        native = sorted(
-            environment["name"]
-            for environment in plan["environments"]
-            if not affected_scope.capability(environment, "archive_only")
-        )
-        selectors = self.SELECTORS | {"lib": "--lib", "bin": "--bins", "test": "--tests"}
-        for record in untested:
-            with self.subTest(package=record["package"]):
-                self.assertEqual([], record["tiers"])
-                tokens = record["check_args"].split()
-                self.assertEqual(["-p", record["package"]], tokens[:2])
-                self.assertEqual(
-                    [selectors[kind] for kind in record["targets"]],
-                    [token for token in tokens if token in selectors.values()],
-                )
-                self.assertEqual(native, sorted(self.check_environments(plan, record["package"])))
-                self.assertEqual(
-                    [],
-                    [
-                        cell
-                        for cell in self.cells(plan)
-                        if cell["package"] == record["package"]
-                        and cell["gate"] in schema.BUILD_GATES
-                    ],
-                )
 
     def test_a_reused_linux_l1_reuses_the_check_cell_and_macos_reuses_none(self) -> None:
         def accepted(environment: str) -> list[dict[str, str]]:

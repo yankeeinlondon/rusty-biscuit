@@ -8,5 +8,4 @@ license = "AGPL-3.0-only"
 clap = { version = "4.5.54", features = ["derive"] }
 
 [package.metadata.ci.tests]
-tiers = []
-no-tests-reason = "placeholder binary that only prints a greeting"
+unimplemented = "not implemented yet, so there are no tests to run"

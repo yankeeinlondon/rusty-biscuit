@@ -1,0 +1,5295 @@
+{
+  "schema_version": {
+    "major": 2,
+    "minor": 0
+  },
+  "root_dir": "/private/tmp/claude-501/-Volumes-coding-wt-rusty-biscuit-feat-symbols/d63e5266-3b40-40b9-970c-1a0bd24ad9bf/scratchpad/baseline",
+  "language": "Cpp",
+  "files": [
+    {
+      "file": "cpp.cpp",
+      "language": "Cpp",
+      "hash": "3b996e3bd99ed858",
+      "symbols": [
+        {
+          "name": "fixture_space",
+          "kind": "Namespace",
+          "range": {
+            "start_line": 4,
+            "start_column": 11,
+            "end_line": 4,
+            "end_column": 24,
+            "start_byte": 94,
+            "end_byte": 107
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "AccessWidget",
+          "kind": "Type",
+          "range": {
+            "start_line": 6,
+            "start_column": 1,
+            "end_line": 27,
+            "end_column": 2,
+            "start_byte": 111,
+            "end_byte": 619
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "implicitPrivateField",
+                "type_annotation": "int"
+              },
+              {
+                "name": "firstPublicField",
+                "type_annotation": "int",
+                "visibility": "Public"
+              },
+              {
+                "name": "secondPublicField",
+                "type_annotation": "int",
+                "visibility": "Public"
+              },
+              {
+                "name": "staticMemberField",
+                "type_annotation": "int",
+                "visibility": "Public",
+                "is_static": true
+              },
+              {
+                "name": "protectedField",
+                "type_annotation": "int",
+                "visibility": "Protected"
+              },
+              {
+                "name": "explicitPrivateField",
+                "type_annotation": "int",
+                "visibility": "Private"
+              }
+            ]
+          }
+        },
+        {
+          "name": "implicitPrivateField",
+          "kind": "Field",
+          "range": {
+            "start_line": 7,
+            "start_column": 9,
+            "end_line": 7,
+            "end_column": 29,
+            "start_byte": 140,
+            "end_byte": 160
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "implicitPrivateMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 8,
+            "start_column": 5,
+            "end_line": 8,
+            "end_column": 34,
+            "start_byte": 166,
+            "end_byte": 195
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "AccessWidget",
+          "kind": "Function",
+          "range": {
+            "start_line": 11,
+            "start_column": 5,
+            "end_line": 11,
+            "end_column": 19,
+            "start_byte": 209,
+            "end_byte": 223
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "firstPublicField",
+          "kind": "Field",
+          "range": {
+            "start_line": 12,
+            "start_column": 9,
+            "end_line": 12,
+            "end_column": 25,
+            "start_byte": 233,
+            "end_byte": 249
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "secondPublicField",
+          "kind": "Field",
+          "range": {
+            "start_line": 13,
+            "start_column": 9,
+            "end_line": 13,
+            "end_column": 26,
+            "start_byte": 259,
+            "end_byte": 276
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "firstPublicMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 14,
+            "start_column": 5,
+            "end_line": 14,
+            "end_column": 30,
+            "start_byte": 282,
+            "end_byte": 307
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "staticMemberField",
+          "kind": "Field",
+          "range": {
+            "start_line": 16,
+            "start_column": 16,
+            "end_line": 16,
+            "end_column": 33,
+            "start_byte": 356,
+            "end_byte": 373
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "staticFactory",
+          "kind": "Method",
+          "range": {
+            "start_line": 17,
+            "start_column": 5,
+            "end_line": 17,
+            "end_column": 41,
+            "start_byte": 379,
+            "end_byte": 415
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space",
+          "signature": {
+            "return_type": "AccessWidget"
+          }
+        },
+        {
+          "name": "protectedField",
+          "kind": "Field",
+          "range": {
+            "start_line": 21,
+            "start_column": 9,
+            "end_line": 21,
+            "end_column": 23,
+            "start_byte": 496,
+            "end_byte": 510
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "explicitPrivateField",
+          "kind": "Field",
+          "range": {
+            "start_line": 25,
+            "start_column": 9,
+            "end_line": 25,
+            "end_column": 29,
+            "start_byte": 560,
+            "end_byte": 580
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "PlainStruct",
+          "kind": "Type",
+          "range": {
+            "start_line": 29,
+            "start_column": 1,
+            "end_line": 35,
+            "end_column": 2,
+            "start_byte": 622,
+            "end_byte": 742
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "structPublicField",
+                "type_annotation": "int"
+              },
+              {
+                "name": "structPrivateField",
+                "type_annotation": "int",
+                "visibility": "Private"
+              }
+            ]
+          }
+        },
+        {
+          "name": "structPublicField",
+          "kind": "Field",
+          "range": {
+            "start_line": 30,
+            "start_column": 9,
+            "end_line": 30,
+            "end_column": 26,
+            "start_byte": 651,
+            "end_byte": 668
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "PlainStruct"
+        },
+        {
+          "name": "structPrivateField",
+          "kind": "Field",
+          "range": {
+            "start_line": 34,
+            "start_column": 9,
+            "end_line": 34,
+            "end_column": 27,
+            "start_byte": 721,
+            "end_byte": 739
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "PlainStruct"
+        },
+        {
+          "name": "unionIntField",
+          "kind": "Field",
+          "range": {
+            "start_line": 38,
+            "start_column": 9,
+            "end_line": 38,
+            "end_column": 22,
+            "start_byte": 772,
+            "end_byte": 785
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "unionFloatField",
+          "kind": "Field",
+          "range": {
+            "start_line": 39,
+            "start_column": 11,
+            "end_line": 39,
+            "end_column": 26,
+            "start_byte": 797,
+            "end_byte": 812
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "ScopedColor",
+          "kind": "Enum",
+          "range": {
+            "start_line": 42,
+            "start_column": 1,
+            "end_line": 42,
+            "end_column": 38,
+            "start_byte": 818,
+            "end_byte": 855
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space",
+          "type_metadata": {
+            "variants": [
+              {
+                "name": "Red"
+              },
+              {
+                "name": "Green"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Red",
+          "kind": "Variable",
+          "range": {
+            "start_line": 42,
+            "start_column": 26,
+            "end_line": 42,
+            "end_column": 29,
+            "start_byte": 843,
+            "end_byte": 846
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "ScopedColor"
+        },
+        {
+          "name": "Green",
+          "kind": "Variable",
+          "range": {
+            "start_line": 42,
+            "start_column": 31,
+            "end_line": 42,
+            "end_column": 36,
+            "start_byte": 848,
+            "end_byte": 853
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "ScopedColor"
+        },
+        {
+          "name": "PlainColor",
+          "kind": "Enum",
+          "range": {
+            "start_line": 44,
+            "start_column": 1,
+            "end_line": 44,
+            "end_column": 43,
+            "start_byte": 858,
+            "end_byte": 900
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space",
+          "type_metadata": {
+            "variants": [
+              {
+                "name": "PLAIN_RED"
+              },
+              {
+                "name": "PLAIN_GREEN"
+              }
+            ]
+          }
+        },
+        {
+          "name": "PLAIN_RED",
+          "kind": "Variable",
+          "range": {
+            "start_line": 44,
+            "start_column": 19,
+            "end_line": 44,
+            "end_column": 28,
+            "start_byte": 876,
+            "end_byte": 885
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "PlainColor"
+        },
+        {
+          "name": "PLAIN_GREEN",
+          "kind": "Variable",
+          "range": {
+            "start_line": 44,
+            "start_column": 30,
+            "end_line": 44,
+            "end_column": 41,
+            "start_byte": 887,
+            "end_byte": 898
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "PlainColor"
+        },
+        {
+          "name": "SizeAlias",
+          "kind": "Type",
+          "range": {
+            "start_line": 46,
+            "start_column": 7,
+            "end_line": 46,
+            "end_column": 16,
+            "start_byte": 909,
+            "end_byte": 918
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "IntTypedef",
+          "kind": "Type",
+          "range": {
+            "start_line": 48,
+            "start_column": 1,
+            "end_line": 48,
+            "end_column": 24,
+            "start_byte": 937,
+            "end_byte": 960
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "namespaceFunction",
+          "kind": "Function",
+          "range": {
+            "start_line": 50,
+            "start_column": 5,
+            "end_line": 50,
+            "end_column": 42,
+            "start_byte": 966,
+            "end_byte": 1003
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space",
+          "signature": {
+            "parameters": [
+              {
+                "name": "parameterValue",
+                "type_annotation": "int"
+              }
+            ],
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "parameterValue",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 50,
+            "start_column": 27,
+            "end_line": 50,
+            "end_column": 41,
+            "start_byte": 988,
+            "end_byte": 1002
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "localValue",
+          "kind": "Variable",
+          "range": {
+            "start_line": 51,
+            "start_column": 9,
+            "end_line": 51,
+            "end_column": 19,
+            "start_byte": 1014,
+            "end_byte": 1024
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "helper",
+          "kind": "Function",
+          "range": {
+            "start_line": 57,
+            "start_column": 12,
+            "end_line": 57,
+            "end_column": 23,
+            "start_byte": 1115,
+            "end_byte": 1126
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "signature": {
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "helper",
+          "kind": "Function",
+          "range": {
+            "start_line": 59,
+            "start_column": 5,
+            "end_line": 59,
+            "end_column": 28,
+            "start_byte": 1133,
+            "end_byte": 1156
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "signature": {
+            "parameters": [
+              {
+                "name": "helperValue",
+                "type_annotation": "int"
+              }
+            ],
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "helperValue",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 59,
+            "start_column": 16,
+            "end_line": 59,
+            "end_column": 27,
+            "start_byte": 1144,
+            "end_byte": 1155
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp"
+        },
+        {
+          "name": "helper",
+          "kind": "Function",
+          "range": {
+            "start_line": 61,
+            "start_column": 5,
+            "end_line": 61,
+            "end_column": 29,
+            "start_byte": 1186,
+            "end_byte": 1210
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "signature": {
+            "parameters": [
+              {
+                "name": "helperValue",
+                "type_annotation": "long"
+              }
+            ],
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "helperValue",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 61,
+            "start_column": 17,
+            "end_line": 61,
+            "end_column": 28,
+            "start_byte": 1198,
+            "end_byte": 1209
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp"
+        },
+        {
+          "name": "hiddenVariable",
+          "kind": "Variable",
+          "range": {
+            "start_line": 64,
+            "start_column": 5,
+            "end_line": 64,
+            "end_column": 19,
+            "start_byte": 1229,
+            "end_byte": 1243
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp"
+        },
+        {
+          "name": "hiddenFunction",
+          "kind": "Function",
+          "range": {
+            "start_line": 66,
+            "start_column": 6,
+            "end_line": 66,
+            "end_column": 22,
+            "start_byte": 1251,
+            "end_byte": 1267
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "LIMIT",
+          "kind": "Variable",
+          "range": {
+            "start_line": 69,
+            "start_column": 11,
+            "end_line": 69,
+            "end_column": 16,
+            "start_byte": 1298,
+            "end_byte": 1303
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp"
+        },
+        {
+          "name": "SHARED",
+          "kind": "Variable",
+          "range": {
+            "start_line": 71,
+            "start_column": 18,
+            "end_line": 71,
+            "end_column": 24,
+            "start_byte": 1327,
+            "end_byte": 1333
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp"
+        },
+        {
+          "name": "INLINE_LIMIT",
+          "kind": "Variable",
+          "range": {
+            "start_line": 73,
+            "start_column": 18,
+            "end_line": 73,
+            "end_column": 30,
+            "start_byte": 1357,
+            "end_byte": 1369
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp"
+        },
+        {
+          "name": "publicGlobal",
+          "kind": "Variable",
+          "range": {
+            "start_line": 75,
+            "start_column": 5,
+            "end_line": 75,
+            "end_column": 17,
+            "start_byte": 1380,
+            "end_byte": 1392
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp"
+        },
+        {
+          "name": "fileStaticVariable",
+          "kind": "Variable",
+          "range": {
+            "start_line": 77,
+            "start_column": 12,
+            "end_line": 77,
+            "end_column": 30,
+            "start_byte": 1410,
+            "end_byte": 1428
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp"
+        },
+        {
+          "name": "fileStaticFunction",
+          "kind": "Function",
+          "range": {
+            "start_line": 79,
+            "start_column": 13,
+            "end_line": 79,
+            "end_column": 33,
+            "start_byte": 1447,
+            "end_byte": 1467
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "api",
+          "kind": "Function",
+          "range": {
+            "start_line": 81,
+            "start_column": 17,
+            "end_line": 81,
+            "end_column": 26,
+            "start_byte": 1488,
+            "end_byte": 1497
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "functionWithLocalStatic",
+          "kind": "Function",
+          "range": {
+            "start_line": 83,
+            "start_column": 5,
+            "end_line": 83,
+            "end_column": 30,
+            "start_byte": 1504,
+            "end_byte": 1529
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "signature": {
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "localStaticCounter",
+          "kind": "Variable",
+          "range": {
+            "start_line": 84,
+            "start_column": 16,
+            "end_line": 84,
+            "end_column": 34,
+            "start_byte": 1547,
+            "end_byte": 1565
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp"
+        }
+      ],
+      "imports": [],
+      "exports": [],
+      "locals": [
+        {
+          "name": "fixture_space",
+          "kind": "Namespace",
+          "range": {
+            "start_line": 4,
+            "start_column": 11,
+            "end_line": 4,
+            "end_column": 24,
+            "start_byte": 94,
+            "end_byte": 107
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "AccessWidget",
+          "kind": "Type",
+          "range": {
+            "start_line": 6,
+            "start_column": 1,
+            "end_line": 27,
+            "end_column": 2,
+            "start_byte": 111,
+            "end_byte": 619
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "implicitPrivateField",
+                "type_annotation": "int"
+              },
+              {
+                "name": "firstPublicField",
+                "type_annotation": "int",
+                "visibility": "Public"
+              },
+              {
+                "name": "secondPublicField",
+                "type_annotation": "int",
+                "visibility": "Public"
+              },
+              {
+                "name": "staticMemberField",
+                "type_annotation": "int",
+                "visibility": "Public",
+                "is_static": true
+              },
+              {
+                "name": "protectedField",
+                "type_annotation": "int",
+                "visibility": "Protected"
+              },
+              {
+                "name": "explicitPrivateField",
+                "type_annotation": "int",
+                "visibility": "Private"
+              }
+            ]
+          }
+        },
+        {
+          "name": "implicitPrivateField",
+          "kind": "Field",
+          "range": {
+            "start_line": 7,
+            "start_column": 9,
+            "end_line": 7,
+            "end_column": 29,
+            "start_byte": 140,
+            "end_byte": 160
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "implicitPrivateMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 8,
+            "start_column": 5,
+            "end_line": 8,
+            "end_column": 34,
+            "start_byte": 166,
+            "end_byte": 195
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "AccessWidget",
+          "kind": "Function",
+          "range": {
+            "start_line": 11,
+            "start_column": 5,
+            "end_line": 11,
+            "end_column": 19,
+            "start_byte": 209,
+            "end_byte": 223
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "firstPublicField",
+          "kind": "Field",
+          "range": {
+            "start_line": 12,
+            "start_column": 9,
+            "end_line": 12,
+            "end_column": 25,
+            "start_byte": 233,
+            "end_byte": 249
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "secondPublicField",
+          "kind": "Field",
+          "range": {
+            "start_line": 13,
+            "start_column": 9,
+            "end_line": 13,
+            "end_column": 26,
+            "start_byte": 259,
+            "end_byte": 276
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "firstPublicMethod",
+          "kind": "Method",
+          "range": {
+            "start_line": 14,
+            "start_column": 5,
+            "end_line": 14,
+            "end_column": 30,
+            "start_byte": 282,
+            "end_byte": 307
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "staticMemberField",
+          "kind": "Field",
+          "range": {
+            "start_line": 16,
+            "start_column": 16,
+            "end_line": 16,
+            "end_column": 33,
+            "start_byte": 356,
+            "end_byte": 373
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "staticFactory",
+          "kind": "Method",
+          "range": {
+            "start_line": 17,
+            "start_column": 5,
+            "end_line": 17,
+            "end_column": 41,
+            "start_byte": 379,
+            "end_byte": 415
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space",
+          "signature": {
+            "return_type": "AccessWidget"
+          }
+        },
+        {
+          "name": "protectedField",
+          "kind": "Field",
+          "range": {
+            "start_line": 21,
+            "start_column": 9,
+            "end_line": 21,
+            "end_column": 23,
+            "start_byte": 496,
+            "end_byte": 510
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "explicitPrivateField",
+          "kind": "Field",
+          "range": {
+            "start_line": 25,
+            "start_column": 9,
+            "end_line": 25,
+            "end_column": 29,
+            "start_byte": 560,
+            "end_byte": 580
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "PlainStruct",
+          "kind": "Type",
+          "range": {
+            "start_line": 29,
+            "start_column": 1,
+            "end_line": 35,
+            "end_column": 2,
+            "start_byte": 622,
+            "end_byte": 742
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space",
+          "type_metadata": {
+            "fields": [
+              {
+                "name": "structPublicField",
+                "type_annotation": "int"
+              },
+              {
+                "name": "structPrivateField",
+                "type_annotation": "int",
+                "visibility": "Private"
+              }
+            ]
+          }
+        },
+        {
+          "name": "structPublicField",
+          "kind": "Field",
+          "range": {
+            "start_line": 30,
+            "start_column": 9,
+            "end_line": 30,
+            "end_column": 26,
+            "start_byte": 651,
+            "end_byte": 668
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "PlainStruct"
+        },
+        {
+          "name": "structPrivateField",
+          "kind": "Field",
+          "range": {
+            "start_line": 34,
+            "start_column": 9,
+            "end_line": 34,
+            "end_column": 27,
+            "start_byte": 721,
+            "end_byte": 739
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "PlainStruct"
+        },
+        {
+          "name": "unionIntField",
+          "kind": "Field",
+          "range": {
+            "start_line": 38,
+            "start_column": 9,
+            "end_line": 38,
+            "end_column": 22,
+            "start_byte": 772,
+            "end_byte": 785
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "unionFloatField",
+          "kind": "Field",
+          "range": {
+            "start_line": 39,
+            "start_column": 11,
+            "end_line": 39,
+            "end_column": 26,
+            "start_byte": 797,
+            "end_byte": 812
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "ScopedColor",
+          "kind": "Enum",
+          "range": {
+            "start_line": 42,
+            "start_column": 1,
+            "end_line": 42,
+            "end_column": 38,
+            "start_byte": 818,
+            "end_byte": 855
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space",
+          "type_metadata": {
+            "variants": [
+              {
+                "name": "Red"
+              },
+              {
+                "name": "Green"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Red",
+          "kind": "Variable",
+          "range": {
+            "start_line": 42,
+            "start_column": 26,
+            "end_line": 42,
+            "end_column": 29,
+            "start_byte": 843,
+            "end_byte": 846
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "ScopedColor"
+        },
+        {
+          "name": "Green",
+          "kind": "Variable",
+          "range": {
+            "start_line": 42,
+            "start_column": 31,
+            "end_line": 42,
+            "end_column": 36,
+            "start_byte": 848,
+            "end_byte": 853
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "ScopedColor"
+        },
+        {
+          "name": "PlainColor",
+          "kind": "Enum",
+          "range": {
+            "start_line": 44,
+            "start_column": 1,
+            "end_line": 44,
+            "end_column": 43,
+            "start_byte": 858,
+            "end_byte": 900
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space",
+          "type_metadata": {
+            "variants": [
+              {
+                "name": "PLAIN_RED"
+              },
+              {
+                "name": "PLAIN_GREEN"
+              }
+            ]
+          }
+        },
+        {
+          "name": "PLAIN_RED",
+          "kind": "Variable",
+          "range": {
+            "start_line": 44,
+            "start_column": 19,
+            "end_line": 44,
+            "end_column": 28,
+            "start_byte": 876,
+            "end_byte": 885
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "PlainColor"
+        },
+        {
+          "name": "PLAIN_GREEN",
+          "kind": "Variable",
+          "range": {
+            "start_line": 44,
+            "start_column": 30,
+            "end_line": 44,
+            "end_column": 41,
+            "start_byte": 887,
+            "end_byte": 898
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "PlainColor"
+        },
+        {
+          "name": "SizeAlias",
+          "kind": "Type",
+          "range": {
+            "start_line": 46,
+            "start_column": 7,
+            "end_line": 46,
+            "end_column": 16,
+            "start_byte": 909,
+            "end_byte": 918
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "IntTypedef",
+          "kind": "Type",
+          "range": {
+            "start_line": 48,
+            "start_column": 1,
+            "end_line": 48,
+            "end_column": 24,
+            "start_byte": 937,
+            "end_byte": 960
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "namespaceFunction",
+          "kind": "Function",
+          "range": {
+            "start_line": 50,
+            "start_column": 5,
+            "end_line": 50,
+            "end_column": 42,
+            "start_byte": 966,
+            "end_byte": 1003
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space",
+          "signature": {
+            "parameters": [
+              {
+                "name": "parameterValue",
+                "type_annotation": "int"
+              }
+            ],
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "parameterValue",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 50,
+            "start_column": 27,
+            "end_line": 50,
+            "end_column": 41,
+            "start_byte": 988,
+            "end_byte": 1002
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "localValue",
+          "kind": "Variable",
+          "range": {
+            "start_line": 51,
+            "start_column": 9,
+            "end_line": 51,
+            "end_column": 19,
+            "start_byte": 1014,
+            "end_byte": 1024
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "container_name": "fixture_space"
+        },
+        {
+          "name": "helper",
+          "kind": "Function",
+          "range": {
+            "start_line": 57,
+            "start_column": 12,
+            "end_line": 57,
+            "end_column": 23,
+            "start_byte": 1115,
+            "end_byte": 1126
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "signature": {
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "helper",
+          "kind": "Function",
+          "range": {
+            "start_line": 59,
+            "start_column": 5,
+            "end_line": 59,
+            "end_column": 28,
+            "start_byte": 1133,
+            "end_byte": 1156
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "signature": {
+            "parameters": [
+              {
+                "name": "helperValue",
+                "type_annotation": "int"
+              }
+            ],
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "helperValue",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 59,
+            "start_column": 16,
+            "end_line": 59,
+            "end_column": 27,
+            "start_byte": 1144,
+            "end_byte": 1155
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp"
+        },
+        {
+          "name": "helper",
+          "kind": "Function",
+          "range": {
+            "start_line": 61,
+            "start_column": 5,
+            "end_line": 61,
+            "end_column": 29,
+            "start_byte": 1186,
+            "end_byte": 1210
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "signature": {
+            "parameters": [
+              {
+                "name": "helperValue",
+                "type_annotation": "long"
+              }
+            ],
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "helperValue",
+          "kind": "Parameter",
+          "range": {
+            "start_line": 61,
+            "start_column": 17,
+            "end_line": 61,
+            "end_column": 28,
+            "start_byte": 1198,
+            "end_byte": 1209
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp"
+        },
+        {
+          "name": "hiddenVariable",
+          "kind": "Variable",
+          "range": {
+            "start_line": 64,
+            "start_column": 5,
+            "end_line": 64,
+            "end_column": 19,
+            "start_byte": 1229,
+            "end_byte": 1243
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp"
+        },
+        {
+          "name": "hiddenFunction",
+          "kind": "Function",
+          "range": {
+            "start_line": 66,
+            "start_column": 6,
+            "end_line": 66,
+            "end_column": 22,
+            "start_byte": 1251,
+            "end_byte": 1267
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "LIMIT",
+          "kind": "Variable",
+          "range": {
+            "start_line": 69,
+            "start_column": 11,
+            "end_line": 69,
+            "end_column": 16,
+            "start_byte": 1298,
+            "end_byte": 1303
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp"
+        },
+        {
+          "name": "SHARED",
+          "kind": "Variable",
+          "range": {
+            "start_line": 71,
+            "start_column": 18,
+            "end_line": 71,
+            "end_column": 24,
+            "start_byte": 1327,
+            "end_byte": 1333
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp"
+        },
+        {
+          "name": "INLINE_LIMIT",
+          "kind": "Variable",
+          "range": {
+            "start_line": 73,
+            "start_column": 18,
+            "end_line": 73,
+            "end_column": 30,
+            "start_byte": 1357,
+            "end_byte": 1369
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp"
+        },
+        {
+          "name": "publicGlobal",
+          "kind": "Variable",
+          "range": {
+            "start_line": 75,
+            "start_column": 5,
+            "end_line": 75,
+            "end_column": 17,
+            "start_byte": 1380,
+            "end_byte": 1392
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp"
+        },
+        {
+          "name": "fileStaticVariable",
+          "kind": "Variable",
+          "range": {
+            "start_line": 77,
+            "start_column": 12,
+            "end_line": 77,
+            "end_column": 30,
+            "start_byte": 1410,
+            "end_byte": 1428
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp"
+        },
+        {
+          "name": "fileStaticFunction",
+          "kind": "Function",
+          "range": {
+            "start_line": 79,
+            "start_column": 13,
+            "end_line": 79,
+            "end_column": 33,
+            "start_byte": 1447,
+            "end_byte": 1467
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "api",
+          "kind": "Function",
+          "range": {
+            "start_line": 81,
+            "start_column": 17,
+            "end_line": 81,
+            "end_column": 26,
+            "start_byte": 1488,
+            "end_byte": 1497
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "signature": {
+            "return_type": "void"
+          }
+        },
+        {
+          "name": "functionWithLocalStatic",
+          "kind": "Function",
+          "range": {
+            "start_line": 83,
+            "start_column": 5,
+            "end_line": 83,
+            "end_column": 30,
+            "start_byte": 1504,
+            "end_byte": 1529
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp",
+          "signature": {
+            "return_type": "int"
+          }
+        },
+        {
+          "name": "localStaticCounter",
+          "kind": "Variable",
+          "range": {
+            "start_line": 84,
+            "start_column": 16,
+            "end_line": 84,
+            "end_column": 34,
+            "start_byte": 1547,
+            "end_byte": 1565
+          },
+          "language": "Cpp",
+          "file": "cpp.cpp"
+        }
+      ],
+      "lint": [],
+      "syntax": []
+    }
+  ],
+  "symbol_indexes": [
+    {
+      "schema_version": {
+        "major": 2,
+        "minor": 0
+      },
+      "file": "cpp.cpp",
+      "language": "Cpp",
+      "file_hash": "3b996e3bd99ed858",
+      "completed_passes": [
+        "Parse",
+        "Bind",
+        "Semantic",
+        "Docs"
+      ],
+      "symbols": [
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "eb1e0952766278303bc3991edb7f0137f28be3e27f5bf67449dc94100ed9cc8d",
+          "language": "Cpp",
+          "kind": "Namespace",
+          "identity": {
+            "name": "fixture_space",
+            "display_name": "fixture_space",
+            "qualified_name": "fixture_space::fixture_space",
+            "module_path": "fixture_space",
+            "stable_key": "cpp::cpp.cpp::Namespace::fixture_space::fixture_space::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 4,
+                "column": 11
+              },
+              "end": {
+                "line": 4,
+                "column": 24
+              },
+              "start_byte": 94,
+              "end_byte": 107
+            },
+            "name_span": {
+              "start": {
+                "line": 4,
+                "column": 11
+              },
+              "end": {
+                "line": 4,
+                "column": 24
+              },
+              "start_byte": 94,
+              "end_byte": 107
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287647,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "b265f5805b3fdd9ae24a76db0bce8353b09110d9996cf27a18c10892b8552a29",
+          "language": "Cpp",
+          "kind": "Type",
+          "identity": {
+            "name": "AccessWidget",
+            "display_name": "AccessWidget",
+            "qualified_name": "fixture_space::AccessWidget",
+            "module_path": "fixture_space",
+            "stable_key": "cpp::cpp.cpp::Type::fixture_space::AccessWidget::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 6,
+                "column": 1
+              },
+              "end": {
+                "line": 27,
+                "column": 2
+              },
+              "start_byte": 111,
+              "end_byte": 619
+            },
+            "body_span": {
+              "start": {
+                "line": 6,
+                "column": 20
+              },
+              "end": {
+                "line": 27,
+                "column": 2
+              },
+              "start_byte": 130,
+              "end_byte": 619
+            },
+            "name_span": {
+              "start": {
+                "line": 6,
+                "column": 7
+              },
+              "end": {
+                "line": 6,
+                "column": 19
+              },
+              "start_byte": 117,
+              "end_byte": 129
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "references": [
+              {
+                "id": "8b7d3cf1c1c87f5dbbac97ce72f3d94b5d842a2e58a69dc56df0c052efd467c2",
+                "name": "firstPublicField",
+                "qualified_name": "fixture_space::firstPublicField"
+              }
+            ],
+            "referenced_by": [
+              {
+                "id": "68251fb3669584a184102a2c2d9543b5e164a0d2282d713784c1f8cf913e7eca",
+                "name": "staticFactory",
+                "qualified_name": "fixture_space::staticFactory"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287647,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Type",
+            "data": {
+              "fields": [
+                {
+                  "name": "implicitPrivateField",
+                  "type_text": "int",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "firstPublicField",
+                  "type_text": "int",
+                  "visibility": "Public",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "secondPublicField",
+                  "type_text": "int",
+                  "visibility": "Public",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "staticMemberField",
+                  "type_text": "int",
+                  "visibility": "Public",
+                  "is_static": true,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "protectedField",
+                  "type_text": "int",
+                  "visibility": "Protected",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "explicitPrivateField",
+                  "type_text": "int",
+                  "visibility": "Private",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                }
+              ],
+              "is_abstract": false,
+              "is_final": false,
+              "is_sealed": false,
+              "is_open": false,
+              "is_partial": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "0784411bb4733f689c1ce7343094e5135cb5a11489d8c90f41c4dcbddba86e95",
+          "language": "Cpp",
+          "kind": "Field",
+          "identity": {
+            "name": "implicitPrivateField",
+            "display_name": "implicitPrivateField",
+            "qualified_name": "fixture_space::implicitPrivateField",
+            "module_path": "fixture_space",
+            "stable_key": "cpp::cpp.cpp::Field::fixture_space::implicitPrivateField::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 7,
+                "column": 9
+              },
+              "end": {
+                "line": 7,
+                "column": 29
+              },
+              "start_byte": 140,
+              "end_byte": 160
+            },
+            "name_span": {
+              "start": {
+                "line": 7,
+                "column": 9
+              },
+              "end": {
+                "line": 7,
+                "column": 29
+              },
+              "start_byte": 140,
+              "end_byte": 160
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287647,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "implicitPrivateField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "ea43c1c237e958ea7b80b62482cebce49c1bb6f8ff1367e1956fc3689c4259e4",
+          "language": "Cpp",
+          "kind": "Method",
+          "identity": {
+            "name": "implicitPrivateMethod",
+            "display_name": "implicitPrivateMethod",
+            "qualified_name": "fixture_space::implicitPrivateMethod",
+            "module_path": "fixture_space",
+            "stable_key": "cpp::cpp.cpp::Method::fixture_space::implicitPrivateMethod::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 8,
+                "column": 5
+              },
+              "end": {
+                "line": 8,
+                "column": 34
+              },
+              "start_byte": 166,
+              "end_byte": 195
+            },
+            "name_span": {
+              "start": {
+                "line": 8,
+                "column": 10
+              },
+              "end": {
+                "line": 8,
+                "column": 31
+              },
+              "start_byte": 171,
+              "end_byte": 192
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287647,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "edb53d3341077a14b123fbd0f33e8cbc603c40cb47bb788213766bdafc20e934",
+          "language": "Cpp",
+          "kind": "Function",
+          "identity": {
+            "name": "AccessWidget",
+            "display_name": "AccessWidget",
+            "qualified_name": "fixture_space::AccessWidget",
+            "module_path": "fixture_space",
+            "stable_key": "cpp::cpp.cpp::Function::fixture_space::AccessWidget::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 11,
+                "column": 5
+              },
+              "end": {
+                "line": 11,
+                "column": 19
+              },
+              "start_byte": 209,
+              "end_byte": 223
+            },
+            "name_span": {
+              "start": {
+                "line": 11,
+                "column": 5
+              },
+              "end": {
+                "line": 11,
+                "column": 17
+              },
+              "start_byte": 209,
+              "end_byte": 221
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287647,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "8b7d3cf1c1c87f5dbbac97ce72f3d94b5d842a2e58a69dc56df0c052efd467c2",
+          "language": "Cpp",
+          "kind": "Field",
+          "identity": {
+            "name": "firstPublicField",
+            "display_name": "firstPublicField",
+            "qualified_name": "fixture_space::firstPublicField",
+            "module_path": "fixture_space",
+            "stable_key": "cpp::cpp.cpp::Field::fixture_space::firstPublicField::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 12,
+                "column": 9
+              },
+              "end": {
+                "line": 12,
+                "column": 25
+              },
+              "start_byte": 233,
+              "end_byte": 249
+            },
+            "name_span": {
+              "start": {
+                "line": 12,
+                "column": 9
+              },
+              "end": {
+                "line": 12,
+                "column": 25
+              },
+              "start_byte": 233,
+              "end_byte": 249
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "referenced_by": [
+              {
+                "id": "b265f5805b3fdd9ae24a76db0bce8353b09110d9996cf27a18c10892b8552a29",
+                "name": "AccessWidget",
+                "qualified_name": "fixture_space::AccessWidget"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287647,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "firstPublicField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "3f56f658e47fbd20c99a6dacaf79caacea20cbcafe023bbf57d1a4913284a6bb",
+          "language": "Cpp",
+          "kind": "Field",
+          "identity": {
+            "name": "secondPublicField",
+            "display_name": "secondPublicField",
+            "qualified_name": "fixture_space::secondPublicField",
+            "module_path": "fixture_space",
+            "stable_key": "cpp::cpp.cpp::Field::fixture_space::secondPublicField::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 13,
+                "column": 9
+              },
+              "end": {
+                "line": 13,
+                "column": 26
+              },
+              "start_byte": 259,
+              "end_byte": 276
+            },
+            "name_span": {
+              "start": {
+                "line": 13,
+                "column": 9
+              },
+              "end": {
+                "line": 13,
+                "column": 26
+              },
+              "start_byte": 259,
+              "end_byte": 276
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287647,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "secondPublicField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "8c425e73eb75c841d5a42e83541fefb8b1d04e72a6502d3c10a78aa0cf4beee9",
+          "language": "Cpp",
+          "kind": "Method",
+          "identity": {
+            "name": "firstPublicMethod",
+            "display_name": "firstPublicMethod",
+            "qualified_name": "fixture_space::firstPublicMethod",
+            "module_path": "fixture_space",
+            "stable_key": "cpp::cpp.cpp::Method::fixture_space::firstPublicMethod::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 14,
+                "column": 5
+              },
+              "end": {
+                "line": 14,
+                "column": 30
+              },
+              "start_byte": 282,
+              "end_byte": 307
+            },
+            "name_span": {
+              "start": {
+                "line": 14,
+                "column": 10
+              },
+              "end": {
+                "line": 14,
+                "column": 27
+              },
+              "start_byte": 287,
+              "end_byte": 304
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287647,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "149c046f0b764f1f46e018d1b32cf6d3c42ce45d95e9fc9ef0a6678b39c2bff9",
+          "language": "Cpp",
+          "kind": "Field",
+          "identity": {
+            "name": "staticMemberField",
+            "display_name": "staticMemberField",
+            "qualified_name": "fixture_space::staticMemberField",
+            "module_path": "fixture_space",
+            "stable_key": "cpp::cpp.cpp::Field::fixture_space::staticMemberField::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 16,
+                "column": 16
+              },
+              "end": {
+                "line": 16,
+                "column": 33
+              },
+              "start_byte": 356,
+              "end_byte": 373
+            },
+            "name_span": {
+              "start": {
+                "line": 16,
+                "column": 16
+              },
+              "end": {
+                "line": 16,
+                "column": 33
+              },
+              "start_byte": 356,
+              "end_byte": 373
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287647,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "staticMemberField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "68251fb3669584a184102a2c2d9543b5e164a0d2282d713784c1f8cf913e7eca",
+          "language": "Cpp",
+          "kind": "Method",
+          "identity": {
+            "name": "staticFactory",
+            "display_name": "staticFactory",
+            "qualified_name": "fixture_space::staticFactory",
+            "module_path": "fixture_space",
+            "stable_key": "cpp::cpp.cpp::Method::fixture_space::staticFactory::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 17,
+                "column": 5
+              },
+              "end": {
+                "line": 17,
+                "column": 41
+              },
+              "start_byte": 379,
+              "end_byte": 415
+            },
+            "name_span": {
+              "start": {
+                "line": 17,
+                "column": 25
+              },
+              "end": {
+                "line": 17,
+                "column": 38
+              },
+              "start_byte": 399,
+              "end_byte": 412
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "modifiers": [
+            {
+              "type": "Static"
+            }
+          ],
+          "type_info": {
+            "primary_type": "AccessWidget",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "AccessWidget"
+              },
+              {
+                "kind": "Canonical",
+                "text": "AccessWidget"
+              }
+            ]
+          },
+          "relations": {
+            "references": [
+              {
+                "id": "b265f5805b3fdd9ae24a76db0bce8353b09110d9996cf27a18c10892b8552a29",
+                "name": "AccessWidget",
+                "qualified_name": "fixture_space::AccessWidget"
+              }
+            ]
+          },
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287647,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "AccessWidget",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "eefc9b090a029e4f012e4d27b97e028e55ac9bbe7f5c23da14703319140e2628",
+          "language": "Cpp",
+          "kind": "Field",
+          "identity": {
+            "name": "protectedField",
+            "display_name": "protectedField",
+            "qualified_name": "fixture_space::protectedField",
+            "module_path": "fixture_space",
+            "stable_key": "cpp::cpp.cpp::Field::fixture_space::protectedField::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 21,
+                "column": 9
+              },
+              "end": {
+                "line": 21,
+                "column": 23
+              },
+              "start_byte": 496,
+              "end_byte": 510
+            },
+            "name_span": {
+              "start": {
+                "line": 21,
+                "column": 9
+              },
+              "end": {
+                "line": 21,
+                "column": 23
+              },
+              "start_byte": 496,
+              "end_byte": 510
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287647,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "protectedField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "eee0cc78f6fcc7df3cbba9771a02437371b756f7646ab7e0f039b4bb66cc0b98",
+          "language": "Cpp",
+          "kind": "Field",
+          "identity": {
+            "name": "explicitPrivateField",
+            "display_name": "explicitPrivateField",
+            "qualified_name": "fixture_space::explicitPrivateField",
+            "module_path": "fixture_space",
+            "stable_key": "cpp::cpp.cpp::Field::fixture_space::explicitPrivateField::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 25,
+                "column": 9
+              },
+              "end": {
+                "line": 25,
+                "column": 29
+              },
+              "start_byte": 560,
+              "end_byte": 580
+            },
+            "name_span": {
+              "start": {
+                "line": 25,
+                "column": 9
+              },
+              "end": {
+                "line": 25,
+                "column": 29
+              },
+              "start_byte": 560,
+              "end_byte": 580
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "explicitPrivateField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "e9b45dbf8ded63f3057a8b0345540d94499395437067cf00ff9bc53e3cb65779",
+          "language": "Cpp",
+          "kind": "Type",
+          "identity": {
+            "name": "PlainStruct",
+            "display_name": "PlainStruct",
+            "qualified_name": "fixture_space::PlainStruct",
+            "module_path": "fixture_space",
+            "stable_key": "cpp::cpp.cpp::Type::fixture_space::PlainStruct::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 29,
+                "column": 1
+              },
+              "end": {
+                "line": 35,
+                "column": 2
+              },
+              "start_byte": 622,
+              "end_byte": 742
+            },
+            "body_span": {
+              "start": {
+                "line": 29,
+                "column": 20
+              },
+              "end": {
+                "line": 35,
+                "column": 2
+              },
+              "start_byte": 641,
+              "end_byte": 742
+            },
+            "name_span": {
+              "start": {
+                "line": 29,
+                "column": 8
+              },
+              "end": {
+                "line": 29,
+                "column": 19
+              },
+              "start_byte": 629,
+              "end_byte": 640
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "members": [
+              {
+                "id": "13c1716d2136a6c8f4462c6f584fe0c29fa25329679e76b20b4bb8fc179dcc8b",
+                "name": "structPublicField",
+                "qualified_name": "PlainStruct::structPublicField"
+              },
+              {
+                "id": "bc69bae885cd035eafd67ea1fbad2169c48ca5d9c2f2450a2f37de5816ad4de2",
+                "name": "structPrivateField",
+                "qualified_name": "PlainStruct::structPrivateField"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Type",
+            "data": {
+              "fields": [
+                {
+                  "name": "structPublicField",
+                  "type_text": "int",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                },
+                {
+                  "name": "structPrivateField",
+                  "type_text": "int",
+                  "visibility": "Private",
+                  "is_static": false,
+                  "is_readonly": false,
+                  "is_mutable": true,
+                  "is_optional": false
+                }
+              ],
+              "is_abstract": false,
+              "is_final": false,
+              "is_sealed": false,
+              "is_open": false,
+              "is_partial": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "13c1716d2136a6c8f4462c6f584fe0c29fa25329679e76b20b4bb8fc179dcc8b",
+          "language": "Cpp",
+          "kind": "Field",
+          "identity": {
+            "name": "structPublicField",
+            "display_name": "structPublicField",
+            "qualified_name": "PlainStruct::structPublicField",
+            "module_path": "PlainStruct",
+            "stable_key": "cpp::cpp.cpp::Field::PlainStruct::structPublicField::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 30,
+                "column": 9
+              },
+              "end": {
+                "line": 30,
+                "column": 26
+              },
+              "start_byte": 651,
+              "end_byte": 668
+            },
+            "name_span": {
+              "start": {
+                "line": 30,
+                "column": 9
+              },
+              "end": {
+                "line": 30,
+                "column": 26
+              },
+              "start_byte": 651,
+              "end_byte": 668
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "e9b45dbf8ded63f3057a8b0345540d94499395437067cf00ff9bc53e3cb65779",
+              "name": "PlainStruct",
+              "qualified_name": "fixture_space::PlainStruct"
+            },
+            "container": {
+              "id": "e9b45dbf8ded63f3057a8b0345540d94499395437067cf00ff9bc53e3cb65779",
+              "name": "PlainStruct",
+              "qualified_name": "fixture_space::PlainStruct"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "structPublicField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "bc69bae885cd035eafd67ea1fbad2169c48ca5d9c2f2450a2f37de5816ad4de2",
+          "language": "Cpp",
+          "kind": "Field",
+          "identity": {
+            "name": "structPrivateField",
+            "display_name": "structPrivateField",
+            "qualified_name": "PlainStruct::structPrivateField",
+            "module_path": "PlainStruct",
+            "stable_key": "cpp::cpp.cpp::Field::PlainStruct::structPrivateField::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 34,
+                "column": 9
+              },
+              "end": {
+                "line": 34,
+                "column": 27
+              },
+              "start_byte": 721,
+              "end_byte": 739
+            },
+            "name_span": {
+              "start": {
+                "line": 34,
+                "column": 9
+              },
+              "end": {
+                "line": 34,
+                "column": 27
+              },
+              "start_byte": 721,
+              "end_byte": 739
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "e9b45dbf8ded63f3057a8b0345540d94499395437067cf00ff9bc53e3cb65779",
+              "name": "PlainStruct",
+              "qualified_name": "fixture_space::PlainStruct"
+            },
+            "container": {
+              "id": "e9b45dbf8ded63f3057a8b0345540d94499395437067cf00ff9bc53e3cb65779",
+              "name": "PlainStruct",
+              "qualified_name": "fixture_space::PlainStruct"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "structPrivateField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "01065fd41472c7a48d39b651b2071c6fa2e658516afbaaae57c66c8e7947f4ca",
+          "language": "Cpp",
+          "kind": "Field",
+          "identity": {
+            "name": "unionIntField",
+            "display_name": "unionIntField",
+            "qualified_name": "fixture_space::unionIntField",
+            "module_path": "fixture_space",
+            "stable_key": "cpp::cpp.cpp::Field::fixture_space::unionIntField::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 38,
+                "column": 9
+              },
+              "end": {
+                "line": 38,
+                "column": 22
+              },
+              "start_byte": 772,
+              "end_byte": 785
+            },
+            "name_span": {
+              "start": {
+                "line": 38,
+                "column": 9
+              },
+              "end": {
+                "line": 38,
+                "column": 22
+              },
+              "start_byte": 772,
+              "end_byte": 785
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "unionIntField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "211b4cd417c9ca28aaea4043898a6824a9719e8bb2f041e23a49c075773cf25d",
+          "language": "Cpp",
+          "kind": "Field",
+          "identity": {
+            "name": "unionFloatField",
+            "display_name": "unionFloatField",
+            "qualified_name": "fixture_space::unionFloatField",
+            "module_path": "fixture_space",
+            "stable_key": "cpp::cpp.cpp::Field::fixture_space::unionFloatField::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 39,
+                "column": 11
+              },
+              "end": {
+                "line": 39,
+                "column": 26
+              },
+              "start_byte": 797,
+              "end_byte": 812
+            },
+            "name_span": {
+              "start": {
+                "line": 39,
+                "column": 11
+              },
+              "end": {
+                "line": 39,
+                "column": 26
+              },
+              "start_byte": 797,
+              "end_byte": 812
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Field",
+            "data": {
+              "name": "unionFloatField",
+              "visibility": "Unknown",
+              "is_static": false,
+              "is_readonly": false,
+              "is_mutable": true,
+              "is_optional": false
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "0816ae546c706bcfc8cc4d926865a2446551f553cea88836077e96ad2deef9a8",
+          "language": "Cpp",
+          "kind": "Enum",
+          "identity": {
+            "name": "ScopedColor",
+            "display_name": "ScopedColor",
+            "qualified_name": "fixture_space::ScopedColor",
+            "module_path": "fixture_space",
+            "stable_key": "cpp::cpp.cpp::Enum::fixture_space::ScopedColor::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 42,
+                "column": 1
+              },
+              "end": {
+                "line": 42,
+                "column": 38
+              },
+              "start_byte": 818,
+              "end_byte": 855
+            },
+            "body_span": {
+              "start": {
+                "line": 42,
+                "column": 24
+              },
+              "end": {
+                "line": 42,
+                "column": 38
+              },
+              "start_byte": 841,
+              "end_byte": 855
+            },
+            "name_span": {
+              "start": {
+                "line": 42,
+                "column": 12
+              },
+              "end": {
+                "line": 42,
+                "column": 23
+              },
+              "start_byte": 829,
+              "end_byte": 840
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "members": [
+              {
+                "id": "c439f215b21c207709404703413825625c9642cd86d7e7a995182ff0b742420e",
+                "name": "Red",
+                "qualified_name": "ScopedColor::Red"
+              },
+              {
+                "id": "32727e6a2ba2fff9b643c612c6f52ff49c4bb270fdd4e46e9396865e2c7af2cf",
+                "name": "Green",
+                "qualified_name": "ScopedColor::Green"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Enum",
+            "data": {
+              "variants": [
+                {
+                  "name": "Red"
+                },
+                {
+                  "name": "Green"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "c439f215b21c207709404703413825625c9642cd86d7e7a995182ff0b742420e",
+          "language": "Cpp",
+          "kind": "Variable",
+          "identity": {
+            "name": "Red",
+            "display_name": "Red",
+            "qualified_name": "ScopedColor::Red",
+            "module_path": "ScopedColor",
+            "stable_key": "cpp::cpp.cpp::Variable::ScopedColor::Red::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 42,
+                "column": 26
+              },
+              "end": {
+                "line": 42,
+                "column": 29
+              },
+              "start_byte": 843,
+              "end_byte": 846
+            },
+            "name_span": {
+              "start": {
+                "line": 42,
+                "column": 26
+              },
+              "end": {
+                "line": 42,
+                "column": 29
+              },
+              "start_byte": 843,
+              "end_byte": 846
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "0816ae546c706bcfc8cc4d926865a2446551f553cea88836077e96ad2deef9a8",
+              "name": "ScopedColor",
+              "qualified_name": "fixture_space::ScopedColor"
+            },
+            "container": {
+              "id": "0816ae546c706bcfc8cc4d926865a2446551f553cea88836077e96ad2deef9a8",
+              "name": "ScopedColor",
+              "qualified_name": "fixture_space::ScopedColor"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "32727e6a2ba2fff9b643c612c6f52ff49c4bb270fdd4e46e9396865e2c7af2cf",
+          "language": "Cpp",
+          "kind": "Variable",
+          "identity": {
+            "name": "Green",
+            "display_name": "Green",
+            "qualified_name": "ScopedColor::Green",
+            "module_path": "ScopedColor",
+            "stable_key": "cpp::cpp.cpp::Variable::ScopedColor::Green::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 42,
+                "column": 31
+              },
+              "end": {
+                "line": 42,
+                "column": 36
+              },
+              "start_byte": 848,
+              "end_byte": 853
+            },
+            "name_span": {
+              "start": {
+                "line": 42,
+                "column": 31
+              },
+              "end": {
+                "line": 42,
+                "column": 36
+              },
+              "start_byte": 848,
+              "end_byte": 853
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "0816ae546c706bcfc8cc4d926865a2446551f553cea88836077e96ad2deef9a8",
+              "name": "ScopedColor",
+              "qualified_name": "fixture_space::ScopedColor"
+            },
+            "container": {
+              "id": "0816ae546c706bcfc8cc4d926865a2446551f553cea88836077e96ad2deef9a8",
+              "name": "ScopedColor",
+              "qualified_name": "fixture_space::ScopedColor"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "ea5f37719c1157566b1130e24c427d2074698aa5ba8bf56685f0bfdf55ed589b",
+          "language": "Cpp",
+          "kind": "Enum",
+          "identity": {
+            "name": "PlainColor",
+            "display_name": "PlainColor",
+            "qualified_name": "fixture_space::PlainColor",
+            "module_path": "fixture_space",
+            "stable_key": "cpp::cpp.cpp::Enum::fixture_space::PlainColor::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 44,
+                "column": 1
+              },
+              "end": {
+                "line": 44,
+                "column": 43
+              },
+              "start_byte": 858,
+              "end_byte": 900
+            },
+            "body_span": {
+              "start": {
+                "line": 44,
+                "column": 17
+              },
+              "end": {
+                "line": 44,
+                "column": 43
+              },
+              "start_byte": 874,
+              "end_byte": 900
+            },
+            "name_span": {
+              "start": {
+                "line": 44,
+                "column": 6
+              },
+              "end": {
+                "line": 44,
+                "column": 16
+              },
+              "start_byte": 863,
+              "end_byte": 873
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "members": [
+              {
+                "id": "9d79e7997649b6aba7df7192fba616a42251e5d0d4f51f91c1d1a5a6d80333c8",
+                "name": "PLAIN_RED",
+                "qualified_name": "PlainColor::PLAIN_RED"
+              },
+              {
+                "id": "2aa9fbe2ca1253508424749be64fb09134e818fe4e2b9cc9fe4e59af965f6f88",
+                "name": "PLAIN_GREEN",
+                "qualified_name": "PlainColor::PLAIN_GREEN"
+              }
+            ]
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Enum",
+            "data": {
+              "variants": [
+                {
+                  "name": "PLAIN_RED"
+                },
+                {
+                  "name": "PLAIN_GREEN"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "9d79e7997649b6aba7df7192fba616a42251e5d0d4f51f91c1d1a5a6d80333c8",
+          "language": "Cpp",
+          "kind": "Variable",
+          "identity": {
+            "name": "PLAIN_RED",
+            "display_name": "PLAIN_RED",
+            "qualified_name": "PlainColor::PLAIN_RED",
+            "module_path": "PlainColor",
+            "stable_key": "cpp::cpp.cpp::Variable::PlainColor::PLAIN_RED::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 44,
+                "column": 19
+              },
+              "end": {
+                "line": 44,
+                "column": 28
+              },
+              "start_byte": 876,
+              "end_byte": 885
+            },
+            "name_span": {
+              "start": {
+                "line": 44,
+                "column": 19
+              },
+              "end": {
+                "line": 44,
+                "column": 28
+              },
+              "start_byte": 876,
+              "end_byte": 885
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "ea5f37719c1157566b1130e24c427d2074698aa5ba8bf56685f0bfdf55ed589b",
+              "name": "PlainColor",
+              "qualified_name": "fixture_space::PlainColor"
+            },
+            "container": {
+              "id": "ea5f37719c1157566b1130e24c427d2074698aa5ba8bf56685f0bfdf55ed589b",
+              "name": "PlainColor",
+              "qualified_name": "fixture_space::PlainColor"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "2aa9fbe2ca1253508424749be64fb09134e818fe4e2b9cc9fe4e59af965f6f88",
+          "language": "Cpp",
+          "kind": "Variable",
+          "identity": {
+            "name": "PLAIN_GREEN",
+            "display_name": "PLAIN_GREEN",
+            "qualified_name": "PlainColor::PLAIN_GREEN",
+            "module_path": "PlainColor",
+            "stable_key": "cpp::cpp.cpp::Variable::PlainColor::PLAIN_GREEN::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 44,
+                "column": 30
+              },
+              "end": {
+                "line": 44,
+                "column": 41
+              },
+              "start_byte": 887,
+              "end_byte": 898
+            },
+            "name_span": {
+              "start": {
+                "line": 44,
+                "column": 30
+              },
+              "end": {
+                "line": 44,
+                "column": 41
+              },
+              "start_byte": 887,
+              "end_byte": 898
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {
+            "parent": {
+              "id": "ea5f37719c1157566b1130e24c427d2074698aa5ba8bf56685f0bfdf55ed589b",
+              "name": "PlainColor",
+              "qualified_name": "fixture_space::PlainColor"
+            },
+            "container": {
+              "id": "ea5f37719c1157566b1130e24c427d2074698aa5ba8bf56685f0bfdf55ed589b",
+              "name": "PlainColor",
+              "qualified_name": "fixture_space::PlainColor"
+            }
+          },
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "cd5edd6bfbbd042ee2414986453a366b96bea80c235f5d5bc04f6cf8304f0a91",
+          "language": "Cpp",
+          "kind": "Type",
+          "identity": {
+            "name": "SizeAlias",
+            "display_name": "SizeAlias",
+            "qualified_name": "fixture_space::SizeAlias",
+            "module_path": "fixture_space",
+            "stable_key": "cpp::cpp.cpp::Type::fixture_space::SizeAlias::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 46,
+                "column": 7
+              },
+              "end": {
+                "line": 46,
+                "column": 16
+              },
+              "start_byte": 909,
+              "end_byte": 918
+            },
+            "name_span": {
+              "start": {
+                "line": 46,
+                "column": 7
+              },
+              "end": {
+                "line": 46,
+                "column": 16
+              },
+              "start_byte": 909,
+              "end_byte": 918
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "612d1a3081c1772ecd02ee3ffbad54e8c427e028e063e44d17b3a17a6ae5c5ff",
+          "language": "Cpp",
+          "kind": "Type",
+          "identity": {
+            "name": "IntTypedef",
+            "display_name": "IntTypedef",
+            "qualified_name": "fixture_space::IntTypedef",
+            "module_path": "fixture_space",
+            "stable_key": "cpp::cpp.cpp::Type::fixture_space::IntTypedef::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 48,
+                "column": 1
+              },
+              "end": {
+                "line": 48,
+                "column": 24
+              },
+              "start_byte": 937,
+              "end_byte": 960
+            },
+            "name_span": {
+              "start": {
+                "line": 48,
+                "column": 13
+              },
+              "end": {
+                "line": 48,
+                "column": 23
+              },
+              "start_byte": 949,
+              "end_byte": 959
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "fdcf4c7c4761024bebf70cf23b04b05411259d5360e1597615cd37fa50a192c0",
+          "language": "Cpp",
+          "kind": "Function",
+          "identity": {
+            "name": "namespaceFunction",
+            "display_name": "namespaceFunction",
+            "qualified_name": "fixture_space::namespaceFunction",
+            "module_path": "fixture_space",
+            "stable_key": "cpp::cpp.cpp::Function::fixture_space::namespaceFunction::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 50,
+                "column": 5
+              },
+              "end": {
+                "line": 50,
+                "column": 42
+              },
+              "start_byte": 966,
+              "end_byte": 1003
+            },
+            "name_span": {
+              "start": {
+                "line": 50,
+                "column": 5
+              },
+              "end": {
+                "line": 50,
+                "column": 22
+              },
+              "start_byte": 966,
+              "end_byte": 983
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "int",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "int"
+              },
+              {
+                "kind": "Canonical",
+                "text": "int"
+              }
+            ]
+          },
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "parameters": [
+                {
+                  "name": "parameterValue",
+                  "position": 0,
+                  "type_text": "int",
+                  "is_optional": false,
+                  "is_variadic": false,
+                  "is_keyword_only": false,
+                  "is_positional_only": false
+                }
+              ],
+              "return_info": {
+                "type_text": "int",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 1
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "c0e5ac67695973500bc3773148ca244f56163a1ef333218c1fee1ee482f5858a",
+          "language": "Cpp",
+          "kind": "Parameter",
+          "identity": {
+            "name": "parameterValue",
+            "display_name": "parameterValue",
+            "qualified_name": "fixture_space::parameterValue",
+            "module_path": "fixture_space",
+            "stable_key": "cpp::cpp.cpp::Parameter::fixture_space::parameterValue::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 50,
+                "column": 27
+              },
+              "end": {
+                "line": 50,
+                "column": 41
+              },
+              "start_byte": 988,
+              "end_byte": 1002
+            },
+            "name_span": {
+              "start": {
+                "line": 50,
+                "column": 27
+              },
+              "end": {
+                "line": 50,
+                "column": 41
+              },
+              "start_byte": 988,
+              "end_byte": 1002
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Parameter",
+            "data": {
+              "name": "parameterValue",
+              "position": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "bfeab49ee79e59a9d9b8b663c88c9f4aa6211af1c38747206f358d985d5547eb",
+          "language": "Cpp",
+          "kind": "Variable",
+          "identity": {
+            "name": "localValue",
+            "display_name": "localValue",
+            "qualified_name": "fixture_space::localValue",
+            "module_path": "fixture_space",
+            "stable_key": "cpp::cpp.cpp::Variable::fixture_space::localValue::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 51,
+                "column": 9
+              },
+              "end": {
+                "line": 51,
+                "column": 19
+              },
+              "start_byte": 1014,
+              "end_byte": 1024
+            },
+            "name_span": {
+              "start": {
+                "line": 51,
+                "column": 9
+              },
+              "end": {
+                "line": 51,
+                "column": 19
+              },
+              "start_byte": 1014,
+              "end_byte": 1024
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "30f2b20774525b07b7e5577dfb8e5560cfb6a887eca9b599d9bad0ab5c627bdd",
+          "language": "Cpp",
+          "kind": "Function",
+          "identity": {
+            "name": "helper",
+            "display_name": "helper",
+            "stable_key": "cpp::cpp.cpp::Function::helper::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 57,
+                "column": 12
+              },
+              "end": {
+                "line": 57,
+                "column": 23
+              },
+              "start_byte": 1115,
+              "end_byte": 1126
+            },
+            "name_span": {
+              "start": {
+                "line": 57,
+                "column": 12
+              },
+              "end": {
+                "line": 57,
+                "column": 18
+              },
+              "start_byte": 1115,
+              "end_byte": 1121
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "int",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "int"
+              },
+              {
+                "kind": "Canonical",
+                "text": "int"
+              }
+            ]
+          },
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "int",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "a0baaa706ede39df8f2e6200b4e3a9719a40da229addec81867c43709b0d2ca5",
+          "language": "Cpp",
+          "kind": "Function",
+          "identity": {
+            "name": "helper",
+            "display_name": "helper",
+            "stable_key": "cpp::cpp.cpp::Function::helper::1"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 59,
+                "column": 5
+              },
+              "end": {
+                "line": 59,
+                "column": 28
+              },
+              "start_byte": 1133,
+              "end_byte": 1156
+            },
+            "name_span": {
+              "start": {
+                "line": 59,
+                "column": 5
+              },
+              "end": {
+                "line": 59,
+                "column": 11
+              },
+              "start_byte": 1133,
+              "end_byte": 1139
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "int",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "int"
+              },
+              {
+                "kind": "Canonical",
+                "text": "int"
+              }
+            ]
+          },
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "parameters": [
+                {
+                  "name": "helperValue",
+                  "position": 0,
+                  "type_text": "int",
+                  "is_optional": false,
+                  "is_variadic": false,
+                  "is_keyword_only": false,
+                  "is_positional_only": false
+                }
+              ],
+              "return_info": {
+                "type_text": "int",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 1
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "89ae981c4d59f45555fd497e3291cfab9b624f848b8c8995f176e5ed6ea150b0",
+          "language": "Cpp",
+          "kind": "Parameter",
+          "identity": {
+            "name": "helperValue",
+            "display_name": "helperValue",
+            "stable_key": "cpp::cpp.cpp::Parameter::helperValue::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 59,
+                "column": 16
+              },
+              "end": {
+                "line": 59,
+                "column": 27
+              },
+              "start_byte": 1144,
+              "end_byte": 1155
+            },
+            "name_span": {
+              "start": {
+                "line": 59,
+                "column": 16
+              },
+              "end": {
+                "line": 59,
+                "column": 27
+              },
+              "start_byte": 1144,
+              "end_byte": 1155
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Parameter",
+            "data": {
+              "name": "helperValue",
+              "position": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "44a9dedf20e38d28d73d4c00699e6043c0cdf6df09a25b7d21cb4a3237e8b0a3",
+          "language": "Cpp",
+          "kind": "Function",
+          "identity": {
+            "name": "helper",
+            "display_name": "helper",
+            "stable_key": "cpp::cpp.cpp::Function::helper::2"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 61,
+                "column": 5
+              },
+              "end": {
+                "line": 61,
+                "column": 29
+              },
+              "start_byte": 1186,
+              "end_byte": 1210
+            },
+            "name_span": {
+              "start": {
+                "line": 61,
+                "column": 5
+              },
+              "end": {
+                "line": 61,
+                "column": 11
+              },
+              "start_byte": 1186,
+              "end_byte": 1192
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "int",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "int"
+              },
+              {
+                "kind": "Canonical",
+                "text": "int"
+              }
+            ]
+          },
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "parameters": [
+                {
+                  "name": "helperValue",
+                  "position": 0,
+                  "type_text": "long",
+                  "is_optional": false,
+                  "is_variadic": false,
+                  "is_keyword_only": false,
+                  "is_positional_only": false
+                }
+              ],
+              "return_info": {
+                "type_text": "int",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 1
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "9b4e0869aa5952faa3150af790ad4e1e84207d68e850ad29e2aba492493ae16a",
+          "language": "Cpp",
+          "kind": "Parameter",
+          "identity": {
+            "name": "helperValue",
+            "display_name": "helperValue",
+            "stable_key": "cpp::cpp.cpp::Parameter::helperValue::1"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 61,
+                "column": 17
+              },
+              "end": {
+                "line": 61,
+                "column": 28
+              },
+              "start_byte": 1198,
+              "end_byte": 1209
+            },
+            "name_span": {
+              "start": {
+                "line": 61,
+                "column": 17
+              },
+              "end": {
+                "line": 61,
+                "column": 28
+              },
+              "start_byte": 1198,
+              "end_byte": 1209
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Parameter",
+            "data": {
+              "name": "helperValue",
+              "position": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "b9ea398b30dcf06d87765c9525d342de66449137ca676d15ab294e702b189016",
+          "language": "Cpp",
+          "kind": "Variable",
+          "identity": {
+            "name": "hiddenVariable",
+            "display_name": "hiddenVariable",
+            "stable_key": "cpp::cpp.cpp::Variable::hiddenVariable::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 64,
+                "column": 5
+              },
+              "end": {
+                "line": 64,
+                "column": 19
+              },
+              "start_byte": 1229,
+              "end_byte": 1243
+            },
+            "name_span": {
+              "start": {
+                "line": 64,
+                "column": 5
+              },
+              "end": {
+                "line": 64,
+                "column": 19
+              },
+              "start_byte": 1229,
+              "end_byte": 1243
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "52d1a93bec921f4ceb4b17bf32c84183cb87beb30c311bd6710644f27a4198d0",
+          "language": "Cpp",
+          "kind": "Function",
+          "identity": {
+            "name": "hiddenFunction",
+            "display_name": "hiddenFunction",
+            "stable_key": "cpp::cpp.cpp::Function::hiddenFunction::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 66,
+                "column": 6
+              },
+              "end": {
+                "line": 66,
+                "column": 22
+              },
+              "start_byte": 1251,
+              "end_byte": 1267
+            },
+            "name_span": {
+              "start": {
+                "line": 66,
+                "column": 6
+              },
+              "end": {
+                "line": 66,
+                "column": 20
+              },
+              "start_byte": 1251,
+              "end_byte": 1265
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "ab2dcc1a941ac6e76e3eb8d0716a2bb328efc6bb4e27b246254a10d704cb97f7",
+          "language": "Cpp",
+          "kind": "Variable",
+          "identity": {
+            "name": "LIMIT",
+            "display_name": "LIMIT",
+            "stable_key": "cpp::cpp.cpp::Variable::LIMIT::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 69,
+                "column": 11
+              },
+              "end": {
+                "line": 69,
+                "column": 16
+              },
+              "start_byte": 1298,
+              "end_byte": 1303
+            },
+            "name_span": {
+              "start": {
+                "line": 69,
+                "column": 11
+              },
+              "end": {
+                "line": 69,
+                "column": 16
+              },
+              "start_byte": 1298,
+              "end_byte": 1303
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "06d7b022003ac109cd82ca43aae4ea2cda848b896268c57fa47ad76f2052366f",
+          "language": "Cpp",
+          "kind": "Variable",
+          "identity": {
+            "name": "SHARED",
+            "display_name": "SHARED",
+            "stable_key": "cpp::cpp.cpp::Variable::SHARED::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 71,
+                "column": 18
+              },
+              "end": {
+                "line": 71,
+                "column": 24
+              },
+              "start_byte": 1327,
+              "end_byte": 1333
+            },
+            "name_span": {
+              "start": {
+                "line": 71,
+                "column": 18
+              },
+              "end": {
+                "line": 71,
+                "column": 24
+              },
+              "start_byte": 1327,
+              "end_byte": 1333
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "1501c3697350a02a0ceeea3a0ece2895e46857194c34097942f385ec2e295833",
+          "language": "Cpp",
+          "kind": "Variable",
+          "identity": {
+            "name": "INLINE_LIMIT",
+            "display_name": "INLINE_LIMIT",
+            "stable_key": "cpp::cpp.cpp::Variable::INLINE_LIMIT::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 73,
+                "column": 18
+              },
+              "end": {
+                "line": 73,
+                "column": 30
+              },
+              "start_byte": 1357,
+              "end_byte": 1369
+            },
+            "name_span": {
+              "start": {
+                "line": 73,
+                "column": 18
+              },
+              "end": {
+                "line": 73,
+                "column": 30
+              },
+              "start_byte": 1357,
+              "end_byte": 1369
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "afd45aa58579430f4c633fb7d8fe2997086af1516812fc2b495a2adc5e817dcd",
+          "language": "Cpp",
+          "kind": "Variable",
+          "identity": {
+            "name": "publicGlobal",
+            "display_name": "publicGlobal",
+            "stable_key": "cpp::cpp.cpp::Variable::publicGlobal::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 75,
+                "column": 5
+              },
+              "end": {
+                "line": 75,
+                "column": 17
+              },
+              "start_byte": 1380,
+              "end_byte": 1392
+            },
+            "name_span": {
+              "start": {
+                "line": 75,
+                "column": 5
+              },
+              "end": {
+                "line": 75,
+                "column": 17
+              },
+              "start_byte": 1380,
+              "end_byte": 1392
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "e41ad51fc06fb21c077c628d350035228b3feebef3d16bf0b67ec3532632180f",
+          "language": "Cpp",
+          "kind": "Variable",
+          "identity": {
+            "name": "fileStaticVariable",
+            "display_name": "fileStaticVariable",
+            "stable_key": "cpp::cpp.cpp::Variable::fileStaticVariable::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 77,
+                "column": 12
+              },
+              "end": {
+                "line": 77,
+                "column": 30
+              },
+              "start_byte": 1410,
+              "end_byte": 1428
+            },
+            "name_span": {
+              "start": {
+                "line": 77,
+                "column": 12
+              },
+              "end": {
+                "line": 77,
+                "column": 30
+              },
+              "start_byte": 1410,
+              "end_byte": 1428
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "3d0f91cb74cf22e88f833da3dd03ca451bf0e787e7ebb52cefd1f083cce1406a",
+          "language": "Cpp",
+          "kind": "Function",
+          "identity": {
+            "name": "fileStaticFunction",
+            "display_name": "fileStaticFunction",
+            "stable_key": "cpp::cpp.cpp::Function::fileStaticFunction::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 79,
+                "column": 13
+              },
+              "end": {
+                "line": 79,
+                "column": 33
+              },
+              "start_byte": 1447,
+              "end_byte": 1467
+            },
+            "name_span": {
+              "start": {
+                "line": 79,
+                "column": 13
+              },
+              "end": {
+                "line": 79,
+                "column": 31
+              },
+              "start_byte": 1447,
+              "end_byte": 1465
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "261dc55cfd4398508b8bf7cc8f0c30829c66327eeec2beac522f0099f88a0b63",
+          "language": "Cpp",
+          "kind": "Function",
+          "identity": {
+            "name": "api",
+            "display_name": "api",
+            "stable_key": "cpp::cpp.cpp::Function::api::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 81,
+                "column": 17
+              },
+              "end": {
+                "line": 81,
+                "column": 26
+              },
+              "start_byte": 1488,
+              "end_byte": 1497
+            },
+            "name_span": {
+              "start": {
+                "line": 81,
+                "column": 17
+              },
+              "end": {
+                "line": 81,
+                "column": 20
+              },
+              "start_byte": 1488,
+              "end_byte": 1491
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "void",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "void"
+              },
+              {
+                "kind": "Canonical",
+                "text": "void"
+              }
+            ]
+          },
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "void",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "4780598b8aeaceafb1fc65fe0b8bba3453693467e6d92f51e1e624d5262ef732",
+          "language": "Cpp",
+          "kind": "Function",
+          "identity": {
+            "name": "functionWithLocalStatic",
+            "display_name": "functionWithLocalStatic",
+            "stable_key": "cpp::cpp.cpp::Function::functionWithLocalStatic::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 83,
+                "column": 5
+              },
+              "end": {
+                "line": 83,
+                "column": 30
+              },
+              "start_byte": 1504,
+              "end_byte": 1529
+            },
+            "name_span": {
+              "start": {
+                "line": 83,
+                "column": 5
+              },
+              "end": {
+                "line": 83,
+                "column": 28
+              },
+              "start_byte": 1504,
+              "end_byte": 1527
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {
+            "primary_type": "int",
+            "views": [
+              {
+                "kind": "Declared",
+                "text": "int"
+              },
+              {
+                "kind": "Canonical",
+                "text": "int"
+              }
+            ]
+          },
+          "relations": {},
+          "semantics": {
+            "may_throw": "Unknown",
+            "may_panic": "Unknown",
+            "is_recursive": "No",
+            "mutates_self": "Unknown",
+            "mutates_arguments": "Unknown"
+          },
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Function",
+            "data": {
+              "return_info": {
+                "type_text": "int",
+                "never_returns": false
+              },
+              "is_variadic": false,
+              "arity": 0
+            }
+          }
+        },
+        {
+          "schema_version": {
+            "major": 2,
+            "minor": 0
+          },
+          "id": "b72f49ba2fbb82024b79b70542d2e538dd0332ee94f0f52b02809cd839f314a4",
+          "language": "Cpp",
+          "kind": "Variable",
+          "identity": {
+            "name": "localStaticCounter",
+            "display_name": "localStaticCounter",
+            "stable_key": "cpp::cpp.cpp::Variable::localStaticCounter::0"
+          },
+          "source": {
+            "file_path": "cpp.cpp",
+            "declaration_span": {
+              "start": {
+                "line": 84,
+                "column": 16
+              },
+              "end": {
+                "line": 84,
+                "column": 34
+              },
+              "start_byte": 1547,
+              "end_byte": 1565
+            },
+            "name_span": {
+              "start": {
+                "line": 84,
+                "column": 16
+              },
+              "end": {
+                "line": 84,
+                "column": 34
+              },
+              "start_byte": 1547,
+              "end_byte": 1565
+            }
+          },
+          "visibility": {
+            "level": "Unknown",
+            "is_exported": false,
+            "is_reexported": false,
+            "is_default_export": false,
+            "is_imported": false,
+            "is_external": false,
+            "is_generated": false,
+            "is_synthetic": false,
+            "is_deprecated": false,
+            "is_experimental": false
+          },
+          "docs": {},
+          "type_info": {},
+          "relations": {},
+          "semantics": {},
+          "provenance": {
+            "extractor": "tree-sitter",
+            "extractor_version": "0.1.0",
+            "parse_pass": "docs",
+            "created_at_epoch_ms": 1791069287648,
+            "updated_at_epoch_ms": 1791069288683
+          },
+          "kind_data": {
+            "kind_data_type": "Unknown"
+          }
+        }
+      ],
+      "imports": [],
+      "exports": [],
+      "diagnostics": []
+    }
+  ],
+  "adapter_metadata": []
+}

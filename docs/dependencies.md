@@ -7,6 +7,25 @@
 
 ## Recent Dependency Notes
 
+- `tree-hugger-cli` adds a direct local `renderable` edge for the render-tree
+  node types of biscuit-terminal's `InlineProse::to_render_nodes`, which its
+  Markdown and plain Prose exports read. biscuit-terminal already depends on
+  `renderable`, so this adds no new package. See
+  [tree-hugger dependencies](../tree-hugger/docs/dependencies.md).
+
+- `tree-hugger-cli` adds a local `sniff` edge with `default-features = false`
+  for path-only Git changed-file selection. It requests no `network`,
+  `remote`, or `metrics` feature and reuses sniff's pinned gix backend without
+  adding gix features. CLI fixtures add dev-only `git2` 0.20.3 (default
+  features off), with `libgit2-sys >=0.18.3, <0.18.6` matching sniff's MSVC
+  pin. See [tree-hugger dependencies](../tree-hugger/docs/dependencies.md)
+  and [sniff dependencies](../sniff/docs/dependencies.md).
+
+- `tree-hugger` adds a direct `unicode-normalization = "0.1"` edge for Rust
+  identifier NFC comparison. It was already present in the workspace graph;
+  this adds no new package. JS/TS identity decodes Unicode escapes without
+  normalization. See `tree-hugger/docs/dependencies.md`.
+
 - `renderable` adds `pulldown-cmark` 0.13 as a **dev-dependency** with
   `default-features = false` (2026-10-03). It was already in the graph through
   `darkmatter`, so the lockfile gains one edge and no package. Its tests parse
@@ -195,6 +214,15 @@
 - `tree-hugger` uses `test-toolkit` only as a development dependency, for the
   `test_layout` gate in its consolidated `l1` test binary. It adds no crate to
   the workspace: every crate it brings is already in `Cargo.lock`.
+- `tree-hugger-cli` depends on `rayon` (the same `1.10` requirement as
+  `tree-hugger`) to analyze scanned files on worker threads; output order is
+  still file order. The lockfile gains one edge and no package.
+- `tree-hugger-cli` uses `biscuit-hash` (`blake3` feature) only as a
+  development dependency, so its cache-upgrade test can compute the
+  persistent-cache key `hug` used before the extractor revision existed
+  without calling the code under test. `tree-hugger` already depends on
+  `biscuit-hash` with the same feature, so the lockfile gains one edge and no
+  package.
 - `biscuit-tui-cli` keeps its optional `terminal-tests` dependency on the
   workspace `biscuit-test-harness` and also declares it as a development
   dependency, so the `test_layout` gate in its feature-less `l1` test binary

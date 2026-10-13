@@ -152,6 +152,23 @@ pub struct RepoInfo {
     pub standalone_lockfiles: Vec<StandaloneLockfileObservation>,
 }
 
+/// Whether a package identity was declared or inferred from its directory.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PackageNameSource {
+    /// A nonblank name read from a supported manifest.
+    Manifest,
+    /// A relative-path label, including catalogs serialized before this field existed.
+    #[default]
+    PathFallback,
+}
+
+impl PackageNameSource {
+    fn is_path_fallback(&self) -> bool {
+        *self == Self::PathFallback
+    }
+}
+
 /// A package within a monorepo.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Package {
@@ -162,8 +179,11 @@ pub struct Package {
     /// Directory path between repo root and package root (e.g., "sniff" for "sniff/lib",
     /// "apps/browser" for "apps/browser/my_package", `""` for top-level packages)
     pub package_area: String,
-    /// Native package name from manifest (Cargo.toml `[package]`.name or package.json name)
+    /// Manifest name, or a relative-path label when no usable name was read.
     pub name: String,
+    /// Provenance of `name`; legacy serialized catalogs default to path fallback.
+    #[serde(default, skip_serializing_if = "PackageNameSource::is_path_fallback")]
+    pub name_source: PackageNameSource,
     /// The package ecosystem inferred from its manifests.
     #[serde(default)]
     pub ecosystem: PackageEcosystem,

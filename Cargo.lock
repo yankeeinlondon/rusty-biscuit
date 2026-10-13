@@ -14433,6 +14433,7 @@ dependencies = [
  "tree-sitter-swift",
  "tree-sitter-typescript",
  "tree-sitter-zsh",
+ "unicode-normalization",
 ]
 
 [[package]]
@@ -14441,17 +14442,23 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "biscuit-file",
+ "biscuit-hash",
  "biscuit-terminal",
  "biscuit-test-harness",
  "clap 4.6.1",
  "clap_complete",
+ "git2",
  "ignore",
+ "libgit2-sys",
  "owo-colors",
  "predicates",
+ "pulldown-cmark",
+ "rayon",
  "renderable",
  "serde",
  "serde_json",
  "serial_test",
+ "sniff",
  "tempfile",
  "test-toolkit",
  "tree-hugger",

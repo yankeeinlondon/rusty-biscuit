@@ -848,6 +848,16 @@ run_publishing_hook() {
         "0000000000000000000000000000000000000000" "$@"
 }
 
+# The validation note is a version-3 collection of observations. The assertions
+# in this file were written for one receipt, so they read it through this
+# projection: the cells of every observation no later observation retries, with
+# the first observation's base, scope identity, and host.
+RECEIPT_VIEW='{head, tree, environment, base: .observations[0].base, scope_identity: .observations[0].scope_identity, host: .observations[0].producer.host, cells: ([.observations[] | .retry_of] as $retried | [.observations[] | select(.observation_id as $id | $retried | index($id) | not) | .cell] | sort_by(.package, .gate))}'
+
+receipt_view() {
+    jq -c "$RECEIPT_VIEW"
+}
+
 test_a_published_receipt_names_retained_readable_reports() {
     local tmpdir="$1"
     make_publishing_repo "$tmpdir"
@@ -857,8 +867,13 @@ test_a_published_receipt_names_retained_readable_reports() {
 
     local repo="$tmpdir/repo" head receipt report_dir
     head="$(git -C "$repo" rev-parse HEAD)"
-    if ! receipt="$(git -C "$repo" notes --ref refs/notes/ci-local/macos-latest show "$head" 2>/dev/null)"; then
+    if ! receipt="$(git -C "$repo" notes --ref refs/notes/ci-local/macos-latest show "$head" 2>/dev/null | receipt_view)" || [ -z "$receipt" ]; then
         echo "  no receipt note was attached to $head" >&2
+        return 1
+    fi
+    if ! git -C "$repo" notes --ref refs/notes/ci-local/macos-latest show "$head" \
+        | jq -e '.schema_version == 3 and (.observations | length) == 1 and .observations[0].producer.kind == "hook"' >/dev/null; then
+        echo "  the note is not a one-observation version-3 collection from a hook producer" >&2
         return 1
     fi
     report_dir="$(printf '%s' "$receipt" | jq -r '.host.report_dir')"
@@ -945,7 +960,7 @@ run_failing_publishing_hook() {
 # commit is not there to `notes show` against, but the note is.
 remote_macos_receipt() {
     local bare="$1/origin.git" head="$2"
-    git -C "$bare" cat-file -p "refs/notes/ci-local/macos-latest:$head" 2>/dev/null
+    git -C "$bare" cat-file -p "refs/notes/ci-local/macos-latest:$head" 2>/dev/null | receipt_view
 }
 
 assert_remote_receipt_is_a_complete_failure() {
@@ -2294,7 +2309,7 @@ add_follow_up_commit() {
 
 # The macOS receipt attached to `head` in the fixture repository.
 local_macos_receipt() {
-    git -C "$1/repo" notes --ref refs/notes/ci-local/macos-latest show "$2" 2>/dev/null
+    git -C "$1/repo" notes --ref refs/notes/ci-local/macos-latest show "$2" 2>/dev/null | receipt_view
 }
 
 # The receipt on `head` records exactly `expected_cells` (a jq array literal
@@ -2491,7 +2506,7 @@ test_an_advanced_non_main_target_reuses_prior_cells_and_publishes_exact_receipts
     assert_receipt_records "advanced comparison" "$tmpdir" "$head" "$advanced" '["beta/L1"]' || return 1
     git -C "$tmpdir/origin.git" notes --ref refs/notes/ci-local/scope show "$head" >"$tmpdir/remote-scope.json"
     jq -e --arg base "$advanced" '.base == $base' "$tmpdir/remote-scope.json" >/dev/null || return 1
-    git -C "$tmpdir/origin.git" notes --ref refs/notes/ci-local/macos-latest show "$head" >"$tmpdir/remote-validation.json"
+    git -C "$tmpdir/origin.git" notes --ref refs/notes/ci-local/macos-latest show "$head" | receipt_view >"$tmpdir/remote-validation.json"
     jq -e --arg base "$advanced" '.base == $base and .cells[0].outcome == "pass"' "$tmpdir/remote-validation.json" >/dev/null || return 1
     local identity
     identity="$(scope_receipt_plan_identity "$tmpdir/remote-scope.json")"

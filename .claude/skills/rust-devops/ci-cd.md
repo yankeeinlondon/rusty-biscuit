@@ -38,11 +38,32 @@ local and hosted runs. Its package policy is deliberately narrow:
   record in `environments.json` names the GitHub events that schedule it; the
   planner takes `--event`, plans nothing (no cell, build, or preflight runner)
   for an environment the event does not schedule, and records it in the
-  plan's `deferred_environments`. Policy as of 2026-09-18: a pull request
-  proves `ubuntu-latest` and `macos-latest` (the latter normally from the
-  hook's local evidence); a push to `main` adds `windows-latest`; the nightly
-  `schedule` (`0 8 * * *`, its own concurrency group) plans the full
-  workspace for `ubuntu-latest`, `windows-latest`, and `wsl2-ubuntu`;
+  plan's `deferred_environments`. A pull request and a push to `main` prove
+  `ubuntu-latest` and `macos-latest` (the latter normally from the hook's
+  local evidence); the nightly `schedule` (`0 8 * * *`, its own concurrency
+  group) plans native Windows and WSL2, each over changes since the newest
+  successful ancestor nightly that proved *that* environment
+  (`reuse_validation.py nightly-anchors`; the plan's `coverage_anchors` records
+  the anchor and a coded reason per environment, and `affected_scope.py
+  --anchors` unions the per-anchor selections), with Linux joining only as
+  WSL2's demanded archive producer. A run proves an environment by a coverage
+  certification (`certify-nightly` job, artifact `ci-coverage-v1-<env>-<head>-<policy16>`,
+  published only after the final gate and every audit passed) or, for a
+  pre-certification run, by its own schedule policy plus all `coverage-audit`
+  jobs succeeding. No qualifying anchor means that environment runs the full
+  gated workspace; current policy also adds cells the anchor never covered,
+  or covered under a different coverage contract (backends, test features,
+  target kinds, companions), as `policy_delta` whatever the diff says. A
+  legacy anchor records no contracts, so it inherits no cell. A covered cell
+  is inherited only while published evidence agrees: the planner runs
+  `local_evidence.blocking_evidence` (the verifier's own resolution, with the
+  `--artifact-repo` probe) over the cells it would lend, and one whose newest
+  qualifying result is a failure, or an unordered pass/fail conflict, is
+  selected and listed in the anchor's `reopened_cells`. Never make the
+  overlay or the certification writer decide inheritance; the plan does. The
+  `scope` job therefore recovers earlier nightlies' observation artifacts
+  before planning. The scheduled run now verifies and
+  reuses notes evidence like a push does;
   `workflow_dispatch` plans everything. The `ci:all-os` label plans every
   environment for a pull request and takes effect on the next push; such a
   run never takes the hook's scope receipt, which is planned for the
@@ -50,10 +71,26 @@ local and hosted runs. Its package policy is deliberately narrow:
   silently ignored). A push
   whose pull request validation is reused plans with `--proven-event
   pull_request`: the proven environments land in `proven_environments`, so
-  only Windows runs, and an empty plan skips everything as before. The hook
+  the plan is empty and every downstream job skips. A push merged while its
+  pull request's run is still going waits for it (`reuse_validation.py check
+  --wait-minutes 90`) and falls back to the normal grid if it fails, is
+  canceled, or outlasts the wait. The hook
   plans `push` for `main` and `pull_request` for every other branch, and
   `scope-verify --event` refuses a receipt planned for another event
   (`scope-event-mismatch`). Without `--event`, every environment is planned.
+- `just ci-seed` (`scripts/ci/seed.py`) seeds the nightly: at a clean,
+  pinned `origin/main` checkout it resolves the full-workspace schedule plan,
+  asks `verify_cells` (all-zero base) what is proved, and runs
+  `cross-check.sh <pkg> --os windows|wsl` for each package still owing a
+  cell; each leg publishes its `rig` observation as it ends. Resume is
+  re-derivation from published proof; the state file only records attempts.
+  It seeds Level 1 only (`SEED_GATES`): a pending cell of another gate is
+  `unsupported`, never run via a Level 1 leg, and keeps the exit nonzero.
+  A nightly executes what no verified observation covers. See
+  `docs/topics/ci-cd.md`.
+  Risk-directed pre-push use of that infrastructure remains optional. Do not
+  describe a nightly as a fixed 24-hour diff or treat old WSL2-only nightlies
+  as Windows proof.
 - A package owning changed source receives lint, L1, and its declared higher
   tiers — and `check` when it declares `example` or `bench` targets or has
   unchanged direct reverse dependents. The L1 build already compiles the
@@ -100,6 +137,12 @@ local and hosted runs. Its package policy is deliberately narrow:
   *source* is scanned the same way only for a package that lists it in
   `[package.metadata.ci.tests] source-inputs` (test-toolkit's kache suites
   declare the two `repo-deps` kache scripts they execute).
+- A package not built yet declares `[package.metadata.ci.tests]
+  unimplemented = "<why>"`. While a scan of its own source finds no test it
+  gets no test cell (zero tests fail `completion-expected-empty`); the first
+  test schedules it again and the plan's `unimplemented.tests_found: true`
+  says the marker is stale. Never use it to silence a package that has
+  tests, and never infer it: only declaring packages are scanned.
 - CI's own inputs are the exception, because CI's own suites now have owners.
   `SUITE_REGISTRY` in `affected_scope.py` declares every suite's owner,
   canonical recipe, environment, and kind (`cargo` or `companion`);
@@ -390,14 +433,19 @@ deprecated alias of `scope-only`. A receipt's
 `$BISCUIT_CI_EVIDENCE_DIR/<head sha>/<environment>/`, root default
 `~/.rusty-biscuit/ci-evidence` — copied there before the receipt exists;
 `record-cells` refuses an empty or non-retaining directory rather than
-inventing one.
+inventing one. `just ci-evidence` (`scripts/ci/evidence_index.py`) lists the
+store by branch and subject without changing its SHA-keyed layout.
 
 Same-head retries must update that evidence cumulatively. The planner skips
 the already-passing cells, so replacing the note or clearing the retained
 report directory with only the retry's staged files silently discards exactly
-the evidence that caused those skips. Overlay the report directory, merge only
-a receipt with identical execution bindings and host provenance, and let the
-new run replace the cells it actually reran.
+the evidence that caused those skips. Overlay the report directory and publish
+through the collection (never `git notes add -f` a receipt over the note). A
+hook observation carries no `retry_of`, so a same-head retry that disagrees
+with the earlier result is unordered and the cell executes. Retry lineage is
+established at execution, never from the order observations are published: a
+rig leg names the predecessor `retry-predecessor` reported before it ran, and a
+hosted re-run attempt names the earlier attempt of the same run.
 
 The rollup consumes that evidence. `ci-rollup rollup --plan` reads the resolved
 execution plan, so a cell a receipt satisfied is reported as a completed
@@ -1018,15 +1066,6 @@ the tracked work that ends the gap. A plain `false` is an *ungoverned* absence.
 - Do not put a policy gap in `ci-baseline.toml`; gaps are planner-owned
   governance records, while the baseline contains only exact skip budgets.
 
-A package with no tests declares `[package.metadata.ci.tests] tiers = []`
-plus a non-empty `no-tests-reason`; never leave it on the default L1 tier,
-whose empty listing fails `completion-expected-empty`. It gets no test cell
-and no archive, only lint and a `check` cell on every native environment the
-event schedules, with `--lib`/`--bins`/`--tests` selectors added to
-`check_args`. The plan carries the reason as `no_tests_reason`; on the
-nightly WSL2-only schedule such a package has no cells and an empty gate list
-without an `exclusion`.
-
 A `gates = false` package owns no plan cells at all. Its governed
 `NOT SCHEDULED` entries come from the resolved-package policy document, which is
 the only place its owner, class, and expiry live — that document cannot be
@@ -1109,20 +1148,60 @@ suppressing the matrix entry while leaving the policy expecting a CI result was
 the PR #76 seven-cell regression.
 
 `local_evidence.py verify --cells` produces that set by reading **every**
-note on every environment's notes ref between the merge base and the outgoing
-head, so a macOS receipt from this push and a prior WSL receipt combine in one
-run. Within one environment each cell is resolved by the **newest note that
-qualifies for it**, so a later run that covered fewer packages does not hide an
-older, still-equivalent passing receipt for the rest. Complete failures are
-diagnostic records and never enter the accepted set. Each refusal describes
-one candidate note, carries a code from `schema.REJECTIONS`, and is published
-with the plan.
+note on every environment's notes ref from the coverage boundary (the merge
+base, included) to the outgoing head — or, for an all-zero base, the annotated
+ancestors of the head, bounded at 500 — so a macOS receipt from this push and a
+prior WSL receipt combine in one run. A note is a version-3 **observation
+collection**; version-1 and -2 notes are read as one observation per cell. All
+candidates are gathered first and resolved per `{package, environment, gate}`
+afterwards: among those that qualify (exact tree, or an unchanged gate-input
+identity), a `retry_of` link or a descendant commit supersedes, and results
+nothing orders that disagree are `conflicting-evidence` and execute. So a later
+run that covered fewer packages does not hide an older, still-equivalent passing
+observation, a newer failure is never hidden by an older pass, and a later
+passing retry restores reuse. A complete failure never enters the accepted set.
+A passing observation also needs its reports (`observation-report-unavailable`).
+Each refusal describes one candidate, carries a code from `schema.REJECTIONS`,
+and is published with the plan.
 
-`scripts/cross-check.sh` publishes a `wsl2-ubuntu` receipt only when its WSL leg
-ran the outgoing head's exact tree on a clean remote worktree with no test
-filter; every other run prints why it published nothing. It ships the
+Publication goes through `scripts/ci/observation_notes.py`: local write first,
+then fetch, union, and a non-force push retried up to five times, so concurrent
+publishers keep each other's observations and a remote failure keeps the proof
+local. `rig`, `hosted`, and `seed` producer kinds need a `proof` object (a
+failing cell may omit it); the hook publishes `hook` observations,
+`cross-check.sh` publishes `rig` ones for its WSL2 and native Windows legs, and the
+scheduled hosted producers publish `hosted` ones.
+
+**Hosted observations** (`scripts/ci/hosted_observations.py`, scheduled runs
+only). Each hosted test producer records its finished cell after its completion
+step (`emit`, `continue-on-error`, `!cancelled()`) and uploads
+`observation-<package>-<gate>-<environment>`; passes need a succeeded gate plus a
+completion record bound to the cell, head, run, and attempt, honest failures are
+recorded without one, and a cancelled, skipped, or report-less cell records
+nothing. `publish-observations` (`ci.yml`, `schedule` only, `always()`,
+`contents: write` + `actions: read`, not in `ci-gate`) validates and publishes
+them through `observation_notes.py`; a refused push fails that step red and
+prints that the proof is local. A run whose publisher never ran is recovered by
+`publish --recent` (the newest `RECOVERY_RUNS` completed scheduled `ci.yml`
+runs on `main`, any conclusion): the nightly `scope` job runs it with
+`--no-push` before verifying, needing only its `actions: read`, and
+`publish-observations` runs it with a push. Discovery passes `hosted_observations.gh_probe`
+as `verify_cells`' `report_probe`, which downloads the producer run's artifact
+and credits the cell only when the cited bytes and proof digests match
+(`producer.host.label` is the environment it derives the artifact name from).
+Nothing outside `publish-observations` may hold `contents: write`;
+`accepted-gaps` remains the only `checks: write` job. Unverified on a hosted
+run: that rulesets let `GITHUB_TOKEN` push `refs/notes/*`, cancellation
+behavior of the publisher, re-run attempts that repeat an artifact name.
+
+`scripts/cross-check.sh` publishes a `rig` observation per finished leg, under that
+leg's environment (`wsl2-ubuntu`, `windows-latest`), only when the leg ran the
+outgoing head's exact tree on a clean remote worktree with no test filter in
+archive mode; every other run prints why it published nothing. It ships the
 developer's local tree, uncommitted work included, so most of its runs test a
-tree no head names.
+tree no head names. A rig observation's proof documents sit beside its report in
+a per-run directory and are rechecked byte for byte by a reader on the same
+host.
 
 **Record the restriction, do not remember it.** The store at
 `<home>/.rusty-biscuit/ci-constraints/<repository>/` (beside the evidence

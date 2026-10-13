@@ -116,10 +116,10 @@ def refuse(code: str, message: str, infrastructure: bool = False) -> Refused:
 
 def read_json(path: Path, code: str, what: str) -> Any:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return schema.loads_strict(path.read_text(encoding="utf-8"))
     except FileNotFoundError as error:
         raise refuse(code, f"{what} is absent at {path}", infrastructure=True) from error
-    except (OSError, json.JSONDecodeError) as error:
+    except (OSError, ValueError) as error:
         raise refuse(
             code, f"{what} at {path} could not be read: {error}", infrastructure=True
         ) from error
@@ -456,7 +456,7 @@ def manifest_problems(
         return ["completion-manifest-schema: the expected manifest must be an object"]
 
     version = manifest.get("schema_version")
-    if version != schema.EXPECTED_MANIFEST_SCHEMA_VERSION:
+    if not schema.is_version(version, schema.EXPECTED_MANIFEST_SCHEMA_VERSION):
         return [
             f"completion-manifest-schema: the expected manifest is schema_version "
             f"{version!r}; this tool reads "
@@ -496,7 +496,8 @@ def manifest_problems(
             f"{manifest['tier']!r}, the cell's gate is {cell['gate']!r}; an L1 report "
             f"is never compared against another tier in a shared archive"
         )
-    if not str(manifest["nextest_version"]).strip():
+    if not isinstance(manifest["nextest_version"], str) or not manifest["nextest_version"].strip():
+        # `str(None)` is "None", which is non-empty: only a real string is a version.
         problems.append(
             "completion-manifest-provenance: the expected manifest records no "
             "nextest_version, so a cross-host listing mismatch could not be seen"
@@ -599,6 +600,17 @@ def declared_problems(manifest: dict[str, Any], cell: dict[str, Any]) -> list[st
     introduced, not a value to prefer one side of.
     """
     problems = []
+    for name in ("backends", "companion_suites"):
+        if name in manifest and (
+            not isinstance(manifest[name], list)
+            or not all(isinstance(item, str) for item in manifest[name])
+        ):
+            problems.append(
+                f"completion-manifest-selection: the expected manifest's {name} "
+                "must be a list of strings"
+            )
+    if problems:
+        return problems
     if "backends" in manifest:
         declared = sorted(set(manifest["backends"]))
         planned = sorted(set(required_backends(cell)))
@@ -692,8 +704,8 @@ def staged_entries(stage: Path, cell: dict[str, Any]) -> list[dict[str, Any]]:
         if not line:
             continue
         try:
-            record = json.loads(line)
-        except json.JSONDecodeError as error:
+            record = schema.loads_strict(line)
+        except ValueError as error:
             raise refuse(
                 "completion-report-malformed",
                 f"{manifest} line {number} is malformed: {error}",
@@ -877,11 +889,9 @@ def comparison_problems(
 
     if not expected and not cell.get("companions"):
         problems.append(
-            "completion-expected-empty: the listing expected no test at all; an "
-            "empty expected set with a green, empty report is a drifted filter "
-            "wearing evidence. A package that genuinely has no tests declares "
-            "`tiers = []` with a `no-tests-reason` in [package.metadata.ci.tests], "
-            "and the planner gives it compile-only check cells instead"
+            "completion-expected-empty: the listing expected no test at all and the "
+            "plan records no reason for it; an empty expected set with a green, "
+            "empty report is a drifted filter wearing evidence"
         )
 
     for identity in sorted(expected - set(observed)):

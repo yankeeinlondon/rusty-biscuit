@@ -123,6 +123,10 @@ test *args="": _ensure-md
         just _test_local_all "${packages}" {{ args }}
     fi
 
+# List every test Nextest marks SLOW (see the shared `_slow_tests`).
+slow-tests *args="":
+    @just _slow_tests {{ args }}
+
 # Run the CLI L1 suite with its daemon-backed tests enabled. This is
 # intentionally opt-in: the feature adds rendezvous-daemon and bundled DuckDB
 # to the graph.

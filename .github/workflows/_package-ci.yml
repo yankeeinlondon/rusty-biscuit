@@ -1052,6 +1052,52 @@ jobs:
         with:
           name: ${{ steps.cell.outputs.completion_artifact }}
           path: ${{ runner.temp }}/completion
+      # THE CELL'S DURABLE OBSERVATION, scheduled runs only.
+      #
+      # The JUnit and completion artifacts above die with the run's verdict:
+      # nothing outside the run can find them, so a nightly that failed
+      # elsewhere used to discard every cell it had proved. This records the
+      # finished cell as an observation (`hosted_observations.py emit`) and
+      # uploads it before the area or the workflow knows how it ended; the
+      # trusted `publish-observations` job in `ci.yml` turns the run's
+      # observations into notes. `github.event_name` inside a called workflow
+      # is the CALLER's event, so this is `schedule` exactly when `ci.yml` was
+      # started by the nightly; a pull request or push never reaches it.
+      #
+      # `!cancelled()` is `always()` minus cancellation, which is the point: a
+      # failed gate still records its honest failure, while a cancelled job
+      # records nothing. A cell cancelled before this step publishes nothing; a
+      # cell cancelled after the upload below keeps its artifact. The step is
+      # `continue-on-error` because the recorder must never change a cell's
+      # verdict; it refuses (and annotates why) rather than invent proof for a
+      # cell with no usable report, an unfinished gate, or no completion record.
+      - name: Record this cell's observation
+        if: ${{ !cancelled() && github.event_name == 'schedule' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          CELL: ${{ steps.cell.outputs.cell }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/hosted_observations.py emit \
+            --plan ci-artifacts/ci-resolved-plan/resolved-plan.json \
+            --cell "$CELL" \
+            --stage target/nextest/ci-reports \
+            --completion "$RUNNER_TEMP/completion/completion.json" \
+            --gate-outcome "$GATE_OUTCOME" \
+            --run-id "$GITHUB_RUN_ID" \
+            --attempt "$GITHUB_RUN_ATTEMPT" \
+            --workflow "$GITHUB_WORKFLOW_REF" \
+            --out "$RUNNER_TEMP/observation/observation.json"
+      - name: Upload this cell's observation
+        if: ${{ !cancelled() && github.event_name == 'schedule' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: observation-${{ matrix.package }}-${{ matrix.gate }}-${{ matrix.environment }}
+          path: ${{ runner.temp }}/observation
+          retention-days: 90
+          if-no-files-found: ignore
 
   # This area's lint rows. `lint` runs on exactly one environment per package,
   # so the row set is one row per package — but it is still a row set, because

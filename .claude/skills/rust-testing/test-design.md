@@ -51,6 +51,16 @@ test is not required for every implementation edit.
   concurrency, platform, and cache conditions. Separate build time from test
   execution. Do not hide cost by changing tiers, dropping assertions, adding
   retries, or raising runner limits without diagnosing the cause.
+- **Growing corpora.** A test that loops a shared row corpus that every new
+  matrix row extends gets slower with each row until it passes the per-test
+  timeout under ordinary parallel load. Partition it into statically
+  registered groups, one `#[test]` per group stamped by a macro, and keep a
+  test proving every row lands in exactly one group and no group exceeds a
+  size bound; when the bound trips, add a group. Each process repeats fixed
+  setup (grammar or query compilation), so size groups against that floor.
+  Assert "some row exercised X" guards on one bounded group that contains the
+  witnesses. Examples: tree-hugger's `declaration_fact_group_tests!` (row
+  groups) and `shape_tests!` (one test per labeled shape).
 
 When a test exposes defective shared setup, inspect its siblings even if they
 have never crossed a slow threshold. Repair the shared fixture within the

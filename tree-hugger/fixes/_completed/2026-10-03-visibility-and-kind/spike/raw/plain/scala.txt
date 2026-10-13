@@ -1,0 +1,64 @@
+  - function abstractTraitMethod() -> Int scala.scala:28:3
+  - class CasePoint { xCoordinate: Int, yCoordinate: Int } scala.scala:35:1
+  - function classQualifiedMethod() -> Unit [in PlainWidget] scala.scala:21:3
+  - variable companionStaticField scala.scala:24:7
+  - function companionStaticMethod() -> PlainWidget scala.scala:25:3
+  - function concreteTraitMethod() -> Int scala.scala:29:3
+  - parameter constructorField [in PlainWidget] scala.scala:10:23
+  - variable localValue scala.scala:5:7
+  - function methodInPrivateClass() -> Unit [in PrivateClass] scala.scala:42:3
+  - function objectMethod() -> Unit scala.scala:32:3
+  - variable packageQualifiedField scala.scala:14:24
+  - function packageQualifiedMethod() -> Unit [in PlainWidget] scala.scala:20:3
+  - parameter parameterValue scala.scala:4:22
+  - enum PlainColor scala.scala:38:1
+  - trait PlainTrait { abstractTraitMethod: def abstractTraitMethod(): Int, concreteTraitMethod: def concreteTraitMethod(): Int = 7 } scala.scala:27:1
+  - class PlainWidget { constructorField: Int } scala.scala:10:1
+  - module PlainWidget scala.scala:23:1
+  - class PrivateClass scala.scala:41:1
+  - variable privateField scala.scala:12:15
+  - function privateMethod() -> Unit [in PlainWidget] scala.scala:18:3
+  - function privateObjectMethod() -> Unit scala.scala:33:3
+  - function privateTopLevelFunction() -> Unit scala.scala:8:1
+  - variable protectedField scala.scala:13:17
+  - function protectedMethod() -> Unit [in PlainWidget] scala.scala:19:3
+  - variable publicField scala.scala:11:7
+  - function publicMethod() -> Int [in PlainWidget] scala.scala:17:3
+  - module StandaloneObject scala.scala:31:1
+  - function sum() -> Int [in CasePoint] scala.scala:36:3
+  - variable thisQualifiedField scala.scala:15:21
+  - function topLevelFunction(parameterValue: Int) -> Int scala.scala:4:1
+  - parameter xCoordinate [in CasePoint] scala.scala:35:22
+  - parameter yCoordinate [in CasePoint] scala.scala:35:40
+=== classes
+scala.scala (Scala)
+  class PlainWidget [10:1]
+    Instance Fields (1)
+      - constructorField: Int
+  class CasePoint [35:1]
+    Instance Fields (2)
+      - xCoordinate: Int
+      - yCoordinate: Int
+  class PrivateClass [41:1]
+
+=== functions
+  - function abstractTraitMethod() -> Int scala.scala:28:3
+  - function classQualifiedMethod() -> Unit [in PlainWidget] scala.scala:21:3
+  - function companionStaticMethod() -> PlainWidget scala.scala:25:3
+  - function concreteTraitMethod() -> Int scala.scala:29:3
+  - function methodInPrivateClass() -> Unit [in PrivateClass] scala.scala:42:3
+  - function objectMethod() -> Unit scala.scala:32:3
+  - function packageQualifiedMethod() -> Unit [in PlainWidget] scala.scala:20:3
+  - function privateMethod() -> Unit [in PlainWidget] scala.scala:18:3
+  - function privateObjectMethod() -> Unit scala.scala:33:3
+  - function privateTopLevelFunction() -> Unit scala.scala:8:1
+  - function protectedMethod() -> Unit [in PlainWidget] scala.scala:19:3
+  - function publicMethod() -> Int [in PlainWidget] scala.scala:17:3
+  - function sum() -> Int [in CasePoint] scala.scala:36:3
+  - function topLevelFunction(parameterValue: Int) -> Int scala.scala:4:1
+=== types
+  - class CasePoint { xCoordinate: Int, yCoordinate: Int } scala.scala:35:1
+  - enum PlainColor scala.scala:38:1
+  - trait PlainTrait { abstractTraitMethod: def abstractTraitMethod(): Int, concreteTraitMethod: def concreteTraitMethod(): Int = 7 } scala.scala:27:1
+  - class PlainWidget { constructorField: Int } scala.scala:10:1
+  - class PrivateClass scala.scala:41:1

@@ -107,6 +107,13 @@ exit marker timed out. Consequences:
 
 Assert *styling* on `raw`; assert *visible text* on `plain`.
 
+A shared pane's capture still holds earlier commands' output (a `clear` is
+not proof), and tmux `capture-pane -e` re-emits only the attributes that
+changed, carrying them across rows: a bold row under a bold heading may show
+just `\e[39m`. Scope assertions to the command under test (begin/end markers)
+and read a cell's style by replaying SGR from the capture's start; worked
+example: `tree-hugger/cli/tests/support/terminal_report.rs`.
+
 ## `available()` and skip-clean
 
 Every L2/L3 test **must** check `Harness::available()` first and early-return

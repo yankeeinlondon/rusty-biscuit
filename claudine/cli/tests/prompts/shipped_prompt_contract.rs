@@ -581,9 +581,8 @@ fn shipped_review_spec_inline_fires_failure_cleanly() {
     assert_clean_lifecycle(&rendered);
 }
 
-/// End-to-end over the shipped `commit.md` (spec acceptance 3): its repaired
-/// `resides_in` whole value composes into the delivered prompt with no raw
-/// span, and the `success` lifecycle fires cleanly after the provider exits.
+/// CLI overrides must reach the provider even when the
+/// shipped commit prompt declares a different agent and model.
 #[cfg(unix)]
 #[test]
 fn shipped_commit_prompt_composes_resides_in_and_fires_success_cleanly() {
@@ -607,17 +606,19 @@ fn shipped_commit_prompt_composes_resides_in_and_fires_success_cleanly() {
         .unwrap();
     assert!(staged.success(), "the fixture needs one staged file");
 
-    let delivered = fixture.cwd().join("delivered.txt");
-    write_executable(
-        &fixture.bin_dir().join("claude"),
-        "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$CLAUDINE_PROMPT_CAPTURE\"\n/bin/cat >> \"$CLAUDINE_PROMPT_CAPTURE\"\nexit 0\n",
-    );
+    std::fs::copy(
+        biscuit_test_harness::bin_exe!("claudine-fake-codex"),
+        fixture.bin_dir().join("codex"),
+    ).unwrap();
+    write_executable(&fixture.bin_dir().join("claude"), "#!/bin/sh\nexit 99\n");
+    let launches = fixture.workspace_path().join("fake-codex");
     let output = fixture
         .command()
-        .env("CLAUDINE_PROMPT_CAPTURE", &delivered)
+        .env("FAKE_CODEX_DIR", &launches)
+        .env("FAKE_CODEX_PLAN", "ok")
         .arg("compose")
         .arg(prompts.join("commit.md"))
-        .arg("-y")
+        .args(["-y", "--codex", "--model", "gpt-6-luna"])
         .output()
         .unwrap();
     let rendered = strip_ansi(&format!(
@@ -628,8 +629,16 @@ fn shipped_commit_prompt_composes_resides_in_and_fires_success_cleanly() {
     assert!(output.status.success(), "the commit prompt must succeed:\n{rendered}");
     assert!(!fixture.audio_spool().exists(), "no audio may be published");
 
-    let delivered = std::fs::read_to_string(&delivered)
-        .unwrap_or_else(|_| panic!("the provider must have started:\n{rendered}"));
+    let argv: Vec<String> = serde_json::from_str(
+        &std::fs::read_to_string(launches.join("argv-1.json")).unwrap(),
+    ).unwrap();
+    assert_eq!(&argv[..3], ["app-server", "--listen", "stdio://"]);
+    let messages: Vec<Value> = std::fs::read_to_string(launches.join("messages-1.jsonl"))
+        .unwrap().lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+    let thread = messages.iter().find(|message| message["method"] == "thread/start").unwrap();
+    assert_eq!(thread["params"]["model"], "gpt-6-luna");
+    let turn = messages.iter().find(|message| message["method"] == "turn/start").unwrap();
+    let delivered = turn["params"]["input"][0]["text"].as_str().unwrap();
     let flowed = delivered.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
         flowed.contains("There are 1 staged files to commit which are"),

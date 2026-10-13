@@ -121,6 +121,63 @@ CONTRACT_PATH = ROOT / ".github" / "ci" / "schemas" / "contract.json"
 RESOLVED_PLAN_SCHEMA_VERSION = 7
 RECEIPT_SCHEMA_VERSION = 2
 
+#: The observation collection a note under `refs/notes/ci-local/<environment>`
+#: carries: one commit's independently produced, immutable observations. The
+#: per-cell contract inside an observation is still the version-2 receipt cell,
+#: so `RECEIPT_SCHEMA_VERSION` does not move. Version-1 and -2 notes stay
+#: readable as single-observation collections and are never upgraded in place.
+COLLECTION_SCHEMA_VERSION = 3
+
+#: A collection larger than this is refused at publication; the producer keeps
+#: its proof locally and the cells it covers stay scheduled for everyone else.
+COLLECTION_SIZE_LIMIT = 256 * 1024
+
+#: What a scheduled nightly publishes, per environment, once its final gate
+#: passed and every required audit ran: the proof that the environment's
+#: planned coverage was accounted for at that head. A later nightly may use that
+#: run as the comparison anchor for the same environment and no other. The
+#: resolved plan stays at its version: `coverage_anchors` is optional and
+#: absent on every event but a scheduled one, like `event` and
+#: `deferred_environments`.
+CERTIFICATION_SCHEMA_VERSION = 1
+
+#: The coverage policy the certification contract itself is written against.
+#: A certification below this version earns no anchor credit; raise it when the
+#: meaning of "certified" tightens.
+COVERAGE_POLICY_VERSION = 1
+
+ANCHOR_MODES = ("incremental", "full")
+ANCHOR_SOURCE_KINDS = ("nightly-certified", "nightly-legacy", "none")
+
+#: Why an environment was anchored where it was. Every full-scope fallback has
+#: one of these so a reader never has to infer a bootstrap from silence:
+#: `bootstrap-no-run` (no successful scheduled run exists), `api-failure`
+#: (the run list or a lookup could not be read), `search-exhausted` (the
+#: bounded search ended with candidates unexamined), `policy-uncertified`
+#: (candidate runs exist but none carries a valid certification for this
+#: environment), `no-qualifying-ancestor` (qualifying runs exist, none is an
+#: ancestor of the head). The two incremental reasons name the evidence kind.
+ANCHOR_REASONS = (
+    "bootstrap-no-run",
+    "api-failure",
+    "search-exhausted",
+    "policy-uncertified",
+    "no-qualifying-ancestor",
+    "certified-ancestor",
+    "legacy-wsl2-ancestor",
+)
+
+#: The `(mode, source.kind)` each reason implies.
+ANCHOR_REASON_SHAPES: dict[str, tuple[str, str]] = {
+    "bootstrap-no-run": ("full", "none"),
+    "api-failure": ("full", "none"),
+    "search-exhausted": ("full", "none"),
+    "policy-uncertified": ("full", "none"),
+    "no-qualifying-ancestor": ("full", "none"),
+    "certified-ancestor": ("incremental", "nightly-certified"),
+    "legacy-wsl2-ancestor": ("incremental", "nightly-legacy"),
+}
+
 #: The scope receipt: what the planner selected for one exact `{base, head,
 #: tree}`, published by the hook under `refs/notes/ci-local/scope` and taken as
 #: the plan by CI on an exact match (`fixes/2026-09-10-local-affected-scope`,
@@ -240,6 +297,14 @@ REJECTIONS = (
     "v1-requires-exact-tree",
     "v1-not-equivalence-eligible",
     "v1-is-pass-only",
+    #: Observation collections (version 3). A retry link that dangles, cycles,
+    #: names itself, or crosses cells; an id that is not the identity of its
+    #: content; a report reference that cannot be shown to exist or whose bytes
+    #: differ; a producer kind whose required proof is missing.
+    "observation-link-invalid",
+    "observation-id-mismatch",
+    "observation-report-unavailable",
+    "observation-proof-missing",
     #: The plan's snapshot of the exact-skip policy (ruling R8). All three are
     #: planner-time errors: the snapshot travels in the artifact a carried scope
     #: receipt reuses, so an approval that cannot be bound to a cell, one whose
@@ -457,7 +522,91 @@ RESOLVED_PLAN_FIELDS: dict[str, bool] = {
     #: scheduled archive-only guest runs what they compile. Optional and absent
     #: rather than empty (fixes/2026-09-19-nightly-scope).
     "producing_environments": False,
+    #: One entry per scheduled environment on a nightly: where that
+    #: environment's comparison anchor is and why (`COVERAGE_ANCHOR_FIELDS`).
+    #: Optional and absent on every other event, so no other plan changes.
+    "coverage_anchors": False,
 }
+
+COVERAGE_ANCHOR_FIELDS: dict[str, bool] = {
+    "environment": True,
+    "mode": True,
+    #: A full Git object ID when `mode` is `incremental`, null when `full`.
+    "anchor": True,
+    "reason": True,
+    "source": True,
+    #: `{package, gate}` cells the current policy requires that the anchor's
+    #: certification does not cover under the same coverage contract (expired
+    #: gaps, newly declared gates, new backends or test features inside a
+    #: gate, every cell of a legacy anchor), selected whatever the diff says.
+    "policy_delta": True,
+    #: `{package, gate}` cells the anchor already covers and this plan does not
+    #: reselect. They are what keeps coverage transitive: a nightly that
+    #: executes nothing still certifies the cells its anchor proved.
+    "inherited_cells": True,
+    #: `{package, gate}` cells the anchor covers that this plan selects anyway
+    #: because published evidence for them (a later qualifying failure no
+    #: passing retry supersedes, or results nothing orders) requires
+    #: execution. Each is a plan cell; none is also inherited.
+    "reopened_cells": True,
+    #: `{package, gate, contract}` for every cell current policy requires of
+    #: this environment, `contract` being the planner's `coverage_contract`.
+    #: The certification copies the contract of each cell it covers from here,
+    #: so a later nightly can tell a cell whose contract changed (a new
+    #: backend or test feature) from one its anchor proved.
+    "required_cells": True,
+}
+
+#: A certification's `anchors_used` entry: the plan's anchor without its
+#: `required_cells`, which the certification already carries as contracts on
+#: `covered_cells`.
+CERTIFICATION_ANCHOR_FIELDS: dict[str, bool] = {
+    key: value for key, value in COVERAGE_ANCHOR_FIELDS.items() if key != "required_cells"
+}
+
+COVERAGE_SOURCE_FIELDS: dict[str, bool] = {"kind": True, "run_id": True, "head": True}
+
+CERTIFICATION_FIELDS: dict[str, bool] = {
+    "schema_version": True,
+    "run_id": True,
+    "attempt": True,
+    "workflow_path": True,
+    "event": True,
+    "head": True,
+    "tree": True,
+    "environment": True,
+    "coverage_policy_version": True,
+    "environments_digest": True,
+    "plan_identity": True,
+    #: Why each environment of the run was anchored where it was, so a
+    #: certification states which history it was built on.
+    "anchors_used": True,
+    "certified": True,
+    "cells": True,
+    "covered_cells": True,
+    "audits": True,
+}
+
+#: The document `reuse_validation.py nightly-anchors` hands the planner: the
+#: anchor resolved for each environment the nightly schedules, plus the cells
+#: each certified anchor covers. The plan's own `coverage_anchors` is derived
+#: from it, so this is a planning input, not a stored contract.
+ANCHOR_INPUT_SCHEMA_VERSION = 1
+ANCHOR_INPUT_FIELDS: dict[str, bool] = {"schema_version": True, "anchors": True}
+ANCHOR_INPUT_ENTRY_FIELDS: dict[str, bool] = {
+    "environment": True,
+    "mode": True,
+    "anchor": True,
+    "reason": True,
+    "source": True,
+    #: Null when the anchor proves no list of cells (a full-scope fallback or a
+    #: legacy run); a list, possibly empty, of `{package, gate, contract}` for a
+    #: certified anchor.
+    "covered_cells": True,
+}
+
+CERTIFICATION_CELL_COUNTS = ("executing", "reused", "accepted_gap", "inherited")
+CERTIFICATION_AUDIT_FIELDS: dict[str, bool] = {"required": True, "passed": True}
 
 #: `paths` and `counts` are present exactly when `diff_available` is true, and
 #: `reason` exactly when it is false. A manual full-scope run consulted no diff;
@@ -562,11 +711,6 @@ PACKAGE_FIELDS: dict[str, bool] = {
     #: reason, expiry. Present exactly when `gates` is empty, because the
     #: rollup's policy document is projected from the plan and reads it there.
     "exclusion": False,
-    #: Why a package that declares `tiers = []` has no tests. Present exactly
-    #: when that declaration was made: its `tiers` are empty, and its cells are
-    #: compile-only checks, which an event scheduling no native environment
-    #: does not create, so its gate list may be empty without an exclusion.
-    "no_tests_reason": False,
     #: Repository-relative manifest directories of the package's build closure,
     #: dev-dependencies included. The gate-input identity of spec section 3.3
     #: is computed over these plus the gate's global inputs. Optional: a plan
@@ -578,6 +722,10 @@ PACKAGE_FIELDS: dict[str, bool] = {
     #: Present exactly when at least one is attributed; never names a package
     #: the plan also selects.
     "dependent_seam": False,
+    #: A package declaring `unimplemented`: `{reason, tests_found}`. While
+    #: `tests_found` is false the package has no test tier and no test cell;
+    #: once true it is scheduled normally and the marker is stale.
+    "unimplemented": False,
 }
 
 CELL_FIELDS: dict[str, bool] = {
@@ -740,6 +888,94 @@ RECEIPT_BUILD_FIELDS: dict[str, bool] = {"key": True, "digest": True}
 
 HOST_FIELDS: dict[str, bool] = {"os": True, "kernel": True, "report_dir": True}
 
+COLLECTION_FIELDS: dict[str, bool] = {
+    "schema_version": True,
+    "environment": True,
+    "head": True,
+    "tree": True,
+    #: Sorted by `observation_id`; may be a real empty list (zero proof).
+    "observations": True,
+}
+
+#: One completed or attempted run of one cell. Immutable: its id is the
+#: identity of every other field, so republishing the same observation is a
+#: no-op and the same id with different content is corruption.
+OBSERVATION_FIELDS: dict[str, bool] = {
+    "observation_id": True,
+    #: The `observation_id` this one retries. Absent means "declares no retry";
+    #: null is malformed. Supersession is never inferred from time.
+    "retry_of": False,
+    "producer": True,
+    "base": True,
+    "scope_identity": True,
+    #: Whether the run as a whole finished; the cell carries its own.
+    "completion": True,
+    #: A version-2 receipt cell, unchanged.
+    "cell": True,
+    #: Absent exactly for a `hook` producer, which proves through the junit
+    #: counts in the cell; required for every other producer kind.
+    "proof": False,
+    #: Immutable references to the reports the cell names.
+    "reports": True,
+    #: The package's isolated feature arguments the run used, verbatim, as the
+    #: plan's build identity spells them. Absent means no feature arguments.
+    "features": False,
+}
+
+OBSERVATION_PRODUCER_KINDS = ("hook", "rig", "hosted", "seed")
+
+#: The host a producer ran on. `report_dir` is the durable directory holding
+#: `host-dir` reports; it is optional only because a hosted producer has none.
+OBSERVATION_HOST_FIELDS: dict[str, bool] = {
+    "os": True,
+    "kernel": True,
+    "label": False,
+    "report_dir": False,
+}
+
+OBSERVATION_PRODUCER_FIELDS: dict[str, bool] = {
+    "kind": True,
+    "host": True,
+    "workflow": False,
+    "run_id": False,
+    "attempt": False,
+    "seed_id": False,
+}
+
+#: What a `rig`, `hosted`, or `seed` producer cites to show the cell ran the work
+#: the plan scheduled. `completion_record_digest` is required of a passing cell
+#: only: `completion.py` refuses a run with a failing test, so a completed
+#: failure has no record to cite, and the failure still blocks reuse without
+#: one. A failing observation may also omit `proof` altogether, because a
+#: failure needs no proof that everything else ran.
+OBSERVATION_PROOF_FIELDS: dict[str, bool] = {
+    "nextest_version": True,
+    "target": True,
+    "expected_listing_digest": True,
+    "completion_record_digest": False,
+}
+
+#: Where a `rig` or `seed` producer retains the two documents its proof cites,
+#: inside `producer.host.report_dir`. The proof carries only their digests, so
+#: a reader on the producing host can recheck them byte for byte and a reader
+#: elsewhere accepts them with provenance, as it does a `host-dir` report. A
+#: directory therefore holds one run of one cell: a second run of the same
+#: cell would replace the documents the first run's digests name.
+PROOF_EXPECTED_FILE = "{package}-{gate}.expected.json"
+PROOF_COMPLETION_FILE = "{package}-{gate}.completion.json"
+
+OBSERVATION_REPORT_FIELDS: dict[str, bool] = {
+    "path": True,
+    "sha256": True,
+    "bytes": True,
+    "store": True,
+}
+
+#: Where a report's bytes live. `host-dir` is `producer.host.report_dir`;
+#: `artifact` is a retained workflow artifact. An `artifact` reference needs a
+#: probe to be verified, and without one it is treated as unavailable.
+OBSERVATION_REPORT_STORES = ("host-dir", "artifact")
+
 SCOPE_RECEIPT_FIELDS: dict[str, bool] = {
     "schema_version": True,
     "base": True,
@@ -888,6 +1124,18 @@ def contract() -> dict[str, Any]:
             "row": list(ROW_FIELDS),
             "row_sets": list(ROW_SET_NAMES),
             "archive_guard": ARCHIVE_GUARD_FIELDS,
+            "coverage_anchor": COVERAGE_ANCHOR_FIELDS,
+            "coverage_source": COVERAGE_SOURCE_FIELDS,
+        },
+        "certification": {
+            "schema_version": CERTIFICATION_SCHEMA_VERSION,
+            "coverage_policy_version": COVERAGE_POLICY_VERSION,
+            "document": CERTIFICATION_FIELDS,
+            "audits": CERTIFICATION_AUDIT_FIELDS,
+            "cell_counts": list(CERTIFICATION_CELL_COUNTS),
+            "anchor_modes": list(ANCHOR_MODES),
+            "anchor_reasons": list(ANCHOR_REASONS),
+            "anchor_source_kinds": list(ANCHOR_SOURCE_KINDS),
         },
         "receipt": {
             "schema_version": RECEIPT_SCHEMA_VERSION,
@@ -896,6 +1144,18 @@ def contract() -> dict[str, Any]:
             "cell": RECEIPT_CELL_FIELDS,
             "cell_build": RECEIPT_BUILD_FIELDS,
             "host": HOST_FIELDS,
+            "collection": {
+                "schema_version": COLLECTION_SCHEMA_VERSION,
+                "size_limit": COLLECTION_SIZE_LIMIT,
+                "document": COLLECTION_FIELDS,
+                "observation": OBSERVATION_FIELDS,
+                "producer": OBSERVATION_PRODUCER_FIELDS,
+                "producer_kinds": list(OBSERVATION_PRODUCER_KINDS),
+                "host": OBSERVATION_HOST_FIELDS,
+                "proof": OBSERVATION_PROOF_FIELDS,
+                "report": OBSERVATION_REPORT_FIELDS,
+                "report_stores": list(OBSERVATION_REPORT_STORES),
+            },
             "counts": list(COUNT_FIELDS),
             "failure_detail_limit": FAILURE_DETAIL_LIMIT,
             "unrecorded_measurement": UNRECORDED_MEASUREMENT,
@@ -1354,6 +1614,23 @@ def _rows(value: Any, areas: set[str]) -> list[str]:
     return problems
 
 
+def _unimplemented(entry: dict[str, Any]) -> list[str]:
+    where = f"package {entry['package']} unimplemented"
+    marker = entry["unimplemented"]
+    if not isinstance(marker, dict) or set(marker) != {"reason", "tests_found"}:
+        return [f"malformed-receipt: {where} must be {{reason, tests_found}}"]
+    problems = []
+    if not isinstance(marker["reason"], str) or not marker["reason"].strip():
+        problems.append(f"malformed-receipt: {where} reason must be a non-empty string")
+    if not isinstance(marker["tests_found"], bool):
+        problems.append(f"malformed-receipt: {where} tests_found must be a boolean")
+    elif not marker["tests_found"] and entry.get("tiers"):
+        problems.append(
+            f"malformed-receipt: {where} has no tests but declares tiers {entry['tiers']}"
+        )
+    return problems
+
+
 def validate_resolved_plan(document: Any, today: Any = None) -> list[str]:
     """Every reason `document` is not a valid resolved plan, or an empty list.
 
@@ -1441,21 +1718,28 @@ def validate_resolved_plan(document: Any, today: Any = None) -> list[str]:
             problems.append(
                 f"malformed-receipt: package {entry['package']} l1_include_slow must be a boolean"
             )
-        untested = "no_tests_reason" in entry
-        if untested and (
-            not isinstance(entry["no_tests_reason"], str)
-            or not entry["no_tests_reason"].strip()
-            or entry.get("tiers") != []
-        ):
-            problems.append(
-                f"malformed-receipt: package {entry['package']} no_tests_reason must "
-                "be a non-empty string on a package whose tiers are empty"
-            )
-        if ("exclusion" in entry) != (entry.get("gates") == [] and not untested):
+        # Two plans select a package that gates nothing without excluding it:
+        # a push whose pull request already proved every environment it
+        # schedules plans no environment at all, and an `unimplemented`
+        # package with no tests has no test cell, so an event that schedules
+        # no Linux lint leaves it nothing. Anywhere else an empty gate list is
+        # an owned `gates = false` exclusion.
+        marker = entry.get("unimplemented")
+        nothing_scheduled = document.get("environments") == [] or (
+            isinstance(marker, dict) and marker.get("tests_found") is False
+        )
+        if "exclusion" in entry and entry.get("gates") != []:
             problems.append(
                 f"malformed-receipt: package {entry['package']} carries an exclusion "
-                "exactly when it gates nothing without a no_tests_reason"
+                "but gates something"
             )
+        elif entry.get("gates") == [] and "exclusion" not in entry and not nothing_scheduled:
+            problems.append(
+                f"malformed-receipt: package {entry['package']} gates nothing "
+                "without an exclusion"
+            )
+        if "unimplemented" in entry:
+            problems += _unimplemented(entry)
         if "dependent_seam" in entry:
             problems += _dependent_seam(entry["package"], entry["dependent_seam"])
 
@@ -1609,6 +1893,324 @@ def validate_resolved_plan(document: Any, today: Any = None) -> list[str]:
                         f"malformed-receipt: resolved plan producing_environments entry "
                         f"{entry['name']!r} must name scheduled guests it produces for"
                     )
+    if "coverage_anchors" in document:
+        entries = document["coverage_anchors"]
+        if not isinstance(entries, list) or not entries:
+            problems.append(
+                "malformed-receipt: resolved plan coverage_anchors must be a non-empty list"
+            )
+        else:
+            seen: set[Any] = set()
+            for entry in entries:
+                problems += _coverage_anchor("resolved plan coverage_anchors entry", entry)
+                name = entry.get("environment") if isinstance(entry, dict) else None
+                if isinstance(name, str):
+                    if name in seen:
+                        problems.append(
+                            f"malformed-receipt: resolved plan coverage_anchors names "
+                            f"{name!r} twice"
+                        )
+                    seen.add(name)
+                    if name not in scheduled:
+                        problems.append(
+                            f"malformed-receipt: resolved plan coverage_anchors names "
+                            f"{name!r}, which is not in the plan's environment table"
+                        )
+                    reopened = entry.get("reopened_cells")
+                    planned = {
+                        (cell.get("package"), cell.get("gate"))
+                        for cell in document.get("cells") or []
+                        if isinstance(cell, dict) and cell.get("environment") == name
+                    }
+                    if isinstance(reopened, list) and any(
+                        isinstance(cell, dict)
+                        and (cell.get("package"), cell.get("gate")) not in planned
+                        for cell in reopened
+                    ):
+                        problems.append(
+                            f"malformed-receipt: resolved plan coverage_anchors entry "
+                            f"{name!r} reopens a cell the plan does not schedule"
+                        )
+    return problems
+
+
+def _contract_cells(where: str, cells: Any) -> list[str]:
+    """Every reason `cells` is not a list of distinct `{package, gate, contract}` cells."""
+    if not isinstance(cells, list):
+        return [f"malformed-receipt: {where} must be a list"]
+    problems: list[str] = []
+    keys: set[tuple[Any, Any]] = set()
+    for cell in cells:
+        if (
+            not isinstance(cell, dict)
+            or set(cell) != {"package", "gate", "contract"}
+            or not isinstance(cell["package"], str)
+            or not cell["package"]
+            or cell["gate"] not in GATES
+            or not isinstance(cell["contract"], str)
+            or not re.fullmatch(r"[0-9a-f]{64}", cell["contract"])
+        ):
+            return problems + [
+                f"malformed-receipt: {where} entries are exactly "
+                "{package, gate, contract} with a known gate and a coverage contract digest"
+            ]
+        key = (cell["package"], cell["gate"])
+        if key in keys:
+            problems.append(f"malformed-receipt: {where} repeats {cell['package']}/{cell['gate']}")
+        keys.add(key)
+    return problems
+
+
+def _coverage_anchor(
+    where: str, entry: Any, fields: dict[str, bool] = COVERAGE_ANCHOR_FIELDS
+) -> list[str]:
+    """Every reason `entry` is not one environment's coherent coverage anchor.
+
+    Reason, mode, anchor, and source must agree: an incremental anchor names
+    the commit and the run that earned it, and a full-scope fallback names
+    neither, so a reader can never mistake a missing history for a short diff.
+    """
+    problems = _keys(where, entry, fields)
+    if problems:
+        return problems
+    problems += _member(f"{where} environment", entry["environment"], ENVIRONMENTS, "unknown-environment")
+    problems += _member(f"{where} mode", entry["mode"], ANCHOR_MODES, "malformed-receipt")
+    problems += _member(f"{where} reason", entry["reason"], ANCHOR_REASONS, "malformed-receipt")
+    source = entry["source"]
+    problems += _keys(f"{where} source", source, COVERAGE_SOURCE_FIELDS)
+    if isinstance(source, dict) and set(source) == set(COVERAGE_SOURCE_FIELDS):
+        problems += _member(f"{where} source kind", source["kind"], ANCHOR_SOURCE_KINDS, "malformed-receipt")
+        has_run = source["kind"] != "none"
+        if has_run:
+            if type(source["run_id"]) is not int or source["run_id"] < 1:
+                problems.append(f"malformed-receipt: {where} source run_id must be a positive integer")
+            problems += _sha(f"{where} source head", source["head"])
+        elif source["run_id"] is not None or source["head"] is not None:
+            problems.append(
+                f"malformed-receipt: {where} source of kind 'none' carries neither a run_id nor a head"
+            )
+    if entry["mode"] == "full":
+        if entry["anchor"] is not None:
+            problems.append(f"malformed-receipt: {where} is a full-scope fallback and cannot carry an anchor")
+    else:
+        problems += _sha(f"{where} anchor", entry["anchor"])
+    shape = ANCHOR_REASON_SHAPES.get(entry["reason"]) if isinstance(entry["reason"], str) else None
+    if shape is not None:
+        if entry["mode"] != shape[0]:
+            problems.append(
+                f"malformed-receipt: {where} reason {entry['reason']!r} implies mode {shape[0]!r}, "
+                f"not {entry['mode']!r}"
+            )
+        if isinstance(source, dict) and source.get("kind") != shape[1]:
+            problems.append(
+                f"malformed-receipt: {where} reason {entry['reason']!r} implies a {shape[1]!r} "
+                f"source, not {source.get('kind')!r}"
+            )
+    for field in ("policy_delta", "inherited_cells", "reopened_cells"):
+        cells = entry[field]
+        if not isinstance(cells, list):
+            problems.append(f"malformed-receipt: {where} {field} must be a list")
+            continue
+        for cell in cells:
+            if (
+                not isinstance(cell, dict)
+                or set(cell) != {"package", "gate"}
+                or not isinstance(cell["package"], str)
+                or cell["gate"] not in GATES
+            ):
+                problems.append(
+                    f"malformed-receipt: {where} {field} entries are exactly "
+                    "{package, gate} with a known gate"
+                )
+                break
+    if entry["mode"] == "full" and entry["inherited_cells"] not in ([], None) and isinstance(
+        entry["inherited_cells"], list
+    ):
+        problems.append(f"malformed-receipt: {where} is a full-scope fallback and inherits no cells")
+    if entry["mode"] == "full" and entry["reopened_cells"] not in ([], None) and isinstance(
+        entry["reopened_cells"], list
+    ):
+        problems.append(f"malformed-receipt: {where} is a full-scope fallback and reopens no cells")
+    if isinstance(entry["inherited_cells"], list) and isinstance(entry["reopened_cells"], list):
+        inherited = {
+            (cell.get("package"), cell.get("gate"))
+            for cell in entry["inherited_cells"] if isinstance(cell, dict)
+        }
+        if any(
+            isinstance(cell, dict) and (cell.get("package"), cell.get("gate")) in inherited
+            for cell in entry["reopened_cells"]
+        ):
+            problems.append(f"malformed-receipt: {where} both inherits and reopens a cell")
+    if "required_cells" in fields:
+        required = entry["required_cells"]
+        shape = _contract_cells(f"{where} required_cells", required)
+        problems += shape
+        if not shape:
+            known = {(cell["package"], cell["gate"]) for cell in required}
+            for field in ("policy_delta", "inherited_cells", "reopened_cells"):
+                cells = entry[field]
+                if isinstance(cells, list) and any(
+                    isinstance(cell, dict) and (cell.get("package"), cell.get("gate")) not in known
+                    for cell in cells
+                ):
+                    problems.append(
+                        f"malformed-receipt: {where} {field} names a cell absent from required_cells"
+                    )
+    return problems
+
+
+def validate_anchor_input(document: Any) -> list[str]:
+    """Every reason `document` is not a valid anchor input for the planner.
+
+    A planning input that cannot be trusted stops resolution; the planner never
+    emits a reduced plan from a malformed anchor document.
+    """
+    if isinstance(document, dict) and "schema_version" in document:
+        if not is_version(document["schema_version"], ANCHOR_INPUT_SCHEMA_VERSION):
+            return [
+                f"unknown-schema-version: anchor input is version {document['schema_version']!r}, "
+                f"this tool reads {ANCHOR_INPUT_SCHEMA_VERSION}"
+            ]
+    problems = _keys("anchor input", document, ANCHOR_INPUT_FIELDS)
+    if problems:
+        return problems
+    entries = document["anchors"]
+    if not isinstance(entries, list) or not entries:
+        return ["malformed-receipt: anchor input anchors must be a non-empty list"]
+    seen: set[Any] = set()
+    for entry in entries:
+        problems += _keys("anchor input entry", entry, ANCHOR_INPUT_ENTRY_FIELDS)
+        if not isinstance(entry, dict) or set(entry) != set(ANCHOR_INPUT_ENTRY_FIELDS):
+            continue
+        shaped = {key: value for key, value in entry.items() if key != "covered_cells"}
+        shaped["policy_delta"] = []
+        shaped["inherited_cells"] = []
+        shaped["reopened_cells"] = []
+        problems += _coverage_anchor("anchor input entry", shaped, CERTIFICATION_ANCHOR_FIELDS)
+        if entry["environment"] in seen:
+            problems.append(f"malformed-receipt: anchor input names {entry['environment']!r} twice")
+        seen.add(entry["environment"])
+        covered = entry["covered_cells"]
+        certified = entry["reason"] == "certified-ancestor"
+        if certified != isinstance(covered, list):
+            problems.append(
+                f"malformed-receipt: anchor input entry {entry['environment']!r} covered_cells is "
+                f"{'required' if certified else 'null'} for reason {entry['reason']!r}"
+            )
+        elif isinstance(covered, list):
+            problems += _contract_cells(
+                f"anchor input entry {entry['environment']!r} covered_cells", covered
+            )
+    return problems
+
+
+def policy_digest(environment: dict[str, Any]) -> str:
+    """The identity of what schedules one environment's coverage.
+
+    Only the environment's name and the events that schedule it: a change to
+    its capabilities or runner leaves existing certifications valid, while
+    adding or removing a scheduling event (the Windows move itself) makes the
+    old certification a different artifact name, so it can never be credited
+    for coverage it did not claim.
+    """
+    return identity(canonical({
+        "name": environment["name"],
+        "events": sorted(environment.get("events") or EVENTS),
+    }))
+
+
+def certification_name(environment: str, head: str, digest: str) -> str:
+    """The artifact name a certification is published and looked up by.
+
+    The name carries the environment, the certified head, and the leading
+    digits of [`policy_digest`], so finding a candidate needs no download and a
+    run certified under another schedule policy is simply absent.
+    """
+    if environment not in ENVIRONMENTS:
+        raise ValueError(f"unknown environment {environment!r}")
+    if not _SHA.fullmatch(head) or not re.fullmatch(r"[0-9a-f]{16,64}", digest):
+        raise ValueError("certification name requires a full Git object ID and a policy digest")
+    return f"ci-coverage-v{CERTIFICATION_SCHEMA_VERSION}-{environment}-{head}-{digest[:16]}"
+
+
+def validate_certification(document: Any) -> list[str]:
+    """Every reason `document` is not a valid coverage certification.
+
+    Version first: a document from another generation reads as version skew,
+    never as a pile of missing fields. `certified` is a claim the other fields
+    must support, so a certified document with a failed or skipped audit, or
+    with fewer accounted cells than... nothing, is refused here rather than at
+    the consumer.
+    """
+    if isinstance(document, dict) and "schema_version" in document:
+        if not is_version(document["schema_version"], CERTIFICATION_SCHEMA_VERSION):
+            return [
+                f"unknown-schema-version: coverage certification is version "
+                f"{document['schema_version']!r}, this tool reads {CERTIFICATION_SCHEMA_VERSION}"
+            ]
+    problems = _keys("coverage certification", document, CERTIFICATION_FIELDS)
+    if problems:
+        return problems
+    for field in ("run_id", "attempt"):
+        if type(document[field]) is not int or document[field] < 1:
+            problems.append(f"malformed-receipt: coverage certification {field} must be a positive integer")
+    if not isinstance(document["workflow_path"], str) or not document["workflow_path"]:
+        problems.append("malformed-receipt: coverage certification workflow_path must be a non-empty string")
+    problems += _member("coverage certification event", document["event"], EVENTS, "malformed-receipt")
+    for field in ("head", "tree"):
+        problems += _sha(f"coverage certification {field}", document[field])
+    problems += _member(
+        "coverage certification environment", document["environment"], ENVIRONMENTS, "unknown-environment"
+    )
+    if type(document["coverage_policy_version"]) is not int or document["coverage_policy_version"] < 1:
+        problems.append(
+            "malformed-receipt: coverage certification coverage_policy_version must be a positive integer"
+        )
+    for field in ("environments_digest", "plan_identity"):
+        value = document[field]
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{16,64}", value):
+            problems.append(f"malformed-receipt: coverage certification {field} must be a hex digest")
+    anchors = document["anchors_used"]
+    if not isinstance(anchors, list) or not anchors:
+        problems.append("malformed-receipt: coverage certification anchors_used must be a non-empty list")
+    else:
+        for entry in anchors:
+            problems += _coverage_anchor(
+                "coverage certification anchors_used entry", entry, CERTIFICATION_ANCHOR_FIELDS
+            )
+    if not isinstance(document["certified"], bool):
+        problems.append("malformed-receipt: coverage certification certified must be a boolean")
+    counts = document["cells"]
+    problems += _keys(
+        "coverage certification cells", counts, {name: True for name in CERTIFICATION_CELL_COUNTS}
+    )
+    if isinstance(counts, dict):
+        for name in CERTIFICATION_CELL_COUNTS:
+            if name in counts and (type(counts[name]) is not int or counts[name] < 0):
+                problems.append(
+                    f"malformed-receipt: coverage certification cells {name} must be a non-negative integer"
+                )
+    covered = document["covered_cells"]
+    shape = _contract_cells("coverage certification covered_cells", covered)
+    problems += shape
+    if not shape:
+        if isinstance(counts, dict) and all(type(counts.get(n)) is int for n in CERTIFICATION_CELL_COUNTS):
+            proven = counts["executing"] + counts["reused"] + counts["inherited"]
+            if len(covered) != proven:
+                problems.append(
+                    f"malformed-receipt: coverage certification covered_cells lists {len(covered)} "
+                    f"cells but cells executing + reused + inherited is {proven}"
+                )
+    audits = document["audits"]
+    problems += _keys("coverage certification audits", audits, CERTIFICATION_AUDIT_FIELDS)
+    if isinstance(audits, dict) and set(audits) == set(CERTIFICATION_AUDIT_FIELDS):
+        if any(type(audits[name]) is not int or audits[name] < 0 for name in audits):
+            problems.append("malformed-receipt: coverage certification audits must be non-negative integers")
+        elif document["certified"] is True and audits["passed"] != audits["required"]:
+            problems.append(
+                f"malformed-receipt: coverage certification is certified but {audits['passed']} of "
+                f"{audits['required']} required audits passed"
+            )
     return problems
 
 
@@ -1970,28 +2572,63 @@ def _cell_consistency(label: str, entry: dict[str, Any]) -> list[str]:
     return problems
 
 
+def is_version(value: Any, expected: int) -> bool:
+    """Whether `value` is exactly the integer `expected`.
+
+    `True == 1` and `2.0 == 2` in Python, so a bare `==` would read a boolean
+    or a float as a schema version.
+    """
+    return type(value) is int and value == expected
+
+
+def loads_strict(text: str) -> Any:
+    """Parse one JSON document, refusing what `json.loads` quietly accepts.
+
+    ## Errors
+
+    Raises ``ValueError`` for a duplicate key (the last would otherwise win),
+    for `NaN`/`Infinity`, and for trailing content after the document.
+    """
+
+    def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        document: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in document:
+                raise ValueError(f"duplicate key {key!r}")
+            document[key] = value
+        return document
+
+    def refuse_constant(name: str) -> Any:
+        raise ValueError(f"{name} is not a JSON number")
+
+    return json.loads(text, object_pairs_hook=unique, parse_constant=refuse_constant)
+
+
 def validate_receipt(document: Any) -> list[str]:
     """Every reason `document` is not a valid version-2 validation receipt.
 
     A version-1 note is *not* malformed — it is a legacy document with narrower
-    reuse rules — so it is reported with the `v1-*` codes instead.
+    reuse rules — so it is reported with the `v1-*` codes instead. The version
+    is read before the field set, so a document from another generation reads
+    as version skew rather than as a missing field.
     """
-    if isinstance(document, dict) and document.get("schema_version") == LEGACY_RECEIPT_SCHEMA_VERSION:
+    if not isinstance(document, dict) or "schema_version" not in document:
+        return _keys("receipt", document, RECEIPT_FIELDS)
+    if is_version(document["schema_version"], LEGACY_RECEIPT_SCHEMA_VERSION):
         return [
             "v1-requires-exact-tree: a version-1 receipt carries no per-cell outcome "
             "and is reusable only on exact tree identity, pass-only, whole-environment"
         ]
-
-    problems = _keys("receipt", document, RECEIPT_FIELDS)
-    if problems:
-        return problems
-
-    if document["schema_version"] != RECEIPT_SCHEMA_VERSION:
+    if not is_version(document["schema_version"], RECEIPT_SCHEMA_VERSION):
         return [
             f"unknown-schema-version: receipt is version {document['schema_version']!r}, "
             f"this tool reads {RECEIPT_SCHEMA_VERSION} and "
             f"{LEGACY_RECEIPT_SCHEMA_VERSION}"
         ]
+
+    problems = _keys("receipt", document, RECEIPT_FIELDS)
+    if problems:
+        return problems
 
     problems += _member(
         "receipt environment", document["environment"], ENVIRONMENTS, "unknown-environment"
@@ -2011,59 +2648,11 @@ def validate_receipt(document: Any) -> list[str]:
 
     seen: dict[tuple[str, str], dict[str, Any]] = {}
     for entry in document["cells"]:
-        problems += _keys("receipt cell", entry, RECEIPT_CELL_FIELDS)
-        if "test_filter" in entry and (
-            not isinstance(entry["test_filter"], str)
-            or not entry["test_filter"].strip()
-            or entry.get("gate") != "L1"
-        ):
-            problems.append(
-                f"malformed-receipt: {label} carries a test_filter, which only a "
-                "non-empty L1 narrowing may be"
-            )
+        cell_problems = receipt_cell_problems(entry, document["environment"])
+        problems += cell_problems
         if not isinstance(entry, dict) or "package" not in entry or "gate" not in entry:
             continue
         label = f"receipt cell {entry['package']}/{document['environment']}/{entry['gate']}"
-        problems += _member(f"{label} gate", entry["gate"], GATES, "unknown-gate")
-        problems += _member(f"{label} outcome", entry.get("outcome"), OUTCOMES, "malformed-receipt")
-        problems += _member(f"{label} completion", entry.get("completion"), COMPLETIONS, "malformed-receipt")
-        problems += _counts(label, entry.get("counts"))
-        if not _IDENTITY.fullmatch(str(entry.get("gate_input_identity"))):
-            problems.append(f"malformed-receipt: {label} has no gate-input identity")
-        if not isinstance(entry.get("duration_s"), (int, float)) or entry["duration_s"] < 0:
-            problems.append(f"malformed-receipt: {label} duration_s must be a non-negative number")
-        problems += _str_list(f"{label} backends", entry.get("backends"))
-        build = entry.get("build")
-        if build is not None:
-            problems += _keys(f"{label} build", build, RECEIPT_BUILD_FIELDS)
-            if isinstance(build, dict):
-                for field in ("key", "digest"):
-                    if not _IDENTITY.fullmatch(str(build.get(field))):
-                        problems.append(
-                            f"malformed-receipt: {label} build {field} is not a digest"
-                        )
-        failed = entry.get("failed_tests", [])
-        problems += _str_list(f"{label} failed_tests", failed)
-        if isinstance(failed, list) and len(failed) > FAILURE_DETAIL_LIMIT:
-            problems.append(
-                f"malformed-receipt: {label} names {len(failed)} failed tests, over the "
-                f"{FAILURE_DETAIL_LIMIT} the receipt carries; truncate and set "
-                "failure_detail_truncated"
-            )
-        if (
-            entry.get("outcome") == "fail"
-            and entry.get("completion") == "complete"
-            and not failed
-            and not entry.get("failure_detail_truncated")
-        ):
-            # Only a COMPLETE failure owes detail. An interrupted or partial
-            # gate — a compile failure staging no report, say — has an exit
-            # code and nothing to attribute it to, and is rejected for reuse on
-            # its completion rather than made unpublishable.
-            problems.append(
-                f"malformed-receipt: {label} failed but names no failing test; a failure "
-                "with no detail cannot be acted on"
-            )
         key = (entry["package"], entry["gate"])
         if key in seen and canonical(seen[key]) != canonical(entry):
             problems.append(
@@ -2071,6 +2660,318 @@ def validate_receipt(document: Any) -> list[str]:
             )
         seen.setdefault(key, entry)
     return problems
+
+
+def receipt_cell_problems(entry: Any, environment: str) -> list[str]:
+    """Every reason `entry` is not a valid version-2 receipt cell.
+
+    Shared by the version-2 receipt and the observation, whose `cell` is this
+    same contract.
+    """
+    problems = _keys("receipt cell", entry, RECEIPT_CELL_FIELDS)
+    if not isinstance(entry, dict):
+        return problems
+    if (
+        not isinstance(entry.get("package"), str)
+        or not entry["package"]
+        or not isinstance(entry.get("gate"), str)
+    ):
+        return problems + ["malformed-receipt: receipt cell names no package and gate"]
+    label = f"receipt cell {entry['package']}/{environment}/{entry['gate']}"
+    if "test_filter" in entry and (
+        not isinstance(entry["test_filter"], str)
+        or not entry["test_filter"].strip()
+        or entry["gate"] != "L1"
+    ):
+        problems.append(
+            f"malformed-receipt: {label} carries a test_filter, which only a "
+            "non-empty L1 narrowing may be"
+        )
+    problems += _member(f"{label} gate", entry["gate"], GATES, "unknown-gate")
+    problems += _member(f"{label} outcome", entry.get("outcome"), OUTCOMES, "malformed-receipt")
+    problems += _member(f"{label} completion", entry.get("completion"), COMPLETIONS, "malformed-receipt")
+    problems += _counts(label, entry.get("counts"))
+    if not _IDENTITY.fullmatch(str(entry.get("gate_input_identity"))):
+        problems.append(f"malformed-receipt: {label} has no gate-input identity")
+    exit_code = entry.get("exit_code")
+    if type(exit_code) is not int:
+        problems.append(f"malformed-receipt: {label} exit_code must be an integer")
+    duration = entry.get("duration_s")
+    if (
+        isinstance(duration, bool)
+        or not isinstance(duration, (int, float))
+        or duration < 0
+    ):
+        problems.append(f"malformed-receipt: {label} duration_s must be a non-negative number")
+    if not isinstance(entry.get("report"), str):
+        problems.append(f"malformed-receipt: {label} report must be a string")
+    problems += _str_list(f"{label} backends", entry.get("backends"))
+    build = entry.get("build")
+    if build is not None or "build" in entry:
+        problems += _keys(f"{label} build", build, RECEIPT_BUILD_FIELDS)
+        if isinstance(build, dict):
+            for field in ("key", "digest"):
+                if not _IDENTITY.fullmatch(str(build.get(field))):
+                    problems.append(
+                        f"malformed-receipt: {label} build {field} is not a digest"
+                    )
+    failed = entry.get("failed_tests", [])
+    problems += _str_list(f"{label} failed_tests", failed)
+    if isinstance(failed, list) and len(failed) > FAILURE_DETAIL_LIMIT:
+        problems.append(
+            f"malformed-receipt: {label} names {len(failed)} failed tests, over the "
+            f"{FAILURE_DETAIL_LIMIT} the receipt carries; truncate and set "
+            "failure_detail_truncated"
+        )
+    if (
+        entry.get("outcome") == "fail"
+        and entry.get("completion") == "complete"
+        and not failed
+        and not entry.get("failure_detail_truncated")
+    ):
+        # Only a COMPLETE failure owes detail. An interrupted or partial
+        # gate — a compile failure staging no report, say — has an exit
+        # code and nothing to attribute it to, and is rejected for reuse on
+        # its completion rather than made unpublishable.
+        problems.append(
+            f"malformed-receipt: {label} failed but names no failing test; a failure "
+            "with no detail cannot be acted on"
+        )
+    return problems
+
+
+def observation_identity(observation: dict[str, Any]) -> str:
+    """The identity an observation's `observation_id` must equal.
+
+    The canonical form of every other field, so the id names content: two hosts
+    cannot publish different observations under one id without the mismatch
+    being detectable, and one observation published twice is the same entry.
+    """
+    return identity(
+        canonical({name: value for name, value in observation.items() if name != "observation_id"})
+    )
+
+
+def validate_observation(observation: Any, environment: str) -> list[str]:
+    """Every reason `observation` is not a valid member of a collection.
+
+    Structural only: whether the reports exist and whether the inputs match a
+    head is the verifier's.
+    """
+    problems = _keys("observation", observation, OBSERVATION_FIELDS)
+    if problems:
+        return problems
+    label = f"observation {str(observation['observation_id'])[:12]}"
+    if not isinstance(observation["observation_id"], str) or not _IDENTITY.fullmatch(
+        observation["observation_id"]
+    ):
+        return [f"malformed-receipt: {label} has no hex observation_id"]
+    if observation["observation_id"] != observation_identity(observation):
+        problems.append(
+            f"observation-id-mismatch: {label} is not the identity of its own content"
+        )
+    if "retry_of" in observation and (
+        not isinstance(observation["retry_of"], str)
+        or not _IDENTITY.fullmatch(observation["retry_of"])
+    ):
+        problems.append(f"observation-link-invalid: {label} retry_of must be an observation id")
+    elif observation.get("retry_of") == observation["observation_id"]:
+        problems.append(f"observation-link-invalid: {label} retries itself")
+    problems += _sha(f"{label} base", observation["base"])
+    if not _IDENTITY.fullmatch(str(observation["scope_identity"])):
+        problems.append(f"malformed-receipt: {label} scope_identity is not a hex identity")
+    problems += _member(
+        f"{label} completion", observation["completion"], COMPLETIONS, "malformed-receipt"
+    )
+    if "features" in observation:
+        if not isinstance(observation["features"], str):
+            problems.append(f"malformed-receipt: {label} features must be a string")
+
+    producer = observation["producer"]
+    problems += _keys(f"{label} producer", producer, OBSERVATION_PRODUCER_FIELDS)
+    kind = None
+    host: Any = None
+    if isinstance(producer, dict):
+        kind = producer.get("kind")
+        host = producer.get("host")
+        problems += _member(
+            f"{label} producer kind", kind, OBSERVATION_PRODUCER_KINDS, "malformed-receipt"
+        )
+        problems += _keys(f"{label} producer host", host, OBSERVATION_HOST_FIELDS)
+        if isinstance(host, dict):
+            for field in ("os", "kernel"):
+                if not isinstance(host.get(field), str) or not host[field]:
+                    problems.append(f"malformed-receipt: {label} host {field} must be a string")
+            for field in ("label", "report_dir"):
+                if field in host and not isinstance(host[field], str):
+                    problems.append(f"malformed-receipt: {label} host {field} must be a string")
+        required = {
+            "hosted": ("workflow", "run_id", "attempt"),
+            "seed": ("seed_id",),
+        }.get(kind, ())
+        problems += [
+            f"malformed-receipt: {label} producer {kind} needs '{name}'"
+            for name in required
+            if name not in producer
+        ]
+        problems += [
+            f"malformed-receipt: {label} producer {name} must be a string"
+            for name in ("workflow", "run_id", "seed_id")
+            if name in producer and not isinstance(producer[name], str)
+        ]
+        if "attempt" in producer and (
+            type(producer["attempt"]) is not int or producer["attempt"] < 1
+        ):
+            problems.append(f"malformed-receipt: {label} producer attempt must be a positive integer")
+
+    if kind == "hook":
+        if "proof" in observation:
+            problems.append(
+                f"malformed-receipt: {label} is a hook observation, which proves "
+                "through its report counts and carries no proof"
+            )
+    elif "proof" not in observation:
+        if not (isinstance(observation.get("cell"), dict) and observation["cell"].get("outcome") == "fail"):
+            problems.append(
+                f"observation-proof-missing: {label} is a {kind!r} observation and "
+                "names no proof"
+            )
+    else:
+        proof = observation["proof"]
+        problems += _keys(f"{label} proof", proof, OBSERVATION_PROOF_FIELDS)
+        if isinstance(proof, dict):
+            problems += [
+                f"malformed-receipt: {label} proof {name} must be a non-empty string"
+                for name in OBSERVATION_PROOF_FIELDS
+                if name in proof and (not isinstance(proof[name], str) or not proof[name])
+            ]
+            if (
+                isinstance(observation.get("cell"), dict)
+                and observation["cell"].get("outcome") == "pass"
+                and "completion_record_digest" not in proof
+            ):
+                problems.append(
+                    f"observation-proof-missing: {label} passed and its proof cites "
+                    "no completion record"
+                )
+
+    cell = observation["cell"]
+    problems += receipt_cell_problems(cell, environment)
+
+    reports = observation["reports"]
+    if not isinstance(reports, list):
+        problems.append(f"malformed-receipt: {label} reports must be a list")
+    else:
+        for report in reports:
+            problems += _keys(f"{label} report", report, OBSERVATION_REPORT_FIELDS)
+            if not isinstance(report, dict):
+                continue
+            if not isinstance(report.get("path"), str) or not report["path"]:
+                problems.append(f"malformed-receipt: {label} report path must be a string")
+            if not isinstance(report.get("sha256"), str) or not re.fullmatch(
+                r"[0-9a-f]{64}", report["sha256"]
+            ):
+                problems.append(f"malformed-receipt: {label} report sha256 is not a digest")
+            if type(report.get("bytes")) is not int or report["bytes"] < 0:
+                problems.append(f"malformed-receipt: {label} report bytes must be a count")
+            problems += _member(
+                f"{label} report store",
+                report.get("store"),
+                OBSERVATION_REPORT_STORES,
+                "malformed-receipt",
+            )
+            if (
+                report.get("store") == "host-dir"
+                and isinstance(host, dict)
+                and not host.get("report_dir")
+            ):
+                problems.append(
+                    f"malformed-receipt: {label} cites a host-dir report and its "
+                    "host names no report_dir"
+                )
+        if (
+            isinstance(cell, dict)
+            and cell.get("completion") == "complete"
+            and isinstance(cell.get("report"), str)
+            and cell["report"] not in [
+                report.get("path") for report in reports if isinstance(report, dict)
+            ]
+        ):
+            problems.append(
+                f"observation-report-unavailable: {label} is complete and names "
+                f"report {cell['report']!r}, which none of its references cite"
+            )
+    return problems
+
+
+def validate_collection(document: Any) -> list[str]:
+    """Every reason `document` is not a valid version-3 observation collection.
+
+    The version is read first. Beyond each observation's own validity this
+    checks the collection as a whole: ids are unique and sorted, and every
+    retry link names another observation of the same cell in this collection
+    without forming a cycle.
+    """
+    if not isinstance(document, dict) or "schema_version" not in document:
+        return _keys("observation collection", document, COLLECTION_FIELDS)
+    if not is_version(document["schema_version"], COLLECTION_SCHEMA_VERSION):
+        return [
+            f"unknown-schema-version: collection is version {document['schema_version']!r}, "
+            f"this tool reads {COLLECTION_SCHEMA_VERSION}"
+        ]
+    problems = _keys("observation collection", document, COLLECTION_FIELDS)
+    if problems:
+        return problems
+    problems += _member(
+        "collection environment", document["environment"], ENVIRONMENTS, "unknown-environment"
+    )
+    for field in ("head", "tree"):
+        problems += _sha(f"collection {field}", document[field])
+    observations = document["observations"]
+    if not isinstance(observations, list):
+        return problems + ["malformed-receipt: collection observations must be a list"]
+    ids: dict[str, dict[str, Any]] = {}
+    for observation in observations:
+        found = validate_observation(observation, str(document["environment"]))
+        problems += found
+        if found or not isinstance(observation, dict):
+            continue
+        if observation["observation_id"] in ids:
+            problems.append(
+                f"conflicting-evidence: observation {observation['observation_id'][:12]} "
+                "appears twice"
+            )
+        ids[observation["observation_id"]] = observation
+    if problems:
+        return problems
+    if [o["observation_id"] for o in observations] != sorted(ids):
+        problems.append("malformed-receipt: collection observations are not sorted by id")
+    for observation_id, observation in ids.items():
+        target = observation.get("retry_of")
+        if target is None:
+            continue
+        label = f"observation {observation_id[:12]}"
+        previous = ids.get(target)
+        if previous is None:
+            problems.append(f"observation-link-invalid: {label} retries {target[:12]}, which is absent")
+            continue
+        if _cell_key(previous["cell"]) != _cell_key(observation["cell"]):
+            problems.append(
+                f"observation-link-invalid: {label} retries an observation of another cell"
+            )
+        visited = {observation_id}
+        cursor: str | None = target
+        while cursor is not None:
+            if cursor in visited:
+                problems.append(f"observation-link-invalid: {label} is on a retry cycle")
+                break
+            visited.add(cursor)
+            cursor = ids[cursor].get("retry_of") if cursor in ids else None
+    return problems
+
+
+def _cell_key(cell: dict[str, Any]) -> tuple[str, str, str]:
+    return (cell["package"], cell["gate"], cell.get("test_filter", ""))
 
 
 def validate_scope_receipt(document: Any) -> list[str]:
@@ -2133,19 +3034,31 @@ def validate_completion_record(document: Any) -> list[str]:
     Structural only, and deliberately so: whether the record is *true* is the
     producer's question (it wrote the record from the comparison it just ran)
     and whether it is *bound to this run* is the audit's. Each problem begins
-    with a code from [`COMPLETION_REJECTIONS`].
+    with a code from [`COMPLETION_REJECTIONS`]. The version is read before the
+    field set.
     """
-    problems = _keys(
-        "completion record", document, COMPLETION_RECORD_FIELDS, "completion-plan-unreadable"
-    )
-    if problems:
-        return problems
-    if document["schema_version"] != COMPLETION_RECORD_SCHEMA_VERSION:
+    if isinstance(document, dict) and "schema_version" in document and not is_version(
+        document["schema_version"], COMPLETION_RECORD_SCHEMA_VERSION
+    ):
         return [
             f"completion-manifest-schema: completion record is version "
             f"{document['schema_version']!r}, this tool reads "
             f"{COMPLETION_RECORD_SCHEMA_VERSION}"
         ]
+    problems = _keys(
+        "completion record", document, COMPLETION_RECORD_FIELDS, "completion-plan-unreadable"
+    )
+    if problems:
+        return problems
+    for name in ("run", "package"):
+        if not isinstance(document[name], str) or not document[name]:
+            problems.append(
+                f"completion-plan-unreadable: completion record {name} must be a string"
+            )
+    if type(document["attempt"]) is not int or document["attempt"] < 1:
+        problems.append(
+            "completion-plan-unreadable: completion record attempt must be a positive integer"
+        )
     problems += _member(
         "completion record environment",
         document["environment"],

@@ -405,6 +405,7 @@ class ValidatorHarness(unittest.TestCase):
         target: str = TARGET,
         include_manifest: bool = True,
         write_backend_proofs: bool = True,
+        manifest_text: str | None = None,
     ) -> tuple[int, str, Path]:
         """Run the real CLI the producer runs; return exit, stderr, --out path.
 
@@ -419,7 +420,9 @@ class ValidatorHarness(unittest.TestCase):
         )
         manifest_path = self.root / "expected-L1.json"
         manifest_path.write_text(
-            json.dumps(manifest if manifest is not None else expected_manifest()),
+            manifest_text
+            if manifest_text is not None
+            else json.dumps(manifest if manifest is not None else expected_manifest()),
             encoding="utf-8",
         )
         companions_path = self.root / "companions.json"
@@ -513,6 +516,23 @@ class CompletionValidatorOracleTests(ValidatorHarness):
         code, stderr, out = self.validate(artifacts=artifacts)
         self.assertNotEqual(0, code, "an unparseable report is not evidence")
         self.assertIn("malformed", stderr.lower())
+        self.assertFalse(out.exists())
+
+    def test_a_manifest_line_with_a_duplicate_key_fails_validation(self):
+        # Last-wins would let a second `exit_code` decide the report's result.
+        document = junit_document([junit_case("green_one"), junit_case("green_two")])
+        tree = self.staging_tree(
+            {"L1/claudine.xml": document}, [self.manifest_entry("L1/claudine.xml")]
+        )
+        code, stderr, _ = self.validate(artifacts=tree)
+        self.assertEqual(0, code, f"the unedited control validates: {stderr}")
+        manifest = tree / "junit-claudine-L1-ubuntu-latest" / "manifest.jsonl"
+        line = manifest.read_text(encoding="utf-8")
+        manifest.write_text(line.replace('"exit_code": 0', '"exit_code": 1, "exit_code": 0', 1),
+                            encoding="utf-8")
+        code, stderr, out = self.validate(artifacts=tree)
+        self.assertNotEqual(0, code)
+        self.assertIn("duplicate key", stderr)
         self.assertFalse(out.exists())
 
     # -- expected versus observed identities ---------------------------------
@@ -1093,6 +1113,50 @@ class ExpectedManifestV2OracleTests(ValidatorHarness):
             "cfg-compiled tests differ",
         )
         self.assertIn("target", stderr)
+
+
+class ManifestReaderRobustnessTests(ValidatorHarness):
+    """Wrong-typed manifest fields are refusals, not crashes or accepted text."""
+
+    def validate_manifest(self, manifest: dict) -> tuple[int, str]:
+        return self.validate(manifest=manifest)[:2]
+
+    def test_a_null_nextest_version_is_not_the_text_none(self):
+        for value in (None, 0, ["0.9"], ""):
+            with self.subTest(nextest_version=value):
+                manifest = expected_manifest()
+                manifest["nextest_version"] = value
+                code, stderr = self.validate_manifest(manifest)
+                self.assertNotEqual(0, code)
+                self.assertIn("nextest_version", stderr)
+
+    def test_a_boolean_or_float_schema_version_is_not_version_two(self):
+        for value in (True, 2.0):
+            with self.subTest(schema_version=value):
+                manifest = expected_manifest()
+                manifest["schema_version"] = value
+                code, stderr = self.validate_manifest(manifest)
+                self.assertNotEqual(0, code)
+                self.assertIn("schema", stderr.lower())
+
+    def test_a_duplicate_key_in_the_manifest_is_refused(self):
+        manifest = expected_manifest()
+        text = json.dumps(manifest)
+        text = text.replace('"target":', '"target": "x", "target":', 1)
+        code, stderr = self.validate(manifest_text=text)[:2]
+        self.assertNotEqual(0, code)
+        self.assertIn("duplicate key", stderr)
+
+    def test_non_list_declarations_are_refused_without_a_traceback(self):
+        for name in ("backends", "companion_suites"):
+            for value in (5, "tmux", None, [1], {"a": 1}):
+                with self.subTest(field=name, value=value):
+                    manifest = expected_manifest()
+                    manifest[name] = value
+                    code, stderr = self.validate_manifest(manifest)
+                    self.assertNotEqual(0, code)
+                    self.assertNotIn("Traceback", stderr)
+                    self.assertIn(name, stderr)
 
 
 class ManifestCrossCheckTests(ValidatorHarness):
