@@ -14,7 +14,7 @@ The design follows a **trait-based provider abstraction** so that consumer code 
 
 | Provider | API Client | Auth Env Vars |
 |----------|-----------|---------------|
-| GitHub | `schematic_schema::github::GitHubClient` | `GITHUB_TOKEN`, then `GH_TOKEN` (`Authorization: Bearer`) |
+| GitHub | `schematic_schema::github::GitHub` | `GITHUB_TOKEN`, then `GH_TOKEN` (`Authorization: Bearer`) |
 | GitLab | `schematic_schema::gitlab::GitLabClient` | `GITLAB_TOKEN`, then `GITLAB_PRIVATE_TOKEN` (`PRIVATE-TOKEN` header) |
 | Gitea | `schematic_schema::gitea::GiteaClient` | `GITEA_TOKEN` (`Authorization: token …`); Codeberg reads `CODEBERG_TOKEN` first |
 | Bitbucket | `schematic_schema::bitbucket::BitbucketClient` | `BITBUCKET_USERNAME` + `BITBUCKET_APP_PASSWORD` (Basic) |
@@ -512,24 +512,24 @@ Each provider module follows the same structure:
 // sniff/lib/src/remote/github.rs (pattern representative of all providers)
 
 use schematic_schema::github::*;
-use schematic_schema::schematic_runtime::{CallOptions, ClientBuilder};
+use schematic_schema::schematic_runtime::CallOptions;
 
 const REPLIES: Replies = Replies::new("GitHub", Unauthorized::Rejected);
 
 pub struct GitHubRemote {
-    client: GitHubClient,
+    client: GitHub,
 }
 
 impl GitHubRemote {
     pub fn new() -> Result<Self, SniffError> {
-        Self::build(GitHub::builder())
+        Self::build(GitHub::new())
     }
 
     pub fn with_base_url(base_url: &str) -> Result<Self, SniffError> {
-        Self::build(GitHub::builder().base_url(base_url))
+        Self::build(GitHub::new().base_url(base_url))
     }
 
-    fn build(builder: ClientBuilder<GitHub>) -> Result<Self, SniffError> {
+    fn build(builder: GitHub) -> Result<Self, SniffError> {
         // A client that cannot be built is `SniffError::RemoteInit`.
         let client = builder.build().map_err(|error| REPLIES.init(&error))?;
         Ok(Self { client })
@@ -588,7 +588,7 @@ four providers; see [Error classification](#error-classification).
 - `has_wiki()` → Read from `GetRepository` response (Gitea `RepositoryInfo` includes `has_wiki`)
 - `list_ci_cd()` → Not currently covered; return empty vec
 - `key_urls()` → Construct from `html_url` pattern
-- **Base URL consideration**: Gitea instances are self-hosted, so the client is built with `Gitea::builder().base_url(..)` to set the correct base URL.
+- **Base URL consideration**: Gitea instances are self-hosted, so the client is created with `Gitea::new().base_url(..)` to set the correct base URL.
 
 #### Bitbucket
 
@@ -877,7 +877,7 @@ shows they exist.
 let (docs, doc) = tokio::join!(listing("docs"), listing("doc"));
 ```
 
-`GitHubClient` and the other clients are cheap to share across concurrent
+`GitHub` and the other clients are cheap to share across concurrent
 sends; each `send` takes `&self`.
 
 ### Rate Limit Awareness
@@ -903,11 +903,11 @@ Gitea (and Forgejo) instances are self-hosted, so the base URL cannot be hardcod
 impl GiteaRemote {
     pub fn with_base_url(base_url: &str) -> Result<Self, SniffError> {
         let normalized_url = normalize_base_url(base_url); // appends `/api/v1`
-        Self::build(Gitea::builder().base_url(&normalized_url), normalized_url)
+        Self::build(Gitea::new().base_url(&normalized_url), normalized_url)
     }
 
     pub fn codeberg() -> Result<Self, SniffError> {
-        let builder = Gitea::builder()
+        let builder = Gitea::new()
             .base_url("https://codeberg.org/api/v1")
             .env_order(["CODEBERG_TOKEN", "GITEA_TOKEN"]);
         Self::build(builder, "https://codeberg.org/api/v1".to_string())
