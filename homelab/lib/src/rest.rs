@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use schematic_schema::schematic_runtime::{
-    ApiError, BuildError, ErrorKind, NoDeclaredError, Outcome, Response, TransportError,
+    ApiError, BuildError, CallError, ErrorKind, NoDeclaredError, TransportError,
 };
 
 /// Bounds establishing a connection to a LAN device that may be asleep.
@@ -47,24 +47,29 @@ pub enum RestError {
         /// The runtime's classification, with the raw body.
         error: ApiError<NoDeclaredError>,
     },
+
+    /// A call failure of a kind the runtime added after this mapping was
+    /// written. `CallError` is `#[non_exhaustive]`, so this arm must exist;
+    /// today every failure maps to one of the variants above.
+    #[error("{0}")]
+    Call(CallError<NoDeclaredError>),
 }
 
-/// Turns a send result into the success value or a [`RestError`].
-pub(crate) fn into_result<T>(
-    sent: Result<Response<T, NoDeclaredError>, TransportError>,
-) -> Result<T, RestError> {
-    let (meta, outcome) = sent?.into_parts();
-    match outcome {
-        Outcome::Success(value) => Ok(value),
-        Outcome::Failure(error) => {
-            let status = meta.status.as_u16();
-            Err(match error.kind {
-                ErrorKind::Undeclared => RestError::Status {
-                    status,
-                    body: String::from_utf8_lossy(&error.body).into_owned(),
-                },
-                _ => RestError::Response { status, error },
-            })
+impl From<CallError<NoDeclaredError>> for RestError {
+    fn from(error: CallError<NoDeclaredError>) -> Self {
+        match error {
+            CallError::Transport(error) => Self::Transport(error),
+            CallError::Api { error, meta } => {
+                let status = meta.status.as_u16();
+                match error.kind {
+                    ErrorKind::Undeclared => Self::Status {
+                        status,
+                        body: String::from_utf8_lossy(&error.body).into_owned(),
+                    },
+                    _ => Self::Response { status, error },
+                }
+            }
+            error => Self::Call(error),
         }
     }
 }

@@ -6,16 +6,12 @@
 //! control key sending, app launch with deep-link, installed apps listing, and
 //! Art Mode control.
 
-use schematic_schema::samsung_smart_tv::{
-    CloseAppRequest, GetAppStatusRequest, GetDeviceInfoRequest, GetServerLogsRequest,
-    InstallAppRequest, LaunchApplicationByIdRequest, LaunchApplicationByNameRequest,
-    SamsungSmartTv, SamsungSmartTvApi,
-};
+use schematic_schema::samsung_smart_tv::SamsungSmartTv;
 use schematic_schema::samsung_smart_tv_remote_ws::{
     ArtModeClient, ArtModeConnectionParams, RemoteControlClient, RemoteControlConnectionParams,
     SamsungSmartTvRemoteWs,
 };
-use schematic_schema::schematic_runtime::{CallOptions, EndpointSpec, NoDeclaredError};
+use schematic_schema::schematic_runtime::{CallError, NoDeclaredError};
 use schematic_schema::ws_shared::{WsClientOptions, WsError};
 
 use crate::rest::{self, RestError};
@@ -72,6 +68,12 @@ pub enum SamsungTvError {
     /// JSON serialization/deserialization error
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+}
+
+impl From<CallError<NoDeclaredError>> for SamsungTvError {
+    fn from(error: CallError<NoDeclaredError>) -> Self {
+        Self::Api(error.into())
+    }
 }
 
 impl From<WsError> for SamsungTvError {
@@ -152,40 +154,31 @@ impl SamsungTv {
         self.ws_port
     }
 
-    async fn send<R>(&self, request: R) -> Result<R::Success, SamsungTvError>
-    where
-        R: EndpointSpec<Api = SamsungSmartTvApi, Failure = NoDeclaredError>,
-    {
-        Ok(rest::into_result(
-            self.rest_client
-                .send(request, &CallOptions::default())
-                .await,
-        )?)
-    }
-
     // ── REST: Device ─────────────────────────────────────────────────
 
     /// Get device information (model, firmware, network details).
     pub async fn get_device_info(&self) -> Result<SamsungDeviceInfoResponse, SamsungTvError> {
-        self.send(GetDeviceInfoRequest {}).await
+        Ok(self.rest_client.get_device_info().await?)
     }
 
     /// Get server logs from the TV.
     pub async fn get_server_logs(&self) -> Result<String, SamsungTvError> {
-        self.send(GetServerLogsRequest {}).await
+        Ok(self.rest_client.get_server_logs().await?)
     }
 
     // ── REST: Apps ───────────────────────────────────────────────────
 
     /// Launch an application by its ID.
     pub async fn launch_app_by_id(&self, app_id: &str) -> Result<(), SamsungTvError> {
-        self.send(LaunchApplicationByIdRequest::new(app_id)).await
+        Ok(self.rest_client.launch_application_by_id(app_id).await?)
     }
 
     /// Launch an application by its name.
     pub async fn launch_app_by_name(&self, app_name: &str) -> Result<(), SamsungTvError> {
-        self.send(LaunchApplicationByNameRequest::new(app_name))
-            .await
+        Ok(self
+            .rest_client
+            .launch_application_by_name(app_name)
+            .await?)
     }
 
     /// Get the running status of an application by its ID.
@@ -193,17 +186,17 @@ impl SamsungTv {
         &self,
         app_id: &str,
     ) -> Result<SamsungAppStatusResponse, SamsungTvError> {
-        self.send(GetAppStatusRequest::new(app_id)).await
+        Ok(self.rest_client.get_app_status(app_id).await?)
     }
 
     /// Close a running application by its ID.
     pub async fn close_app(&self, app_id: &str) -> Result<(), SamsungTvError> {
-        self.send(CloseAppRequest::new(app_id)).await
+        Ok(self.rest_client.close_app(app_id).await?)
     }
 
     /// Install (or reinstall) an application by its ID.
     pub async fn install_app(&self, app_id: &str) -> Result<(), SamsungTvError> {
-        self.send(InstallAppRequest::new(app_id)).await
+        Ok(self.rest_client.install_app(app_id).await?)
     }
 
     // ── WebSocket: Remote Control ────────────────────────────────────
@@ -575,6 +568,30 @@ mod rest_tests {
         let logs = tv_for(&server).get_server_logs().await.expect("logs");
 
         assert_eq!(logs, "line one\nline two\n");
+    }
+
+    #[tokio::test]
+    async fn an_undecodable_success_body_is_a_response_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("not json"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let error = tv_for(&server)
+            .get_device_info()
+            .await
+            .expect_err("bad body fails");
+
+        match error {
+            SamsungTvError::Api(RestError::Response { status, error }) => {
+                assert_eq!(status, 200);
+                assert!(error.is_decode_failure());
+            }
+            other => panic!("expected a decode failure, got {other}"),
+        }
     }
 
     #[tokio::test]

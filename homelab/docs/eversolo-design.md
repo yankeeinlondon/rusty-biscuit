@@ -25,20 +25,7 @@ The `Eversolo` struct wraps the generated `schematic_schema::eversolo::Eversolo`
 ```rust
 // homelab/lib/src/eversolo.rs
 
-use schematic_schema::eversolo::{
-    Eversolo as EversoloRest, EversoloApi,
-    // Request types
-    DeviceGetModelRequest, MusicGetStateRequest, MusicPlayOrPauseRequest,
-    MusicPlayNextRequest, MusicPlayLastRequest, MusicSeekToRequest,
-    MusicGetInputOutputListRequest, MusicSetInputRequest, MusicSetOutputRequest,
-    MusicSetVolumeRequest, MusicSetMuteRequest, PowerGetOptionsRequest,
-    PowerSetOptionRequest, RemoteSendKeyRequest, RemoteInputTextRequest,
-    SystemGetScreenBrightnessRequest, SystemSetScreenBrightnessRequest,
-    SystemGetKnobBrightnessRequest, SystemSetKnobBrightnessRequest,
-    SystemGetVuModeListRequest, SystemSetVuModeRequest,
-    SystemGetSpectrumModeListRequest, SystemSetSpectrumModeRequest,
-    SystemChangeVuDisplayRequest,
-};
+use schematic_schema::eversolo::Eversolo as EversoloRest;
 
 // Re-export response types for consumers
 pub use schematic_definitions::eversolo::*;
@@ -78,7 +65,15 @@ impl Eversolo {
 
 ### Method Groups
 
-Each method sends its request with `self.client.send(request, &CallOptions::default())`; the endpoint fixes the response type. Methods are organized into `impl` blocks by domain for clarity:
+Each method calls the generated client's method for its endpoint, sets any optional values on the returned call, and awaits it; the endpoint fixes the response type, and `?` converts a failed call into `EversoloError`:
+
+```rust
+pub async fn set_volume(&self, level: i64) -> Result<StatusResponse, EversoloError> {
+    Ok(self.client.music_set_volume().volume(level).await?)
+}
+```
+
+Methods are organized into `impl` blocks by domain for clarity:
 
 **Device**
 - `get_model() -> Result<GetModelResponse>` — device identity, firmware, capabilities
@@ -133,6 +128,7 @@ pub enum EversoloError {
 | `Transport` | no reply arrived: connection refused or dropped, TLS failure, timeout | the failure kind and the redacted request URL |
 | `Status` | the device replied with a non-2xx status | `status {code}: {body}` |
 | `Response` | the device replied but the body could not be used, such as a 2xx body that is not the expected JSON | `status {code}: {reason} ({n} body bytes)` |
+| `Call` | a call failure of a kind the runtime adds in a later version; no current failure produces it | the runtime's call error |
 
 For example, a device answering `503 device busy` displays as
 `Eversolo API error: status 503: device busy`. No variant displays request

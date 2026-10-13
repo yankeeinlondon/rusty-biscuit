@@ -2,17 +2,8 @@
 //!
 //! Provides a homelab-native interface over the generated schematic client.
 
-use schematic_schema::eversolo::{
-    DeviceGetModelRequest, Eversolo as EversoloRest, EversoloApi, MusicGetInputOutputListRequest,
-    MusicGetStateRequest, MusicPlayLastRequest, MusicPlayNextRequest, MusicPlayOrPauseRequest,
-    MusicSeekToRequest, MusicSetInputRequest, MusicSetMuteRequest, MusicSetOutputRequest,
-    MusicSetVolumeRequest, PowerGetOptionsRequest, PowerSetOptionRequest, RemoteInputTextRequest,
-    RemoteSendKeyRequest, SystemChangeVuDisplayRequest, SystemGetKnobBrightnessRequest,
-    SystemGetScreenBrightnessRequest, SystemGetSpectrumModeListRequest, SystemGetVuModeListRequest,
-    SystemSetKnobBrightnessRequest, SystemSetScreenBrightnessRequest, SystemSetSpectrumModeRequest,
-    SystemSetVuModeRequest,
-};
-use schematic_schema::schematic_runtime::{CallOptions, EndpointSpec, NoDeclaredError};
+use schematic_schema::eversolo::Eversolo as EversoloRest;
+use schematic_schema::schematic_runtime::{CallError, NoDeclaredError};
 
 use crate::rest::{self, RestError};
 
@@ -31,6 +22,12 @@ pub enum EversoloError {
     /// The client could not be built, or a request failed or was refused.
     #[error("Eversolo API error: {0}")]
     Api(#[from] RestError),
+}
+
+impl From<CallError<NoDeclaredError>> for EversoloError {
+    fn from(error: CallError<NoDeclaredError>) -> Self {
+        Self::Api(error.into())
+    }
 }
 
 /// Eversolo DMP-A8 music streamer client.
@@ -80,162 +77,156 @@ impl Eversolo {
         self.port
     }
 
-    async fn send<R>(&self, request: R) -> Result<R::Success, EversoloError>
-    where
-        R: EndpointSpec<Api = EversoloApi, Failure = NoDeclaredError>,
-    {
-        Ok(rest::into_result(
-            self.client.send(request, &CallOptions::default()).await,
-        )?)
-    }
-
     // ── Device ──────────────────────────────────────────────────────
 
     /// Get device model, firmware, and network information.
     pub async fn get_model(&self) -> Result<GetModelResponse, EversoloError> {
-        self.send(DeviceGetModelRequest {}).await
+        Ok(self.client.device_get_model().await?)
     }
 
     // ── Music Control ───────────────────────────────────────────────
 
     /// Get current playback state, track info, and volume.
     pub async fn get_state(&self) -> Result<GetStateResponse, EversoloError> {
-        self.send(MusicGetStateRequest {}).await
+        Ok(self.client.music_get_state().await?)
     }
 
     /// Toggle play/pause on the current track.
     pub async fn play_or_pause(&self) -> Result<StatusResponse, EversoloError> {
-        self.send(MusicPlayOrPauseRequest {}).await
+        Ok(self.client.music_play_or_pause().await?)
     }
 
     /// Skip to the next track.
     pub async fn play_next(&self) -> Result<StatusResponse, EversoloError> {
-        self.send(MusicPlayNextRequest {}).await
+        Ok(self.client.music_play_next().await?)
     }
 
     /// Go back to the previous track.
     pub async fn play_previous(&self) -> Result<StatusResponse, EversoloError> {
-        self.send(MusicPlayLastRequest {}).await
+        Ok(self.client.music_play_last().await?)
     }
 
     /// Seek to a position in the current track.
     pub async fn seek_to(&self, time_ms: i64) -> Result<StatusResponse, EversoloError> {
-        self.send(MusicSeekToRequest::new().with_time(time_ms))
-            .await
+        Ok(self.client.music_seek_to().time(time_ms).await?)
     }
 
     // ── Audio ───────────────────────────────────────────────────────
 
     /// List available audio inputs and outputs.
     pub async fn get_inputs_outputs(&self) -> Result<InputOutputListResponse, EversoloError> {
-        self.send(MusicGetInputOutputListRequest {}).await
+        Ok(self.client.music_get_input_output_list().await?)
     }
 
     /// Set the active audio input.
     pub async fn set_input(&self, tag: &str) -> Result<InputOutputListResponse, EversoloError> {
-        self.send(MusicSetInputRequest::new().with_tag(tag.to_string()))
-            .await
+        Ok(self.client.music_set_input().tag(tag.to_string()).await?)
     }
 
     /// Set the active audio output.
     pub async fn set_output(&self, tag: &str) -> Result<InputOutputListResponse, EversoloError> {
-        self.send(MusicSetOutputRequest::new().with_tag(tag.to_string()))
-            .await
+        Ok(self.client.music_set_output().tag(tag.to_string()).await?)
     }
 
     /// Set the absolute volume level.
     pub async fn set_volume(&self, level: i64) -> Result<StatusResponse, EversoloError> {
-        self.send(MusicSetVolumeRequest::new().with_volume(level))
-            .await
+        Ok(self.client.music_set_volume().volume(level).await?)
     }
 
     /// Set or clear mute state.
     #[allow(non_snake_case)]
     pub async fn set_mute(&self, muted: bool) -> Result<StatusResponse, EversoloError> {
         let value = if muted { 1 } else { 0 };
-        self.send(MusicSetMuteRequest::new().with_is_mute(value))
-            .await
+        Ok(self.client.music_set_mute().is_mute(value).await?)
     }
 
     // ── Power ───────────────────────────────────────────────────────
 
     /// Get available power options (shutdown, reboot, etc.).
     pub async fn get_power_options(&self) -> Result<PowerOptionsResponse, EversoloError> {
-        self.send(PowerGetOptionsRequest {}).await
+        Ok(self.client.power_get_options().await?)
     }
 
     /// Execute a power action by tag.
     pub async fn set_power_option(&self, tag: &str) -> Result<StatusResponse, EversoloError> {
-        self.send(PowerSetOptionRequest::new().with_tag(tag.to_string()))
-            .await
+        Ok(self.client.power_set_option().tag(tag.to_string()).await?)
     }
 
     // ── Remote ──────────────────────────────────────────────────────
 
     /// Send a remote control key command.
     pub async fn send_key(&self, key: &str) -> Result<StatusResponse, EversoloError> {
-        self.send(RemoteSendKeyRequest::new().with_key(key.to_string()))
-            .await
+        Ok(self.client.remote_send_key().key(key.to_string()).await?)
     }
 
     /// Send text input to the device.
     pub async fn input_text(&self, text: &str) -> Result<StatusResponse, EversoloError> {
-        self.send(RemoteInputTextRequest::new().with_text(text.to_string()))
-            .await
+        Ok(self
+            .client
+            .remote_input_text()
+            .text(text.to_string())
+            .await?)
     }
 
     // ── Display ─────────────────────────────────────────────────────
 
     /// Get current screen brightness level.
     pub async fn get_screen_brightness(&self) -> Result<BrightnessResponse, EversoloError> {
-        self.send(SystemGetScreenBrightnessRequest {}).await
+        Ok(self.client.system_get_screen_brightness().await?)
     }
 
     /// Set screen brightness level.
     pub async fn set_screen_brightness(&self, index: i64) -> Result<StatusResponse, EversoloError> {
-        self.send(SystemSetScreenBrightnessRequest::new().with_index(index))
-            .await
+        Ok(self
+            .client
+            .system_set_screen_brightness()
+            .index(index)
+            .await?)
     }
 
     /// Get current knob LED brightness level.
     pub async fn get_knob_brightness(&self) -> Result<BrightnessResponse, EversoloError> {
-        self.send(SystemGetKnobBrightnessRequest {}).await
+        Ok(self.client.system_get_knob_brightness().await?)
     }
 
     /// Set knob LED brightness level.
     pub async fn set_knob_brightness(&self, index: i64) -> Result<StatusResponse, EversoloError> {
-        self.send(SystemSetKnobBrightnessRequest::new().with_index(index))
-            .await
+        Ok(self
+            .client
+            .system_set_knob_brightness()
+            .index(index)
+            .await?)
     }
 
     /// List available VU meter display modes.
     pub async fn get_vu_modes(&self) -> Result<DisplayModeListResponse, EversoloError> {
-        self.send(SystemGetVuModeListRequest {}).await
+        Ok(self.client.system_get_vu_mode_list().await?)
     }
 
     /// Set the VU meter display mode.
     pub async fn set_vu_mode(&self, index: i64) -> Result<StatusResponse, EversoloError> {
-        self.send(SystemSetVuModeRequest::new().with_index(index))
-            .await
+        Ok(self.client.system_set_vu_mode().index(index).await?)
     }
 
     /// List available spectrum display modes.
     pub async fn get_spectrum_modes(&self) -> Result<DisplayModeListResponse, EversoloError> {
-        self.send(SystemGetSpectrumModeListRequest {}).await
+        Ok(self.client.system_get_spectrum_mode_list().await?)
     }
 
     /// Set the spectrum display mode.
     #[allow(non_snake_case)]
     pub async fn set_spectrum_mode(&self, index: i64) -> Result<StatusResponse, EversoloError> {
-        self.send(SystemSetSpectrumModeRequest::new().with_index(index))
-            .await
+        Ok(self.client.system_set_spectrum_mode().index(index).await?)
     }
 
     /// Toggle VU display open/close.
     #[allow(non_snake_case)]
     pub async fn change_vu_display(&self, open_type: i64) -> Result<StatusResponse, EversoloError> {
-        self.send(SystemChangeVuDisplayRequest::new().with_open_type(open_type))
-            .await
+        Ok(self
+            .client
+            .system_change_vu_display()
+            .open_type(open_type)
+            .await?)
     }
 }
 
