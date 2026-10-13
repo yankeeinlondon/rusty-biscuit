@@ -162,7 +162,7 @@ impl FormFile {
 /// ```text
 /// use schematic_schema::shared::Paginated;
 ///
-/// fn fetch_all_pages<R: Paginated>(request: R) -> Vec<R::Response>
+/// fn fetch_all_pages<R: Paginated>(request: R) -> Vec<R::Success>
 /// where
 ///     R: EndpointSpec,
 /// {
