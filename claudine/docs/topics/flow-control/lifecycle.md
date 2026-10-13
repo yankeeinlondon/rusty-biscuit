@@ -73,12 +73,12 @@ it always was. See
 
 ## Binding Time: Early vs Late
 
-Every frontmatter property of a lifecycle event interpolates **when that event fires**, not during the initial compose. This is what lets a lifecycle message report the state at the moment it runs — including the late-binding roots (`err`, `timing`, `current`, `current_env`) that do not exist at compose time. So `failure.message: "❌️  {{err.code}}"` renders the real error's code, and a `failure` stack `message: "❌️  {{err.code}}"` does too.
+Every frontmatter property of a lifecycle event interpolates **when that event fires**, not during the initial compose. This is what lets a lifecycle message report the state at the moment it runs — including the late-binding roots (`err`, `timing`, `current`) that do not exist at compose time. So `failure.message: "❌️  {{err.code}}"` renders the real error's code, and a `failure` stack `message: "❌️  {{err.code}}"` does too.
 
 The variables a lifecycle `{{ … }}` span can read fall into two groups:
 
-- **Early-binding** (resolvable before the run): `doc.*` (frontmatter), `ctx.*`, `env.*`, and read-side functions (`parent_dir`, `dirname`, `frontmatter`, `file_exists`, …).
-- **Late-binding** (only exists at event-time): `err` (in `blocked`/`failure`/optional-error `finalize`), `timing`, `group` (inside a sequence group), `current`, `current_env`.
+- **Early-binding** (resolvable before the run): `fm.*` (frontmatter), `ctx.*`, `env.*`, and read-side functions (`parent_dir`, `dirname`, `frontmatter`, `file_exists`, …).
+- **Late-binding** (only exists at event-time): `err` (in `blocked`/`failure`/optional-error `finalize`), `timing`, `group` (inside a sequence group), `current`.
 
 `err`, `timing`, and `group` are Claudine's lifecycle globals. Which of them an
 event can read is fixed per event (and per sequence task stack), and both the
@@ -95,7 +95,7 @@ prepare-time check and event-time evaluation consult that one declaration:
 Reading an unavailable global is an error that names the global and the
 reason (`claudine.event-has-no-error`, `claudine.outside-group`,
 `claudine.preflight-unavailable`). It never falls back to a document property
-of the same name; write `doc.err` or `doc.group` to read one of those.
+of the same name; write `fm.err` or `fm.group` to read one of those.
 
 Two consequences are worth calling out. In `finalize` and a task's
 `teardown:`, `err` is always readable: it is an explicit `null` when the run
@@ -119,7 +119,7 @@ Lifecycle strings keep their authored `{{{ … }}}` spans through the prepare st
 
 ### The `shell` exception
 
-`shell` commands (positional `shell: "…"` and key/value `command:`) are the single early-binding exception, and so are the commands inside a `set` value written as a whole-value `$( … )` (see [Reading a Command's Result](#reading-a-commands-result)). They are approved during pre-flight, so they are resolved **then**, against early-binding surfaces only (`doc.*`, `ctx.*`, `env.*`, document properties, read-side functions). The approved command is byte-identical to the executed command, including a sequence task's `setup:`/`teardown:` commands, which run the bytes sequence approval fixed. A late-binding reference (`err`, `timing`, `group`, `current`, `current_env`) inside a shell command is rejected at prepare time with a typed error naming the property path — even in a branch that would never run — because those values do not exist yet at pre-flight. `doc.group` still reads the document.
+`shell` commands (positional `shell: "…"` and key/value `command:`) are the single early-binding exception, and so are the commands inside a `set` value written as a whole-value `$( … )` (see [Reading a Command's Result](#reading-a-commands-result)). They are approved during pre-flight, so they are resolved **then**, against early-binding surfaces only (`fm.*`, `ctx.*`, `env.*`, document properties, read-side functions). The approved command is byte-identical to the executed command, including a sequence task's `setup:`/`teardown:` commands, which run the bytes sequence approval fixed. A late-binding reference (`err`, `timing`, `group`, `current`) inside a shell command is rejected at prepare time with a typed error naming the property path — even in a branch that would never run — because those values do not exist yet at pre-flight. `fm.group` still reads the document.
 
 Lifecycle YAML accepts only `set: {property: value}`; the positional
 `set(key, value)` spelling belongs to the separate capability and loop-control
@@ -429,20 +429,19 @@ start:
 
 ## Lifecycle Context
 
-Stack expressions have access to four late-binding roots in addition to frontmatter, `ctx.*`, `env.*`, and `doc.*`:
+Stack expressions have access to three late-binding roots in addition to frontmatter, `ctx.*`, `env.*`, and `fm.*`:
 
 | Root | Available in | Fields |
 |------|--------------|--------|
 | `err` | `blocked`, `failure`, `finalize` | faceted fields below (`code`, `category`, `disposition`, `origin`, `detail.*`, plus promoted conveniences) |
 | `timing` | every event | `document_ms`, `total_ms`, `step_ms` (all optional) |
 | `current` | every event | `current.<key>` for every `ctx.<key>`, observed once per event: every read in one event's notification fields and stack agrees |
-| `current_env` | every event | `current_env.<KEY>` for every `env.<KEY>`, reread from the live process environment when the reference is reached |
 
-`err` and `timing` are Claudine globals. `current` and `current_env` are
-Darkmatter **reserved roots**: Claudine supplies the invocation's refresh
+`err` and `timing` are Claudine globals. `current` is a Darkmatter
+**reserved root**: Claudine supplies the invocation's refresh
 capability, and a key that capability does not hold renders `null` with a
 `PartialRuntimeCapture` diagnostic rather than probing the host. Lazy is
-bounded by the request: Repository metadata and topology (`repo`, `repo_root`, `packages`, `area`, and the rest of the repository keys) are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does; only mutable Git and filesystem facts (`branch`, `recent_commits`, `dirty_files`) refresh from one event to the next, and `current_env.*` is reread at reference time. A gate that asks about now — "is anything staged yet?" — reads `current`; `ctx` holds what this composition run observed when it started. See
+bounded by the request: Repository metadata and topology (`repo`, `repo_root`, `packages`, `area`, and the rest of the repository keys) are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does; only mutable Git and filesystem facts (`branch`, `recent_commits`, `dirty_files`) refresh from one event to the next. A gate that asks about now — "is anything staged yet?" — reads `current`; `ctx` holds what this composition run observed when it started. See
 [Context Variables — Binding time](../state-management/context-variables.md#binding-time-eager-ctx-lazy-current).
 
 `err` is only meaningful in events that can carry an error. Using bare `err` (or `err.*`) in `initialize`, `start`, `success`, or `loop` is rejected at parse time.
@@ -576,15 +575,15 @@ The original `err` fields remain available for backward compatibility but are **
 | `err.kind` | string | Deprecated alias of `err.category`. Mirrors the category for a classifiable error; falls back to the internal Rust error *type* name (`ClaudineError`, `HarnessError`, `CompositionError`) only for a facet-less action failure. |
 | `err.variant` | string | Deprecated alias of `err.code`. Mirrors the code for a classifiable error; falls back to the internal Rust enum *arm* name (`Io`, `ShellCommandDenied`, `SchemaLoad`) only for a facet-less action failure. |
 
-### `doc.err` Escape Hatch
+### `fm.err` Escape Hatch
 
-A frontmatter property literally named `err` is reached through the `doc` namespace. In every event a bare `err` is the lifecycle global — the failure, `null`, or unavailable — so `doc.err` is the only way to read the property. The same holds for `group` and `doc.group`.
+A frontmatter property literally named `err` is reached through the `fm` namespace. In every event a bare `err` is the lifecycle global — the failure, `null`, or unavailable — so `fm.err` is the only way to read the property. The same holds for `timing` and `fm.timing`, `group` and `fm.group`, and the fixed roots `ctx`, `env`, and `current` (`fm.ctx`, `fm.env`, `fm.current`). `doc` is not reserved: a property named `doc` is read as bare `doc`.
 
 ```yaml
 err: "user-configured reason"
 start:
   stack:
-    - action: { stderr: "{{doc.err}}" }
+    - action: { stderr: "{{fm.err}}" }
 ```
 
 ## Loop Gate Concerns
@@ -929,7 +928,7 @@ This also means these effects cannot write a template into a file. An authored `
 
 ### `LifecycleErrNotAvailable`
 
-`err` is read in an event that never carries an error (`initialize`, `start`, `success`, `loop`). Darkmatter's passive validation checks every `{{ … }}` span in communication and action strings and every `when:` expression against the event's declared globals — every branch, without evaluating anything — and the document fails preparation before any event runs. The typed Darkmatter error is the diagnostic's source. `timing`, `current`, and `current_env` are readable in every event; `doc.err` reads the document.
+`err` is read in an event that never carries an error (`initialize`, `start`, `success`, `loop`). Darkmatter's passive validation checks every `{{ … }}` span in communication and action strings and every `when:` expression against the event's declared globals — every branch, without evaluating anything — and the document fails preparation before any event runs. The typed Darkmatter error is the diagnostic's source. `timing` and `current` are readable in every event; `fm.err` reads the document.
 
 ```yaml
 start:

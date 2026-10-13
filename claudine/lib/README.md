@@ -132,6 +132,8 @@ Sub-modules:
 
 Shell environment variables are also supported via `{{env.VAR_NAME}}` with optional defaults: `{{env.MY_VAR || "fallback"}}`. The legacy single-pipe `|` form is no longer supported.
 
+Every event, OS, hardware, Git, and project variable can also be read through the hook-only `hook` root, which names the normalized payload explicitly: `{{hook.tool_name}}` is `{{tool_name}}`, and bare `{{hook}}` renders the whole payload as JSON (without the environment). The same root works in `when` conditions and expression matchers. It replaces the former `doc` payload root, which was renamed with no alias.
+
 Unknown placeholders are left as-is. `None` values render as empty strings.
 
 ### Configuration (`config`)

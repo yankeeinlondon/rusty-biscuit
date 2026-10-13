@@ -924,6 +924,24 @@ Template variables available in `Speak` messages, `FireAndForget` args, and `Cal
 | `{{project.monorepo_orchestrators}}` | `meta.env.repo.monorepo_orchestrators` | `"nx"` |
 | `{{project.monorepo_tool}}` | `meta.env.repo.monorepo_standard` (deprecated alias) | `"cargo-workspace"` |
 
+#### The `hook` Root
+
+Every path above can also be written through the `hook` root, which names the
+normalized payload explicitly: `{{hook.tool_name}}` is `{{tool_name}}`, and
+`{{hook.git.branch}}` is `{{git.branch}}`. Bare `{{hook}}` renders the whole
+payload as JSON. The same root works in `when` conditions and expression
+matchers (`hook.tool_name == 'Bash'`).
+
+- A missing `hook.<path>` is absent and never falls back to an unprefixed field.
+- `hook` excludes the environment (`hook.env.HOME` is absent); use `env.*`.
+- `hook` is a hook-only root. Hook expressions have no frontmatter, so the
+  Darkmatter document root `fm` does not apply.
+
+The root was previously spelled `doc`. It was renamed with no alias: a
+`{{doc.tool_name}}` template is now left as literal text and a
+`doc.tool_name == 'Bash'` condition is false. See
+[Configuring Actions § Migrating from the `doc` root](configuring-actions.md#migrating-from-the-doc-root).
+
 **Resolution rules:**
 
 1. Unknown placeholders are left as-is in the output string (no error).

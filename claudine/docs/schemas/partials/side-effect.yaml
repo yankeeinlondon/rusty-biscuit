@@ -3,7 +3,7 @@ kind: schema
 types:
     # Lifecycle side-effects in object notation
     side_effect:
-        set: object -> Sets a top-level key in the `doc` namespace; no external mutation
+        set: object -> Sets a top-level key in the `fm` namespace; no external mutation
         # Sets a frontmatter property on a local file. Only files in the repo (or
         # file tree if not in a repo) are accessible. Fallible.
         set_frontmatter:
