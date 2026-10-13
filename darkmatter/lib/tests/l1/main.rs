@@ -52,6 +52,7 @@ mod clean_counters;
 mod code_link;
 mod compose_phase6;
 mod compose_reuse_phase5;
+mod content_policy_compose_contract;
 mod content_policy_disk_baseline;
 mod content_policy_embedded_baseline;
 mod content_policy_editor_schema;

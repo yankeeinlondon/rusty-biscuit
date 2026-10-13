@@ -19,7 +19,8 @@ use darkmatter::markdown::schemas::{
 };
 
 use crate::content_policy_fixtures::{
-    BASELINE_DECLARATION_LINE, DECLARATIONS, MIXED_POLICY_FRONTMATTER, Verdict, render,
+    ACCEPTANCE_REJECTIONS, BASELINE_DECLARATION_LINE, DECLARATIONS, MIXED_POLICY_FRONTMATTER, Verdict,
+    declaration, render,
 };
 use crate::request_support::context_at;
 
@@ -215,14 +216,42 @@ fn the_typed_baseline_carries_the_policy_definitions() {
 }
 
 /// The baseline is prepared and lowered once per process: every accessor and
-/// builder shares one allocation.
+/// builder shares one allocation. Two requests rooted outside the checkout,
+/// each holding only its test document, accept the authoring example and
+/// reject the specification's invalid policies at their instance paths; the
+/// second load reuses the first's resolved baseline.
 #[test]
 fn the_embedded_baseline_is_prepared_once_per_process() {
+    let checkout = biscuit_test_harness::manifest_dir!()
+        .ancestors()
+        .find(|ancestor| ancestor.join(".git").exists())
+        .map(|checkout| biscuit_file::canonicalize_simplified(checkout).expect("canonical checkout"));
     let first = darkmatter_base_json_schema_ref();
-    let (_dir, root) = temp_root();
-    let api = embedded_api(&root);
-    assert!(validate(&api, &root, MIXED_POLICY_FRONTMATTER).valid);
-    assert!(std::ptr::eq(first, darkmatter_base_json_schema_ref()));
+
+    for _load in 0..2 {
+        let (_dir, root) = temp_root();
+        if let Some(checkout) = &checkout {
+            assert!(!root.starts_with(checkout), "{} is inside {}", root.display(), checkout.display());
+        }
+        let api = embedded_api(&root);
+        let mixed = validate(&api, &root, MIXED_POLICY_FRONTMATTER);
+        assert!(mixed.valid, "{:#?}", mixed.problems);
+        for name in ACCEPTANCE_REJECTIONS {
+            let case = declaration(name);
+            let rendered = render(case.declaration).remove(0);
+            let report = validate(&api, &root, &rendered.frontmatter);
+            let paths: Vec<_> = report.problems.iter().map(|problem| problem.path.as_str()).collect();
+            let expected: Vec<_> = case.problems.iter().map(|problem| problem.path).collect();
+            assert!(!report.valid, "{name}");
+            assert_eq!(paths, expected, "{name}");
+        }
+        let entries: Vec<_> = std::fs::read_dir(&root)
+            .expect("list the request root")
+            .map(|entry| entry.expect("entry").file_name())
+            .collect();
+        assert_eq!(entries, ["doc.md"], "only the test document exists");
+        assert!(std::ptr::eq(first, darkmatter_base_json_schema_ref()));
+    }
     assert_eq!(darkmatter_base_schema(), darkmatter_base_schema());
 }
 

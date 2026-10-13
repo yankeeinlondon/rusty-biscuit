@@ -217,6 +217,55 @@ pub const DECLARATIONS: &[DeclarationCase] = &[
         Declaration::List(&["\" ValidFor(3mo)\""]),
         ITEM_0,
     ),
+    both_reject("malformed_date", Declaration::List(&["\"ValidUntil(2027-1-1)\""]), ITEM_0),
+    // ── both reject: `FileChanged` grammar ──
+    both_reject(
+        "file_changed_without_fingerprint",
+        Declaration::List(&["\"FileChanged(src/config.rs)\""]),
+        ITEM_0,
+    ),
+    both_reject(
+        "file_changed_comma_in_path",
+        Declaration::List(&["\"FileChanged(src,config.rs, @fp)\""]),
+        ITEM_0,
+    ),
+    both_reject(
+        "file_changed_backslash_in_path",
+        Declaration::List(&["'FileChanged(src\\config.rs, @fp)'"]),
+        ITEM_0,
+    ),
+    both_reject(
+        "file_changed_leading_space_is_not_trimmed",
+        Declaration::List(&["\"FileChanged( src/a.rs, @fp)\""]),
+        ITEM_0,
+    ),
+    both_reject(
+        "file_changed_trailing_space_is_not_trimmed",
+        Declaration::List(&["\"FileChanged(src/a.rs , @fp)\""]),
+        ITEM_0,
+    ),
+    both_reject(
+        "file_changed_absolute_path",
+        Declaration::List(&["\"FileChanged(/etc/hosts, @fp)\""]),
+        ITEM_0,
+    ),
+    both_reject("file_changed_home_prefix", Declaration::List(&["\"FileChanged(~/x, @fp)\""]), ITEM_0),
+    both_reject("file_changed_at_prefix", Declaration::List(&["\"FileChanged(@x, @fp)\""]), ITEM_0),
+    both_reject(
+        "file_changed_percent_prefix",
+        Declaration::List(&["\"FileChanged(%x, @fp)\""]),
+        ITEM_0,
+    ),
+    both_reject(
+        "file_changed_leading_template",
+        Declaration::List(&["\"FileChanged({{HOME}}/x, @fp)\""]),
+        ITEM_0,
+    ),
+    both_reject(
+        "file_changed_nested_fingerprint_property",
+        Declaration::List(&["\"FileChanged(src/config.rs, @a.b)\""]),
+        ITEM_0,
+    ),
     // ── both reject: long-form entries ──
     both_reject(
         "unknown_action",
@@ -230,6 +279,21 @@ pub const DECLARATIONS: &[DeclarationCase] = &[
     ),
     both_reject("missing_rule", Declaration::List(&["{action: archive}"]), ITEM_0),
     both_reject("null_rule", Declaration::List(&["{rule: null, action: archive}"]), RULE),
+    both_reject(
+        "missing_rule_after_a_valid_entry",
+        Declaration::List(&["\"ValidFor(3mo)\"", "{action: archive}"]),
+        ITEM_1,
+    ),
+    both_reject(
+        "null_rule_after_a_valid_entry",
+        Declaration::List(&["\"ValidFor(3mo)\"", "{rule: null, action: archive}"]),
+        &[problem("/content_policy/1/rule", "invalid", Anchor::Field(1, "rule"))],
+    ),
+    both_reject(
+        "capitalized_action",
+        Declaration::List(&["{rule: TimeSensitive, action: Archive}"]),
+        ACTION,
+    ),
     both_reject(
         "null_action",
         Declaration::List(&["{rule: \"ValidFor(3mo)\", action: null}"]),
@@ -328,6 +392,31 @@ pub const DECLARATIONS: &[DeclarationCase] = &[
     limitation("whole_list_null", Declaration::Whole("null")),
     limitation("whole_list_empty_value", Declaration::Whole("")),
 ];
+
+/// The [`DECLARATIONS`] rows the specification names as rejections every
+/// entry point must report: an unknown rule, an unknown action, an empty
+/// list, a value that is not a list, and a long-form entry without `rule` or
+/// with `rule: null`.
+pub const ACCEPTANCE_REJECTIONS: [&str; 6] = [
+    "duration_rule_name",
+    "unknown_action",
+    "empty_list",
+    "whole_string",
+    "missing_rule",
+    "null_rule",
+];
+
+/// The [`DECLARATIONS`] row called `name`.
+///
+/// ## Panics
+///
+/// When no row has that name.
+pub fn declaration(name: &str) -> &'static DeclarationCase {
+    DECLARATIONS
+        .iter()
+        .find(|case| case.name == name)
+        .unwrap_or_else(|| panic!("no declaration case `{name}`"))
+}
 
 /// A declaration written into frontmatter, with the authored start of every
 /// node an [`Anchor`] can name. Lines count the whole document (the opening
@@ -894,6 +983,20 @@ pub const SCHEMA_MUTATIONS: &[SchemaMutation] = &[
         "duplicate definition",
         Policy,
         Edit::Append("  long_form: string\n"),
+        PrepareFails,
+    ),
+    mutation(
+        "types.long_form",
+        "malformed field definition",
+        Policy,
+        Edit::Span(LONG_FORM, "  policy:\n", "  long_form:\n    rule: \"short_form(required\"\n    action: \"enum(refresh, archive, remove; required)\"\n"),
+        PrepareFails,
+    ),
+    mutation(
+        "types.long_form",
+        "invalid YAML",
+        Policy,
+        Edit::Span(LONG_FORM, "  policy:\n", "  long_form:\n    rule: [short_form\n"),
         PrepareFails,
     ),
     // ── policy `types.policy` ──
