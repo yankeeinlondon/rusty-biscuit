@@ -48,6 +48,32 @@ hold the rest:
   with `GIT_TRACE=<file>` on the child, which timestamps every process. Found
   2026-10-05: `wt list`'s refresh worker started 14 git processes per fetch
   and missed its 3 s wait on `windows-latest`.
+- **Every fresh file a fixture writes costs milliseconds, and reading it
+  back costs more.** On `build-win-native` (2026-10-12), libgit2 writing a
+  ~400-file fixture as loose objects took about 1.9 s, and `Index::add_all`
+  over the same freshly written working tree took 1.2 s against 7 ms on
+  macOS, consistent with an on-access scan of each newly created file.
+  For a `git2` fixture, add a mempack backend
+  (`odb.add_new_mempack_backend(1000)`), `dump` it once into
+  `odb.packwriter()` at the end, and reopen the repository; stage only the
+  paths a history step changed, and write the index and branch once.
+  Sniff's `build_large_monorepo` went from 6.5 s to 2.1 s this way with
+  identical commit IDs.
+- **`git` on `PATH` is a launcher that starts a second process.** Git for
+  Windows puts `<top>\cmd\git.exe` (or `<top>\bin\git.exe`) on `PATH`; it
+  is `compat/win32/git-wrapper.c`, which sets `MSYSTEM`, `PLINK_PROTOCOL`,
+  `HOME` (when unset), and a `PATH` prefix of `<top>\mingw64\bin;<top>\usr\bin;%HOME%\bin;`,
+  then starts `<top>\mingw64\bin\git.exe` and waits. On `build-win-native`
+  (2026-10-12) 100 × `git --version` took 2.6–2.8 s through the launcher and
+  1.6 s calling the real binary. The real `git.exe` sets the same variables
+  itself when `MSYSTEM` is unset, but puts `%HOME%\bin` *before* Git's own
+  directories, so calling it bare is not quite equivalent; setting the four
+  variables the launcher's way is (the environment a `!` alias sees was
+  byte-identical). `worktree::git::command()` does that, resolving the layout
+  once per process, and falls back to plain `git` for any other layout or a
+  `<top>\etc\git-bash.config`. Killing the launcher does not kill the git
+  behind it, so a direct child also makes `Child::kill` mean what it says.
+  `where.exe git` lists both paths; the first is the launcher.
 - **A refused loopback connection is slow.** Connecting to a closed
   `127.0.0.1` port fails in milliseconds on macOS and Linux, but native
   Windows retries the SYN and reports the refusal after about 2 s. A test
@@ -262,6 +288,13 @@ is standing in (`worktree/fixes/2026-09-24-ux-improvements`).
   `ping` itself with `current_dir` set and null stdio
   (`worktree/lib/src/remove/mod.rs`, `worktree/cli/tests/powershell_wrapper_exec.rs`,
   2026-09-24).
+- **The holder takes its directory handle after `spawn` returns.** A child
+  opens its working-directory handle while it starts, after `CreateProcess`
+  has returned, so a usage query made right after `spawn` can find nothing
+  under load (green alone, red in a parallel run, 2026-10-12). Pipe the
+  holder's stdout and read its first byte before querying: by then it runs
+  its own code (`remove::usage::tests::a_real_query_names_a_process_working_in_the_checkout`).
+  On Unix the directory is set before `spawn` returns.
 - **A directory rename denied by use looks like a permission error.**
   Measured 2026-10-11 on ReFS `B:` and NTFS `C:` with
   `SetFileInformationByHandle(FileRenameInfo, ReplaceIfExists = FALSE)`.
@@ -337,6 +370,27 @@ Measured 2026-10-12 with `wt remove`'s own adapter
 - **Overlapped reads belong to the thread that issued them.** Windows cancels
   a thread's outstanding I/O when that thread exits, so issue each read on
   the thread that waits for it.
+- **A watcher must never open what it watches, not even to stat it.** The
+  adapter once called `std::fs::symlink_metadata` on each created or modified
+  entry to learn whether it was a directory. That open, inside the tree,
+  made a concurrent directory rename fail with `ERROR_ACCESS_DENIED` (5): the
+  rename-time rule above ("an open file anywhere in the subtree") applies to
+  a handle that lives for half a millisecond, too. Measured 2026-10-12 on
+  `build-win-native`: 3 of 300 write-then-rename iterations failed under a
+  parallel `worktree` run, 0 of 300 with no watch running, and in all three
+  the watcher's stat of the just-written file overlapped the rename call; a
+  file-side holder query (below) found no other process. Learn the type
+  from the notification instead: `ReadDirectoryChangesExW` with
+  `ReadDirectoryNotifyExtendedInformation` returns
+  `FILE_NOTIFY_EXTENDED_INFORMATION`, whose `FileAttributes` carries
+  `FILE_ATTRIBUTE_DIRECTORY`.
+- **ReFS refuses the extended notification format.** On `build-win-native`'s
+  `B:` Dev Drive, `ReadDirectoryChangesExW(…,
+  ReadDirectoryNotifyExtendedInformation)` fails at once with
+  `ERROR_INVALID_FUNCTION` (1) at any buffer size, while the plain class
+  (`ReadDirectoryNotifyInformation`) is accepted; NTFS `C:` accepts both
+  (2026-10-12). A watcher that wants entry types therefore has none on
+  ReFS, and must say "unknown" rather than open the entry.
 
 ## The `windows-latest` leg
 
@@ -453,6 +507,25 @@ Simulate Medium integrity with a filtered token, or use a desktop session.
   `filesystem::query` case-sensitivity test fails, rather than skips, where it
   cannot.
 
+## Reading another process's loaded modules
+
+Measured 2026-10-12 on `build-win-native` (130 processes, 5,300 modules):
+
+- **`GetModuleFileNameExW` costs about 130 µs per module**, because it walks
+  the target's loader list from its head on every call: 700 ms for one pass
+  over every process. Reading the list once (`NtQueryInformationProcess`
+  for the PEB, then `PEB.Ldr` → `InMemoryOrderModuleList` → each entry's
+  `FullDllName`, all `winternl.h` fields) returns the same strings in about
+  70 ms. A 64-bit reader sees only a WOW64 process's 64-bit list.
+- **The kernel's mapped-file name is not the loaded path.**
+  `GetMappedFileNameW` is fast, but an image section is shared per file, so
+  for a hard-linked DLL or EXE it names whichever link was mapped first,
+  possibly outside the directory the process loaded it from. A prefilter on
+  that name missed a child whose executable was a hard link of the test
+  binary (`sniff` `win32_tests::live::a_controlled_child_is_found_by_its_loaded_executable`).
+  Also, `\Device\…` is not absolute to `Path::is_absolute`; spell it
+  `\\?\GLOBALROOT\Device\…` before comparing.
+
 ## Asking which processes have a path open
 
 Measured 2026-10-06 on `BUILD_WIN`. This is the safe alternative to resolving
@@ -502,7 +575,7 @@ which processes hold it.
   It has no directory or long-path support, it is slower per path, and a
   missing path returns success with an empty list.
 
-### Transient system holders refuse `wt remove`
+### Transient system holders and `wt remove`
 
 Observed 2026-10-12 on `BUILD_WIN_NATIVE` while running the `worktree-cli`
 L1 suite through `cross-check`:
@@ -516,9 +589,41 @@ L1 suite through `cross-check`:
 - It is intermittent: 2 failures in about 300 lifecycle runs that day, none in
   14 immediate reruns. Any test that writes a file and then runs `wt remove`
   on Windows can hit it, and so can a user.
-- Do not chase it with retries, `#[cfg]` skips, or a slow marker. The policy
-  for transient OS holders is a product decision about the usage check, not a
-  test fix.
+- **It is frequent; what is rare is a query landing inside a hold.**
+  Measured 2026-10-13 during full parallel `worktree-cli` runs: of fresh files
+  written under `%TEMP%`, `SearchProtocolHost.exe` opened 40 of 216 in one run
+  and 112 of 216 in another, first seen between 47 ms and 1.34 s after
+  creation; each hold is brief. Setting `FILE_ATTRIBUTE_NOT_CONTENT_INDEXED`
+  on the fixture root (`attrib +I`) did not help: new files inherited it,
+  and 48 of 216 were still opened. A `wt remove` whose usage query runs
+  within about a second of a fixture writing a file is exposed; making a
+  fixture faster moves the query closer to that window.
+- `cross-check --os windows` runs the suite from an extracted nextest archive
+  under `%TEMP%`, so even paths beside the test binary are in `%TEMP%` there.
+- **Each hold is a few milliseconds.** Measured 2026-10-13 on
+  `BUILD_WIN_NATIVE` with a probe that kept a `FILE_READ_ATTRIBUTES` handle on
+  each fresh `%TEMP%` file and polled `FileProcessIdsUsingFileInformation`
+  (about 3 ms per call, serialized across threads): Search opened 253 of
+  3,200 files, first 50 ms to 1.04 s after creation; every hold was seen in
+  exactly one poll and gone by the next, 9.5–17 ms at 15 ms resolution
+  (≤ 66 ms at coarser resolution). Under a full `worktree-cli` run Search
+  backs off: 3 of 4 loaded probes saw no hold at all. The holder is the
+  session-0 `C:\WINDOWS\System32\SearchProtocolHost.exe` (Sniff reports the
+  image path even as a non-elevated SSH user).
+- **`wt remove` rechecks once for it** (author decision 2026-10-12): when
+  every holder is `SearchProtocolHost.exe`, `SearchFilterHost.exe`, or
+  `SearchIndexer.exe` by full image path in `GetSystemDirectoryW`'s directory,
+  it waits 500 ms and queries exactly once more; the directory comes back as
+  `C:\WINDOWS\system32` or `C:\Windows\System32`, so compare
+  case-insensitively. Any other holder still refuses at once. See the
+  worktree skill's `lifecycle.md`. Do not add test retries, `#[cfg]` skips,
+  or slow markers for this holder; a refusal that names it after the recheck
+  is a new finding.
+- Before blaming such a holder for a rename that fails with 5, rule out the
+  process itself. The file-side query never lists the caller's own PID, so an
+  empty holder list right after the failure points at an in-process handle
+  (see the watcher entry under
+  [Directory change notifications](#directory-change-notifications)).
 
 ## COM lifetime and cpal
 
