@@ -653,7 +653,7 @@ impl schematic_runtime::EndpointSpec for ListRunningModelsNativeRequest {
 }
 /// A call to the `Generate` endpoint, returned by [`OllamaNative::generate`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GenerateNativeCall<'a>(
@@ -683,7 +683,9 @@ impl<'a> GenerateNativeCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -702,7 +704,7 @@ impl<'a> ::core::future::IntoFuture for GenerateNativeCall<'a> {
 }
 /// A call to the `Chat` endpoint, returned by [`OllamaNative::chat`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ChatNativeCall<'a>(
@@ -732,7 +734,9 @@ impl<'a> ChatNativeCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -751,7 +755,7 @@ impl<'a> ::core::future::IntoFuture for ChatNativeCall<'a> {
 }
 /// A call to the `Embeddings` endpoint, returned by [`OllamaNative::embeddings`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct EmbeddingsNativeCall<'a>(
@@ -781,7 +785,9 @@ impl<'a> EmbeddingsNativeCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -800,7 +806,7 @@ impl<'a> ::core::future::IntoFuture for EmbeddingsNativeCall<'a> {
 }
 /// A call to the `ListModels` endpoint, returned by [`OllamaNative::list_models`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListModelsNativeCall<'a>(
@@ -830,7 +836,9 @@ impl<'a> ListModelsNativeCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -849,7 +857,7 @@ impl<'a> ::core::future::IntoFuture for ListModelsNativeCall<'a> {
 }
 /// A call to the `ShowModel` endpoint, returned by [`OllamaNative::show_model`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ShowModelNativeCall<'a>(
@@ -879,7 +887,9 @@ impl<'a> ShowModelNativeCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -898,7 +908,7 @@ impl<'a> ::core::future::IntoFuture for ShowModelNativeCall<'a> {
 }
 /// A call to the `PullModel` endpoint, returned by [`OllamaNative::pull_model`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct PullModelNativeCall<'a>(
@@ -928,7 +938,9 @@ impl<'a> PullModelNativeCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -947,7 +959,7 @@ impl<'a> ::core::future::IntoFuture for PullModelNativeCall<'a> {
 }
 /// A call to the `PushModel` endpoint, returned by [`OllamaNative::push_model`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct PushModelNativeCall<'a>(
@@ -977,7 +989,9 @@ impl<'a> PushModelNativeCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -996,7 +1010,7 @@ impl<'a> ::core::future::IntoFuture for PushModelNativeCall<'a> {
 }
 /// A call to the `CopyModel` endpoint, returned by [`OllamaNative::copy_model`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CopyModelNativeCall<'a>(
@@ -1026,7 +1040,9 @@ impl<'a> CopyModelNativeCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1045,7 +1061,7 @@ impl<'a> ::core::future::IntoFuture for CopyModelNativeCall<'a> {
 }
 /// A call to the `DeleteModel` endpoint, returned by [`OllamaNative::delete_model`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteModelNativeCall<'a>(
@@ -1075,7 +1091,9 @@ impl<'a> DeleteModelNativeCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1094,7 +1112,7 @@ impl<'a> ::core::future::IntoFuture for DeleteModelNativeCall<'a> {
 }
 /// A call to the `CreateModel` endpoint, returned by [`OllamaNative::create_model`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateModelNativeCall<'a>(
@@ -1124,7 +1142,9 @@ impl<'a> CreateModelNativeCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1143,7 +1163,7 @@ impl<'a> ::core::future::IntoFuture for CreateModelNativeCall<'a> {
 }
 /// A call to the `ListRunningModels` endpoint, returned by [`OllamaNative::list_running_models`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListRunningModelsNativeCall<'a>(
@@ -1177,7 +1197,9 @@ impl<'a> ListRunningModelsNativeCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1574,7 +1596,7 @@ impl schematic_runtime::EndpointSpec for ListModelsOaiRequest {
 }
 /// A call to the `ChatCompletions` endpoint, returned by [`OllamaOpenAI::chat_completions`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ChatCompletionsOaiCall<'a>(
@@ -1604,7 +1626,9 @@ impl<'a> ChatCompletionsOaiCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1623,7 +1647,7 @@ impl<'a> ::core::future::IntoFuture for ChatCompletionsOaiCall<'a> {
 }
 /// A call to the `Completions` endpoint, returned by [`OllamaOpenAI::completions`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CompletionsOaiCall<'a>(
@@ -1653,7 +1677,9 @@ impl<'a> CompletionsOaiCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1672,7 +1698,7 @@ impl<'a> ::core::future::IntoFuture for CompletionsOaiCall<'a> {
 }
 /// A call to the `Embeddings` endpoint, returned by [`OllamaOpenAI::embeddings`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct EmbeddingsOaiCall<'a>(
@@ -1702,7 +1728,9 @@ impl<'a> EmbeddingsOaiCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1721,7 +1749,7 @@ impl<'a> ::core::future::IntoFuture for EmbeddingsOaiCall<'a> {
 }
 /// A call to the `ListModels` endpoint, returned by [`OllamaOpenAI::list_models`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListModelsOaiCall<'a>(
@@ -1751,7 +1779,9 @@ impl<'a> ListModelsOaiCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }

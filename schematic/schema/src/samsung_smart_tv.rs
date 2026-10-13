@@ -437,7 +437,7 @@ impl schematic_runtime::EndpointSpec for InstallAppRequest {
 }
 /// A call to the `GetDeviceInfo` endpoint, returned by [`SamsungSmartTv::get_device_info`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetDeviceInfoCall<'a>(
@@ -467,7 +467,9 @@ impl<'a> GetDeviceInfoCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -486,7 +488,7 @@ impl<'a> ::core::future::IntoFuture for GetDeviceInfoCall<'a> {
 }
 /// A call to the `GetServerLogs` endpoint, returned by [`SamsungSmartTv::get_server_logs`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetServerLogsCall<'a>(
@@ -516,7 +518,9 @@ impl<'a> GetServerLogsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -535,7 +539,7 @@ impl<'a> ::core::future::IntoFuture for GetServerLogsCall<'a> {
 }
 /// A call to the `LaunchApplicationById` endpoint, returned by [`SamsungSmartTv::launch_application_by_id`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct LaunchApplicationByIdCall<'a>(
@@ -569,7 +573,9 @@ impl<'a> LaunchApplicationByIdCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -588,7 +594,7 @@ impl<'a> ::core::future::IntoFuture for LaunchApplicationByIdCall<'a> {
 }
 /// A call to the `LaunchApplicationByName` endpoint, returned by [`SamsungSmartTv::launch_application_by_name`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct LaunchApplicationByNameCall<'a>(
@@ -622,7 +628,9 @@ impl<'a> LaunchApplicationByNameCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -641,7 +649,7 @@ impl<'a> ::core::future::IntoFuture for LaunchApplicationByNameCall<'a> {
 }
 /// A call to the `GetAppStatus` endpoint, returned by [`SamsungSmartTv::get_app_status`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetAppStatusCall<'a>(
@@ -671,7 +679,9 @@ impl<'a> GetAppStatusCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -690,7 +700,7 @@ impl<'a> ::core::future::IntoFuture for GetAppStatusCall<'a> {
 }
 /// A call to the `CloseApp` endpoint, returned by [`SamsungSmartTv::close_app`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CloseAppCall<'a>(
@@ -720,7 +730,9 @@ impl<'a> CloseAppCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -739,7 +751,7 @@ impl<'a> ::core::future::IntoFuture for CloseAppCall<'a> {
 }
 /// A call to the `InstallApp` endpoint, returned by [`SamsungSmartTv::install_app`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct InstallAppCall<'a>(
@@ -769,7 +781,9 @@ impl<'a> InstallAppCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }

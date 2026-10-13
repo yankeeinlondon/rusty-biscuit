@@ -5,6 +5,7 @@
 
 mod builder;
 mod call;
+mod call_build;
 mod client_settings;
 mod compile_fail;
 mod credential_resolution;

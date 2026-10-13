@@ -19347,7 +19347,7 @@ impl schematic_runtime::EndpointSpec for BetaGetinputtokencountsRequest {
 }
 /// A call to the `CreateSpeech` endpoint, returned by [`OpenAI::create_speech`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateSpeechCall<'a>(
@@ -19377,7 +19377,9 @@ impl<'a> CreateSpeechCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -19396,7 +19398,7 @@ impl<'a> ::core::future::IntoFuture for CreateSpeechCall<'a> {
 }
 /// A call to the `CreateTranscription` endpoint, returned by [`OpenAI::create_transcription`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateTranscriptionCall<'a>(
@@ -19426,7 +19428,9 @@ impl<'a> CreateTranscriptionCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -19445,7 +19449,7 @@ impl<'a> ::core::future::IntoFuture for CreateTranscriptionCall<'a> {
 }
 /// A call to the `CreateTranslation` endpoint, returned by [`OpenAI::create_translation`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateTranslationCall<'a>(
@@ -19475,7 +19479,9 @@ impl<'a> CreateTranslationCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -19494,7 +19500,7 @@ impl<'a> ::core::future::IntoFuture for CreateTranslationCall<'a> {
 }
 /// A call to the `ListVoiceConsents` endpoint, returned by [`OpenAI::list_voice_consents`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListVoiceConsentsCall<'a>(
@@ -19532,7 +19538,9 @@ impl<'a> ListVoiceConsentsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -19551,7 +19559,7 @@ impl<'a> ::core::future::IntoFuture for ListVoiceConsentsCall<'a> {
 }
 /// A call to the `CreateVoiceConsent` endpoint, returned by [`OpenAI::create_voice_consent`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateVoiceConsentCall<'a>(
@@ -19581,7 +19589,9 @@ impl<'a> CreateVoiceConsentCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -19600,7 +19610,7 @@ impl<'a> ::core::future::IntoFuture for CreateVoiceConsentCall<'a> {
 }
 /// A call to the `GetVoiceConsent` endpoint, returned by [`OpenAI::get_voice_consent`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetVoiceConsentCall<'a>(
@@ -19630,7 +19640,9 @@ impl<'a> GetVoiceConsentCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -19649,7 +19661,7 @@ impl<'a> ::core::future::IntoFuture for GetVoiceConsentCall<'a> {
 }
 /// A call to the `UpdateVoiceConsent` endpoint, returned by [`OpenAI::update_voice_consent`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UpdateVoiceConsentCall<'a>(
@@ -19679,7 +19691,9 @@ impl<'a> UpdateVoiceConsentCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -19698,7 +19712,7 @@ impl<'a> ::core::future::IntoFuture for UpdateVoiceConsentCall<'a> {
 }
 /// A call to the `DeleteVoiceConsent` endpoint, returned by [`OpenAI::delete_voice_consent`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteVoiceConsentCall<'a>(
@@ -19728,7 +19742,9 @@ impl<'a> DeleteVoiceConsentCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -19747,7 +19763,7 @@ impl<'a> ::core::future::IntoFuture for DeleteVoiceConsentCall<'a> {
 }
 /// A call to the `CreateVoice` endpoint, returned by [`OpenAI::create_voice`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateVoiceCall<'a>(
@@ -19775,7 +19791,9 @@ impl<'a> CreateVoiceCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -19794,7 +19812,7 @@ impl<'a> ::core::future::IntoFuture for CreateVoiceCall<'a> {
 }
 /// A call to the `ListBatches` endpoint, returned by [`OpenAI::list_batches`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListBatchesCall<'a>(
@@ -19830,7 +19848,9 @@ impl<'a> ListBatchesCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -19849,7 +19869,7 @@ impl<'a> ::core::future::IntoFuture for ListBatchesCall<'a> {
 }
 /// A call to the `CreateBatch` endpoint, returned by [`OpenAI::create_batch`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateBatchCall<'a>(
@@ -19877,7 +19897,9 @@ impl<'a> CreateBatchCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -19896,7 +19918,7 @@ impl<'a> ::core::future::IntoFuture for CreateBatchCall<'a> {
 }
 /// A call to the `RetrieveBatch` endpoint, returned by [`OpenAI::retrieve_batch`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveBatchCall<'a>(
@@ -19926,7 +19948,9 @@ impl<'a> RetrieveBatchCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -19945,7 +19969,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveBatchCall<'a> {
 }
 /// A call to the `CancelBatch` endpoint, returned by [`OpenAI::cancel_batch`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CancelBatchCall<'a>(
@@ -19973,7 +19997,9 @@ impl<'a> CancelBatchCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -19992,7 +20018,7 @@ impl<'a> ::core::future::IntoFuture for CancelBatchCall<'a> {
 }
 /// A call to the `ListChatCompletions` endpoint, returned by [`OpenAI::list_chat_completions`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListChatCompletionsCall<'a>(
@@ -20042,7 +20068,9 @@ impl<'a> ListChatCompletionsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -20061,7 +20089,7 @@ impl<'a> ::core::future::IntoFuture for ListChatCompletionsCall<'a> {
 }
 /// A call to the `CreateChatCompletion` endpoint, returned by [`OpenAI::create_chat_completion`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateChatCompletionCall<'a>(
@@ -20091,7 +20119,9 @@ impl<'a> CreateChatCompletionCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -20110,7 +20140,7 @@ impl<'a> ::core::future::IntoFuture for CreateChatCompletionCall<'a> {
 }
 /// A call to the `GetChatCompletion` endpoint, returned by [`OpenAI::get_chat_completion`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetChatCompletionCall<'a>(
@@ -20140,7 +20170,9 @@ impl<'a> GetChatCompletionCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -20159,7 +20191,7 @@ impl<'a> ::core::future::IntoFuture for GetChatCompletionCall<'a> {
 }
 /// A call to the `UpdateChatCompletion` endpoint, returned by [`OpenAI::update_chat_completion`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UpdateChatCompletionCall<'a>(
@@ -20189,7 +20221,9 @@ impl<'a> UpdateChatCompletionCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -20208,7 +20242,7 @@ impl<'a> ::core::future::IntoFuture for UpdateChatCompletionCall<'a> {
 }
 /// A call to the `DeleteChatCompletion` endpoint, returned by [`OpenAI::delete_chat_completion`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteChatCompletionCall<'a>(
@@ -20238,7 +20272,9 @@ impl<'a> DeleteChatCompletionCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -20257,7 +20293,7 @@ impl<'a> ::core::future::IntoFuture for DeleteChatCompletionCall<'a> {
 }
 /// A call to the `GetChatCompletionMessages` endpoint, returned by [`OpenAI::get_chat_completion_messages`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetChatCompletionMessagesCall<'a>(
@@ -20299,7 +20335,9 @@ impl<'a> GetChatCompletionMessagesCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -20318,7 +20356,7 @@ impl<'a> ::core::future::IntoFuture for GetChatCompletionMessagesCall<'a> {
 }
 /// A call to the `CreateCompletion` endpoint, returned by [`OpenAI::create_completion`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateCompletionCall<'a>(
@@ -20348,7 +20386,9 @@ impl<'a> CreateCompletionCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -20367,7 +20407,7 @@ impl<'a> ::core::future::IntoFuture for CreateCompletionCall<'a> {
 }
 /// A call to the `ListContainers` endpoint, returned by [`OpenAI::list_containers`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListContainersCall<'a>(
@@ -20413,7 +20453,9 @@ impl<'a> ListContainersCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -20432,7 +20474,7 @@ impl<'a> ::core::future::IntoFuture for ListContainersCall<'a> {
 }
 /// A call to the `CreateContainer` endpoint, returned by [`OpenAI::create_container`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateContainerCall<'a>(
@@ -20462,7 +20504,9 @@ impl<'a> CreateContainerCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -20481,7 +20525,7 @@ impl<'a> ::core::future::IntoFuture for CreateContainerCall<'a> {
 }
 /// A call to the `RetrieveContainer` endpoint, returned by [`OpenAI::retrieve_container`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveContainerCall<'a>(
@@ -20511,7 +20555,9 @@ impl<'a> RetrieveContainerCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -20530,7 +20576,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveContainerCall<'a> {
 }
 /// A call to the `DeleteContainer` endpoint, returned by [`OpenAI::delete_container`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteContainerCall<'a>(
@@ -20560,7 +20606,9 @@ impl<'a> DeleteContainerCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -20579,7 +20627,7 @@ impl<'a> ::core::future::IntoFuture for DeleteContainerCall<'a> {
 }
 /// A call to the `ListContainerFiles` endpoint, returned by [`OpenAI::list_container_files`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListContainerFilesCall<'a>(
@@ -20621,7 +20669,9 @@ impl<'a> ListContainerFilesCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -20640,7 +20690,7 @@ impl<'a> ::core::future::IntoFuture for ListContainerFilesCall<'a> {
 }
 /// A call to the `CreateContainerFile` endpoint, returned by [`OpenAI::create_container_file`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateContainerFileCall<'a>(
@@ -20670,7 +20720,9 @@ impl<'a> CreateContainerFileCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -20689,7 +20741,7 @@ impl<'a> ::core::future::IntoFuture for CreateContainerFileCall<'a> {
 }
 /// A call to the `RetrieveContainerFile` endpoint, returned by [`OpenAI::retrieve_container_file`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveContainerFileCall<'a>(
@@ -20719,7 +20771,9 @@ impl<'a> RetrieveContainerFileCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -20738,7 +20792,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveContainerFileCall<'a> {
 }
 /// A call to the `DeleteContainerFile` endpoint, returned by [`OpenAI::delete_container_file`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteContainerFileCall<'a>(
@@ -20768,7 +20822,9 @@ impl<'a> DeleteContainerFileCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -20787,7 +20843,7 @@ impl<'a> ::core::future::IntoFuture for DeleteContainerFileCall<'a> {
 }
 /// A call to the `RetrieveContainerFileContent` endpoint, returned by [`OpenAI::retrieve_container_file_content`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveContainerFileContentCall<'a>(
@@ -20821,7 +20877,9 @@ impl<'a> RetrieveContainerFileContentCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -20840,7 +20898,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveContainerFileContentCall<'a> {
 }
 /// A call to the `ListConversationItems` endpoint, returned by [`OpenAI::list_conversation_items`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListConversationItemsCall<'a>(
@@ -20886,7 +20944,9 @@ impl<'a> ListConversationItemsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -20905,7 +20965,7 @@ impl<'a> ::core::future::IntoFuture for ListConversationItemsCall<'a> {
 }
 /// A call to the `CreateConversationItems` endpoint, returned by [`OpenAI::create_conversation_items`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateConversationItemsCall<'a>(
@@ -20939,7 +20999,9 @@ impl<'a> CreateConversationItemsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -20958,7 +21020,7 @@ impl<'a> ::core::future::IntoFuture for CreateConversationItemsCall<'a> {
 }
 /// A call to the `GetConversationItem` endpoint, returned by [`OpenAI::get_conversation_item`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetConversationItemCall<'a>(
@@ -20992,7 +21054,9 @@ impl<'a> GetConversationItemCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -21011,7 +21075,7 @@ impl<'a> ::core::future::IntoFuture for GetConversationItemCall<'a> {
 }
 /// A call to the `DeleteConversationItem` endpoint, returned by [`OpenAI::delete_conversation_item`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteConversationItemCall<'a>(
@@ -21041,7 +21105,9 @@ impl<'a> DeleteConversationItemCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -21060,7 +21126,7 @@ impl<'a> ::core::future::IntoFuture for DeleteConversationItemCall<'a> {
 }
 /// A call to the `CreateEmbedding` endpoint, returned by [`OpenAI::create_embedding`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateEmbeddingCall<'a>(
@@ -21090,7 +21156,9 @@ impl<'a> CreateEmbeddingCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -21109,7 +21177,7 @@ impl<'a> ::core::future::IntoFuture for CreateEmbeddingCall<'a> {
 }
 /// A call to the `ListEvals` endpoint, returned by [`OpenAI::list_evals`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListEvalsCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListEvalsRequest>);
@@ -21151,7 +21219,9 @@ impl<'a> ListEvalsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -21170,7 +21240,7 @@ impl<'a> ::core::future::IntoFuture for ListEvalsCall<'a> {
 }
 /// A call to the `CreateEval` endpoint, returned by [`OpenAI::create_eval`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateEvalCall<'a>(schematic_runtime::Call<'a, OpenAIApi, CreateEvalRequest>);
@@ -21196,7 +21266,9 @@ impl<'a> CreateEvalCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -21215,7 +21287,7 @@ impl<'a> ::core::future::IntoFuture for CreateEvalCall<'a> {
 }
 /// A call to the `GetEval` endpoint, returned by [`OpenAI::get_eval`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetEvalCall<'a>(schematic_runtime::Call<'a, OpenAIApi, GetEvalRequest>);
@@ -21241,7 +21313,9 @@ impl<'a> GetEvalCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -21260,7 +21334,7 @@ impl<'a> ::core::future::IntoFuture for GetEvalCall<'a> {
 }
 /// A call to the `UpdateEval` endpoint, returned by [`OpenAI::update_eval`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UpdateEvalCall<'a>(schematic_runtime::Call<'a, OpenAIApi, UpdateEvalRequest>);
@@ -21286,7 +21360,9 @@ impl<'a> UpdateEvalCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -21305,7 +21381,7 @@ impl<'a> ::core::future::IntoFuture for UpdateEvalCall<'a> {
 }
 /// A call to the `DeleteEval` endpoint, returned by [`OpenAI::delete_eval`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteEvalCall<'a>(schematic_runtime::Call<'a, OpenAIApi, DeleteEvalRequest>);
@@ -21331,7 +21407,9 @@ impl<'a> DeleteEvalCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -21350,7 +21428,7 @@ impl<'a> ::core::future::IntoFuture for DeleteEvalCall<'a> {
 }
 /// A call to the `GetEvalRuns` endpoint, returned by [`OpenAI::get_eval_runs`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetEvalRunsCall<'a>(
@@ -21394,7 +21472,9 @@ impl<'a> GetEvalRunsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -21413,7 +21493,7 @@ impl<'a> ::core::future::IntoFuture for GetEvalRunsCall<'a> {
 }
 /// A call to the `CreateEvalRun` endpoint, returned by [`OpenAI::create_eval_run`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateEvalRunCall<'a>(
@@ -21443,7 +21523,9 @@ impl<'a> CreateEvalRunCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -21462,7 +21544,7 @@ impl<'a> ::core::future::IntoFuture for CreateEvalRunCall<'a> {
 }
 /// A call to the `GetEvalRun` endpoint, returned by [`OpenAI::get_eval_run`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetEvalRunCall<'a>(schematic_runtime::Call<'a, OpenAIApi, GetEvalRunRequest>);
@@ -21488,7 +21570,9 @@ impl<'a> GetEvalRunCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -21507,7 +21591,7 @@ impl<'a> ::core::future::IntoFuture for GetEvalRunCall<'a> {
 }
 /// A call to the `CancelEvalRun` endpoint, returned by [`OpenAI::cancel_eval_run`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CancelEvalRunCall<'a>(
@@ -21537,7 +21621,9 @@ impl<'a> CancelEvalRunCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -21556,7 +21642,7 @@ impl<'a> ::core::future::IntoFuture for CancelEvalRunCall<'a> {
 }
 /// A call to the `DeleteEvalRun` endpoint, returned by [`OpenAI::delete_eval_run`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteEvalRunCall<'a>(
@@ -21586,7 +21672,9 @@ impl<'a> DeleteEvalRunCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -21605,7 +21693,7 @@ impl<'a> ::core::future::IntoFuture for DeleteEvalRunCall<'a> {
 }
 /// A call to the `GetEvalRunOutputItems` endpoint, returned by [`OpenAI::get_eval_run_output_items`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetEvalRunOutputItemsCall<'a>(
@@ -21651,7 +21739,9 @@ impl<'a> GetEvalRunOutputItemsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -21670,7 +21760,7 @@ impl<'a> ::core::future::IntoFuture for GetEvalRunOutputItemsCall<'a> {
 }
 /// A call to the `GetEvalRunOutputItem` endpoint, returned by [`OpenAI::get_eval_run_output_item`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetEvalRunOutputItemCall<'a>(
@@ -21700,7 +21790,9 @@ impl<'a> GetEvalRunOutputItemCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -21719,7 +21811,7 @@ impl<'a> ::core::future::IntoFuture for GetEvalRunOutputItemCall<'a> {
 }
 /// A call to the `ListFiles` endpoint, returned by [`OpenAI::list_files`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListFilesCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListFilesRequest>);
@@ -21761,7 +21853,9 @@ impl<'a> ListFilesCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -21780,7 +21874,7 @@ impl<'a> ::core::future::IntoFuture for ListFilesCall<'a> {
 }
 /// A call to the `CreateFile` endpoint, returned by [`OpenAI::create_file`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateFileCall<'a>(schematic_runtime::Call<'a, OpenAIApi, CreateFileRequest>);
@@ -21806,7 +21900,9 @@ impl<'a> CreateFileCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -21825,7 +21921,7 @@ impl<'a> ::core::future::IntoFuture for CreateFileCall<'a> {
 }
 /// A call to the `RetrieveFile` endpoint, returned by [`OpenAI::retrieve_file`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveFileCall<'a>(
@@ -21855,7 +21951,9 @@ impl<'a> RetrieveFileCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -21874,7 +21972,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveFileCall<'a> {
 }
 /// A call to the `DeleteFile` endpoint, returned by [`OpenAI::delete_file`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteFileCall<'a>(schematic_runtime::Call<'a, OpenAIApi, DeleteFileRequest>);
@@ -21900,7 +21998,9 @@ impl<'a> DeleteFileCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -21919,7 +22019,7 @@ impl<'a> ::core::future::IntoFuture for DeleteFileCall<'a> {
 }
 /// A call to the `DownloadFile` endpoint, returned by [`OpenAI::download_file`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DownloadFileCall<'a>(
@@ -21949,7 +22049,9 @@ impl<'a> DownloadFileCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -21968,7 +22070,7 @@ impl<'a> ::core::future::IntoFuture for DownloadFileCall<'a> {
 }
 /// A call to the `RunGrader` endpoint, returned by [`OpenAI::run_grader`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RunGraderCall<'a>(schematic_runtime::Call<'a, OpenAIApi, RunGraderRequest>);
@@ -21994,7 +22096,9 @@ impl<'a> RunGraderCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -22013,7 +22117,7 @@ impl<'a> ::core::future::IntoFuture for RunGraderCall<'a> {
 }
 /// A call to the `ValidateGrader` endpoint, returned by [`OpenAI::validate_grader`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ValidateGraderCall<'a>(
@@ -22043,7 +22147,9 @@ impl<'a> ValidateGraderCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -22062,7 +22168,7 @@ impl<'a> ::core::future::IntoFuture for ValidateGraderCall<'a> {
 }
 /// A call to the `ListFineTuningCheckpointPermissions` endpoint, returned by [`OpenAI::list_fine_tuning_checkpoint_permissions`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListFineTuningCheckpointPermissionsCall<'a>(
@@ -22112,7 +22218,9 @@ impl<'a> ListFineTuningCheckpointPermissionsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -22131,7 +22239,7 @@ impl<'a> ::core::future::IntoFuture for ListFineTuningCheckpointPermissionsCall<
 }
 /// A call to the `CreateFineTuningCheckpointPermission` endpoint, returned by [`OpenAI::create_fine_tuning_checkpoint_permission`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateFineTuningCheckpointPermissionCall<'a>(
@@ -22165,7 +22273,9 @@ impl<'a> CreateFineTuningCheckpointPermissionCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -22184,7 +22294,7 @@ impl<'a> ::core::future::IntoFuture for CreateFineTuningCheckpointPermissionCall
 }
 /// A call to the `DeleteFineTuningCheckpointPermission` endpoint, returned by [`OpenAI::delete_fine_tuning_checkpoint_permission`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteFineTuningCheckpointPermissionCall<'a>(
@@ -22218,7 +22328,9 @@ impl<'a> DeleteFineTuningCheckpointPermissionCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -22237,7 +22349,7 @@ impl<'a> ::core::future::IntoFuture for DeleteFineTuningCheckpointPermissionCall
 }
 /// A call to the `ListPaginatedFineTuningJobs` endpoint, returned by [`OpenAI::list_paginated_fine_tuning_jobs`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListPaginatedFineTuningJobsCall<'a>(
@@ -22279,7 +22391,9 @@ impl<'a> ListPaginatedFineTuningJobsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -22298,7 +22412,7 @@ impl<'a> ::core::future::IntoFuture for ListPaginatedFineTuningJobsCall<'a> {
 }
 /// A call to the `CreateFineTuningJob` endpoint, returned by [`OpenAI::create_fine_tuning_job`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateFineTuningJobCall<'a>(
@@ -22328,7 +22442,9 @@ impl<'a> CreateFineTuningJobCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -22347,7 +22463,7 @@ impl<'a> ::core::future::IntoFuture for CreateFineTuningJobCall<'a> {
 }
 /// A call to the `RetrieveFineTuningJob` endpoint, returned by [`OpenAI::retrieve_fine_tuning_job`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveFineTuningJobCall<'a>(
@@ -22377,7 +22493,9 @@ impl<'a> RetrieveFineTuningJobCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -22396,7 +22514,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveFineTuningJobCall<'a> {
 }
 /// A call to the `CancelFineTuningJob` endpoint, returned by [`OpenAI::cancel_fine_tuning_job`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CancelFineTuningJobCall<'a>(
@@ -22426,7 +22544,9 @@ impl<'a> CancelFineTuningJobCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -22445,7 +22565,7 @@ impl<'a> ::core::future::IntoFuture for CancelFineTuningJobCall<'a> {
 }
 /// A call to the `ListFineTuningJobCheckpoints` endpoint, returned by [`OpenAI::list_fine_tuning_job_checkpoints`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListFineTuningJobCheckpointsCall<'a>(
@@ -22487,7 +22607,9 @@ impl<'a> ListFineTuningJobCheckpointsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -22506,7 +22628,7 @@ impl<'a> ::core::future::IntoFuture for ListFineTuningJobCheckpointsCall<'a> {
 }
 /// A call to the `ListFineTuningEvents` endpoint, returned by [`OpenAI::list_fine_tuning_events`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListFineTuningEventsCall<'a>(
@@ -22544,7 +22666,9 @@ impl<'a> ListFineTuningEventsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -22563,7 +22687,7 @@ impl<'a> ::core::future::IntoFuture for ListFineTuningEventsCall<'a> {
 }
 /// A call to the `PauseFineTuningJob` endpoint, returned by [`OpenAI::pause_fine_tuning_job`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct PauseFineTuningJobCall<'a>(
@@ -22593,7 +22717,9 @@ impl<'a> PauseFineTuningJobCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -22612,7 +22738,7 @@ impl<'a> ::core::future::IntoFuture for PauseFineTuningJobCall<'a> {
 }
 /// A call to the `ResumeFineTuningJob` endpoint, returned by [`OpenAI::resume_fine_tuning_job`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ResumeFineTuningJobCall<'a>(
@@ -22642,7 +22768,9 @@ impl<'a> ResumeFineTuningJobCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -22661,7 +22789,7 @@ impl<'a> ::core::future::IntoFuture for ResumeFineTuningJobCall<'a> {
 }
 /// A call to the `CreateImageEdit` endpoint, returned by [`OpenAI::create_image_edit`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateImageEditCall<'a>(
@@ -22691,7 +22819,9 @@ impl<'a> CreateImageEditCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -22710,7 +22840,7 @@ impl<'a> ::core::future::IntoFuture for CreateImageEditCall<'a> {
 }
 /// A call to the `CreateImage` endpoint, returned by [`OpenAI::create_image`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateImageCall<'a>(
@@ -22738,7 +22868,9 @@ impl<'a> CreateImageCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -22757,7 +22889,7 @@ impl<'a> ::core::future::IntoFuture for CreateImageCall<'a> {
 }
 /// A call to the `CreateImageVariation` endpoint, returned by [`OpenAI::create_image_variation`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateImageVariationCall<'a>(
@@ -22787,7 +22919,9 @@ impl<'a> CreateImageVariationCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -22806,7 +22940,7 @@ impl<'a> ::core::future::IntoFuture for CreateImageVariationCall<'a> {
 }
 /// A call to the `ListModels` endpoint, returned by [`OpenAI::list_models`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListModelsCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListModelsRequest>);
@@ -22832,7 +22966,9 @@ impl<'a> ListModelsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -22851,7 +22987,7 @@ impl<'a> ::core::future::IntoFuture for ListModelsCall<'a> {
 }
 /// A call to the `RetrieveModel` endpoint, returned by [`OpenAI::retrieve_model`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveModelCall<'a>(
@@ -22881,7 +23017,9 @@ impl<'a> RetrieveModelCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -22900,7 +23038,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveModelCall<'a> {
 }
 /// A call to the `DeleteModel` endpoint, returned by [`OpenAI::delete_model`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteModelCall<'a>(
@@ -22928,7 +23066,9 @@ impl<'a> DeleteModelCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -22947,7 +23087,7 @@ impl<'a> ::core::future::IntoFuture for DeleteModelCall<'a> {
 }
 /// A call to the `CreateModeration` endpoint, returned by [`OpenAI::create_moderation`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateModerationCall<'a>(
@@ -22977,7 +23117,9 @@ impl<'a> CreateModerationCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -22996,7 +23138,7 @@ impl<'a> ::core::future::IntoFuture for CreateModerationCall<'a> {
 }
 /// A call to the `AdminApiKeysList` endpoint, returned by [`OpenAI::admin_api_keys_list`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct AdminApiKeysListCall<'a>(
@@ -23038,7 +23180,9 @@ impl<'a> AdminApiKeysListCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -23057,7 +23201,7 @@ impl<'a> ::core::future::IntoFuture for AdminApiKeysListCall<'a> {
 }
 /// A call to the `AdminApiKeysCreate` endpoint, returned by [`OpenAI::admin_api_keys_create`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct AdminApiKeysCreateCall<'a>(
@@ -23087,7 +23231,9 @@ impl<'a> AdminApiKeysCreateCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -23106,7 +23252,7 @@ impl<'a> ::core::future::IntoFuture for AdminApiKeysCreateCall<'a> {
 }
 /// A call to the `AdminApiKeysGet` endpoint, returned by [`OpenAI::admin_api_keys_get`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct AdminApiKeysGetCall<'a>(
@@ -23136,7 +23282,9 @@ impl<'a> AdminApiKeysGetCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -23155,7 +23303,7 @@ impl<'a> ::core::future::IntoFuture for AdminApiKeysGetCall<'a> {
 }
 /// A call to the `AdminApiKeysDelete` endpoint, returned by [`OpenAI::admin_api_keys_delete`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct AdminApiKeysDeleteCall<'a>(
@@ -23185,7 +23333,9 @@ impl<'a> AdminApiKeysDeleteCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -23204,7 +23354,7 @@ impl<'a> ::core::future::IntoFuture for AdminApiKeysDeleteCall<'a> {
 }
 /// A call to the `ListAuditLogs` endpoint, returned by [`OpenAI::list_audit_logs`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListAuditLogsCall<'a>(
@@ -23274,7 +23424,9 @@ impl<'a> ListAuditLogsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -23293,7 +23445,7 @@ impl<'a> ::core::future::IntoFuture for ListAuditLogsCall<'a> {
 }
 /// A call to the `ListOrganizationCertificates` endpoint, returned by [`OpenAI::list_organization_certificates`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListOrganizationCertificatesCall<'a>(
@@ -23339,7 +23491,9 @@ impl<'a> ListOrganizationCertificatesCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -23358,7 +23512,7 @@ impl<'a> ::core::future::IntoFuture for ListOrganizationCertificatesCall<'a> {
 }
 /// A call to the `UploadCertificate` endpoint, returned by [`OpenAI::upload_certificate`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UploadCertificateCall<'a>(
@@ -23388,7 +23542,9 @@ impl<'a> UploadCertificateCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -23407,7 +23563,7 @@ impl<'a> ::core::future::IntoFuture for UploadCertificateCall<'a> {
 }
 /// A call to the `ActivateOrganizationCertificates` endpoint, returned by [`OpenAI::activate_organization_certificates`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ActivateOrganizationCertificatesCall<'a>(
@@ -23441,7 +23597,9 @@ impl<'a> ActivateOrganizationCertificatesCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -23460,7 +23618,7 @@ impl<'a> ::core::future::IntoFuture for ActivateOrganizationCertificatesCall<'a>
 }
 /// A call to the `DeactivateOrganizationCertificates` endpoint, returned by [`OpenAI::deactivate_organization_certificates`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeactivateOrganizationCertificatesCall<'a>(
@@ -23494,7 +23652,9 @@ impl<'a> DeactivateOrganizationCertificatesCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -23513,7 +23673,7 @@ impl<'a> ::core::future::IntoFuture for DeactivateOrganizationCertificatesCall<'
 }
 /// A call to the `GetCertificate` endpoint, returned by [`OpenAI::get_certificate`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetCertificateCall<'a>(
@@ -23547,7 +23707,9 @@ impl<'a> GetCertificateCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -23566,7 +23728,7 @@ impl<'a> ::core::future::IntoFuture for GetCertificateCall<'a> {
 }
 /// A call to the `ModifyCertificate` endpoint, returned by [`OpenAI::modify_certificate`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ModifyCertificateCall<'a>(
@@ -23596,7 +23758,9 @@ impl<'a> ModifyCertificateCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -23615,7 +23779,7 @@ impl<'a> ::core::future::IntoFuture for ModifyCertificateCall<'a> {
 }
 /// A call to the `DeleteCertificate` endpoint, returned by [`OpenAI::delete_certificate`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteCertificateCall<'a>(
@@ -23645,7 +23809,9 @@ impl<'a> DeleteCertificateCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -23664,7 +23830,7 @@ impl<'a> ::core::future::IntoFuture for DeleteCertificateCall<'a> {
 }
 /// A call to the `UsageCosts` endpoint, returned by [`OpenAI::usage_costs`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UsageCostsCall<'a>(schematic_runtime::Call<'a, OpenAIApi, UsageCostsRequest>);
@@ -23722,7 +23888,9 @@ impl<'a> UsageCostsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -23741,7 +23909,7 @@ impl<'a> ::core::future::IntoFuture for UsageCostsCall<'a> {
 }
 /// A call to the `RetrieveOrganizationDataRetention` endpoint, returned by [`OpenAI::retrieve_organization_data_retention`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveOrganizationDataRetentionCall<'a>(
@@ -23775,7 +23943,9 @@ impl<'a> RetrieveOrganizationDataRetentionCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -23794,7 +23964,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveOrganizationDataRetentionCall<'a
 }
 /// A call to the `UpdateOrganizationDataRetention` endpoint, returned by [`OpenAI::update_organization_data_retention`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UpdateOrganizationDataRetentionCall<'a>(
@@ -23828,7 +23998,9 @@ impl<'a> UpdateOrganizationDataRetentionCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -23847,7 +24019,7 @@ impl<'a> ::core::future::IntoFuture for UpdateOrganizationDataRetentionCall<'a> 
 }
 /// A call to the `ListGroups` endpoint, returned by [`OpenAI::list_groups`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListGroupsCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListGroupsRequest>);
@@ -23885,7 +24057,9 @@ impl<'a> ListGroupsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -23904,7 +24078,7 @@ impl<'a> ::core::future::IntoFuture for ListGroupsCall<'a> {
 }
 /// A call to the `CreateGroup` endpoint, returned by [`OpenAI::create_group`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateGroupCall<'a>(
@@ -23932,7 +24106,9 @@ impl<'a> CreateGroupCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -23951,7 +24127,7 @@ impl<'a> ::core::future::IntoFuture for CreateGroupCall<'a> {
 }
 /// A call to the `RetrieveGroup` endpoint, returned by [`OpenAI::retrieve_group`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveGroupCall<'a>(
@@ -23981,7 +24157,9 @@ impl<'a> RetrieveGroupCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -24000,7 +24178,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveGroupCall<'a> {
 }
 /// A call to the `UpdateGroup` endpoint, returned by [`OpenAI::update_group`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UpdateGroupCall<'a>(
@@ -24028,7 +24206,9 @@ impl<'a> UpdateGroupCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -24047,7 +24227,7 @@ impl<'a> ::core::future::IntoFuture for UpdateGroupCall<'a> {
 }
 /// A call to the `DeleteGroup` endpoint, returned by [`OpenAI::delete_group`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteGroupCall<'a>(
@@ -24075,7 +24255,9 @@ impl<'a> DeleteGroupCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -24094,7 +24276,7 @@ impl<'a> ::core::future::IntoFuture for DeleteGroupCall<'a> {
 }
 /// A call to the `ListGroupRoleAssignments` endpoint, returned by [`OpenAI::list_group_role_assignments`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListGroupRoleAssignmentsCall<'a>(
@@ -24136,7 +24318,9 @@ impl<'a> ListGroupRoleAssignmentsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -24155,7 +24339,7 @@ impl<'a> ::core::future::IntoFuture for ListGroupRoleAssignmentsCall<'a> {
 }
 /// A call to the `AssignGroupRole` endpoint, returned by [`OpenAI::assign_group_role`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct AssignGroupRoleCall<'a>(
@@ -24185,7 +24369,9 @@ impl<'a> AssignGroupRoleCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -24204,7 +24390,7 @@ impl<'a> ::core::future::IntoFuture for AssignGroupRoleCall<'a> {
 }
 /// A call to the `RetrieveGroupRole` endpoint, returned by [`OpenAI::retrieve_group_role`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveGroupRoleCall<'a>(
@@ -24234,7 +24420,9 @@ impl<'a> RetrieveGroupRoleCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -24253,7 +24441,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveGroupRoleCall<'a> {
 }
 /// A call to the `UnassignGroupRole` endpoint, returned by [`OpenAI::unassign_group_role`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UnassignGroupRoleCall<'a>(
@@ -24283,7 +24471,9 @@ impl<'a> UnassignGroupRoleCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -24302,7 +24492,7 @@ impl<'a> ::core::future::IntoFuture for UnassignGroupRoleCall<'a> {
 }
 /// A call to the `ListGroupUsers` endpoint, returned by [`OpenAI::list_group_users`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListGroupUsersCall<'a>(
@@ -24344,7 +24534,9 @@ impl<'a> ListGroupUsersCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -24363,7 +24555,7 @@ impl<'a> ::core::future::IntoFuture for ListGroupUsersCall<'a> {
 }
 /// A call to the `AddGroupUser` endpoint, returned by [`OpenAI::add_group_user`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct AddGroupUserCall<'a>(
@@ -24393,7 +24585,9 @@ impl<'a> AddGroupUserCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -24412,7 +24606,7 @@ impl<'a> ::core::future::IntoFuture for AddGroupUserCall<'a> {
 }
 /// A call to the `RetrieveGroupUser` endpoint, returned by [`OpenAI::retrieve_group_user`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveGroupUserCall<'a>(
@@ -24442,7 +24636,9 @@ impl<'a> RetrieveGroupUserCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -24461,7 +24657,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveGroupUserCall<'a> {
 }
 /// A call to the `RemoveGroupUser` endpoint, returned by [`OpenAI::remove_group_user`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RemoveGroupUserCall<'a>(
@@ -24491,7 +24687,9 @@ impl<'a> RemoveGroupUserCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -24510,7 +24708,7 @@ impl<'a> ::core::future::IntoFuture for RemoveGroupUserCall<'a> {
 }
 /// A call to the `ListInvites` endpoint, returned by [`OpenAI::list_invites`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListInvitesCall<'a>(
@@ -24546,7 +24744,9 @@ impl<'a> ListInvitesCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -24565,7 +24765,7 @@ impl<'a> ::core::future::IntoFuture for ListInvitesCall<'a> {
 }
 /// A call to the `InviteUser` endpoint, returned by [`OpenAI::invite_user`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct InviteUserCall<'a>(schematic_runtime::Call<'a, OpenAIApi, InviteUserRequest>);
@@ -24591,7 +24791,9 @@ impl<'a> InviteUserCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -24610,7 +24812,7 @@ impl<'a> ::core::future::IntoFuture for InviteUserCall<'a> {
 }
 /// A call to the `RetrieveInvite` endpoint, returned by [`OpenAI::retrieve_invite`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveInviteCall<'a>(
@@ -24640,7 +24842,9 @@ impl<'a> RetrieveInviteCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -24659,7 +24863,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveInviteCall<'a> {
 }
 /// A call to the `DeleteInvite` endpoint, returned by [`OpenAI::delete_invite`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteInviteCall<'a>(
@@ -24689,7 +24893,9 @@ impl<'a> DeleteInviteCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -24708,7 +24914,7 @@ impl<'a> ::core::future::IntoFuture for DeleteInviteCall<'a> {
 }
 /// A call to the `ListProjects` endpoint, returned by [`OpenAI::list_projects`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListProjectsCall<'a>(
@@ -24750,7 +24956,9 @@ impl<'a> ListProjectsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -24769,7 +24977,7 @@ impl<'a> ::core::future::IntoFuture for ListProjectsCall<'a> {
 }
 /// A call to the `CreateProject` endpoint, returned by [`OpenAI::create_project`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateProjectCall<'a>(
@@ -24799,7 +25007,9 @@ impl<'a> CreateProjectCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -24818,7 +25028,7 @@ impl<'a> ::core::future::IntoFuture for CreateProjectCall<'a> {
 }
 /// A call to the `RetrieveProject` endpoint, returned by [`OpenAI::retrieve_project`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveProjectCall<'a>(
@@ -24848,7 +25058,9 @@ impl<'a> RetrieveProjectCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -24867,7 +25079,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectCall<'a> {
 }
 /// A call to the `ModifyProject` endpoint, returned by [`OpenAI::modify_project`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ModifyProjectCall<'a>(
@@ -24897,7 +25109,9 @@ impl<'a> ModifyProjectCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -24916,7 +25130,7 @@ impl<'a> ::core::future::IntoFuture for ModifyProjectCall<'a> {
 }
 /// A call to the `ListProjectApiKeys` endpoint, returned by [`OpenAI::list_project_api_keys`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListProjectApiKeysCall<'a>(
@@ -24958,7 +25172,9 @@ impl<'a> ListProjectApiKeysCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -24977,7 +25193,7 @@ impl<'a> ::core::future::IntoFuture for ListProjectApiKeysCall<'a> {
 }
 /// A call to the `RetrieveProjectApiKey` endpoint, returned by [`OpenAI::retrieve_project_api_key`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveProjectApiKeyCall<'a>(
@@ -25007,7 +25223,9 @@ impl<'a> RetrieveProjectApiKeyCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -25026,7 +25244,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectApiKeyCall<'a> {
 }
 /// A call to the `DeleteProjectApiKey` endpoint, returned by [`OpenAI::delete_project_api_key`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteProjectApiKeyCall<'a>(
@@ -25056,7 +25274,9 @@ impl<'a> DeleteProjectApiKeyCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -25075,7 +25295,7 @@ impl<'a> ::core::future::IntoFuture for DeleteProjectApiKeyCall<'a> {
 }
 /// A call to the `ArchiveProject` endpoint, returned by [`OpenAI::archive_project`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ArchiveProjectCall<'a>(
@@ -25105,7 +25325,9 @@ impl<'a> ArchiveProjectCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -25124,7 +25346,7 @@ impl<'a> ::core::future::IntoFuture for ArchiveProjectCall<'a> {
 }
 /// A call to the `ListProjectCertificates` endpoint, returned by [`OpenAI::list_project_certificates`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListProjectCertificatesCall<'a>(
@@ -25166,7 +25388,9 @@ impl<'a> ListProjectCertificatesCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -25185,7 +25409,7 @@ impl<'a> ::core::future::IntoFuture for ListProjectCertificatesCall<'a> {
 }
 /// A call to the `ActivateProjectCertificates` endpoint, returned by [`OpenAI::activate_project_certificates`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ActivateProjectCertificatesCall<'a>(
@@ -25215,7 +25439,9 @@ impl<'a> ActivateProjectCertificatesCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -25234,7 +25460,7 @@ impl<'a> ::core::future::IntoFuture for ActivateProjectCertificatesCall<'a> {
 }
 /// A call to the `DeactivateProjectCertificates` endpoint, returned by [`OpenAI::deactivate_project_certificates`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeactivateProjectCertificatesCall<'a>(
@@ -25268,7 +25494,9 @@ impl<'a> DeactivateProjectCertificatesCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -25287,7 +25515,7 @@ impl<'a> ::core::future::IntoFuture for DeactivateProjectCertificatesCall<'a> {
 }
 /// A call to the `RetrieveProjectDataRetention` endpoint, returned by [`OpenAI::retrieve_project_data_retention`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveProjectDataRetentionCall<'a>(
@@ -25321,7 +25549,9 @@ impl<'a> RetrieveProjectDataRetentionCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -25340,7 +25570,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectDataRetentionCall<'a> {
 }
 /// A call to the `UpdateProjectDataRetention` endpoint, returned by [`OpenAI::update_project_data_retention`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UpdateProjectDataRetentionCall<'a>(
@@ -25370,7 +25600,9 @@ impl<'a> UpdateProjectDataRetentionCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -25389,7 +25621,7 @@ impl<'a> ::core::future::IntoFuture for UpdateProjectDataRetentionCall<'a> {
 }
 /// A call to the `ListProjectGroups` endpoint, returned by [`OpenAI::list_project_groups`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListProjectGroupsCall<'a>(
@@ -25431,7 +25663,9 @@ impl<'a> ListProjectGroupsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -25450,7 +25684,7 @@ impl<'a> ::core::future::IntoFuture for ListProjectGroupsCall<'a> {
 }
 /// A call to the `AddProjectGroup` endpoint, returned by [`OpenAI::add_project_group`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct AddProjectGroupCall<'a>(
@@ -25480,7 +25714,9 @@ impl<'a> AddProjectGroupCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -25499,7 +25735,7 @@ impl<'a> ::core::future::IntoFuture for AddProjectGroupCall<'a> {
 }
 /// A call to the `RetrieveProjectGroup` endpoint, returned by [`OpenAI::retrieve_project_group`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveProjectGroupCall<'a>(
@@ -25533,7 +25769,9 @@ impl<'a> RetrieveProjectGroupCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -25552,7 +25790,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectGroupCall<'a> {
 }
 /// A call to the `RemoveProjectGroup` endpoint, returned by [`OpenAI::remove_project_group`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RemoveProjectGroupCall<'a>(
@@ -25582,7 +25820,9 @@ impl<'a> RemoveProjectGroupCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -25601,7 +25841,7 @@ impl<'a> ::core::future::IntoFuture for RemoveProjectGroupCall<'a> {
 }
 /// A call to the `RetrieveProjectHostedToolPermissions` endpoint, returned by [`OpenAI::retrieve_project_hosted_tool_permissions`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveProjectHostedToolPermissionsCall<'a>(
@@ -25635,7 +25875,9 @@ impl<'a> RetrieveProjectHostedToolPermissionsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -25654,7 +25896,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectHostedToolPermissionsCall
 }
 /// A call to the `UpdateProjectHostedToolPermissions` endpoint, returned by [`OpenAI::update_project_hosted_tool_permissions`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UpdateProjectHostedToolPermissionsCall<'a>(
@@ -25688,7 +25930,9 @@ impl<'a> UpdateProjectHostedToolPermissionsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -25707,7 +25951,7 @@ impl<'a> ::core::future::IntoFuture for UpdateProjectHostedToolPermissionsCall<'
 }
 /// A call to the `RetrieveProjectModelPermissions` endpoint, returned by [`OpenAI::retrieve_project_model_permissions`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveProjectModelPermissionsCall<'a>(
@@ -25741,7 +25985,9 @@ impl<'a> RetrieveProjectModelPermissionsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -25760,7 +26006,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectModelPermissionsCall<'a> 
 }
 /// A call to the `UpdateProjectModelPermissions` endpoint, returned by [`OpenAI::update_project_model_permissions`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UpdateProjectModelPermissionsCall<'a>(
@@ -25794,7 +26040,9 @@ impl<'a> UpdateProjectModelPermissionsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -25813,7 +26061,7 @@ impl<'a> ::core::future::IntoFuture for UpdateProjectModelPermissionsCall<'a> {
 }
 /// A call to the `DeleteProjectModelPermissions` endpoint, returned by [`OpenAI::delete_project_model_permissions`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteProjectModelPermissionsCall<'a>(
@@ -25847,7 +26095,9 @@ impl<'a> DeleteProjectModelPermissionsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -25866,7 +26116,7 @@ impl<'a> ::core::future::IntoFuture for DeleteProjectModelPermissionsCall<'a> {
 }
 /// A call to the `ListProjectRateLimits` endpoint, returned by [`OpenAI::list_project_rate_limits`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListProjectRateLimitsCall<'a>(
@@ -25908,7 +26158,9 @@ impl<'a> ListProjectRateLimitsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -25927,7 +26179,7 @@ impl<'a> ::core::future::IntoFuture for ListProjectRateLimitsCall<'a> {
 }
 /// A call to the `UpdateProjectRateLimits` endpoint, returned by [`OpenAI::update_project_rate_limits`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UpdateProjectRateLimitsCall<'a>(
@@ -25957,7 +26209,9 @@ impl<'a> UpdateProjectRateLimitsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -25976,7 +26230,7 @@ impl<'a> ::core::future::IntoFuture for UpdateProjectRateLimitsCall<'a> {
 }
 /// A call to the `ListProjectServiceAccounts` endpoint, returned by [`OpenAI::list_project_service_accounts`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListProjectServiceAccountsCall<'a>(
@@ -26014,7 +26268,9 @@ impl<'a> ListProjectServiceAccountsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -26033,7 +26289,7 @@ impl<'a> ::core::future::IntoFuture for ListProjectServiceAccountsCall<'a> {
 }
 /// A call to the `CreateProjectServiceAccount` endpoint, returned by [`OpenAI::create_project_service_account`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateProjectServiceAccountCall<'a>(
@@ -26063,7 +26319,9 @@ impl<'a> CreateProjectServiceAccountCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -26082,7 +26340,7 @@ impl<'a> ::core::future::IntoFuture for CreateProjectServiceAccountCall<'a> {
 }
 /// A call to the `RetrieveProjectServiceAccount` endpoint, returned by [`OpenAI::retrieve_project_service_account`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveProjectServiceAccountCall<'a>(
@@ -26116,7 +26374,9 @@ impl<'a> RetrieveProjectServiceAccountCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -26135,7 +26395,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectServiceAccountCall<'a> {
 }
 /// A call to the `UpdateProjectServiceAccount` endpoint, returned by [`OpenAI::update_project_service_account`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UpdateProjectServiceAccountCall<'a>(
@@ -26165,7 +26425,9 @@ impl<'a> UpdateProjectServiceAccountCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -26184,7 +26446,7 @@ impl<'a> ::core::future::IntoFuture for UpdateProjectServiceAccountCall<'a> {
 }
 /// A call to the `DeleteProjectServiceAccount` endpoint, returned by [`OpenAI::delete_project_service_account`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteProjectServiceAccountCall<'a>(
@@ -26214,7 +26476,9 @@ impl<'a> DeleteProjectServiceAccountCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -26233,7 +26497,7 @@ impl<'a> ::core::future::IntoFuture for DeleteProjectServiceAccountCall<'a> {
 }
 /// A call to the `ListProjectSpendAlerts` endpoint, returned by [`OpenAI::list_project_spend_alerts`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListProjectSpendAlertsCall<'a>(
@@ -26279,7 +26543,9 @@ impl<'a> ListProjectSpendAlertsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -26298,7 +26564,7 @@ impl<'a> ::core::future::IntoFuture for ListProjectSpendAlertsCall<'a> {
 }
 /// A call to the `CreateProjectSpendAlert` endpoint, returned by [`OpenAI::create_project_spend_alert`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateProjectSpendAlertCall<'a>(
@@ -26328,7 +26594,9 @@ impl<'a> CreateProjectSpendAlertCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -26347,7 +26615,7 @@ impl<'a> ::core::future::IntoFuture for CreateProjectSpendAlertCall<'a> {
 }
 /// A call to the `RetrieveProjectSpendAlert` endpoint, returned by [`OpenAI::retrieve_project_spend_alert`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveProjectSpendAlertCall<'a>(
@@ -26377,7 +26645,9 @@ impl<'a> RetrieveProjectSpendAlertCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -26396,7 +26666,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectSpendAlertCall<'a> {
 }
 /// A call to the `UpdateProjectSpendAlert` endpoint, returned by [`OpenAI::update_project_spend_alert`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UpdateProjectSpendAlertCall<'a>(
@@ -26426,7 +26696,9 @@ impl<'a> UpdateProjectSpendAlertCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -26445,7 +26717,7 @@ impl<'a> ::core::future::IntoFuture for UpdateProjectSpendAlertCall<'a> {
 }
 /// A call to the `DeleteProjectSpendAlert` endpoint, returned by [`OpenAI::delete_project_spend_alert`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteProjectSpendAlertCall<'a>(
@@ -26475,7 +26747,9 @@ impl<'a> DeleteProjectSpendAlertCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -26494,7 +26768,7 @@ impl<'a> ::core::future::IntoFuture for DeleteProjectSpendAlertCall<'a> {
 }
 /// A call to the `ListProjectUsers` endpoint, returned by [`OpenAI::list_project_users`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListProjectUsersCall<'a>(
@@ -26532,7 +26806,9 @@ impl<'a> ListProjectUsersCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -26551,7 +26827,7 @@ impl<'a> ::core::future::IntoFuture for ListProjectUsersCall<'a> {
 }
 /// A call to the `CreateProjectUser` endpoint, returned by [`OpenAI::create_project_user`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateProjectUserCall<'a>(
@@ -26581,7 +26857,9 @@ impl<'a> CreateProjectUserCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -26600,7 +26878,7 @@ impl<'a> ::core::future::IntoFuture for CreateProjectUserCall<'a> {
 }
 /// A call to the `RetrieveProjectUser` endpoint, returned by [`OpenAI::retrieve_project_user`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveProjectUserCall<'a>(
@@ -26630,7 +26908,9 @@ impl<'a> RetrieveProjectUserCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -26649,7 +26929,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectUserCall<'a> {
 }
 /// A call to the `ModifyProjectUser` endpoint, returned by [`OpenAI::modify_project_user`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ModifyProjectUserCall<'a>(
@@ -26679,7 +26959,9 @@ impl<'a> ModifyProjectUserCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -26698,7 +26980,7 @@ impl<'a> ::core::future::IntoFuture for ModifyProjectUserCall<'a> {
 }
 /// A call to the `DeleteProjectUser` endpoint, returned by [`OpenAI::delete_project_user`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteProjectUserCall<'a>(
@@ -26728,7 +27010,9 @@ impl<'a> DeleteProjectUserCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -26747,7 +27031,7 @@ impl<'a> ::core::future::IntoFuture for DeleteProjectUserCall<'a> {
 }
 /// A call to the `ListRoles` endpoint, returned by [`OpenAI::list_roles`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListRolesCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListRolesRequest>);
@@ -26785,7 +27069,9 @@ impl<'a> ListRolesCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -26804,7 +27090,7 @@ impl<'a> ::core::future::IntoFuture for ListRolesCall<'a> {
 }
 /// A call to the `CreateRole` endpoint, returned by [`OpenAI::create_role`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateRoleCall<'a>(schematic_runtime::Call<'a, OpenAIApi, CreateRoleRequest>);
@@ -26830,7 +27116,9 @@ impl<'a> CreateRoleCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -26849,7 +27137,7 @@ impl<'a> ::core::future::IntoFuture for CreateRoleCall<'a> {
 }
 /// A call to the `RetrieveRole` endpoint, returned by [`OpenAI::retrieve_role`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveRoleCall<'a>(
@@ -26879,7 +27167,9 @@ impl<'a> RetrieveRoleCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -26898,7 +27188,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveRoleCall<'a> {
 }
 /// A call to the `UpdateRole` endpoint, returned by [`OpenAI::update_role`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UpdateRoleCall<'a>(schematic_runtime::Call<'a, OpenAIApi, UpdateRoleRequest>);
@@ -26924,7 +27214,9 @@ impl<'a> UpdateRoleCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -26943,7 +27235,7 @@ impl<'a> ::core::future::IntoFuture for UpdateRoleCall<'a> {
 }
 /// A call to the `DeleteRole` endpoint, returned by [`OpenAI::delete_role`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteRoleCall<'a>(schematic_runtime::Call<'a, OpenAIApi, DeleteRoleRequest>);
@@ -26969,7 +27261,9 @@ impl<'a> DeleteRoleCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -26988,7 +27282,7 @@ impl<'a> ::core::future::IntoFuture for DeleteRoleCall<'a> {
 }
 /// A call to the `ListOrganizationSpendAlerts` endpoint, returned by [`OpenAI::list_organization_spend_alerts`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListOrganizationSpendAlertsCall<'a>(
@@ -27034,7 +27328,9 @@ impl<'a> ListOrganizationSpendAlertsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -27053,7 +27349,7 @@ impl<'a> ::core::future::IntoFuture for ListOrganizationSpendAlertsCall<'a> {
 }
 /// A call to the `CreateOrganizationSpendAlert` endpoint, returned by [`OpenAI::create_organization_spend_alert`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateOrganizationSpendAlertCall<'a>(
@@ -27087,7 +27383,9 @@ impl<'a> CreateOrganizationSpendAlertCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -27106,7 +27404,7 @@ impl<'a> ::core::future::IntoFuture for CreateOrganizationSpendAlertCall<'a> {
 }
 /// A call to the `RetrieveOrganizationSpendAlert` endpoint, returned by [`OpenAI::retrieve_organization_spend_alert`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveOrganizationSpendAlertCall<'a>(
@@ -27140,7 +27438,9 @@ impl<'a> RetrieveOrganizationSpendAlertCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -27159,7 +27459,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveOrganizationSpendAlertCall<'a> {
 }
 /// A call to the `UpdateOrganizationSpendAlert` endpoint, returned by [`OpenAI::update_organization_spend_alert`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UpdateOrganizationSpendAlertCall<'a>(
@@ -27193,7 +27493,9 @@ impl<'a> UpdateOrganizationSpendAlertCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -27212,7 +27514,7 @@ impl<'a> ::core::future::IntoFuture for UpdateOrganizationSpendAlertCall<'a> {
 }
 /// A call to the `DeleteOrganizationSpendAlert` endpoint, returned by [`OpenAI::delete_organization_spend_alert`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteOrganizationSpendAlertCall<'a>(
@@ -27246,7 +27548,9 @@ impl<'a> DeleteOrganizationSpendAlertCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -27265,7 +27569,7 @@ impl<'a> ::core::future::IntoFuture for DeleteOrganizationSpendAlertCall<'a> {
 }
 /// A call to the `UsageAudioSpeeches` endpoint, returned by [`OpenAI::usage_audio_speeches`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UsageAudioSpeechesCall<'a>(
@@ -27335,7 +27639,9 @@ impl<'a> UsageAudioSpeechesCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -27354,7 +27660,7 @@ impl<'a> ::core::future::IntoFuture for UsageAudioSpeechesCall<'a> {
 }
 /// A call to the `UsageAudioTranscriptions` endpoint, returned by [`OpenAI::usage_audio_transcriptions`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UsageAudioTranscriptionsCall<'a>(
@@ -27424,7 +27730,9 @@ impl<'a> UsageAudioTranscriptionsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -27443,7 +27751,7 @@ impl<'a> ::core::future::IntoFuture for UsageAudioTranscriptionsCall<'a> {
 }
 /// A call to the `UsageCodeInterpreterSessions` endpoint, returned by [`OpenAI::usage_code_interpreter_sessions`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UsageCodeInterpreterSessionsCall<'a>(
@@ -27505,7 +27813,9 @@ impl<'a> UsageCodeInterpreterSessionsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -27524,7 +27834,7 @@ impl<'a> ::core::future::IntoFuture for UsageCodeInterpreterSessionsCall<'a> {
 }
 /// A call to the `UsageCompletions` endpoint, returned by [`OpenAI::usage_completions`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UsageCompletionsCall<'a>(
@@ -27598,7 +27908,9 @@ impl<'a> UsageCompletionsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -27617,7 +27929,7 @@ impl<'a> ::core::future::IntoFuture for UsageCompletionsCall<'a> {
 }
 /// A call to the `UsageEmbeddings` endpoint, returned by [`OpenAI::usage_embeddings`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UsageEmbeddingsCall<'a>(
@@ -27687,7 +27999,9 @@ impl<'a> UsageEmbeddingsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -27706,7 +28020,7 @@ impl<'a> ::core::future::IntoFuture for UsageEmbeddingsCall<'a> {
 }
 /// A call to the `UsageFileSearchCalls` endpoint, returned by [`OpenAI::usage_file_search_calls`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UsageFileSearchCallsCall<'a>(
@@ -27776,7 +28090,9 @@ impl<'a> UsageFileSearchCallsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -27795,7 +28111,7 @@ impl<'a> ::core::future::IntoFuture for UsageFileSearchCallsCall<'a> {
 }
 /// A call to the `UsageImages` endpoint, returned by [`OpenAI::usage_images`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UsageImagesCall<'a>(
@@ -27871,7 +28187,9 @@ impl<'a> UsageImagesCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -27890,7 +28208,7 @@ impl<'a> ::core::future::IntoFuture for UsageImagesCall<'a> {
 }
 /// A call to the `UsageModerations` endpoint, returned by [`OpenAI::usage_moderations`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UsageModerationsCall<'a>(
@@ -27960,7 +28278,9 @@ impl<'a> UsageModerationsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -27979,7 +28299,7 @@ impl<'a> ::core::future::IntoFuture for UsageModerationsCall<'a> {
 }
 /// A call to the `UsageVectorStores` endpoint, returned by [`OpenAI::usage_vector_stores`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UsageVectorStoresCall<'a>(
@@ -28037,7 +28357,9 @@ impl<'a> UsageVectorStoresCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -28056,7 +28378,7 @@ impl<'a> ::core::future::IntoFuture for UsageVectorStoresCall<'a> {
 }
 /// A call to the `UsageWebSearchCalls` endpoint, returned by [`OpenAI::usage_web_search_calls`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UsageWebSearchCallsCall<'a>(
@@ -28130,7 +28452,9 @@ impl<'a> UsageWebSearchCallsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -28149,7 +28473,7 @@ impl<'a> ::core::future::IntoFuture for UsageWebSearchCallsCall<'a> {
 }
 /// A call to the `ListUsers` endpoint, returned by [`OpenAI::list_users`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListUsersCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListUsersRequest>);
@@ -28187,7 +28511,9 @@ impl<'a> ListUsersCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -28206,7 +28532,7 @@ impl<'a> ::core::future::IntoFuture for ListUsersCall<'a> {
 }
 /// A call to the `RetrieveUser` endpoint, returned by [`OpenAI::retrieve_user`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveUserCall<'a>(
@@ -28236,7 +28562,9 @@ impl<'a> RetrieveUserCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -28255,7 +28583,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveUserCall<'a> {
 }
 /// A call to the `ModifyUser` endpoint, returned by [`OpenAI::modify_user`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ModifyUserCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ModifyUserRequest>);
@@ -28281,7 +28609,9 @@ impl<'a> ModifyUserCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -28300,7 +28630,7 @@ impl<'a> ::core::future::IntoFuture for ModifyUserCall<'a> {
 }
 /// A call to the `DeleteUser` endpoint, returned by [`OpenAI::delete_user`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteUserCall<'a>(schematic_runtime::Call<'a, OpenAIApi, DeleteUserRequest>);
@@ -28326,7 +28656,9 @@ impl<'a> DeleteUserCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -28345,7 +28677,7 @@ impl<'a> ::core::future::IntoFuture for DeleteUserCall<'a> {
 }
 /// A call to the `ListUserRoleAssignments` endpoint, returned by [`OpenAI::list_user_role_assignments`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListUserRoleAssignmentsCall<'a>(
@@ -28387,7 +28719,9 @@ impl<'a> ListUserRoleAssignmentsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -28406,7 +28740,7 @@ impl<'a> ::core::future::IntoFuture for ListUserRoleAssignmentsCall<'a> {
 }
 /// A call to the `AssignUserRole` endpoint, returned by [`OpenAI::assign_user_role`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct AssignUserRoleCall<'a>(
@@ -28436,7 +28770,9 @@ impl<'a> AssignUserRoleCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -28455,7 +28791,7 @@ impl<'a> ::core::future::IntoFuture for AssignUserRoleCall<'a> {
 }
 /// A call to the `RetrieveUserRole` endpoint, returned by [`OpenAI::retrieve_user_role`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveUserRoleCall<'a>(
@@ -28485,7 +28821,9 @@ impl<'a> RetrieveUserRoleCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -28504,7 +28842,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveUserRoleCall<'a> {
 }
 /// A call to the `UnassignUserRole` endpoint, returned by [`OpenAI::unassign_user_role`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UnassignUserRoleCall<'a>(
@@ -28534,7 +28872,9 @@ impl<'a> UnassignUserRoleCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -28553,7 +28893,7 @@ impl<'a> ::core::future::IntoFuture for UnassignUserRoleCall<'a> {
 }
 /// A call to the `ListProjectGroupRoleAssignments` endpoint, returned by [`OpenAI::list_project_group_role_assignments`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListProjectGroupRoleAssignmentsCall<'a>(
@@ -28599,7 +28939,9 @@ impl<'a> ListProjectGroupRoleAssignmentsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -28618,7 +28960,7 @@ impl<'a> ::core::future::IntoFuture for ListProjectGroupRoleAssignmentsCall<'a> 
 }
 /// A call to the `AssignProjectGroupRole` endpoint, returned by [`OpenAI::assign_project_group_role`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct AssignProjectGroupRoleCall<'a>(
@@ -28648,7 +28990,9 @@ impl<'a> AssignProjectGroupRoleCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -28667,7 +29011,7 @@ impl<'a> ::core::future::IntoFuture for AssignProjectGroupRoleCall<'a> {
 }
 /// A call to the `RetrieveProjectGroupRole` endpoint, returned by [`OpenAI::retrieve_project_group_role`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveProjectGroupRoleCall<'a>(
@@ -28697,7 +29041,9 @@ impl<'a> RetrieveProjectGroupRoleCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -28716,7 +29062,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectGroupRoleCall<'a> {
 }
 /// A call to the `UnassignProjectGroupRole` endpoint, returned by [`OpenAI::unassign_project_group_role`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UnassignProjectGroupRoleCall<'a>(
@@ -28746,7 +29092,9 @@ impl<'a> UnassignProjectGroupRoleCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -28765,7 +29113,7 @@ impl<'a> ::core::future::IntoFuture for UnassignProjectGroupRoleCall<'a> {
 }
 /// A call to the `ListProjectRoles` endpoint, returned by [`OpenAI::list_project_roles`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListProjectRolesCall<'a>(
@@ -28807,7 +29155,9 @@ impl<'a> ListProjectRolesCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -28826,7 +29176,7 @@ impl<'a> ::core::future::IntoFuture for ListProjectRolesCall<'a> {
 }
 /// A call to the `CreateProjectRole` endpoint, returned by [`OpenAI::create_project_role`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateProjectRoleCall<'a>(
@@ -28856,7 +29206,9 @@ impl<'a> CreateProjectRoleCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -28875,7 +29227,7 @@ impl<'a> ::core::future::IntoFuture for CreateProjectRoleCall<'a> {
 }
 /// A call to the `RetrieveProjectRole` endpoint, returned by [`OpenAI::retrieve_project_role`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveProjectRoleCall<'a>(
@@ -28905,7 +29257,9 @@ impl<'a> RetrieveProjectRoleCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -28924,7 +29278,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectRoleCall<'a> {
 }
 /// A call to the `UpdateProjectRole` endpoint, returned by [`OpenAI::update_project_role`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UpdateProjectRoleCall<'a>(
@@ -28954,7 +29308,9 @@ impl<'a> UpdateProjectRoleCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -28973,7 +29329,7 @@ impl<'a> ::core::future::IntoFuture for UpdateProjectRoleCall<'a> {
 }
 /// A call to the `DeleteProjectRole` endpoint, returned by [`OpenAI::delete_project_role`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteProjectRoleCall<'a>(
@@ -29003,7 +29359,9 @@ impl<'a> DeleteProjectRoleCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -29022,7 +29380,7 @@ impl<'a> ::core::future::IntoFuture for DeleteProjectRoleCall<'a> {
 }
 /// A call to the `ListProjectUserRoleAssignments` endpoint, returned by [`OpenAI::list_project_user_role_assignments`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListProjectUserRoleAssignmentsCall<'a>(
@@ -29068,7 +29426,9 @@ impl<'a> ListProjectUserRoleAssignmentsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -29087,7 +29447,7 @@ impl<'a> ::core::future::IntoFuture for ListProjectUserRoleAssignmentsCall<'a> {
 }
 /// A call to the `AssignProjectUserRole` endpoint, returned by [`OpenAI::assign_project_user_role`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct AssignProjectUserRoleCall<'a>(
@@ -29117,7 +29477,9 @@ impl<'a> AssignProjectUserRoleCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -29136,7 +29498,7 @@ impl<'a> ::core::future::IntoFuture for AssignProjectUserRoleCall<'a> {
 }
 /// A call to the `RetrieveProjectUserRole` endpoint, returned by [`OpenAI::retrieve_project_user_role`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveProjectUserRoleCall<'a>(
@@ -29166,7 +29528,9 @@ impl<'a> RetrieveProjectUserRoleCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -29185,7 +29549,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveProjectUserRoleCall<'a> {
 }
 /// A call to the `UnassignProjectUserRole` endpoint, returned by [`OpenAI::unassign_project_user_role`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UnassignProjectUserRoleCall<'a>(
@@ -29215,7 +29579,9 @@ impl<'a> UnassignProjectUserRoleCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -29234,7 +29600,7 @@ impl<'a> ::core::future::IntoFuture for UnassignProjectUserRoleCall<'a> {
 }
 /// A call to the `CreateRealtimeCall` endpoint, returned by [`OpenAI::create_realtime_call`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateRealtimeCallCall<'a>(
@@ -29264,7 +29630,9 @@ impl<'a> CreateRealtimeCallCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -29283,7 +29651,7 @@ impl<'a> ::core::future::IntoFuture for CreateRealtimeCallCall<'a> {
 }
 /// A call to the `AcceptRealtimeCall` endpoint, returned by [`OpenAI::accept_realtime_call`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct AcceptRealtimeCallCall<'a>(
@@ -29313,7 +29681,9 @@ impl<'a> AcceptRealtimeCallCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -29332,7 +29702,7 @@ impl<'a> ::core::future::IntoFuture for AcceptRealtimeCallCall<'a> {
 }
 /// A call to the `HangupRealtimeCall` endpoint, returned by [`OpenAI::hangup_realtime_call`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct HangupRealtimeCallCall<'a>(
@@ -29362,7 +29732,9 @@ impl<'a> HangupRealtimeCallCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -29381,7 +29753,7 @@ impl<'a> ::core::future::IntoFuture for HangupRealtimeCallCall<'a> {
 }
 /// A call to the `ReferRealtimeCall` endpoint, returned by [`OpenAI::refer_realtime_call`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ReferRealtimeCallCall<'a>(
@@ -29411,7 +29783,9 @@ impl<'a> ReferRealtimeCallCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -29430,7 +29804,7 @@ impl<'a> ::core::future::IntoFuture for ReferRealtimeCallCall<'a> {
 }
 /// A call to the `RejectRealtimeCall` endpoint, returned by [`OpenAI::reject_realtime_call`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RejectRealtimeCallCall<'a>(
@@ -29460,7 +29834,9 @@ impl<'a> RejectRealtimeCallCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -29479,7 +29855,7 @@ impl<'a> ::core::future::IntoFuture for RejectRealtimeCallCall<'a> {
 }
 /// A call to the `CreateRealtimeClientSecret` endpoint, returned by [`OpenAI::create_realtime_client_secret`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateRealtimeClientSecretCall<'a>(
@@ -29509,7 +29885,9 @@ impl<'a> CreateRealtimeClientSecretCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -29528,7 +29906,7 @@ impl<'a> ::core::future::IntoFuture for CreateRealtimeClientSecretCall<'a> {
 }
 /// A call to the `CreateRealtimeSession` endpoint, returned by [`OpenAI::create_realtime_session`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateRealtimeSessionCall<'a>(
@@ -29558,7 +29936,9 @@ impl<'a> CreateRealtimeSessionCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -29577,7 +29957,7 @@ impl<'a> ::core::future::IntoFuture for CreateRealtimeSessionCall<'a> {
 }
 /// A call to the `CreateRealtimeTranscriptionSession` endpoint, returned by [`OpenAI::create_realtime_transcription_session`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateRealtimeTranscriptionSessionCall<'a>(
@@ -29611,7 +29991,9 @@ impl<'a> CreateRealtimeTranscriptionSessionCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -29630,7 +30012,7 @@ impl<'a> ::core::future::IntoFuture for CreateRealtimeTranscriptionSessionCall<'
 }
 /// A call to the `CreateRealtimeTranslationClientSecret` endpoint, returned by [`OpenAI::create_realtime_translation_client_secret`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateRealtimeTranslationClientSecretCall<'a>(
@@ -29664,7 +30046,9 @@ impl<'a> CreateRealtimeTranslationClientSecretCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -29683,7 +30067,7 @@ impl<'a> ::core::future::IntoFuture for CreateRealtimeTranslationClientSecretCal
 }
 /// A call to the `CreateResponse` endpoint, returned by [`OpenAI::create_response`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateResponseCall<'a>(
@@ -29713,7 +30097,9 @@ impl<'a> CreateResponseCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -29732,7 +30118,7 @@ impl<'a> ::core::future::IntoFuture for CreateResponseCall<'a> {
 }
 /// A call to the `GetResponse` endpoint, returned by [`OpenAI::get_response`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetResponseCall<'a>(
@@ -29776,7 +30162,9 @@ impl<'a> GetResponseCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -29795,7 +30183,7 @@ impl<'a> ::core::future::IntoFuture for GetResponseCall<'a> {
 }
 /// A call to the `DeleteResponse` endpoint, returned by [`OpenAI::delete_response`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteResponseCall<'a>(
@@ -29825,7 +30213,9 @@ impl<'a> DeleteResponseCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -29844,7 +30234,7 @@ impl<'a> ::core::future::IntoFuture for DeleteResponseCall<'a> {
 }
 /// A call to the `CancelResponse` endpoint, returned by [`OpenAI::cancel_response`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CancelResponseCall<'a>(
@@ -29874,7 +30264,9 @@ impl<'a> CancelResponseCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -29893,7 +30285,7 @@ impl<'a> ::core::future::IntoFuture for CancelResponseCall<'a> {
 }
 /// A call to the `ListInputItems` endpoint, returned by [`OpenAI::list_input_items`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListInputItemsCall<'a>(
@@ -29939,7 +30331,9 @@ impl<'a> ListInputItemsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -29958,7 +30352,7 @@ impl<'a> ::core::future::IntoFuture for ListInputItemsCall<'a> {
 }
 /// A call to the `CreateUpload` endpoint, returned by [`OpenAI::create_upload`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateUploadCall<'a>(
@@ -29988,7 +30382,9 @@ impl<'a> CreateUploadCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -30007,7 +30403,7 @@ impl<'a> ::core::future::IntoFuture for CreateUploadCall<'a> {
 }
 /// A call to the `CancelUpload` endpoint, returned by [`OpenAI::cancel_upload`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CancelUploadCall<'a>(
@@ -30037,7 +30433,9 @@ impl<'a> CancelUploadCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -30056,7 +30454,7 @@ impl<'a> ::core::future::IntoFuture for CancelUploadCall<'a> {
 }
 /// A call to the `CompleteUpload` endpoint, returned by [`OpenAI::complete_upload`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CompleteUploadCall<'a>(
@@ -30086,7 +30484,9 @@ impl<'a> CompleteUploadCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -30105,7 +30505,7 @@ impl<'a> ::core::future::IntoFuture for CompleteUploadCall<'a> {
 }
 /// A call to the `AddUploadPart` endpoint, returned by [`OpenAI::add_upload_part`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct AddUploadPartCall<'a>(
@@ -30135,7 +30535,9 @@ impl<'a> AddUploadPartCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -30154,7 +30556,7 @@ impl<'a> ::core::future::IntoFuture for AddUploadPartCall<'a> {
 }
 /// A call to the `ListVectorStores` endpoint, returned by [`OpenAI::list_vector_stores`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListVectorStoresCall<'a>(
@@ -30200,7 +30602,9 @@ impl<'a> ListVectorStoresCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -30219,7 +30623,7 @@ impl<'a> ::core::future::IntoFuture for ListVectorStoresCall<'a> {
 }
 /// A call to the `CreateVectorStore` endpoint, returned by [`OpenAI::create_vector_store`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateVectorStoreCall<'a>(
@@ -30249,7 +30653,9 @@ impl<'a> CreateVectorStoreCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -30268,7 +30674,7 @@ impl<'a> ::core::future::IntoFuture for CreateVectorStoreCall<'a> {
 }
 /// A call to the `GetVectorStore` endpoint, returned by [`OpenAI::get_vector_store`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetVectorStoreCall<'a>(
@@ -30298,7 +30704,9 @@ impl<'a> GetVectorStoreCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -30317,7 +30725,7 @@ impl<'a> ::core::future::IntoFuture for GetVectorStoreCall<'a> {
 }
 /// A call to the `ModifyVectorStore` endpoint, returned by [`OpenAI::modify_vector_store`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ModifyVectorStoreCall<'a>(
@@ -30347,7 +30755,9 @@ impl<'a> ModifyVectorStoreCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -30366,7 +30776,7 @@ impl<'a> ::core::future::IntoFuture for ModifyVectorStoreCall<'a> {
 }
 /// A call to the `DeleteVectorStore` endpoint, returned by [`OpenAI::delete_vector_store`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteVectorStoreCall<'a>(
@@ -30396,7 +30806,9 @@ impl<'a> DeleteVectorStoreCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -30415,7 +30827,7 @@ impl<'a> ::core::future::IntoFuture for DeleteVectorStoreCall<'a> {
 }
 /// A call to the `CreateVectorStoreFileBatch` endpoint, returned by [`OpenAI::create_vector_store_file_batch`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateVectorStoreFileBatchCall<'a>(
@@ -30445,7 +30857,9 @@ impl<'a> CreateVectorStoreFileBatchCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -30464,7 +30878,7 @@ impl<'a> ::core::future::IntoFuture for CreateVectorStoreFileBatchCall<'a> {
 }
 /// A call to the `GetVectorStoreFileBatch` endpoint, returned by [`OpenAI::get_vector_store_file_batch`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetVectorStoreFileBatchCall<'a>(
@@ -30494,7 +30908,9 @@ impl<'a> GetVectorStoreFileBatchCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -30513,7 +30929,7 @@ impl<'a> ::core::future::IntoFuture for GetVectorStoreFileBatchCall<'a> {
 }
 /// A call to the `CancelVectorStoreFileBatch` endpoint, returned by [`OpenAI::cancel_vector_store_file_batch`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CancelVectorStoreFileBatchCall<'a>(
@@ -30543,7 +30959,9 @@ impl<'a> CancelVectorStoreFileBatchCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -30562,7 +30980,7 @@ impl<'a> ::core::future::IntoFuture for CancelVectorStoreFileBatchCall<'a> {
 }
 /// A call to the `ListFilesInVectorStoreBatch` endpoint, returned by [`OpenAI::list_files_in_vector_store_batch`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListFilesInVectorStoreBatchCall<'a>(
@@ -30612,7 +31030,9 @@ impl<'a> ListFilesInVectorStoreBatchCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -30631,7 +31051,7 @@ impl<'a> ::core::future::IntoFuture for ListFilesInVectorStoreBatchCall<'a> {
 }
 /// A call to the `ListVectorStoreFiles` endpoint, returned by [`OpenAI::list_vector_store_files`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListVectorStoreFilesCall<'a>(
@@ -30681,7 +31101,9 @@ impl<'a> ListVectorStoreFilesCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -30700,7 +31122,7 @@ impl<'a> ::core::future::IntoFuture for ListVectorStoreFilesCall<'a> {
 }
 /// A call to the `CreateVectorStoreFile` endpoint, returned by [`OpenAI::create_vector_store_file`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateVectorStoreFileCall<'a>(
@@ -30730,7 +31152,9 @@ impl<'a> CreateVectorStoreFileCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -30749,7 +31173,7 @@ impl<'a> ::core::future::IntoFuture for CreateVectorStoreFileCall<'a> {
 }
 /// A call to the `GetVectorStoreFile` endpoint, returned by [`OpenAI::get_vector_store_file`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetVectorStoreFileCall<'a>(
@@ -30779,7 +31203,9 @@ impl<'a> GetVectorStoreFileCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -30798,7 +31224,7 @@ impl<'a> ::core::future::IntoFuture for GetVectorStoreFileCall<'a> {
 }
 /// A call to the `UpdateVectorStoreFileAttributes` endpoint, returned by [`OpenAI::update_vector_store_file_attributes`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UpdateVectorStoreFileAttributesCall<'a>(
@@ -30832,7 +31258,9 @@ impl<'a> UpdateVectorStoreFileAttributesCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -30851,7 +31279,7 @@ impl<'a> ::core::future::IntoFuture for UpdateVectorStoreFileAttributesCall<'a> 
 }
 /// A call to the `DeleteVectorStoreFile` endpoint, returned by [`OpenAI::delete_vector_store_file`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteVectorStoreFileCall<'a>(
@@ -30881,7 +31309,9 @@ impl<'a> DeleteVectorStoreFileCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -30900,7 +31330,7 @@ impl<'a> ::core::future::IntoFuture for DeleteVectorStoreFileCall<'a> {
 }
 /// A call to the `RetrieveVectorStoreFileContent` endpoint, returned by [`OpenAI::retrieve_vector_store_file_content`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveVectorStoreFileContentCall<'a>(
@@ -30934,7 +31364,9 @@ impl<'a> RetrieveVectorStoreFileContentCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -30953,7 +31385,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveVectorStoreFileContentCall<'a> {
 }
 /// A call to the `SearchVectorStore` endpoint, returned by [`OpenAI::search_vector_store`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct SearchVectorStoreCall<'a>(
@@ -30983,7 +31415,9 @@ impl<'a> SearchVectorStoreCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -31002,7 +31436,7 @@ impl<'a> ::core::future::IntoFuture for SearchVectorStoreCall<'a> {
 }
 /// A call to the `CreateConversation` endpoint, returned by [`OpenAI::create_conversation`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateConversationCall<'a>(
@@ -31032,7 +31466,9 @@ impl<'a> CreateConversationCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -31051,7 +31487,7 @@ impl<'a> ::core::future::IntoFuture for CreateConversationCall<'a> {
 }
 /// A call to the `GetConversation` endpoint, returned by [`OpenAI::get_conversation`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetConversationCall<'a>(
@@ -31081,7 +31517,9 @@ impl<'a> GetConversationCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -31100,7 +31538,7 @@ impl<'a> ::core::future::IntoFuture for GetConversationCall<'a> {
 }
 /// A call to the `UpdateConversation` endpoint, returned by [`OpenAI::update_conversation`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UpdateConversationCall<'a>(
@@ -31130,7 +31568,9 @@ impl<'a> UpdateConversationCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -31149,7 +31589,7 @@ impl<'a> ::core::future::IntoFuture for UpdateConversationCall<'a> {
 }
 /// A call to the `DeleteConversation` endpoint, returned by [`OpenAI::delete_conversation`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteConversationCall<'a>(
@@ -31179,7 +31619,9 @@ impl<'a> DeleteConversationCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -31198,7 +31640,7 @@ impl<'a> ::core::future::IntoFuture for DeleteConversationCall<'a> {
 }
 /// A call to the `Getorganizationspendlimit` endpoint, returned by [`OpenAI::getorganizationspendlimit`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetorganizationspendlimitCall<'a>(
@@ -31228,7 +31670,9 @@ impl<'a> GetorganizationspendlimitCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -31247,7 +31691,7 @@ impl<'a> ::core::future::IntoFuture for GetorganizationspendlimitCall<'a> {
 }
 /// A call to the `Updateorganizationspendlimit` endpoint, returned by [`OpenAI::updateorganizationspendlimit`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UpdateorganizationspendlimitCall<'a>(
@@ -31281,7 +31725,9 @@ impl<'a> UpdateorganizationspendlimitCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -31300,7 +31746,7 @@ impl<'a> ::core::future::IntoFuture for UpdateorganizationspendlimitCall<'a> {
 }
 /// A call to the `Deleteorganizationspendlimit` endpoint, returned by [`OpenAI::deleteorganizationspendlimit`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteorganizationspendlimitCall<'a>(
@@ -31334,7 +31780,9 @@ impl<'a> DeleteorganizationspendlimitCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -31353,7 +31801,7 @@ impl<'a> ::core::future::IntoFuture for DeleteorganizationspendlimitCall<'a> {
 }
 /// A call to the `Getprojectspendlimit` endpoint, returned by [`OpenAI::getprojectspendlimit`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetprojectspendlimitCall<'a>(
@@ -31383,7 +31831,9 @@ impl<'a> GetprojectspendlimitCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -31402,7 +31852,7 @@ impl<'a> ::core::future::IntoFuture for GetprojectspendlimitCall<'a> {
 }
 /// A call to the `Updateprojectspendlimit` endpoint, returned by [`OpenAI::updateprojectspendlimit`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UpdateprojectspendlimitCall<'a>(
@@ -31432,7 +31882,9 @@ impl<'a> UpdateprojectspendlimitCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -31451,7 +31903,7 @@ impl<'a> ::core::future::IntoFuture for UpdateprojectspendlimitCall<'a> {
 }
 /// A call to the `Deleteprojectspendlimit` endpoint, returned by [`OpenAI::deleteprojectspendlimit`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteprojectspendlimitCall<'a>(
@@ -31481,7 +31933,9 @@ impl<'a> DeleteprojectspendlimitCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -31500,7 +31954,7 @@ impl<'a> ::core::future::IntoFuture for DeleteprojectspendlimitCall<'a> {
 }
 /// A call to the `CreateanAPIkeyforaserviceaccount` endpoint, returned by [`OpenAI::createan_apikeyforaserviceaccount`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateanAPIkeyforaserviceaccountCall<'a>(
@@ -31534,7 +31988,9 @@ impl<'a> CreateanAPIkeyforaserviceaccountCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -31553,7 +32009,7 @@ impl<'a> ::core::future::IntoFuture for CreateanAPIkeyforaserviceaccountCall<'a>
 }
 /// A call to the `Createcontentprovenancecheck` endpoint, returned by [`OpenAI::createcontentprovenancecheck`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreatecontentprovenancecheckCall<'a>(
@@ -31587,7 +32043,9 @@ impl<'a> CreatecontentprovenancecheckCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -31606,7 +32064,7 @@ impl<'a> ::core::future::IntoFuture for CreatecontentprovenancecheckCall<'a> {
 }
 /// A call to the `ListVideos` endpoint, returned by [`OpenAI::list_videos`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListVideosCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListVideosRequest>);
@@ -31644,7 +32102,9 @@ impl<'a> ListVideosCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -31663,7 +32123,7 @@ impl<'a> ::core::future::IntoFuture for ListVideosCall<'a> {
 }
 /// A call to the `CreateVideo` endpoint, returned by [`OpenAI::create_video`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateVideoCall<'a>(
@@ -31691,7 +32151,9 @@ impl<'a> CreateVideoCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -31710,7 +32172,7 @@ impl<'a> ::core::future::IntoFuture for CreateVideoCall<'a> {
 }
 /// A call to the `CreateVideoCharacter` endpoint, returned by [`OpenAI::create_video_character`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateVideoCharacterCall<'a>(
@@ -31740,7 +32202,9 @@ impl<'a> CreateVideoCharacterCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -31759,7 +32223,7 @@ impl<'a> ::core::future::IntoFuture for CreateVideoCharacterCall<'a> {
 }
 /// A call to the `GetVideoCharacter` endpoint, returned by [`OpenAI::get_video_character`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetVideoCharacterCall<'a>(
@@ -31789,7 +32253,9 @@ impl<'a> GetVideoCharacterCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -31808,7 +32274,7 @@ impl<'a> ::core::future::IntoFuture for GetVideoCharacterCall<'a> {
 }
 /// A call to the `CreateVideoEdit` endpoint, returned by [`OpenAI::create_video_edit`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateVideoEditCall<'a>(
@@ -31838,7 +32304,9 @@ impl<'a> CreateVideoEditCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -31857,7 +32325,7 @@ impl<'a> ::core::future::IntoFuture for CreateVideoEditCall<'a> {
 }
 /// A call to the `CreateVideoExtend` endpoint, returned by [`OpenAI::create_video_extend`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateVideoExtendCall<'a>(
@@ -31887,7 +32355,9 @@ impl<'a> CreateVideoExtendCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -31906,7 +32376,7 @@ impl<'a> ::core::future::IntoFuture for CreateVideoExtendCall<'a> {
 }
 /// A call to the `GetVideo` endpoint, returned by [`OpenAI::get_video`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetVideoCall<'a>(schematic_runtime::Call<'a, OpenAIApi, GetVideoRequest>);
@@ -31932,7 +32402,9 @@ impl<'a> GetVideoCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -31951,7 +32423,7 @@ impl<'a> ::core::future::IntoFuture for GetVideoCall<'a> {
 }
 /// A call to the `DeleteVideo` endpoint, returned by [`OpenAI::delete_video`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteVideoCall<'a>(
@@ -31979,7 +32451,9 @@ impl<'a> DeleteVideoCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -31998,7 +32472,7 @@ impl<'a> ::core::future::IntoFuture for DeleteVideoCall<'a> {
 }
 /// A call to the `RetrieveVideoContent` endpoint, returned by [`OpenAI::retrieve_video_content`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveVideoContentCall<'a>(
@@ -32032,7 +32506,9 @@ impl<'a> RetrieveVideoContentCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -32051,7 +32527,7 @@ impl<'a> ::core::future::IntoFuture for RetrieveVideoContentCall<'a> {
 }
 /// A call to the `CreateVideoRemix` endpoint, returned by [`OpenAI::create_video_remix`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateVideoRemixCall<'a>(
@@ -32081,7 +32557,9 @@ impl<'a> CreateVideoRemixCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -32100,7 +32578,7 @@ impl<'a> ::core::future::IntoFuture for CreateVideoRemixCall<'a> {
 }
 /// A call to the `Getinputtokencounts` endpoint, returned by [`OpenAI::getinputtokencounts`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetinputtokencountsCall<'a>(
@@ -32130,7 +32608,9 @@ impl<'a> GetinputtokencountsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -32149,7 +32629,7 @@ impl<'a> ::core::future::IntoFuture for GetinputtokencountsCall<'a> {
 }
 /// A call to the `Compactconversation` endpoint, returned by [`OpenAI::compactconversation`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CompactconversationCall<'a>(
@@ -32179,7 +32659,9 @@ impl<'a> CompactconversationCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -32198,7 +32680,7 @@ impl<'a> ::core::future::IntoFuture for CompactconversationCall<'a> {
 }
 /// A call to the `ListSkills` endpoint, returned by [`OpenAI::list_skills`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListSkillsCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListSkillsRequest>);
@@ -32236,7 +32718,9 @@ impl<'a> ListSkillsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -32255,7 +32739,7 @@ impl<'a> ::core::future::IntoFuture for ListSkillsCall<'a> {
 }
 /// A call to the `CreateSkill` endpoint, returned by [`OpenAI::create_skill`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateSkillCall<'a>(
@@ -32283,7 +32767,9 @@ impl<'a> CreateSkillCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -32302,7 +32788,7 @@ impl<'a> ::core::future::IntoFuture for CreateSkillCall<'a> {
 }
 /// A call to the `GetSkill` endpoint, returned by [`OpenAI::get_skill`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetSkillCall<'a>(schematic_runtime::Call<'a, OpenAIApi, GetSkillRequest>);
@@ -32328,7 +32814,9 @@ impl<'a> GetSkillCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -32347,7 +32835,7 @@ impl<'a> ::core::future::IntoFuture for GetSkillCall<'a> {
 }
 /// A call to the `UpdateSkillDefaultVersion` endpoint, returned by [`OpenAI::update_skill_default_version`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UpdateSkillDefaultVersionCall<'a>(
@@ -32377,7 +32865,9 @@ impl<'a> UpdateSkillDefaultVersionCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -32396,7 +32886,7 @@ impl<'a> ::core::future::IntoFuture for UpdateSkillDefaultVersionCall<'a> {
 }
 /// A call to the `DeleteSkill` endpoint, returned by [`OpenAI::delete_skill`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteSkillCall<'a>(
@@ -32424,7 +32914,9 @@ impl<'a> DeleteSkillCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -32443,7 +32935,7 @@ impl<'a> ::core::future::IntoFuture for DeleteSkillCall<'a> {
 }
 /// A call to the `GetSkillContent` endpoint, returned by [`OpenAI::get_skill_content`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetSkillContentCall<'a>(
@@ -32473,7 +32965,9 @@ impl<'a> GetSkillContentCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -32492,7 +32986,7 @@ impl<'a> ::core::future::IntoFuture for GetSkillContentCall<'a> {
 }
 /// A call to the `ListSkillVersions` endpoint, returned by [`OpenAI::list_skill_versions`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListSkillVersionsCall<'a>(
@@ -32534,7 +33028,9 @@ impl<'a> ListSkillVersionsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -32553,7 +33049,7 @@ impl<'a> ::core::future::IntoFuture for ListSkillVersionsCall<'a> {
 }
 /// A call to the `CreateSkillVersion` endpoint, returned by [`OpenAI::create_skill_version`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateSkillVersionCall<'a>(
@@ -32583,7 +33079,9 @@ impl<'a> CreateSkillVersionCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -32602,7 +33100,7 @@ impl<'a> ::core::future::IntoFuture for CreateSkillVersionCall<'a> {
 }
 /// A call to the `GetSkillVersion` endpoint, returned by [`OpenAI::get_skill_version`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetSkillVersionCall<'a>(
@@ -32632,7 +33130,9 @@ impl<'a> GetSkillVersionCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -32651,7 +33151,7 @@ impl<'a> ::core::future::IntoFuture for GetSkillVersionCall<'a> {
 }
 /// A call to the `DeleteSkillVersion` endpoint, returned by [`OpenAI::delete_skill_version`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteSkillVersionCall<'a>(
@@ -32681,7 +33181,9 @@ impl<'a> DeleteSkillVersionCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -32700,7 +33202,7 @@ impl<'a> ::core::future::IntoFuture for DeleteSkillVersionCall<'a> {
 }
 /// A call to the `GetSkillVersionContent` endpoint, returned by [`OpenAI::get_skill_version_content`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetSkillVersionContentCall<'a>(
@@ -32730,7 +33232,9 @@ impl<'a> GetSkillVersionContentCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -32749,7 +33253,7 @@ impl<'a> ::core::future::IntoFuture for GetSkillVersionContentCall<'a> {
 }
 /// A call to the `CancelChatSessionMethod` endpoint, returned by [`OpenAI::cancel_chat_session_method`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CancelChatSessionMethodCall<'a>(
@@ -32779,7 +33283,9 @@ impl<'a> CancelChatSessionMethodCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -32798,7 +33304,7 @@ impl<'a> ::core::future::IntoFuture for CancelChatSessionMethodCall<'a> {
 }
 /// A call to the `CreateChatSessionMethod` endpoint, returned by [`OpenAI::create_chat_session_method`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateChatSessionMethodCall<'a>(
@@ -32828,7 +33334,9 @@ impl<'a> CreateChatSessionMethodCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -32847,7 +33355,7 @@ impl<'a> ::core::future::IntoFuture for CreateChatSessionMethodCall<'a> {
 }
 /// A call to the `ListThreadItemsMethod` endpoint, returned by [`OpenAI::list_thread_items_method`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListThreadItemsMethodCall<'a>(
@@ -32893,7 +33401,9 @@ impl<'a> ListThreadItemsMethodCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -32912,7 +33422,7 @@ impl<'a> ::core::future::IntoFuture for ListThreadItemsMethodCall<'a> {
 }
 /// A call to the `GetThreadMethod` endpoint, returned by [`OpenAI::get_thread_method`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetThreadMethodCall<'a>(
@@ -32942,7 +33452,9 @@ impl<'a> GetThreadMethodCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -32961,7 +33473,7 @@ impl<'a> ::core::future::IntoFuture for GetThreadMethodCall<'a> {
 }
 /// A call to the `DeleteThreadMethod` endpoint, returned by [`OpenAI::delete_thread_method`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeleteThreadMethodCall<'a>(
@@ -32991,7 +33503,9 @@ impl<'a> DeleteThreadMethodCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -33010,7 +33524,7 @@ impl<'a> ::core::future::IntoFuture for DeleteThreadMethodCall<'a> {
 }
 /// A call to the `ListThreadsMethod` endpoint, returned by [`OpenAI::list_threads_method`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListThreadsMethodCall<'a>(
@@ -33060,7 +33574,9 @@ impl<'a> ListThreadsMethodCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -33079,7 +33595,7 @@ impl<'a> ::core::future::IntoFuture for ListThreadsMethodCall<'a> {
 }
 /// A call to the `BetaCreateResponse` endpoint, returned by [`OpenAI::beta_create_response`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct BetaCreateResponseCall<'a>(
@@ -33113,7 +33629,9 @@ impl<'a> BetaCreateResponseCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -33132,7 +33650,7 @@ impl<'a> ::core::future::IntoFuture for BetaCreateResponseCall<'a> {
 }
 /// A call to the `BetaGetResponse` endpoint, returned by [`OpenAI::beta_get_response`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct BetaGetResponseCall<'a>(
@@ -33182,7 +33700,9 @@ impl<'a> BetaGetResponseCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -33201,7 +33721,7 @@ impl<'a> ::core::future::IntoFuture for BetaGetResponseCall<'a> {
 }
 /// A call to the `BetaDeleteResponse` endpoint, returned by [`OpenAI::beta_delete_response`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct BetaDeleteResponseCall<'a>(
@@ -33235,7 +33755,9 @@ impl<'a> BetaDeleteResponseCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -33254,7 +33776,7 @@ impl<'a> ::core::future::IntoFuture for BetaDeleteResponseCall<'a> {
 }
 /// A call to the `BetaCancelResponse` endpoint, returned by [`OpenAI::beta_cancel_response`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct BetaCancelResponseCall<'a>(
@@ -33288,7 +33810,9 @@ impl<'a> BetaCancelResponseCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -33307,7 +33831,7 @@ impl<'a> ::core::future::IntoFuture for BetaCancelResponseCall<'a> {
 }
 /// A call to the `BetaCompactconversation` endpoint, returned by [`OpenAI::beta_compactconversation`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct BetaCompactconversationCall<'a>(
@@ -33341,7 +33865,9 @@ impl<'a> BetaCompactconversationCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -33360,7 +33886,7 @@ impl<'a> ::core::future::IntoFuture for BetaCompactconversationCall<'a> {
 }
 /// A call to the `BetaListInputItems` endpoint, returned by [`OpenAI::beta_list_input_items`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct BetaListInputItemsCall<'a>(
@@ -33410,7 +33936,9 @@ impl<'a> BetaListInputItemsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -33429,7 +33957,7 @@ impl<'a> ::core::future::IntoFuture for BetaListInputItemsCall<'a> {
 }
 /// A call to the `BetaGetinputtokencounts` endpoint, returned by [`OpenAI::beta_getinputtokencounts`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct BetaGetinputtokencountsCall<'a>(
@@ -33463,7 +33991,9 @@ impl<'a> BetaGetinputtokencountsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }

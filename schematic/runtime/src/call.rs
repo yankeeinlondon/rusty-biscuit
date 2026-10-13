@@ -46,7 +46,8 @@ pub struct Call<'a, A: Api, R> {
 /// headers, request id, and the outcome, for a reply of any status.
 ///
 /// Created by [`Call::full`]. Its per-call settings are the same as
-/// [`Call`]'s.
+/// [`Call`]'s, but a generated call type's endpoint setters are not on it,
+/// so chain them before `.full()`.
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct FullCall<'a, A: Api, R> {
     call: Call<'a, A, R>,
@@ -98,20 +99,34 @@ impl<'a, A: Api, R: EndpointSpec<Api = A>> Call<'a, A, R> {
         FullCall { call: self }
     }
 
-    /// Runs every check that can fail before network work, and returns the
-    /// same call, ready to await.
+    /// Checks the call's arguments without sending it, and returns the same
+    /// call, ready to await.
     ///
-    /// The checks run again when the call is awaited; `build` reports their
-    /// failure early, without sending.
+    /// It runs the send's own first-hop preparation with this call's
+    /// per-call settings, so it refuses exactly the arguments the send
+    /// would. The checks run again when the call is awaited, since client
+    /// settings, environment variables, and time can change in between;
+    /// `build` reports an argument failure early, without network work.
     ///
     /// ## Errors
     ///
-    /// Returns [`InvalidArgument`] when the request cannot be encoded.
+    /// Returns [`InvalidArgument`] when the request cannot be encoded, a
+    /// header or the body content type is not a valid header, the credential
+    /// is of a kind the API does not accept, or placing the credential would
+    /// replace a request header, query value, or cookie or produce an invalid
+    /// header value.
+    ///
+    /// ## Notes
+    ///
+    /// Failures that are not about the arguments are reported only by the
+    /// send: invalid client settings (checked by
+    /// [`Client::build`](crate::Client::build)), an unusable URL, a refused
+    /// cross-origin target, and an expired deadline.
     pub fn build(self) -> Result<Self, InvalidArgument>
     where
         R: Clone,
     {
-        self.request.clone().into_parts()?;
+        self.client.check_arguments(self.request.clone(), &self.options)?;
         Ok(self)
     }
 }
@@ -142,7 +157,8 @@ impl<'a, A: Api, R: EndpointSpec<Api = A>> FullCall<'a, A, R> {
     ///
     /// ## Errors
     ///
-    /// Returns [`InvalidArgument`] when the request cannot be encoded.
+    /// Returns [`InvalidArgument`] when the send would refuse the call's
+    /// arguments; see [`Call::build`].
     pub fn build(self) -> Result<Self, InvalidArgument>
     where
         R: Clone,

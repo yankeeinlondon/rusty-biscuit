@@ -517,7 +517,17 @@ struct Assembled {
     body: Option<EncodedBody>,
 }
 
-/// How [`Client::execute`] ended once a response head arrived.
+/// The first hop of a send, prepared before any network work.
+struct FirstHop {
+    /// The request as the application assembled it, before any credential.
+    assembled: Assembled,
+    /// The request actually sent.
+    sent: Assembled,
+    auth: AuthMethod,
+    resolved: Resolved,
+}
+
+/// How [`Inner::execute`] ended once a response head arrived.
 ///
 /// The `elapsed` of its metadata stops at that head; the caller sets the
 /// whole-send time once it has produced the outcome.
@@ -648,6 +658,30 @@ impl<A: Api> Client<A> {
         Ok(RawResponse { meta, body, completion })
     }
 
+    /// The argument checks of a send of `request` with `options`, without
+    /// sending: the first-hop preparation every send runs, keeping only its
+    /// [`TransportErrorKind::InvalidArgument`] failures.
+    ///
+    /// A refusal that is not about the arguments (an invalid client, URL,
+    /// or cross-origin target) is left for the send to report. With invalid
+    /// client settings there is no prepared client, so only the request's
+    /// own encoding is checked.
+    pub(crate) fn check_arguments<R>(&self, request: R, options: &CallOptions) -> Result<(), InvalidArgument>
+    where
+        R: EndpointSpec<Api = A>,
+    {
+        let Ok(inner) = self.validated() else {
+            return request.into_parts().map(drop);
+        };
+        match inner.prepare(request, options, Instant::now()) {
+            Err(TransportError {
+                kind: TransportErrorKind::InvalidArgument(argument),
+                ..
+            }) => Err(argument),
+            _ => Ok(()),
+        }
+    }
+
     /// Checks a URL the caller is about to request, such as a next-page
     /// link, against the cross-origin policy for the endpoint `R`, without any
     /// network work.
@@ -679,9 +713,9 @@ impl<A: Api> Client<A> {
 }
 
 impl Inner {
-    /// The execution core shared by every send: assembles `request`, checks
-    /// its origin, resolves the credential once, and follows redirects under
-    /// one expiration until a reply that ends the send.
+    /// The execution core shared by every send: prepares the first hop
+    /// ([`prepare`](Self::prepare)), checks the deadline, and follows
+    /// redirects under one expiration until a reply that ends the send.
     ///
     /// It does not count the send against its deadline; the caller does,
     /// once the outcome is classified.
@@ -692,38 +726,12 @@ impl Inner {
         let inner = self;
         let pre_send = |kind: TransportErrorKind, meta: RequestMeta| TransportError::new(meta, kind, start.elapsed());
 
-        let parts = request
-            .into_parts()
-            .map_err(|argument| pre_send(TransportErrorKind::InvalidArgument(argument), self.base_meta::<R>()))?;
-        let method = parts.method.clone();
-        let mut assembled = self
-            .assemble(parts)
-            .map_err(|kind| pre_send(kind, self.meta_for::<R>(&method, &inner.base_url, &HeaderMap::new(), AuthMethod::Anonymous)))?;
-
-        let Decision::Follow { credentials } = inner.origins.link(&assembled.url) else {
-            let meta = self.meta_for::<R>(&assembled.method, &assembled.url, &assembled.headers, AuthMethod::Anonymous);
-            let target = inner.secrets.redact_url(&assembled.url);
-            return Err(pre_send(TransportErrorKind::CrossOriginRejected { target }, meta));
-        };
-
-        let resolved = inner.auth.resolve(&options.auth, inner.credential.as_ref());
-        let resolved = match resolved {
-            Ok(resolved) => resolved,
-            Err(argument) => {
-                let meta = self.meta_for::<R>(&assembled.method, &assembled.url, &assembled.headers, AuthMethod::Anonymous);
-                return Err(pre_send(TransportErrorKind::InvalidArgument(argument), meta));
-            }
-        };
-        if matches!(options.auth, CallAuth::Anonymous) {
-            strip_credentials(&inner.auth, &mut assembled);
-        }
-        let (sent, auth) = match self.authenticate(&assembled, credentials, &resolved, false) {
-            Ok(sent) => sent,
-            Err(argument) => {
-                let meta = self.meta_for::<R>(&assembled.method, &assembled.url, &assembled.headers, resolved.auth.clone());
-                return Err(pre_send(TransportErrorKind::InvalidArgument(argument), meta));
-            }
-        };
+        let FirstHop {
+            assembled,
+            sent,
+            auth,
+            resolved,
+        } = self.prepare(request, options, start)?;
 
         let deadline = options.deadline.as_ref();
         if let Some(deadline) = deadline
@@ -823,6 +831,59 @@ impl Inner {
             followed += 1;
             last_redirect = Some((response_meta, body));
         }
+    }
+
+    /// Prepares the first hop of a send: encodes and assembles `request`,
+    /// checks its origin, resolves the credential once for `options`, and
+    /// places it. [`execute`](Self::execute) and [`Call::build`] both run it,
+    /// so a call's early check and its send refuse the same arguments.
+    ///
+    /// It does no network work and does not consult the deadline.
+    fn prepare<R>(&self, request: R, options: &CallOptions, start: Instant) -> Result<FirstHop, TransportError>
+    where
+        R: EndpointSpec,
+    {
+        let inner = self;
+        let pre_send = |kind: TransportErrorKind, meta: RequestMeta| TransportError::new(meta, kind, start.elapsed());
+        let parts = request
+            .into_parts()
+            .map_err(|argument| pre_send(TransportErrorKind::InvalidArgument(argument), self.base_meta::<R>()))?;
+        let method = parts.method.clone();
+        let mut assembled = self
+            .assemble(parts)
+            .map_err(|kind| pre_send(kind, self.meta_for::<R>(&method, &inner.base_url, &HeaderMap::new(), AuthMethod::Anonymous)))?;
+
+        let Decision::Follow { credentials } = inner.origins.link(&assembled.url) else {
+            let meta = self.meta_for::<R>(&assembled.method, &assembled.url, &assembled.headers, AuthMethod::Anonymous);
+            let target = inner.secrets.redact_url(&assembled.url);
+            return Err(pre_send(TransportErrorKind::CrossOriginRejected { target }, meta));
+        };
+
+        let resolved = inner.auth.resolve(&options.auth, inner.credential.as_ref());
+        let resolved = match resolved {
+            Ok(resolved) => resolved,
+            Err(argument) => {
+                let meta = self.meta_for::<R>(&assembled.method, &assembled.url, &assembled.headers, AuthMethod::Anonymous);
+                return Err(pre_send(TransportErrorKind::InvalidArgument(argument), meta));
+            }
+        };
+        if matches!(options.auth, CallAuth::Anonymous) {
+            strip_credentials(&inner.auth, &mut assembled);
+        }
+        let (sent, auth) = match self.authenticate(&assembled, credentials, &resolved, false) {
+            Ok(sent) => sent,
+            Err(argument) => {
+                let meta = self.meta_for::<R>(&assembled.method, &assembled.url, &assembled.headers, resolved.auth.clone());
+                return Err(pre_send(TransportErrorKind::InvalidArgument(argument), meta));
+            }
+        };
+
+        Ok(FirstHop {
+            assembled,
+            sent,
+            auth,
+            resolved,
+        })
     }
 
     /// Starts one hop's request.

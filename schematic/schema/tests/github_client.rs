@@ -602,3 +602,44 @@ async fn a_built_call_sends_nothing_until_awaited_and_sends_once_per_copy() {
     assert_eq!(first.full_name, "octo/widgets");
     assert_eq!(second.full_name, "octo/widgets");
 }
+
+/// `.build()` refuses what the send refuses: Basic credentials on GitHub,
+/// which takes a token, and a token copied with a trailing newline, through
+/// the endpoint method, `.full()`, and the generic `send`.
+#[tokio::test]
+async fn build_refuses_a_credential_the_send_would_refuse() {
+    let mock_server = MockServer::start().await;
+    let client = client_without_env(&mock_server.uri());
+
+    let basic = Credential::basic("user", "password");
+    let call = client.get_repository("octo", "widgets").credential(basic.clone());
+    let refused = call.clone().build().expect_err("GitHub does not accept Basic credentials");
+    assert_eq!(
+        call.clone().full().build().expect_err("the full call agrees"),
+        refused
+    );
+    let Err(CallError::Transport(error)) = call.await else {
+        panic!("expected the send to refuse the credential");
+    };
+    assert!(matches!(&error.kind, TransportErrorKind::InvalidArgument(argument) if *argument == refused));
+
+    let newline = Credential::access_token("token\n");
+    let generic = client.send(GetRepositoryRequest::new("octo", "widgets")).credential(newline);
+    assert!(generic.clone().build().is_err(), "a token ending in a newline is not a valid header value");
+    assert!(matches!(
+        generic.await,
+        Err(CallError::Transport(TransportError {
+            kind: TransportErrorKind::InvalidArgument(_),
+            ..
+        }))
+    ));
+
+    assert!(
+        mock_server
+            .received_requests()
+            .await
+            .expect("recording is on")
+            .is_empty(),
+        "nothing was sent"
+    );
+}

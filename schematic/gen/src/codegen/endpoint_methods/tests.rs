@@ -566,6 +566,24 @@ fn setter_and_call_type_docs_name_the_parameter_and_the_method() {
     );
 }
 
+#[test]
+fn full_docs_say_the_endpoint_setters_come_before_it() {
+    let code = code(&widgets());
+    assert_eq!(
+        fn_docs(&code, "GetWidgetCall", "full"),
+        [
+            " See [`Call::full`](schematic_runtime::Call::full). Chain it",
+            " last: this call's setters are not available on the result.",
+        ]
+    );
+    assert!(
+        squash(&code).contains(&squash(
+            "[`full`](Self::full), chained after the optional values, returns the whole response instead"
+        )),
+        "{code}"
+    );
+}
+
 // ---- assembly ----
 
 #[test]

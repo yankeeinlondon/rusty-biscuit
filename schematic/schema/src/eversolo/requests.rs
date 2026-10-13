@@ -1057,7 +1057,7 @@ impl schematic_runtime::EndpointSpec for SystemChangeVuDisplayRequest {
 }
 /// A call to the `DeviceGetModel` endpoint, returned by [`Eversolo::device_get_model`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct DeviceGetModelCall<'a>(
@@ -1087,7 +1087,9 @@ impl<'a> DeviceGetModelCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1106,7 +1108,7 @@ impl<'a> ::core::future::IntoFuture for DeviceGetModelCall<'a> {
 }
 /// A call to the `RemoteSendKey` endpoint, returned by [`Eversolo::remote_send_key`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RemoteSendKeyCall<'a>(
@@ -1140,7 +1142,9 @@ impl<'a> RemoteSendKeyCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1159,7 +1163,7 @@ impl<'a> ::core::future::IntoFuture for RemoteSendKeyCall<'a> {
 }
 /// A call to the `RemoteInputText` endpoint, returned by [`Eversolo::remote_input_text`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RemoteInputTextCall<'a>(
@@ -1193,7 +1197,9 @@ impl<'a> RemoteInputTextCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1212,7 +1218,7 @@ impl<'a> ::core::future::IntoFuture for RemoteInputTextCall<'a> {
 }
 /// A call to the `MusicGetState` endpoint, returned by [`Eversolo::music_get_state`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct MusicGetStateCall<'a>(
@@ -1242,7 +1248,9 @@ impl<'a> MusicGetStateCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1261,7 +1269,7 @@ impl<'a> ::core::future::IntoFuture for MusicGetStateCall<'a> {
 }
 /// A call to the `MusicPlayOrPause` endpoint, returned by [`Eversolo::music_play_or_pause`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct MusicPlayOrPauseCall<'a>(
@@ -1291,7 +1299,9 @@ impl<'a> MusicPlayOrPauseCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1310,7 +1320,7 @@ impl<'a> ::core::future::IntoFuture for MusicPlayOrPauseCall<'a> {
 }
 /// A call to the `MusicPlayNext` endpoint, returned by [`Eversolo::music_play_next`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct MusicPlayNextCall<'a>(
@@ -1340,7 +1350,9 @@ impl<'a> MusicPlayNextCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1359,7 +1371,7 @@ impl<'a> ::core::future::IntoFuture for MusicPlayNextCall<'a> {
 }
 /// A call to the `MusicPlayLast` endpoint, returned by [`Eversolo::music_play_last`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct MusicPlayLastCall<'a>(
@@ -1389,7 +1401,9 @@ impl<'a> MusicPlayLastCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1408,7 +1422,7 @@ impl<'a> ::core::future::IntoFuture for MusicPlayLastCall<'a> {
 }
 /// A call to the `MusicSeekTo` endpoint, returned by [`Eversolo::music_seek_to`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct MusicSeekToCall<'a>(
@@ -1442,7 +1456,9 @@ impl<'a> MusicSeekToCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1461,7 +1477,7 @@ impl<'a> ::core::future::IntoFuture for MusicSeekToCall<'a> {
 }
 /// A call to the `MusicGetInputOutputList` endpoint, returned by [`Eversolo::music_get_input_output_list`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct MusicGetInputOutputListCall<'a>(
@@ -1491,7 +1507,9 @@ impl<'a> MusicGetInputOutputListCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1510,7 +1528,7 @@ impl<'a> ::core::future::IntoFuture for MusicGetInputOutputListCall<'a> {
 }
 /// A call to the `MusicSetInput` endpoint, returned by [`Eversolo::music_set_input`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct MusicSetInputCall<'a>(
@@ -1544,7 +1562,9 @@ impl<'a> MusicSetInputCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1563,7 +1583,7 @@ impl<'a> ::core::future::IntoFuture for MusicSetInputCall<'a> {
 }
 /// A call to the `MusicSetOutput` endpoint, returned by [`Eversolo::music_set_output`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct MusicSetOutputCall<'a>(
@@ -1597,7 +1617,9 @@ impl<'a> MusicSetOutputCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1616,7 +1638,7 @@ impl<'a> ::core::future::IntoFuture for MusicSetOutputCall<'a> {
 }
 /// A call to the `MusicSetVolume` endpoint, returned by [`Eversolo::music_set_volume`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct MusicSetVolumeCall<'a>(
@@ -1650,7 +1672,9 @@ impl<'a> MusicSetVolumeCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1669,7 +1693,7 @@ impl<'a> ::core::future::IntoFuture for MusicSetVolumeCall<'a> {
 }
 /// A call to the `MusicSetMute` endpoint, returned by [`Eversolo::music_set_mute`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct MusicSetMuteCall<'a>(
@@ -1703,7 +1727,9 @@ impl<'a> MusicSetMuteCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1722,7 +1748,7 @@ impl<'a> ::core::future::IntoFuture for MusicSetMuteCall<'a> {
 }
 /// A call to the `PowerGetOptions` endpoint, returned by [`Eversolo::power_get_options`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct PowerGetOptionsCall<'a>(
@@ -1752,7 +1778,9 @@ impl<'a> PowerGetOptionsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1771,7 +1799,7 @@ impl<'a> ::core::future::IntoFuture for PowerGetOptionsCall<'a> {
 }
 /// A call to the `PowerSetOption` endpoint, returned by [`Eversolo::power_set_option`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct PowerSetOptionCall<'a>(
@@ -1805,7 +1833,9 @@ impl<'a> PowerSetOptionCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1824,7 +1854,7 @@ impl<'a> ::core::future::IntoFuture for PowerSetOptionCall<'a> {
 }
 /// A call to the `SystemGetScreenBrightness` endpoint, returned by [`Eversolo::system_get_screen_brightness`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct SystemGetScreenBrightnessCall<'a>(
@@ -1854,7 +1884,9 @@ impl<'a> SystemGetScreenBrightnessCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1873,7 +1905,7 @@ impl<'a> ::core::future::IntoFuture for SystemGetScreenBrightnessCall<'a> {
 }
 /// A call to the `SystemSetScreenBrightness` endpoint, returned by [`Eversolo::system_set_screen_brightness`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct SystemSetScreenBrightnessCall<'a>(
@@ -1907,7 +1939,9 @@ impl<'a> SystemSetScreenBrightnessCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1926,7 +1960,7 @@ impl<'a> ::core::future::IntoFuture for SystemSetScreenBrightnessCall<'a> {
 }
 /// A call to the `SystemGetKnobBrightness` endpoint, returned by [`Eversolo::system_get_knob_brightness`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct SystemGetKnobBrightnessCall<'a>(
@@ -1956,7 +1990,9 @@ impl<'a> SystemGetKnobBrightnessCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -1975,7 +2011,7 @@ impl<'a> ::core::future::IntoFuture for SystemGetKnobBrightnessCall<'a> {
 }
 /// A call to the `SystemSetKnobBrightness` endpoint, returned by [`Eversolo::system_set_knob_brightness`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct SystemSetKnobBrightnessCall<'a>(
@@ -2009,7 +2045,9 @@ impl<'a> SystemSetKnobBrightnessCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -2028,7 +2066,7 @@ impl<'a> ::core::future::IntoFuture for SystemSetKnobBrightnessCall<'a> {
 }
 /// A call to the `SystemGetVuModeList` endpoint, returned by [`Eversolo::system_get_vu_mode_list`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct SystemGetVuModeListCall<'a>(
@@ -2058,7 +2096,9 @@ impl<'a> SystemGetVuModeListCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -2077,7 +2117,7 @@ impl<'a> ::core::future::IntoFuture for SystemGetVuModeListCall<'a> {
 }
 /// A call to the `SystemSetVuMode` endpoint, returned by [`Eversolo::system_set_vu_mode`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct SystemSetVuModeCall<'a>(
@@ -2111,7 +2151,9 @@ impl<'a> SystemSetVuModeCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -2130,7 +2172,7 @@ impl<'a> ::core::future::IntoFuture for SystemSetVuModeCall<'a> {
 }
 /// A call to the `SystemGetSpectrumModeList` endpoint, returned by [`Eversolo::system_get_spectrum_mode_list`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct SystemGetSpectrumModeListCall<'a>(
@@ -2160,7 +2202,9 @@ impl<'a> SystemGetSpectrumModeListCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -2179,7 +2223,7 @@ impl<'a> ::core::future::IntoFuture for SystemGetSpectrumModeListCall<'a> {
 }
 /// A call to the `SystemSetSpectrumMode` endpoint, returned by [`Eversolo::system_set_spectrum_mode`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct SystemSetSpectrumModeCall<'a>(
@@ -2213,7 +2257,9 @@ impl<'a> SystemSetSpectrumModeCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -2232,7 +2278,7 @@ impl<'a> ::core::future::IntoFuture for SystemSetSpectrumModeCall<'a> {
 }
 /// A call to the `SystemChangeVuDisplay` endpoint, returned by [`Eversolo::system_change_vu_display`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct SystemChangeVuDisplayCall<'a>(
@@ -2266,7 +2312,9 @@ impl<'a> SystemChangeVuDisplayCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }

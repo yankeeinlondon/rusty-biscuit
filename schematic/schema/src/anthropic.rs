@@ -313,7 +313,7 @@ impl schematic_runtime::EndpointSpec for RetrieveModelRequest {
 }
 /// A call to the `CreateMessage` endpoint, returned by [`Anthropic::create_message`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CreateMessageCall<'a>(
@@ -343,7 +343,9 @@ impl<'a> CreateMessageCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -362,7 +364,7 @@ impl<'a> ::core::future::IntoFuture for CreateMessageCall<'a> {
 }
 /// A call to the `CountTokens` endpoint, returned by [`Anthropic::count_tokens`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct CountTokensCall<'a>(
@@ -392,7 +394,9 @@ impl<'a> CountTokensCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -411,7 +415,7 @@ impl<'a> ::core::future::IntoFuture for CountTokensCall<'a> {
 }
 /// A call to the `ListModels` endpoint, returned by [`Anthropic::list_models`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListModelsCall<'a>(
@@ -441,7 +445,9 @@ impl<'a> ListModelsCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
@@ -460,7 +466,7 @@ impl<'a> ::core::future::IntoFuture for ListModelsCall<'a> {
 }
 /// A call to the `RetrieveModel` endpoint, returned by [`Anthropic::retrieve_model`].
 ///
-/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+/// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct RetrieveModelCall<'a>(
@@ -490,7 +496,9 @@ impl<'a> RetrieveModelCall<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns `InvalidArgument` when the request cannot be encoded.
+    /// Returns `InvalidArgument` when the send would refuse the call's
+    /// arguments: the request cannot be encoded, a header is invalid,
+    /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }

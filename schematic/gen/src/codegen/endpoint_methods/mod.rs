@@ -178,7 +178,9 @@ fn call_type(api_name: &str, tag: &proc_macro2::Ident, names: &EndpointNames) ->
             ///
             /// ## Errors
             ///
-            /// Returns `InvalidArgument` when the request cannot be encoded.
+            /// Returns `InvalidArgument` when the send would refuse the call's
+            /// arguments: the request cannot be encoded, a header is invalid,
+            /// or the credential cannot be placed.
             pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
                 self.0.build().map(Self)
             }

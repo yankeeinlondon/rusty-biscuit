@@ -77,8 +77,9 @@ pub(super) fn call_type_doc(api_name: &str, names: &EndpointNames) -> Vec<String
         ),
         String::new(),
         " Chain optional values and per-call settings, then `.await` it: the result is \
-         the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full) returns the whole \
-         response instead, and [`build`](Self::build) checks the call without sending it."
+         the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after \
+         the optional values, returns the whole response instead, and [`build`](Self::build) checks the \
+         call without sending it."
             .to_string(),
     ]
 }
