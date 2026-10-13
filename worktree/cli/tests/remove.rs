@@ -441,83 +441,45 @@ fn an_unknown_name_fails_and_the_base_checkout_is_refused() {
         .stderr(predicate::str::contains("main checkout"));
 }
 
-/// The refusal comes before the report, so nothing is asked and then refused.
+/// Usage is checked after the report and the questions, right before
+/// anything moves: a process standing in the worktree refuses with exit 3,
+/// names its PID, and no force flag overrides it.
 #[cfg(unix)]
 #[test]
-fn a_process_standing_in_the_worktree_blocks_removal_before_the_report() {
+fn a_process_standing_in_the_worktree_refuses_after_the_questions_with_exit_3() {
     let fixture = Fixture::new();
     let wt = fixture.add_worktree("feat/busy", "busy");
     let mut holder = Command::new("sleep").arg("60").current_dir(&wt).spawn().unwrap();
     let pid = holder.id().to_string();
 
-    let assert = fixture
+    let output = fixture
         .wt(&fixture.repo())
-        .args(["remove", "busy", "--force-worktree", "--force-branch"])
-        .assert();
+        .args(["remove", "busy", "--force-worktree", "--force-branch", "--force-remote"])
+        .output()
+        .unwrap();
 
     let _ = holder.kill();
     let _ = holder.wait();
-    assert
-        .code(4)
-        .stderr(predicate::str::contains("is in use by another program: sleep (pid"))
-        .stderr(predicate::str::contains(pid.as_str()))
-        .stderr(predicate::str::contains("Branch").not());
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(stderr.contains("Removal paused: another process is using busy."), "{stderr}");
+    assert!(stderr.contains(&format!("PID {pid}")) && stderr.contains("sleep"), "{stderr}");
+    assert!(stderr.contains("Working directory:"), "{stderr}");
+    assert!(stderr.contains("The checkout and branches were kept."), "{stderr}");
+    assert!(stderr.find("Branch feat/busy") < stderr.find("Removal paused"), "after the report: {stderr}");
+    assert!(output.stdout.is_empty(), "no protocol lines");
     assert!(wt.join("README.md").exists());
     assert!(fixture.branch_exists("feat/busy"));
+    assert!(listed_block(&fixture, &wt).is_some(), "still registered");
+    assert_eq!(pending_removals(&fixture), 0, "a refusal leaves no recovery record");
 }
 
-/// A `git` stand-in first on `wt`'s `PATH`: it runs the real Git, and when a
-/// `worktree remove` succeeds it writes `target/flycheck0/x` back into the
-/// removed folder and exits 1, as when a build tool refills the folder while
-/// git deletes it. Unix only: on Windows `wt` resolves `git.exe`, so a script
-/// cannot stand in without compiling a stub executable; the library tests
-/// cover the same decision on every OS.
-#[cfg(unix)]
-fn refilling_git(dir: &Path, folder: &Path) -> std::ffi::OsString {
-    use std::os::unix::fs::PermissionsExt;
-
-    let path = std::env::var_os("PATH").unwrap();
-    let real = std::env::split_paths(&path)
-        .map(|dir| dir.join("git"))
-        .find(|candidate| candidate.is_file())
-        .expect("git on PATH");
-    let leftover = folder.join("target").join("flycheck0");
-    let script = format!(
-        "#!/bin/sh\n'{real}' \"$@\" || exit $?\ncase \" $* \" in\n  *' worktree remove '*)\n    \
-        mkdir -p '{leftover}' && : > '{leftover}/x'\n    exit 1 ;;\nesac\n",
-        real = real.display(),
-        leftover = leftover.display(),
-    );
-    let stub = dir.join("git");
-    fs::write(&stub, script).unwrap();
-    fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).unwrap();
-    std::env::join_paths(std::iter::once(dir.to_path_buf()).chain(std::env::split_paths(&path))).unwrap()
-}
-
-/// Git unregisters the worktree but fails on a refilled folder; `wt` finishes
-/// the delete and carries on to the branch step.
-#[cfg(unix)]
-#[test]
-fn a_folder_refilled_while_git_removes_it_is_finished_and_the_branch_deleted() {
-    let fixture = Fixture::new();
-    let wt = fixture.add_worktree("chore/refilled", "refilled");
-    fixture.commit(&wt, "cleanup.txt");
-    git(&fixture.repo(), &["merge", "-q", "--no-ff", "-m", "merge", "chore/refilled"]);
-    let stub_dir = fixture.root.path().join("bin");
-    fs::create_dir(&stub_dir).unwrap();
-    let path = refilling_git(&stub_dir, &wt);
-
-    fixture
-        .wt(&fixture.repo())
-        .env("PATH", path)
-        .args(["remove", "refilled"])
-        .assert()
-        .code(0)
-        .stderr(predicate::str::contains("Removed worktree"))
-        .stderr(predicate::str::contains("Deleted branch"));
-    assert!(!wt.exists());
-    assert!(!git(&fixture.repo(), &["worktree", "list", "--porcelain"]).contains("chore/refilled"));
-    assert!(!fixture.branch_exists("chore/refilled"));
+/// The pending (or any) operation directories under the repository's
+/// recovery store that still hold a journal.
+fn pending_removals(fixture: &Fixture) -> usize {
+    let store = fixture.repo().join(".git").join("wt-removal");
+    let Ok(entries) = fs::read_dir(store) else { return 0 };
+    entries.filter_map(Result::ok).filter(|entry| entry.path().join("journal.jsonl").exists()).count()
 }
 
 // --- The spec's Examples table ----------------------------------------------
@@ -538,9 +500,18 @@ fn example_clean_and_merged_removes_worktree_and_branch() {
         .stderr(predicate::str::contains("Safe"))
         .stderr(predicate::str::contains("its commits are on main"))
         .stderr(predicate::str::contains("Removed worktree"))
-        .stderr(predicate::str::contains("Deleted branch"));
+        .stderr(predicate::str::contains("Deleted branch"))
+        // The usage check and the move add nothing to a successful removal.
+        .stderr(predicate::str::contains("Discovery").not())
+        .stderr(predicate::str::contains("wt-remove").not())
+        .stderr(predicate::str::contains("report.json").not());
     assert!(!wt.exists());
     assert!(!fixture.branch_exists("chore/old-cleanup"));
+    assert_eq!(pending_removals(&fixture), 0, "the record is completed");
+    assert!(
+        !fs::read_dir(fixture.root.path().join("wts")).unwrap().any(|entry| entry.unwrap().file_name().to_string_lossy().starts_with(".wt-remove-")),
+        "no quarantine is left behind"
+    );
 }
 
 #[test]
@@ -1595,6 +1566,53 @@ fn an_expired_token_refuses_with_exit_4() {
     assert!(!record.exists(), "an expired record is still consumed");
 }
 
+/// The parent shell stands in the worktree (a `sleep` started there plays
+/// it). The first wrapper run reports and hands off without checking usage,
+/// since that shell is about to leave; the second run, after the shell moved,
+/// makes the decisive check and removes.
+#[cfg(unix)]
+#[test]
+fn the_parent_shell_inside_does_not_block_the_handoff_and_the_second_run_removes() {
+    let fixture = Fixture::new();
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    let mut shell = Command::new("sleep").arg("60").current_dir(&wt).spawn().unwrap();
+
+    let (landing, token) = first_run(&fixture, &wt, &[]);
+    let _ = shell.kill();
+    let _ = shell.wait();
+    let output = fixture.wt(&landing).args(["remove", "--handoff", &token]).output().unwrap();
+
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert!(stderr.contains("Removed worktree feat-x"), "{stderr}");
+    assert!(!stderr.contains("Removal paused"), "{stderr}");
+    assert!(output.stdout.is_empty(), "the second run prints no protocol lines");
+    assert!(!wt.exists());
+}
+
+/// A different process still using the worktree when the second run starts
+/// refuses there (exit 3), with no protocol line, and nothing is removed.
+#[cfg(unix)]
+#[test]
+fn a_process_still_inside_after_the_handoff_refuses_the_second_run() {
+    let fixture = Fixture::new();
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    let (landing, token) = first_run(&fixture, &wt, &[]);
+    let mut holder = Command::new("sleep").arg("60").current_dir(&wt).spawn().unwrap();
+    let pid = holder.id().to_string();
+
+    let output = fixture.wt(&landing).args(["remove", "--handoff", &token]).output().unwrap();
+
+    let _ = holder.kill();
+    let _ = holder.wait();
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(stderr.contains("Removal paused") && stderr.contains(&format!("PID {pid}")), "{stderr}");
+    assert!(output.stdout.is_empty(), "no cd: or remove-handoff: after a refusal");
+    assert_nothing_removed(&fixture, &wt);
+    assert_eq!(pending_removals(&fixture), 0);
+}
+
 #[test]
 fn a_caller_still_inside_the_target_is_refused_with_exit_4() {
     let fixture = Fixture::new();
@@ -1916,9 +1934,14 @@ fn a_push_after_the_second_run_preflight_fails_the_lease_with_a_partial_result()
     let output = fixture.wt(&landing).args(["remove", "--handoff", &token]).output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(output.status.code(), Some(1), "{stderr}");
-    assert!(stderr.contains("Removed worktree"), "{stderr}");
-    assert!(stderr.contains("but origin/feat/x was not deleted"), "{stderr}");
-    assert!(stderr.contains("git push origin --delete feat/x"), "{stderr}");
+    assert!(stderr.contains("Removed worktree feat-x"), "{stderr}");
+    assert!(stderr.contains("but a branch step did not finish"), "{stderr}");
+    assert!(stderr.contains("Branch feat/x: kept"), "{stderr}");
+    assert!(stderr.contains("Branch origin/feat/x: not deleted"), "{stderr}");
+    assert!(stderr.contains("Retry: wt remove feat-x"), "{stderr}");
+    assert!(stderr.contains("Full report: ") && stderr.contains("report.json"), "{stderr}");
+    assert!(output.stdout.is_empty(), "no protocol lines after a failure");
+    assert_eq!(pending_removals(&fixture), 1, "the record stays for the retry");
     assert!(!wt.exists(), "the local removal has already happened");
     assert!(fixture.branch_exists("feat/x"), "not safe without origin's copy, so kept");
     assert_eq!(TwoRemotes::head_in(&fixture.origin(), "feat/x"), Some(main));
@@ -3355,6 +3378,7 @@ fn a_branch_that_moves_after_its_worktree_is_removed_is_kept() {
     let stderr = stderr_of(&output);
     assert_eq!(output.status.code(), Some(1), "{stderr}");
     assert!(stderr.contains("Removed worktree feat-x"), "{stderr}");
+    assert!(stderr.contains("Branch feat/x: not deleted"), "{stderr}");
     assert!(stderr.contains("moved") && stderr.contains("so it was kept"), "{stderr}");
     assert!(!stderr.contains("Deleted branch"), "{stderr}");
     assert!(!wt.exists());
