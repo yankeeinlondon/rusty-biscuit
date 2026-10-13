@@ -135,50 +135,17 @@ pub enum WorktreeError {
     #[error("{0}")]
     BlockedByEnvironment(String),
 
-    /// The worktree's path no longer holds a real directory when removal is
-    /// about to run (for example, a link replaced the checkout after it was
-    /// checked). Nothing was removed.
-    #[error("{} is no longer the worktree's own directory (it is a link or not a directory), so nothing was removed", .0.display())]
-    NotARealDirectory(std::path::PathBuf),
+    /// A removal that changed something and then stopped, or failed before
+    /// changing anything for a reason no fresh run or other environment is
+    /// known to fix. The message is Prose markup, one line per `\n`, that
+    /// says what was moved, deleted, and kept. Exit 1.
+    #[error("{0}")]
+    RemovalFailed(String),
 
     /// A branch about to be deleted no longer points at the tip its deletion
     /// was decided on. The branch is kept.
     #[error("branch {branch} moved from {expected} to {found} after it was checked, so it was kept")]
     BranchMoved { branch: String, expected: String, found: String },
-
-    /// Other programs work in the worktree directory: `processes` stand in
-    /// it, or, when empty, the Windows probe found it held (an open file).
-    /// Nothing was removed.
-    #[error("{}", in_use_message(path, processes))]
-    DirectoryInUse {
-        path: std::path::PathBuf,
-        processes: Vec<sniff::os::WorkingProcess>,
-    },
-
-    /// `git worktree remove` unregistered the worktree and then failed, and
-    /// the rest of its folder could not be deleted either. Nothing after the
-    /// worktree (branch, origin) was removed.
-    #[error(
-        "git unregistered worktree {} but could not delete all of its folder ({reason}). \
-        Nothing else was removed. Delete what is left with: {}",
-        .path.display(),
-        delete_command(path)
-    )]
-    FolderNotFullyRemoved { path: std::path::PathBuf, reason: String },
-
-    /// The Windows lock probe renamed the worktree and could not rename it
-    /// back. Nothing was removed; `move` restores the original name.
-    #[error(
-        "the worktree was left at {} after a lock check and could not be renamed back; \
-        restore it with: move \"{}\" \"{}\"",
-        .temporary.display(),
-        .temporary.display(),
-        .original.display()
-    )]
-    LockProbeRenameBack {
-        original: std::path::PathBuf,
-        temporary: std::path::PathBuf,
-    },
 
     /// `wt create --from` was given for a branch that already exists.
     #[error(
@@ -279,42 +246,6 @@ fn home_hint(value: &str) -> &'static str {
         " wt does not expand ~; write the full home-directory path instead."
     } else {
         ""
-    }
-}
-
-fn in_use_message(path: &std::path::Path, processes: &[sniff::os::WorkingProcess]) -> String {
-    let path = path.display();
-    if processes.is_empty() {
-        return format!("Nothing was removed: the folder {path} is in use by another program.");
-    }
-    // One entry per program name, keeping the order processes were found in.
-    let mut programs: Vec<(&str, Vec<u32>)> = Vec::new();
-    for process in processes {
-        match programs.iter_mut().find(|(name, _)| *name == process.name) {
-            Some((_, pids)) => pids.push(process.pid),
-            None => programs.push((&process.name, vec![process.pid])),
-        }
-    }
-    let listed = programs
-        .iter()
-        .map(|(name, pids)| {
-            let ids = pids.iter().map(u32::to_string).collect::<Vec<_>>().join(", ");
-            format!("{name} (pid{} {ids})", if pids.len() == 1 { "" } else { "s" })
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    let who = if processes.len() == 1 { "another program" } else { "other programs" };
-    format!(
-        "Nothing was removed: the folder {path} is in use by {who}: {listed}. \
-        Close them, or move them out of it, and run wt remove again."
-    )
-}
-
-fn delete_command(path: &std::path::Path) -> String {
-    if cfg!(windows) {
-        format!("Remove-Item -Recurse -Force \"{}\"", path.display())
-    } else {
-        format!("rm -rf \"{}\"", path.display())
     }
 }
 

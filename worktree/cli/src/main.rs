@@ -24,7 +24,8 @@ fn main() {
             // These carry their own Prose markup and heading, and are printed
             // after one blank line.
             worktree::WorktreeError::RefusedToLoseWork(markup)
-            | worktree::WorktreeError::BlockedByEnvironment(markup) => {
+            | worktree::WorktreeError::BlockedByEnvironment(markup)
+            | worktree::WorktreeError::RemovalFailed(markup) => {
                 eprintln!();
                 markup.clone()
             }

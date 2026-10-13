@@ -13,13 +13,18 @@
 //! is checked; a directory whose `.git` file is gone has its link repaired and
 //! verified, then takes the ordinary path; anything else refuses. The rules
 //! are item 3 of `2026-09-24-ux-improvements`.
+//!
+//! A checkout that exists is removed by the library's removal lifecycle
+//! ([`remove_checkout`]), after the questions: it checks that no other
+//! process uses the checkout, moves it aside, and deletes it while watching
+//! both paths. A removal that stopped is found again by the name the user
+//! typed ([`resolve_target`]) and continued under fresh approvals
+//! ([`resume`]); [`recovery`] renders what such a removal left. The rules
+//! are `2026-10-05-graceful-file-contention`.
 
 mod policy;
+pub mod recovery;
 mod report;
-// Not yet called by the `wt` binary: `run` still uses `check_no_processes`
-// until the removal lifecycle makes the decisive usage check. The library
-// target's tests render it.
-#[allow(dead_code)]
 pub mod usage;
 
 use std::path::{Path, PathBuf};
@@ -29,7 +34,7 @@ use biscuit_terminal::components::prose::{InlineProse, LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::terminal::Terminal;
 use inquire::{Confirm, InquireError, Select};
-use worktree::WorktreeError;
+use worktree::{WorktreeCandidate, WorktreeError};
 use worktree::availability::{self, Availability, OtherCondition};
 use worktree::fork_origin::{ForkOriginStore, fork_origin_path};
 use worktree::git::git_command;
@@ -38,9 +43,15 @@ use worktree::remove::handoff::{
     RemoteApproval, canonical, checkout_git_dir, is_within,
 };
 use worktree::live_remote::{LIVE_CHECK_DEADLINE, LsRemote};
+use worktree::remove::lifecycle::{
+    Approval, BranchActions, Environment, ExitClass, Finished, Inspection, LocalBranchDeletion, RecordApproval,
+    Removal, RemovalRequest, RemoteBranchDeletion, Resolution, ResolveError, ResumeRequest, Target, inspect,
+    native_observation, release_unstarted, remove_checkout, resolve_target, resume,
+};
+use worktree::remove::outcome::{BranchState, BranchTarget};
+use worktree::remove::recovery::record::BranchBinding;
 use worktree::remove::remote::{
-    Reinterpretation, RemoteState, delete_remote_branch, preflight_remote_deletion,
-    remote_destination,
+    Reinterpretation, RemoteState, delete_remote_branch, preflight_remote_deletion, remote_destination,
 };
 use worktree::remove::safety::{
     BranchSafety, NoPrSource, PrSource, Reconfirmation, SafetyInput, SniffPrSource, Tier, assess,
@@ -48,9 +59,9 @@ use worktree::remove::safety::{
 };
 use worktree::remove::missing::{MissingCheckout, MissingRefusal, remove_missing_record};
 use worktree::remove::repair::{self, RepairRefusal};
+use worktree::remove::usage::SniffUsage;
 use worktree::remove::{
-    CheckoutState, Inventory, PrepareRefusal, check_no_processes, collect_inventory, prepare,
-    remove_local_branch, remove_worktree,
+    CheckoutState, Inventory, PrepareRefusal, collect_inventory, prepare, remove_local_branch,
 };
 use worktree::remove::included::classify_included;
 use worktree::worktree::{WorktreeEntry, default_branch, find_worktree, parse_worktree_list};
@@ -122,10 +133,19 @@ struct Facts {
     /// The live preflight for an attached branch: with `--force-remote` in
     /// the first run, and when remote deletion was approved in the second.
     remote: Option<RemoteState>,
-    /// [`fingerprint`] of the files as reported, taken in the first run
-    /// before the report when consent may cover them or a handoff will bind
-    /// them. Discarding files is approved for this state only.
+    /// [`fingerprint`] of the files as reported, taken before the report
+    /// for every checkout that exists. Discarding files is approved for this
+    /// state only, and the removal lifecycle refuses if it changed.
     reported: Option<String>,
+    /// What the user typed, for retry commands. In a handoff's second run,
+    /// which never sees it, the directory name.
+    requested_name: String,
+    /// The pending removal this run continues, as inspected before the
+    /// report; `None` for a first attempt.
+    retry: Option<Inspection>,
+    /// The checkout and its registration are already gone
+    /// ([`Resolution::CheckoutRemoved`]): only branch actions are left.
+    branch_only: bool,
 }
 
 impl Facts {
@@ -160,6 +180,7 @@ impl Facts {
         };
         Ok(Self {
             base: base.to_path_buf(),
+            requested_name: display_name.clone(),
             entry,
             display_name,
             head,
@@ -169,7 +190,41 @@ impl Facts {
             has_origin: false,
             remote: None,
             reported: None,
+            retry: None,
+            branch_only: false,
         })
+    }
+
+    /// The facts for a pending removal whose checkout and registration are
+    /// gone: no files, and the branch at its tip now. A branch that no longer
+    /// exists has nothing left to delete.
+    fn branch_only(base: &Path, entry: WorktreeEntry, approved_tip: &str) -> Self {
+        let mut entry = entry;
+        let head = match &entry.branch {
+            Some(branch) => match git_command(&["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]) {
+                Ok(tip) => tip,
+                Err(_) => {
+                    entry.branch = None;
+                    approved_tip.to_string()
+                }
+            },
+            None => approved_tip.to_string(),
+        };
+        Self {
+            base: base.to_path_buf(),
+            display_name: display_name(&entry),
+            requested_name: display_name(&entry),
+            entry,
+            head,
+            checkout: CheckoutState::Healthy,
+            inventory: Inventory::default(),
+            safety: None,
+            has_origin: false,
+            remote: None,
+            reported: None,
+            retry: None,
+            branch_only: true,
+        }
     }
 
     /// The first run's report facts: the branch's tier (PR lookup and live
@@ -235,6 +290,7 @@ impl Facts {
                 inventory: &self.inventory,
                 missing: self.missing(),
                 relinked: matches!(self.checkout, CheckoutState::Repaired(_)),
+                checkout_removed: self.branch_only,
                 safety: self.safety.as_ref(),
                 has_origin: self.has_origin,
                 remote: self.remote.as_ref(),
@@ -291,19 +347,30 @@ impl SafetyContext {
 pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
     let terminal = Terminal::default();
     let cwd = std::env::current_dir()?;
-    let entry = find_worktree(name)?;
+    let base = find_worktree("base")?.path;
+    let (entry, retry) = resolve(&terminal, &base, name)?;
     if entry.is_main {
         return Err(WorktreeError::GitCommand(format!(
             "refusing to remove the main checkout '{name}'. Use plain git for that."
         )));
     }
-    let base = find_worktree("base")?.path;
     // From here on nothing (not `wt`, not a git child) holds the worktree as
     // its current directory; on Windows that would block removing it.
     std::env::set_current_dir(&base)?;
 
     let inside = is_within(&cwd, &entry.path);
-    let display = display_name(&entry);
+    let display = match &retry {
+        Some(inspection) => original_name(inspection),
+        None => display_name(&entry),
+    };
+    if inside && retry.is_some() {
+        return Err(WorktreeError::BlockedByEnvironment(format!(
+            "<red><b>Nothing was removed.</b></red> You are inside the moved checkout of worktree <blue>{}</blue>.\n  \
+            <dim>Run <i>wt remove</i> again from the base checkout at {}.</dim>",
+            esc(&display),
+            esc(&base.display().to_string())
+        )));
+    }
     if inside && !crate::env::shell_wrapper_active() {
         return Err(WorktreeError::BlockedByEnvironment(format!(
             "<red><b>Nothing was removed.</b></red> You are inside worktree <blue>{}</blue>, and \
@@ -314,19 +381,37 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
         )));
     }
 
-    // Checked again right before git deletes anything; this one only spares
-    // the user a report and questions that end in this refusal.
-    check_no_processes(&entry.path)?;
-
-    // After the guards above, so nothing is repaired for a removal that
-    // could not go ahead anyway.
-    let checkout = prepare(&base, &entry, &repair::Git)
-        .map_err(|refusal| WorktreeError::RefusedToLoseWork(prepare_refusal_markup(&refusal, name, &entry)))?;
-    let mut facts = Facts::local(&base, entry, checkout)?;
-    if facts.missing().is_none() && (inside || facts.inventory.needs_consent()) {
+    let branch_only = retry.as_ref().is_some_and(|inspection| inspection.resolution == Resolution::CheckoutRemoved);
+    let mut facts = if branch_only {
+        let approved = retry.as_ref().map(|inspection| inspection.record.approved_tip.clone()).unwrap_or_default();
+        Facts::branch_only(&base, entry, &approved)
+    } else {
+        // A retry never repairs: what is left of a moved checkout without its
+        // `.git` link is reported, not relinked.
+        if retry.is_some() && availability::classify(&entry) == Availability::Unlinked {
+            return Err(WorktreeError::RefusedToLoseWork(start_again(
+                "What is left of the moved checkout lost its .git link. Nothing was repaired.",
+            )));
+        }
+        // After the guards above, so nothing is repaired for a removal that
+        // could not go ahead anyway.
+        let checkout = prepare(&base, &entry, &repair::Git)
+            .map_err(|refusal| WorktreeError::RefusedToLoseWork(prepare_refusal_markup(&refusal, name, &entry)))?;
+        Facts::local(&base, entry, checkout)?
+    };
+    facts.requested_name = name.to_string();
+    facts.display_name = display;
+    facts.retry = retry;
+    // The removal lifecycle binds the approval to this fingerprint, so every
+    // checkout that exists has one, not only those that need consent.
+    if facts.missing().is_none() && !facts.branch_only {
         facts.reported = Some(fingerprint(&facts)?);
     }
     facts.assess(flags.force_remote);
+    if let Some(inspection) = &facts.retry {
+        eprintln!();
+        print(&terminal, retry_markup(inspection));
+    }
     eprintln!("{}", facts.render_report(&terminal));
     if let Some(refusal) = unprovable_remote(facts.remote.as_ref()) {
         return Err(WorktreeError::RefusedToLoseWork(refusal + &facts.kept_link_note()));
@@ -357,34 +442,121 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
             );
             Ok(())
         }
-        // A missing directory has nowhere to stand in, so needs no move.
+        // A missing directory has nowhere to stand in, so needs no move. The
+        // decisive usage check runs in the second run, after the shell left.
         Decision::Proceed(actions) if inside && facts.missing().is_none() => {
             hand_off(&terminal, &facts, &cwd, actions)
         }
-        Decision::Proceed(actions) => {
-            if actions.discard_files && facts.missing().is_none() {
-                files_unchanged(&facts)?;
-            }
-            execute(&terminal, &facts, actions)
-        }
+        Decision::Proceed(actions) => execute(&terminal, &facts, actions),
     }
 }
 
-/// Refuses (exit 3) unless the files still match the report: the same
-/// listed entries and the same [`Facts::reported`] fingerprint.
-///
-/// `git worktree remove --force` discards whatever the checkout holds when it
-/// runs, so consent given to the report (by a question or
-/// `--force-worktree`) would otherwise also cover files changed or staged
-/// while the question was open.
-fn files_unchanged(facts: &Facts) -> Result<(), WorktreeError> {
-    let fresh = Facts::local(&facts.base, facts.entry.clone(), facts.checkout.clone())?;
-    if fresh.inventory.dirty == facts.inventory.dirty && facts.reported.as_deref() == Some(fingerprint(&fresh)?.as_str()) {
-        return Ok(());
+/// What `name` removes: a live worktree, or the checkout of a pending
+/// removal with its inspection. A pending removal that changed nothing is
+/// closed first (a checkout moved but never re-associated is moved back) and
+/// the name resolved again.
+fn resolve(terminal: &Terminal, base: &Path, name: &str) -> Result<(WorktreeEntry, Option<Inspection>), WorktreeError> {
+    let target = match resolve_target(base, name) {
+        Ok(Target::Pending(pending)) => {
+            let inspection = inspect(base, &pending.id).map_err(|error| store_error(&error.to_string()))?;
+            match inspection.resolution {
+                Resolution::NotStarted | Resolution::MovedUnassociated => {
+                    let display = original_name(&inspection);
+                    release_unstarted(base, &inspection.id)
+                        .map_err(|refusal| recovery::refusal_error(&refusal, &display, name))?;
+                    eprintln!();
+                    print(
+                        terminal,
+                        format!(
+                            "<dim>An earlier removal of <blue>{}</blue> stopped before deleting anything{}; starting again.</dim>",
+                            esc(&display),
+                            if inspection.resolution == Resolution::MovedUnassociated { " and was moved back" } else { "" }
+                        ),
+                    );
+                    resolve_target(base, name)
+                }
+                Resolution::Quarantined | Resolution::ContentRemoved => {
+                    let quarantine = inspection.record.quarantine.as_path().to_path_buf();
+                    let entry = worktree_entries()?
+                        .into_iter()
+                        .find(|entry| canonical(&entry.path) == canonical(&quarantine))
+                        .ok_or_else(|| WorktreeError::RefusedToLoseWork(recovery::inspection_markup(&inspection, name)))?;
+                    return Ok((entry, Some(inspection)));
+                }
+                Resolution::CheckoutRemoved => {
+                    let entry = WorktreeEntry {
+                        path: inspection.record.original.as_path().to_path_buf(),
+                        branch: match &inspection.record.branch {
+                            BranchBinding::Named(branch) => Some(branch.clone()),
+                            BranchBinding::Detached => None,
+                        },
+                        head_sha: Some(inspection.record.approved_tip.clone()),
+                        is_main: false,
+                        is_current: false,
+                        prunable: None,
+                    };
+                    return Ok((entry, Some(inspection)));
+                }
+                _ => return Err(WorktreeError::RefusedToLoseWork(recovery::inspection_markup(&inspection, name))),
+            }
+        }
+        other => other,
+    };
+    match target {
+        Ok(Target::Live(entry)) => Ok((entry, None)),
+        Ok(Target::Pending(_)) => Err(store_error("the removal was released, but a pending record still matches the name")),
+        Ok(Target::Ambiguous(candidates)) => {
+            let live: Option<Vec<WorktreeCandidate>> = candidates
+                .iter()
+                .map(|candidate| match candidate {
+                    worktree::remove::lifecycle::Candidate::Live(entry) => Some(WorktreeCandidate {
+                        branch: entry.branch.clone(),
+                        basename: display_name(entry),
+                        path: entry.path.clone(),
+                    }),
+                    worktree::remove::lifecycle::Candidate::Pending { .. } => None,
+                })
+                .collect();
+            match live {
+                // Only live worktrees: the ambiguity `wt` has always reported.
+                Some(candidates) => Err(WorktreeError::AmbiguousWorktree { name: name.to_string(), candidates }),
+                None => Err(WorktreeError::RefusedToLoseWork(recovery::ambiguous_markup(name, &candidates))),
+            }
+        }
+        Err(ResolveError::NotFound(name)) => Err(WorktreeError::WorktreeNotFound(name)),
+        Err(ResolveError::Git(error)) => Err(error),
+        Err(ResolveError::Store(error)) => Err(store_error(&error.to_string())),
     }
-    Err(WorktreeError::RefusedToLoseWork(
-        start_again("The worktree's files or staged changes changed after they were checked.") + &facts.kept_link_note(),
+}
+
+/// A recovery store that could not be read: nothing was changed (exit 1).
+fn store_error(reason: &str) -> WorktreeError {
+    WorktreeError::RemovalFailed(format!(
+        "<red><b>Nothing was removed.</b></red> The record of an earlier removal could not be read: {}.",
+        usage::visible(reason)
     ))
+}
+
+/// The directory name the pending removal's checkout had.
+fn original_name(inspection: &Inspection) -> String {
+    let original = inspection.record.original.as_path();
+    original
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| original.display().to_string())
+}
+
+/// The line before a retry's report: which earlier removal it continues and
+/// where its checkout is.
+fn retry_markup(inspection: &Inspection) -> String {
+    let record = &inspection.record;
+    format!(
+        "<b>Continuing</b> an earlier removal of <blue>{}</blue> that stopped.\n  \
+        <dim>Original: {}\n  Moved to: {}\n  Everything left is checked and asked about again.</dim>",
+        usage::visible(&original_name(inspection)),
+        usage::visible(&record.original.display()),
+        usage::visible(&record.quarantine.display())
+    )
 }
 
 /// `--force-remote` cannot show that it deletes from exactly the repository
@@ -566,86 +738,194 @@ fn map_inquire_err(e: InquireError) -> WorktreeError {
     }
 }
 
-/// Removes the worktree (for a missing directory, only its record), then the
-/// branch, then (with `--force-remote`) the branch on origin. Nothing after a
-/// failed step runs.
+/// Removes the worktree, then the branch, then (with `--force-remote`) the
+/// branch on origin. Nothing after a failed step runs. A checkout that
+/// exists, or a pending removal, goes through the removal lifecycle; a
+/// missing directory has only its record removed, and Sniff is never asked
+/// about it.
 fn execute(terminal: &Terminal, facts: &Facts, actions: Actions) -> Result<(), WorktreeError> {
-    let target = format!("worktree {} at {}", facts.display_name, facts.entry.path.display());
-    let copy_record_warning = if let Some(missing) = facts.missing() {
-        remove_missing_record(&facts.base, &facts.entry, missing).map_err(|refusal| missing_record_error(refusal, facts))?
-    } else {
-        remove_worktree(&facts.base, &facts.entry.path, actions.discard_files).map_err(|error| match error {
-            WorktreeError::NotARealDirectory(_) => WorktreeError::RefusedToLoseWork(format!(
-                "<red><b>Nothing was removed.</b></red> {} is no longer the directory of worktree <blue>{}</blue> \
-                that was checked: a link or something else replaced it.\n  <dim>Put the checkout back at that \
-                path, then run <i>wt remove</i> again.</dim>",
-                esc(&facts.entry.path.display().to_string()),
-                esc(&facts.display_name)
-            )),
-            other => in_context(other, &format!("could not remove {target}")),
-        })?;
-        worktree::copy_record::delete_for(&facts.base, &facts.entry.path)
-    };
-    if let Some(warning) = copy_record_warning {
-        print(terminal, format!("<yellow>Warning:</yellow> could not delete copy record: {}", esc(&warning)));
+    if facts.missing().is_some() && facts.retry.is_none() {
+        return execute_record_only(terminal, facts, actions);
     }
-    let mut removed = vec![format!("worktree {}", facts.display_name)];
-    let path = esc(&facts.entry.path.display().to_string());
+    let branches = branch_actions(facts, &actions);
+    let usage = SniffUsage;
+    let env = Environment { usage: &usage, interrupted: &|| false, observe: &native_observation };
+    let approval = facts.reported.clone().map(|fingerprint| Approval {
+        inventory: facts.inventory.clone(),
+        fingerprint,
+        tip: facts.head.clone(),
+        discard_files: actions.discard_files,
+    });
+    let removal = match &facts.retry {
+        None => {
+            let approval = approval.ok_or_else(|| {
+                WorktreeError::GitParse("the reported files were not fingerprinted before the removal".into())
+            })?;
+            let request = RemovalRequest {
+                base: &facts.base,
+                entry: &facts.entry,
+                requested_name: &facts.requested_name,
+                approval: &approval,
+                branches: &branches,
+            };
+            remove_checkout(&request, &env)
+        }
+        Some(inspection) => {
+            let record = facts.missing().map(|missing| RecordApproval {
+                inspected: missing.clone(),
+                discard_staged: actions.discard_files,
+            });
+            let request = ResumeRequest {
+                base: &facts.base,
+                id: &inspection.id,
+                approval: approval.as_ref(),
+                record: record.as_ref(),
+                branches: &branches,
+            };
+            resume(&request, &env)
+        }
+    };
+    match removal {
+        Removal::Refused(refusal) => Err(with_note(
+            recovery::refusal_error(&refusal, &facts.display_name, &facts.requested_name),
+            &facts.kept_link_note(),
+        )),
+        Removal::Finished(finished) => report_finished(terminal, facts, &actions, &finished),
+    }
+}
+
+/// The approved branch steps as the lifecycle runs them, after the checkout
+/// is verified gone. Only a branch on origin that the preflight saw can be
+/// deleted there; any other state is reported after the removal, as before.
+fn branch_actions(facts: &Facts, actions: &Actions) -> BranchActions {
+    let local = match (facts.branch(), actions.branch) {
+        (Some(name), Some(BranchStep::Delete { .. })) => {
+            Some(LocalBranchDeletion { name: name.to_string(), expected_tip: facts.head.clone() })
+        }
+        _ => None,
+    };
+    let remote = match (&facts.remote, actions.delete_remote) {
+        (Some(RemoteState::Present { destination, endpoint, sha, .. }), true) => Some(RemoteBranchDeletion {
+            remote: "origin".to_string(),
+            destination: destination.clone(),
+            endpoint: endpoint.clone(),
+            expected_sha: sha.clone(),
+        }),
+        _ => None,
+    };
+    BranchActions { local, remote }
+}
+
+/// `error` with `note` appended when it carries Prose markup.
+fn with_note(error: WorktreeError, note: &str) -> WorktreeError {
+    match error {
+        WorktreeError::RefusedToLoseWork(markup) => WorktreeError::RefusedToLoseWork(markup + note),
+        WorktreeError::BlockedByEnvironment(markup) => WorktreeError::BlockedByEnvironment(markup + note),
+        WorktreeError::RemovalFailed(markup) => WorktreeError::RemovalFailed(markup + note),
+        other => other,
+    }
+}
+
+/// The completion report for a removal the lifecycle finished, or the
+/// stop report (exit 1) for one it did not.
+fn report_finished(terminal: &Terminal, facts: &Facts, actions: &Actions, finished: &Finished) -> Result<(), WorktreeError> {
+    if finished.exit_class() != ExitClass::Success {
+        return Err(WorktreeError::RemovalFailed(recovery::stopped_markup(
+            finished,
+            &facts.display_name,
+            &facts.requested_name,
+            facts.branch(),
+            &facts.base,
+        )));
+    }
+    for warning in &finished.warnings {
+        print(terminal, format!("<yellow>Warning:</yellow> {}", usage::visible(warning)));
+    }
+    let original = facts.retry.as_ref().map_or_else(|| facts.entry.path.clone(), |inspection| inspection.record.original.as_path().to_path_buf());
     eprintln!();
     print(
         terminal,
-        if facts.missing().is_some() {
-            format!(
-                "<green>Removed the record of worktree</green> <b>{}</b> <dim>(its directory at {path} was \
-                already gone)</dim>",
-                esc(&facts.display_name)
-            )
-        } else {
-            format!("<green>Removed worktree</green> <b>{}</b> <dim>at {path}</dim>", esc(&facts.display_name))
-        },
+        format!(
+            "<green>Removed worktree</green> <b>{}</b> <dim>at {}</dim>",
+            esc(&facts.display_name),
+            esc(&original.display().to_string())
+        ),
     );
-
-    if let (Some(branch), Some(step)) = (facts.branch(), actions.branch) {
-        match step {
-            BranchStep::Delete { .. } => {
-                remove_local_branch(&facts.base, branch, &facts.head).map_err(|error| {
-                    in_context(error, &format!("removed {}, but could not delete branch {branch}", removed.join(" and ")))
-                })?;
-                removed.push(format!("branch {branch}"));
-                // Without assessed safety (a handoff's second run) there is
-                // no count to claim; the first run's report named the commits.
-                let lost = match &facts.safety {
-                    Some(safety) if !safety.tier.allows_deletion() && facts.lost_commit_count() > 0 => {
-                        format!(
-                            " <dim>({} lost)</dim>",
-                            report::commit_count(facts.lost_commit_count())
-                        )
-                    }
-                    _ => String::new(),
-                };
-                print(
-                    terminal,
-                    format!("<green>Deleted branch</green> <b>{}</b>{lost}", esc(branch)),
-                );
-            }
-            BranchStep::KeepWithWarning => print(
-                terminal,
-                format!(
-                    "<yellow><b>Warning:</b></yellow> kept branch <b>{b}</b>: its commits exist \
-                    nowhere else.\n  <dim>Delete it with <i>git branch -D {b}</i> if you do not \
-                    need them.</dim>",
-                    b = esc(branch)
-                ),
-            ),
-            BranchStep::Keep => print(
-                terminal,
-                format!("<dim>Kept branch <b>{}</b>.</dim>", esc(branch)),
-            ),
-        }
+    let mut removed = vec![format!("worktree {}", facts.display_name)];
+    let deleted_locally = finished.report.branches.iter().any(|outcome| {
+        matches!(&outcome.target, BranchTarget::Local { .. }) && outcome.state == BranchState::Deleted
+    });
+    if deleted_locally && let Some(branch) = facts.branch() {
+        removed.push(format!("branch {branch}"));
     }
-
+    branch_messages(terminal, facts, actions);
     if actions.delete_remote {
-        delete_on_origin(terminal, facts, &removed)?;
+        delete_on_origin(terminal, facts, &removed, true)?;
+    }
+    Ok(())
+}
+
+/// What happened to the local branch, once the checkout is removed.
+fn branch_messages(terminal: &Terminal, facts: &Facts, actions: &Actions) {
+    let (Some(branch), Some(step)) = (facts.branch(), actions.branch) else {
+        return;
+    };
+    match step {
+        BranchStep::Delete { .. } => {
+            // Without assessed safety (a handoff's second run) there is no
+            // count to claim; the first run's report named the commits.
+            let lost = match &facts.safety {
+                Some(safety) if !safety.tier.allows_deletion() && facts.lost_commit_count() > 0 => {
+                    format!(" <dim>({} lost)</dim>", report::commit_count(facts.lost_commit_count()))
+                }
+                _ => String::new(),
+            };
+            print(terminal, format!("<green>Deleted branch</green> <b>{}</b>{lost}", esc(branch)));
+        }
+        BranchStep::KeepWithWarning => print(
+            terminal,
+            format!(
+                "<yellow><b>Warning:</b></yellow> kept branch <b>{b}</b>: its commits exist \
+                nowhere else.\n  <dim>Delete it with <i>git branch -D {b}</i> if you do not \
+                need them.</dim>",
+                b = esc(branch)
+            ),
+        ),
+        BranchStep::Keep => print(terminal, format!("<dim>Kept branch <b>{}</b>.</dim>", esc(branch))),
+    }
+}
+
+/// Removes the record of a worktree whose directory is gone, then the branch
+/// and the branch on origin. Nothing after a failed step runs.
+fn execute_record_only(terminal: &Terminal, facts: &Facts, actions: Actions) -> Result<(), WorktreeError> {
+    let Some(missing) = facts.missing() else {
+        return Err(WorktreeError::GitParse("the worktree's directory is not missing".into()));
+    };
+    if let Some(warning) =
+        remove_missing_record(&facts.base, &facts.entry, missing).map_err(|refusal| missing_record_error(refusal, facts))?
+    {
+        print(terminal, format!("<yellow>Warning:</yellow> could not delete copy record: {}", esc(&warning)));
+    }
+    let mut removed = vec![format!("worktree {}", facts.display_name)];
+    eprintln!();
+    print(
+        terminal,
+        format!(
+            "<green>Removed the record of worktree</green> <b>{}</b> <dim>(its directory at {} was \
+            already gone)</dim>",
+            esc(&facts.display_name),
+            esc(&facts.entry.path.display().to_string())
+        ),
+    );
+    if let (Some(branch), Some(BranchStep::Delete { .. })) = (facts.branch(), actions.branch) {
+        remove_local_branch(&facts.base, branch, &facts.head).map_err(|error| {
+            in_context(error, &format!("removed {}, but could not delete branch {branch}", removed.join(" and ")))
+        })?;
+        removed.push(format!("branch {branch}"));
+    }
+    branch_messages(terminal, facts, &actions);
+    if actions.delete_remote {
+        delete_on_origin(terminal, facts, &removed, false)?;
     }
     Ok(())
 }
@@ -675,7 +955,10 @@ fn missing_record_error(refusal: MissingRefusal, facts: &Facts) -> WorktreeError
     }
 }
 
-fn delete_on_origin(terminal: &Terminal, facts: &Facts, removed: &[String]) -> Result<(), WorktreeError> {
+/// Deletes the branch on origin, or with `already_deleted` only reports
+/// that the removal lifecycle did; any other preflight state fails after
+/// the local removal (exit 1).
+fn delete_on_origin(terminal: &Terminal, facts: &Facts, removed: &[String], already_deleted: bool) -> Result<(), WorktreeError> {
     let failure = |destination: &str, reason: &str| {
         WorktreeError::GitCommand(format!(
             "removed {}, but origin/{destination} was not deleted: {reason}\n\
@@ -690,8 +973,10 @@ fn delete_on_origin(terminal: &Terminal, facts: &Facts, removed: &[String]) -> R
             sha,
             ..
         }) => {
-            delete_remote_branch(&facts.base, endpoint, destination, sha)
-                .map_err(|reason| failure(destination, &reason))?;
+            if !already_deleted {
+                delete_remote_branch(&facts.base, endpoint, destination, sha)
+                    .map_err(|reason| failure(destination, &reason))?;
+            }
             print(
                 terminal,
                 format!("<green>Deleted</green> <b>origin/{}</b>", esc(destination)),
@@ -1029,7 +1314,9 @@ pub fn run_handoff(token: &str) -> Result<(), WorktreeError> {
         landing: canonical(&cwd),
     };
     match handoff::verify(&record, &fresh, &cwd) {
-        Ok(()) => {}
+        // The approval binds what the first run reported, which `verify`
+        // just showed equal to what is there now.
+        Ok(()) => facts.reported = Some(fresh.fingerprint.clone()),
         Err(HandoffRefusal::InsideTarget) => {
             return Err(WorktreeError::BlockedByEnvironment(start_again(
                 "Your shell is still inside the worktree.",
@@ -1093,7 +1380,7 @@ mod tests {
             WorktreeError::Io(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
             WorktreeError::RefusedToLoseWork("markup".into()),
             WorktreeError::BlockedByEnvironment("markup".into()),
-            WorktreeError::DirectoryInUse { path: "/wt/feat-x".into(), processes: Vec::new() },
+            WorktreeError::RemovalFailed("markup".into()),
             WorktreeError::Cancelled,
         ];
         for error in errors {

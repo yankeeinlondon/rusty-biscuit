@@ -201,7 +201,7 @@ fn native(value: &NativeString) -> String {
 
 /// `text` safe to show: control characters escaped (`\n`, `\u{1b}`), then
 /// Prose markup escaped.
-fn visible(text: &str) -> String {
+pub fn visible(text: &str) -> String {
     let shown: String = text
         .chars()
         .map(|c| if c.is_control() { c.escape_default().to_string() } else { c.to_string() })

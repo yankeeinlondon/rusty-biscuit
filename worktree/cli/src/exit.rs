@@ -19,10 +19,8 @@ pub const BLOCKED_BY_ENVIRONMENT: i32 = 4;
 pub fn exit_code(error: &WorktreeError) -> i32 {
     match error {
         WorktreeError::Cancelled => SUCCESS,
-        WorktreeError::RefusedToLoseWork(_) | WorktreeError::NotARealDirectory(_) => REFUSED_TO_LOSE_WORK,
-        WorktreeError::BlockedByEnvironment(_) | WorktreeError::DirectoryInUse { .. } => {
-            BLOCKED_BY_ENVIRONMENT
-        }
+        WorktreeError::RefusedToLoseWork(_) => REFUSED_TO_LOSE_WORK,
+        WorktreeError::BlockedByEnvironment(_) => BLOCKED_BY_ENVIRONMENT,
         _ => FAILURE,
     }
 }
@@ -44,16 +42,8 @@ mod tests {
             exit_code(&WorktreeError::RefusedToLoseWork("dirty".into())),
             3
         );
-        assert_eq!(exit_code(&WorktreeError::NotARealDirectory("/wt/feat-x".into())), 3);
         assert_eq!(
             exit_code(&WorktreeError::BlockedByEnvironment("no wrapper".into())),
-            4
-        );
-        assert_eq!(
-            exit_code(&WorktreeError::DirectoryInUse {
-                path: "C:\\wt\\feat-x".into(),
-                processes: Vec::new(),
-            }),
             4
         );
     }
@@ -71,10 +61,7 @@ mod tests {
             WorktreeError::FromBranchNotFound("nope".into()),
             WorktreeError::IncludeRulesIndeterminate { path: "rules".into(), reason: "unreadable".into() },
             WorktreeError::IncludeSetDiscovery("git failed".into()),
-            WorktreeError::LockProbeRenameBack {
-                original: "a".into(),
-                temporary: "b".into(),
-            },
+            WorktreeError::RemovalFailed("stopped after the move".into()),
             WorktreeError::BaseDirectoryNotConfigured,
             WorktreeError::BaseDirectoryEmpty { origin: BaseDirSource::Env },
             WorktreeError::BaseDirectoryForeignPath { value: r"b:\wt".into(), origin: config() },
