@@ -182,7 +182,7 @@ fn partial_run_regenerates_the_whole_group_and_keeps_every_other_module() {
     );
     let prelude = fs::read_to_string(root.join("prelude.rs")).unwrap();
     for name in ["AlphaOne", "AlphaTwo", "Beta", "Gamma"] {
-        assert!(prelude.contains(&format!("{name}, {name}Client")), "prelude exports {name}");
+        assert!(prelude.contains(&format!("::{name};")), "prelude exports {name}");
     }
 
     // A second partial run is idempotent.
@@ -306,11 +306,11 @@ refusal_tests! {
     refuses_export_mismatch:
         |root: &Path| {
             let prelude = fs::read_to_string(root.join("prelude.rs")).unwrap();
-            let edited = prelude.replace("Gamma, GammaClient", "Gamma");
+            let edited = prelude.replace("gamma::Gamma;", "gamma::{Gamma, GammaClient};");
             assert_ne!(prelude, edited);
             fs::write(root.join("prelude.rs"), edited).unwrap();
         },
-        "prelude.rs exports [\"Gamma\"] from `gamma`", unsafe_output;
+        "prelude.rs exports [\"Gamma\", \"GammaClient\"] from `gamma`", unsafe_output;
     refuses_conflicting_layouts:
         |root: &Path| {
             fs::create_dir(root.join("beta")).unwrap();
@@ -516,7 +516,7 @@ fn matching_abi_marker_does_not_bypass_the_export_check() {
     let lib = fs::read_to_string(root.join("lib.rs")).unwrap();
     assert_eq!(lib.matches(&current_marker()).count(), 1, "the marker matches: {lib}");
     let prelude = fs::read_to_string(root.join("prelude.rs")).unwrap();
-    let edited = prelude.replace("Gamma, GammaClient", "Gamma, GammaClient, GammaExtra");
+    let edited = prelude.replace("gamma::Gamma;", "gamma::{Gamma, GammaExtra};");
     assert_ne!(prelude, edited);
     fs::write(root.join("prelude.rs"), edited).unwrap();
     let before = snapshot_tree(&root);

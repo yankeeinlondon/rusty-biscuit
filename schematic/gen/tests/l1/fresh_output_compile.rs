@@ -461,7 +461,7 @@ fn options() -> CallOptions {
 async fn text_body_reaches_the_server_verbatim_under_its_content_type() {
     for text in ["", "line one\nzwei – ünïcödé\r\n"] {
         let server = start_server().await;
-        let client = FixtureBasic::builder()
+        let client = FixtureBasic::new()
             .base_url(server.uri())
             .credentials(Credential::basic("u", "p"))
             .build()
@@ -483,11 +483,7 @@ async fn binary_body_reaches_the_server_byte_for_byte() {
     assert!(String::from_utf8(not_utf8.clone()).is_err());
     for bytes in [not_utf8, Vec::new()] {
         let server = start_server().await;
-        let client = FixtureBasic::builder()
-            .base_url(server.uri())
-            .credentials(Credential::basic("u", "p"))
-            .build()
-            .unwrap();
+        let client = FixtureBasic::new().base_url(server.uri()).basic_auth("u", "p");
         client.send(UploadBlobRequest::new("a b", bytes.clone()), &options()).await.unwrap();
 
         let request = only_request(&server).await;
@@ -504,7 +500,7 @@ async fn binary_body_reaches_the_server_byte_for_byte() {
 #[tokio::test]
 async fn set_header_parameters_override_static_headers_by_case_insensitive_name() {
     let server = start_server().await;
-    let client = FixtureBearer::builder()
+    let client = FixtureBearer::new()
         .base_url(server.uri())
         .credentials(Credential::access_token("t"))
         .build()
@@ -528,7 +524,7 @@ async fn set_header_parameters_override_static_headers_by_case_insensitive_name(
 #[tokio::test]
 async fn unset_header_parameters_keep_static_headers_and_send_nothing() {
     let server = start_server().await;
-    let client = FixtureBearer::builder().base_url(server.uri()).build().unwrap();
+    let client = FixtureBearer::new().base_url(server.uri()).build().unwrap();
     client.send(SearchWidgetsRequest::default(), &options()).await.unwrap();
 
     let request = only_request(&server).await;
@@ -544,7 +540,7 @@ async fn invalid_header_parameter_values_fail_before_send_without_echoing_them()
     // which the HTTP types accept and send as raw UTF-8.
     for value in ["bad\r\nX-Injected: 1", "nul\u{0}byte", "del\u{7f}"] {
         let server = start_server().await;
-        let client = FixtureBearer::builder().base_url(server.uri()).build().unwrap();
+        let client = FixtureBearer::new().base_url(server.uri()).build().unwrap();
         let request = SearchWidgetsRequest::default().with_x_trace_id(value.to_string());
         let error = client.send(request, &options()).await.unwrap_err();
 
@@ -564,7 +560,7 @@ async fn invalid_header_parameter_values_fail_before_send_without_echoing_them()
 #[tokio::test]
 async fn cookies_from_api_endpoint_and_parameters_share_one_header() {
     let server = start_server().await;
-    let client = FixtureBearer::builder().base_url(server.uri()).build().unwrap();
+    let client = FixtureBearer::new().base_url(server.uri()).build().unwrap();
     let request = SearchWidgetsRequest::default()
         .with_session("a b;c\r\nX-Evil: 1".to_string())
         .with_prefs(vec!["x,y".to_string(), "é".to_string(), "%".to_string()]);
@@ -583,7 +579,7 @@ async fn cookies_from_api_endpoint_and_parameters_share_one_header() {
 #[tokio::test]
 async fn unset_cookie_parameters_still_merge_api_and_endpoint_cookies() {
     let server = start_server().await;
-    let client = FixtureBearer::builder().base_url(server.uri()).build().unwrap();
+    let client = FixtureBearer::new().base_url(server.uri()).build().unwrap();
     client.send(SearchWidgetsRequest::default(), &options()).await.unwrap();
 
     let request = only_request(&server).await;
@@ -595,7 +591,7 @@ async fn unset_cookie_parameters_still_merge_api_and_endpoint_cookies() {
 #[tokio::test]
 async fn a_supplied_query_key_is_sent_and_never_duplicates_a_declared_parameter() {
     let server = start_server().await;
-    let client = FixtureQueryKey::builder().base_url(server.uri()).build().unwrap();
+    let client = FixtureQueryKey::new().base_url(server.uri()).build().unwrap();
     let keyed = options().credential(Credential::api_key("SENTINEL key&="));
     let response = client
         .send(ListThingsRequest::default().with_q("x y".to_string()), &keyed)
@@ -611,7 +607,7 @@ async fn a_supplied_query_key_is_sent_and_never_duplicates_a_declared_parameter(
     // A request that already sets the credential's query name is refused
     // before sending rather than sent with two keys.
     let server = start_server().await;
-    let client = FixtureQueryKey::builder().base_url(server.uri()).build().unwrap();
+    let client = FixtureQueryKey::new().base_url(server.uri()).build().unwrap();
     let declared = ListThingsRequest::default().with_api_key("declared".to_string());
     let error = client.send(declared, &keyed).await.unwrap_err();
     assert!(matches!(error.kind, TransportErrorKind::InvalidArgument(_)), "{error:?}");
@@ -621,7 +617,7 @@ async fn a_supplied_query_key_is_sent_and_never_duplicates_a_declared_parameter(
 #[tokio::test]
 async fn env_query_key_is_read_from_the_definition_env_names() {
     let server = start_server().await;
-    let client = FixtureQueryKey::builder().base_url(server.uri()).build().unwrap();
+    let client = FixtureQueryKey::new().base_url(server.uri()).build().unwrap();
     let response = client.send(ListThingsRequest::default(), &options()).await.unwrap();
 
     assert_eq!(response.meta.request.auth, AuthMethod::EnvVar("FIXTURE_QUERY_KEY_TOKEN".to_string()));
@@ -631,7 +627,7 @@ async fn env_query_key_is_read_from_the_definition_env_names() {
 #[tokio::test]
 async fn the_first_non_empty_env_variable_supplies_the_key() {
     let server = start_server().await;
-    let client = FixtureQueryKey::builder()
+    let client = FixtureQueryKey::new()
         .base_url(server.uri())
         .env_order(["FIXTURE_EMPTY_KEY", "FIXTURE_SECOND_KEY"])
         .build()
@@ -645,7 +641,7 @@ async fn the_first_non_empty_env_variable_supplies_the_key() {
 #[tokio::test]
 async fn a_missing_key_sends_the_request_anonymously() {
     let server = start_server().await;
-    let client = FixtureQueryKey::builder()
+    let client = FixtureQueryKey::new()
         .base_url(server.uri())
         .env_order(["SCHEMATIC_FIXTURE_UNSET_KEY_7F3A"])
         .build()
@@ -659,7 +655,7 @@ async fn a_missing_key_sends_the_request_anonymously() {
 #[tokio::test]
 async fn a_cookie_key_is_appended_and_never_replaces_a_cookie_of_its_name() {
     let server = start_server().await;
-    let client = FixtureCookieKey::builder().base_url(server.uri()).build().unwrap();
+    let client = FixtureCookieKey::new().base_url(server.uri()).build().unwrap();
     client
         .send(GetProfileRequest::default().with_theme("t".to_string()), &options())
         .await
@@ -667,7 +663,7 @@ async fn a_cookie_key_is_appended_and_never_replaces_a_cookie_of_its_name() {
     assert_eq!(header(&only_request(&server).await, "cookie"), ["lang=en; theme=t; sid=env-cookie-key"]);
 
     let server = start_server().await;
-    let client = FixtureCookieKey::builder().base_url(server.uri()).build().unwrap();
+    let client = FixtureCookieKey::new().base_url(server.uri()).build().unwrap();
     let keyed = options().credential(Credential::api_key("SENTINEL;v"));
     let declared = GetProfileRequest::default().with_sid("param".to_string());
     let error = client.send(declared, &keyed).await.unwrap_err();
@@ -679,7 +675,7 @@ async fn a_cookie_key_is_appended_and_never_replaces_a_cookie_of_its_name() {
 #[tokio::test]
 async fn an_anonymous_call_sends_no_credential_from_any_source() {
     let server = start_server().await;
-    let client = FixtureCookieKey::builder()
+    let client = FixtureCookieKey::new()
         .base_url(server.uri())
         .credentials(Credential::api_key("client-key"))
         .build()
@@ -696,13 +692,13 @@ async fn an_anonymous_call_sends_no_credential_from_any_source() {
 #[tokio::test]
 async fn a_policy_without_env_fallback_reads_no_variable() {
     let server = start_server().await;
-    let client = FixturePolicyKey::builder().base_url(server.uri()).build().unwrap();
+    let client = FixturePolicyKey::new().base_url(server.uri()).build().unwrap();
     let response = client.send(PingRequest::default(), &options()).await.unwrap();
     assert_eq!(response.meta.request.auth, AuthMethod::Anonymous);
     assert_eq!(query(&only_request(&server).await), "", "FIXTURE_POLICY_KEY_TOKEN is not read");
 
     let server = start_server().await;
-    let client = FixturePolicyKey::builder().base_url(server.uri()).build().unwrap();
+    let client = FixturePolicyKey::new().base_url(server.uri()).build().unwrap();
     client
         .send(PingRequest::default(), &options().credential(Credential::api_key("explicit")))
         .await
@@ -710,16 +706,57 @@ async fn a_policy_without_env_fallback_reads_no_variable() {
     assert_eq!(query(&only_request(&server).await), "token=explicit");
 }
 
+// ---- the one-name client: chained settings, api_key, and validation ----
+
+#[tokio::test]
+async fn api_key_goes_where_each_generated_definition_takes_a_key() {
+    let server = start_server().await;
+    let bearer = FixtureBearer::new().base_url(server.uri()).api_key("k-bearer");
+    bearer.send(ListWidgetsRequest::default(), &options()).await.unwrap();
+    assert_eq!(header(&only_request(&server).await, "authorization"), ["Bearer k-bearer"]);
+
+    let server = start_server().await;
+    let query_key = FixtureQueryKey::new().base_url(server.uri()).api_key("k-query");
+    let response = query_key.send(ListThingsRequest::default(), &options()).await.unwrap();
+    assert_eq!(response.meta.request.auth, AuthMethod::ClientLevel, "the set key beats the environment");
+    assert_eq!(query(&only_request(&server).await), "api_key=k-query");
+
+    // Basic takes two values, so a single key has nowhere to go.
+    let server = start_server().await;
+    let basic = FixtureBasic::new().base_url(server.uri()).api_key("k-basic");
+    let error = basic.send(GetNoteRequest::default(), &options()).await.unwrap_err();
+    let TransportErrorKind::InvalidClient(build) = &error.kind else {
+        panic!("a key on a Basic-only API is refused: {error:?}");
+    };
+    assert!(build.to_string().contains("API key"), "{build}");
+    assert!(!error.to_string().contains("k-basic"), "{error}");
+    assert_nothing_sent(&server).await;
+}
+
+#[tokio::test]
+async fn new_never_fails_and_an_invalid_setting_surfaces_at_build_or_the_first_send() {
+    let server = start_server().await;
+    let client = FixtureBearer::new().base_url("not a url");
+    let error = client.send(ListWidgetsRequest::default(), &options()).await.unwrap_err();
+    assert!(matches!(error.kind, TransportErrorKind::InvalidClient(_)), "{error:?}");
+    let built: Result<FixtureBearer, _> = client.build();
+    assert!(built.is_err(), "build reports the same setting");
+
+    let built: FixtureBearer = FixtureBearer::new().base_url(server.uri()).build().unwrap();
+    built.send(ListWidgetsRequest::default(), &options()).await.unwrap();
+    only_request(&server).await;
+}
+
 // ---- no credential in Debug output ----
 
 #[tokio::test]
 async fn debug_output_never_contains_a_credential() {
-    let header_key = FixtureApiKey::builder().credentials(Credential::api_key("SENTINEL-HEADER"));
-    let bearer = FixtureBearer::builder()
+    let header_key = FixtureApiKey::new().credentials(Credential::api_key("SENTINEL-HEADER"));
+    let bearer = FixtureBearer::new()
         .credentials(Credential::access_token("SENTINEL-BEARER"))
         .build()
         .unwrap();
-    let query_key = FixtureQueryKey::new().unwrap();
+    let query_key = FixtureQueryKey::new();
     for (sentinel, rendered) in [
         ("SENTINEL-HEADER", format!("{header_key:?}")),
         ("SENTINEL-BEARER", format!("{bearer:?}")),
@@ -738,7 +775,7 @@ async fn debug_output_never_contains_a_credential() {
 #[tokio::test]
 async fn header_key_oauth_and_form_bodies_reach_the_server() {
     let server = start_server().await;
-    let client = FixtureApiKey::builder()
+    let client = FixtureApiKey::new()
         .base_url(server.uri())
         .credentials(Credential::api_key("k-1"))
         .build()
@@ -751,7 +788,7 @@ async fn header_key_oauth_and_form_bodies_reach_the_server() {
     assert_eq!(request.body, b"name=a+b");
 
     let server = start_server().await;
-    let client = FixtureOAuth::builder().base_url(server.uri()).build().unwrap();
+    let client = FixtureOAuth::new().base_url(server.uri()).build().unwrap();
     client
         .send(WhoAmIRequest::default(), &options().credential(Credential::access_token("tok")))
         .await
@@ -776,8 +813,8 @@ async fn each_endpoint_decodes_with_its_declared_codec() {
         .respond_with(ResponseTemplate::new(200).set_body_raw("<html>busy</html>", "text/html"))
         .mount(&server)
         .await;
-    let basic = FixtureBasic::builder().base_url(server.uri()).build().unwrap();
-    let bearer = FixtureBearer::builder().base_url(server.uri()).build().unwrap();
+    let basic = FixtureBasic::new().base_url(server.uri()).build().unwrap();
+    let bearer = FixtureBearer::new().base_url(server.uri()).build().unwrap();
 
     let note: Option<String> = basic.send(GetNoteRequest::default(), &options()).await.unwrap().into_result().ok();
     assert_eq!(note.as_deref(), Some(r#"{"a":1}"#), "a text endpoint keeps a JSON body as text");
@@ -806,7 +843,7 @@ async fn a_mutator_registered_for_a_generated_request_runs_only_for_that_endpoin
         .respond_with(ResponseTemplate::new(200).set_body_raw(r#"{"id":"w1","name":"n"}"#, "application/json"))
         .mount(&server)
         .await;
-    let client = FixtureBearer::builder()
+    let client = FixtureBearer::new()
         .base_url(server.uri())
         .mutate_response::<ListWidgetsRequest, _>(|_meta, list| {
             list.items.push(Widget { id: "added".to_string(), name: "by the mutator".to_string() });
@@ -838,7 +875,7 @@ async fn request_id_secret_names_and_cross_origin_policy_come_from_the_definitio
         .respond_with(ResponseTemplate::new(302).insert_header("location", "/echo"))
         .mount(&server)
         .await;
-    let client = FixtureSettings::builder().base_url(server.uri()).build().unwrap();
+    let client = FixtureSettings::new().base_url(server.uri()).build().unwrap();
 
     let request = EchoRequest::default()
         .with_x_pin("SENTINEL-PIN".to_string())
@@ -891,6 +928,8 @@ const REQUEST_SIDE_TESTS: &[&str] = &[
     "a_cookie_key_is_appended_and_never_replaces_a_cookie_of_its_name",
     "an_anonymous_call_sends_no_credential_from_any_source",
     "a_policy_without_env_fallback_reads_no_variable",
+    "api_key_goes_where_each_generated_definition_takes_a_key",
+    "new_never_fails_and_an_invalid_setting_surfaces_at_build_or_the_first_send",
     "debug_output_never_contains_a_credential",
     "header_key_oauth_and_form_bodies_reach_the_server",
     "each_endpoint_decodes_with_its_declared_codec",
@@ -1008,7 +1047,7 @@ fn slow_real_apis_compile_offline() {
 const MISUSES: &[(&str, &str, &str, &str)] = &[
     (
         "a success type other than the declared one",
-        "async fn misuse(client: FixtureBearerClient) {
+        "async fn misuse(client: FixtureBearer) {
             let _: Response<String, NoDeclaredError> =
                 client.send(ListWidgetsRequest::default(), &CallOptions::new()).await.unwrap();
         }",
@@ -1019,7 +1058,7 @@ const MISUSES: &[(&str, &str, &str, &str)] = &[
         "an EndpointSpec impl without its codec",
         "struct Mine;
         impl EndpointSpec for Mine {
-            type Api = FixtureBearer;
+            type Api = FixtureBearerApi;
             type Success = ();
             type Failure = NoDeclaredError;
             const ENDPOINT_ID: &'static str = \"Mine\";
@@ -1033,7 +1072,7 @@ const MISUSES: &[(&str, &str, &str, &str)] = &[
     ),
     (
         "an arbitrary type that is no request",
-        "async fn misuse(client: FixtureBearerClient) {
+        "async fn misuse(client: FixtureBearer) {
             let _ = client.send(String::from(\"/widgets\"), &CallOptions::new()).await;
         }",
         "E0277",
@@ -1041,7 +1080,7 @@ const MISUSES: &[(&str, &str, &str, &str)] = &[
     ),
     (
         "another API's generated request through the typed send",
-        "async fn misuse(client: FixtureBearerClient) {
+        "async fn misuse(client: FixtureBearer) {
             let _ = client.send(PingRequest::default(), &CallOptions::new()).await;
         }",
         "E0271",
@@ -1049,7 +1088,7 @@ const MISUSES: &[(&str, &str, &str, &str)] = &[
     ),
     (
         "another API's generated request through the raw send",
-        "async fn misuse(client: FixtureBearerClient) {
+        "async fn misuse(client: FixtureBearer) {
             let _ = client.send_raw(PingRequest::default(), &CallOptions::new()).await;
         }",
         "E0271",
@@ -1058,7 +1097,7 @@ const MISUSES: &[(&str, &str, &str, &str)] = &[
     (
         "a response mutator on a text endpoint",
         "fn misuse() {
-            let _ = FixtureBasic::builder().mutate_response::<GetNoteRequest, _>(|_, _| Ok(()));
+            let _ = FixtureBasic::new().mutate_response::<GetNoteRequest, _>(|_, _| Ok(()));
         }",
         "E0277",
         "SupportsHooks",
@@ -1066,14 +1105,36 @@ const MISUSES: &[(&str, &str, &str, &str)] = &[
     (
         "a response mutator for another API's request",
         "fn misuse() {
-            let _ = FixtureBearer::builder().mutate_response::<PingRequest, _>(|_, _| Ok(()));
+            let _ = FixtureBearer::new().mutate_response::<PingRequest, _>(|_, _| Ok(()));
         }",
         "E0271",
         "PingRequest",
     ),
     (
+        "another API's generated request through the link check",
+        "fn misuse(client: FixtureBearer, link: Url) {
+            let _ = client.check_link::<PingRequest>(&link);
+        }",
+        "E0271",
+        "PingRequest",
+    ),
+    (
+        "the removed client alias",
+        "fn misuse(_: FixtureBearerClient) {}",
+        "E0425",
+        "FixtureBearerClient",
+    ),
+    (
+        "the removed per-API builder",
+        "fn misuse() {
+            let _ = FixtureBearer::builder();
+        }",
+        "E0599",
+        "builder",
+    ),
+    (
         "the removed generic request",
-        "async fn misuse(client: FixtureBearerClient) {
+        "async fn misuse(client: FixtureBearer) {
             let _ = client.request::<serde_json::Value>(ListWidgetsRequest::default()).await;
         }",
         "E0599",
@@ -1101,11 +1162,11 @@ const MISUSES: &[(&str, &str, &str, &str)] = &[
 /// and a correct use compile, so each failure is the misuse's own.
 const MISUSE_PRELUDE: &str = "#![allow(dead_code, unused_imports, unreachable_code)]
 use schematic_schema::fixture_basic::{FixtureBasic, GetNoteRequest};
-use schematic_schema::fixture_bearer::{FixtureBearer, FixtureBearerClient, ListWidgetsRequest, WidgetList};
+use schematic_schema::fixture_bearer::{FixtureBearer, FixtureBearerApi, ListWidgetsRequest, WidgetList};
 use schematic_schema::fixture_policy_key::PingRequest;
 use schematic_schema::prelude::*;
 use schematic_schema::schematic_runtime::{
-    EndpointSpec, InvalidArgument, Method, NoDeclaredError, RequestParts,
+    EndpointSpec, InvalidArgument, Method, NoDeclaredError, RequestParts, Url,
 };
 ";
 
@@ -1116,11 +1177,11 @@ fn slow_generated_types_reject_misuse_at_compile_time() {
     let api_refs: Vec<&RestApi> = apis.iter().collect();
     let fresh = FreshCrate::generate(&api_refs, Definitions::Fixture(FIXTURE_TYPES), &lockfile);
 
-    let control = "async fn used(client: FixtureBearerClient) {
+    let control = "async fn used(client: FixtureBearer) {
         let response: Response<WidgetList, NoDeclaredError> =
             client.send(ListWidgetsRequest::default(), &CallOptions::new()).await.unwrap();
         let _ = response.data();
-        let _ = FixtureBearer::builder().mutate_response::<ListWidgetsRequest, _>(|_, _| Ok(()));
+        let _ = FixtureBearer::new().mutate_response::<ListWidgetsRequest, _>(|_, _| Ok(()));
     }";
     fresh.add_test_file("misuse_control", &format!("{MISUSE_PRELUDE}{control}\n"));
     for (index, (_, snippet, _, _)) in MISUSES.iter().enumerate() {
@@ -1253,7 +1314,29 @@ fn generated_rest_code_references_the_runtime_and_defines_none_of_it() {
     assert!(source_of("lib.rs").contains("schematic_runtime::ABI == SCHEMATIC_RUNTIME_ABI"));
     let github = source_of("github.rs");
     assert!(github.contains("impl schematic_runtime::EndpointSpec for ListPullRequestsRequest"));
-    assert!(github.contains("pub type GitHubClient = schematic_runtime::Client<GitHub>;"));
+    // Every REST API has exactly one user-facing client name: its struct,
+    // given its settings by the runtime macro. No alias, per-API builder, or
+    // fallible constructor remains anywhere.
+    let all_rest = rest_files
+        .iter()
+        .flat_map(|(_, source)| source.split_whitespace())
+        .collect::<String>()
+        .replace(",)", ")");
+    for api in &apis {
+        let name = &api.name;
+        for expected in [
+            format!("pub struct {name}(schematic_runtime::Client<{name}Api>);"),
+            format!("pub enum {name}Api {{}}"),
+            format!("schematic_runtime::api_client!({name}, {name}Api);"),
+        ] {
+            let squashed: String = expected.split_whitespace().collect();
+            assert_eq!(all_rest.matches(&squashed).count(), 1, "{name}: `{expected}`");
+        }
+        assert!(!all_rest.contains(&format!("{name}Client")), "{name} still has a client alias");
+    }
+    for removed in ["ClientBuilder", "fnbuilder()", "BuildError", "pubtype"] {
+        assert!(!all_rest.contains(removed), "generated REST code still contains `{removed}`");
+    }
     for (relative, source) in &rest_files {
         let module = relative.trim_end_matches(".rs");
         if ["lib", "prelude", "shared"].contains(&module) || relative.ends_with("/requests.rs") || relative.ends_with("/responses.rs") {
@@ -1366,7 +1449,7 @@ async fn capture_query_request_lines() {
     };
 
     let key = CallOptions::new().credential(Credential::api_key("test-key"));
-    let gitea = Gitea::builder().base_url(format!("{base}/api/v1")).build().unwrap();
+    let gitea = Gitea::new().base_url(format!("{base}/api/v1")).build().unwrap();
 
     let mut scalars = ListPullRequestsRequest::new("own er", "re+po%");
     scalars.page = Some(2);
@@ -1387,13 +1470,13 @@ async fn capture_query_request_lines() {
     let _ = gitea.send(GetGitTreeRecursiveRequest::new("o", "r", "a b"), &key).await;
     record("legacy-embedded-literal-query");
 
-    let tenant = Gitea::builder().base_url(format!("{base}/api/v1?tenant=a b")).build().unwrap();
+    let tenant = Gitea::new().base_url(format!("{base}/api/v1?tenant=a b")).build().unwrap();
     let mut paged = ListPullRequestsRequest::new("o", "r");
     paged.page = Some(1);
     let _ = tenant.send(paged, &key).await;
     record("base-url-with-query");
 
-    let gitlab = GitLab::builder().base_url(format!("{base}/api/v4")).build().unwrap();
+    let gitlab = GitLab::new().base_url(format!("{base}/api/v4")).build().unwrap();
     let _ = gitlab
         .send(
             GetRepositoryFileRequest::new("group/project", "dir/file name.rs", "feature/x y+z"),
@@ -1402,7 +1485,7 @@ async fn capture_query_request_lines() {
         .await;
     record("legacy-embedded-query-with-placeholder");
 
-    let openai = OpenAI::builder().base_url(format!("{base}/v1")).build().unwrap();
+    let openai = OpenAI::new().base_url(format!("{base}/v1")).build().unwrap();
     let token = CallOptions::new().credential(Credential::access_token("test-token"));
     let mut items = ListConversationItemsRequest::new("conv 1");
     items.limit = Some(5);

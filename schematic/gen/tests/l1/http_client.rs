@@ -4,9 +4,9 @@
 //! checks, credential application, and query encoding live in
 //! `schematic-runtime` and are tested there. These tests verify that the
 //! module:
-//! - declares the API marker, its `{Name}Client` runtime alias, and the
-//!   marker's constants and constructors
-//! - scopes every request to the API by naming the marker in its
+//! - declares the API's one client struct over the runtime client, its tag
+//!   type, and the struct's constants and infallible constructor
+//! - scopes every request to the API by naming the tag in its
 //!   `EndpointSpec` implementation, with the endpoint's HTTP method
 //! - carries the definition's authentication translation in `definition()`
 //! - has no send path, request enum, or credential store of its own
@@ -42,7 +42,7 @@ fn without_docs(code: &str) -> String {
 }
 
 /// The generated `definition()`, squashed, up to the doc comment of the
-/// `builder()` that follows it.
+/// `new()` that follows it.
 fn definition_body(code: &str) -> String {
     let flat = squash(code);
     let start = flat
@@ -50,7 +50,7 @@ fn definition_body(code: &str) -> String {
         .unwrap_or_else(|| panic!("definition() is missing:\n{code}"));
     let end = flat[start..]
         .find("///")
-        .unwrap_or_else(|| panic!("builder() is missing:\n{code}"));
+        .unwrap_or_else(|| panic!("new() is missing:\n{code}"));
     flat[start..start + end].to_string()
 }
 
@@ -193,50 +193,47 @@ fn make_dual_auth_api() -> RestApi {
 }
 
 // =============================================================================
-// API marker and constructors
+// API client struct and constructor
 // =============================================================================
 
 #[test]
-fn module_declares_marker_client_alias_and_api_impl() {
+fn module_declares_one_client_struct_and_a_tag_with_the_api_impl() {
     let api = make_api("TestApi", AuthStrategy::None, vec![]);
     let code = format_tokens(&assemble_api_code(&api));
 
     for expected in [
-        "pub enum TestApi {}",
-        "pub type TestApiClient = schematic_runtime::Client<TestApi>;",
-        "impl schematic_runtime::Api for TestApi {",
+        "pub struct TestApi(schematic_runtime::Client<TestApiApi>);",
+        "pub enum TestApiApi {}",
+        "impl schematic_runtime::Api for TestApiApi {",
         r#"const NAME: &'static str = "TestApi";"#,
+        "schematic_runtime::api_client!(TestApi, TestApiApi);",
     ] {
         assert!(code.contains(expected), "missing `{expected}`\nGenerated code:\n{code}");
     }
+    assert!(!code.contains("TestApiClient"), "no client alias\nGenerated code:\n{code}");
 }
 
 #[test]
-fn marker_holds_base_url_and_constructors() {
+fn client_struct_holds_base_url_and_an_infallible_new() {
     let api = make_api("TestApi", AuthStrategy::None, vec![]);
     let code = format_tokens(&assemble_api_code(&api));
     let flat = squash(&code);
 
     assert!(
         code.contains(r#"pub const BASE_URL: &'static str = "https://api.example.com/v1";"#),
-        "Marker should hold the base URL\nGenerated code:\n{code}"
+        "The client struct should hold the base URL\nGenerated code:\n{code}"
     );
     assert!(
         code.contains("pub const DOCS_URL: Option<&'static str> = None;"),
-        "Marker should hold the docs URL\nGenerated code:\n{code}"
+        "The client struct should hold the docs URL\nGenerated code:\n{code}"
     );
     assert!(
         flat.contains(&squash(
-            "pub fn builder() -> schematic_runtime::ClientBuilder<Self> { schematic_runtime::Client::builder(Self::definition()) }"
+            "pub fn new() -> Self { Self(schematic_runtime::Client::new(Self::definition())) }"
         )),
-        "builder() should seed the runtime builder from definition()\nGenerated code:\n{code}"
+        "new() should wrap a runtime client seeded from definition()\nGenerated code:\n{code}"
     );
-    assert!(
-        flat.contains(&squash(
-            "pub fn new() -> Result<TestApiClient, schematic_runtime::BuildError> { Self::builder().build() }"
-        )),
-        "new() should build the default client\nGenerated code:\n{code}"
-    );
+    assert!(!flat.contains("fnbuilder()"), "no per-API builder\nGenerated code:\n{code}");
 }
 
 // =============================================================================
@@ -257,7 +254,7 @@ fn requests_name_the_api_marker() {
     // One `type Api` per endpoint, each naming this API's marker, so its
     // client accepts these requests and no other API's client does.
     assert_eq!(
-        code.matches("type Api = TestApi;").count(),
+        code.matches("type Api = TestApiApi;").count(),
         api.endpoints.len(),
         "Generated code:\n{code}"
     );

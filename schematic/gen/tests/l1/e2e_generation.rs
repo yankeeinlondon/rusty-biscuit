@@ -73,10 +73,10 @@ fn without_comments(content: &str) -> String {
 }
 
 /// The opening of `request`'s `EndpointSpec` impl, whitespace removed: its
-/// API marker, success type, and decoder.
+/// API's tag, success type, and decoder.
 fn endpoint_spec_head(api: &str, request: &str, success: &str, decoder: &str) -> String {
     format!(
-        "implschematic_runtime::EndpointSpecfor{request}{{typeApi={api};typeSuccess={success};\
+        "implschematic_runtime::EndpointSpecfor{request}{{typeApi={api}Api;typeSuccess={success};\
          typeFailure=schematic_runtime::NoDeclaredError;typeDecoder={decoder};"
     )
 }
@@ -235,7 +235,7 @@ fn generated_files_exist_and_have_expected_structure() {
     let lib_content =
         std::fs::read_to_string(src_dir.join("lib.rs")).expect("Failed to read lib.rs");
     assert!(lib_content.contains("//!"));
-    assert!(lib_content.contains("pub const SCHEMATIC_RUNTIME_ABI: u32 = 1;"));
+    assert!(lib_content.contains("pub const SCHEMATIC_RUNTIME_ABI: u32 = 2;"));
     assert!(lib_content.contains("schematic_runtime::ABI == SCHEMATIC_RUNTIME_ABI"));
     assert!(lib_content.contains("pub use schematic_runtime;"));
     assert!(lib_content.contains("pub mod shared;"));
@@ -257,9 +257,10 @@ fn generated_files_exist_and_have_expected_structure() {
     assert!(api_content.contains("//!"));
     assert!(api_content.contains("OpenAI"));
 
-    // Should have the API marker and its runtime client alias
-    assert!(api_content.contains("pub enum OpenAI {}"));
-    assert!(api_content.contains("pub type OpenAIClient = schematic_runtime::Client<OpenAI>;"));
+    // Should have the API's one client struct over its tag, and no alias
+    assert!(api_content.contains("pub struct OpenAI(schematic_runtime::Client<OpenAIApi>);"));
+    assert!(api_content.contains("pub enum OpenAIApi {}"));
+    assert!(!api_content.contains("OpenAIClient"));
     assert!(!api_content.contains("pub enum OpenAIRequest"));
 
     // Should have request structs for all endpoints, scoped to the API
@@ -267,7 +268,7 @@ fn generated_files_exist_and_have_expected_structure() {
     assert!(api_content.contains("pub struct RetrieveModelRequest"));
     assert!(api_content.contains("pub struct DeleteModelRequest"));
     assert!(api_content.contains("impl schematic_runtime::EndpointSpec for ListModelsRequest {"));
-    assert!(api_content.contains("type Api = OpenAI;"));
+    assert!(api_content.contains("type Api = OpenAIApi;"));
 
     // The runtime client sends; the module has no send method of its own
     assert_no_send_methods(&api_content, &["list_models"]);
@@ -275,7 +276,7 @@ fn generated_files_exist_and_have_expected_structure() {
     // Verify prelude.rs content
     let prelude_content =
         std::fs::read_to_string(src_dir.join("prelude.rs")).expect("Failed to read prelude.rs");
-    assert!(prelude_content.contains("pub use crate::openai::{OpenAI, OpenAIClient};"));
+    assert!(prelude_content.contains("pub use crate::openai::OpenAI;"));
     assert!(prelude_content.contains("pub use schematic_runtime::{"));
     assert!(prelude_content.contains("CallOptions"));
     assert!(!prelude_content.contains("OpenAIRequest"));
@@ -465,14 +466,14 @@ fn generate_code_for_various_api_configurations() {
         let content =
             std::fs::read_to_string(&api_module_path).expect("Failed to read API module file");
         assert!(
-            content.contains(&format!("pub enum {} {{}}", api.name)),
-            "Should contain API marker for '{}'",
+            content.contains(&format!("pub struct {}(schematic_runtime::Client<{}Api>);", api.name, api.name)),
+            "Should contain the client struct for '{}'",
             api.name
         );
         assert_eq!(
-            content.matches(&format!("type Api = {};", api.name)).count(),
+            content.matches(&format!("type Api = {}Api;", api.name)).count(),
             api.endpoints.len(),
-            "Every request of '{}' should name its API marker",
+            "Every request of '{}' should name its API tag",
             api.name
         );
     }
