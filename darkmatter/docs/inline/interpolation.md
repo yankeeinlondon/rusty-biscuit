@@ -403,7 +403,7 @@ Handlebars writes a variable as \{{ name }} and a partial as \{\{> header }}.
 
 A quoted string literal inside an expression is text. The lexer copies it verbatim, so `{{ "in {{ area }}" }}` does not contain a nested expression at parse time. Whether those braces are ever interpolated depends on the surface:
 
-Every surface is single-pass: the literal's braces land in the output as data and are never interpolated. The body and mixed frontmatter strings (`"Hello {{ name }}"`) insert them as text, and a scalar whose trimmed content is **exactly one** `{{ … }}` span takes the whole-value path, which parses and evaluates once and keeps the typed result. `r: "{{ 'b {{ name }}' }}"` composes to `b {{ name }}`, and a body reference `{{ r }}` inserts that text unchanged. Claudine's lifecycle values (communication fields, stack operands, `proxy … with` values, and `when`/`while`/`until` predicates) are single-pass too, and Claudine refuses a nested span there before any provider starts.
+Every surface is single-pass: the literal's braces land in the output as data and are never interpolated. The body and mixed frontmatter strings (`"Hello {{ name }}"`) insert them as text, and a scalar whose trimmed content is **exactly one** `{{ … }}` span takes the whole-value path, which parses and evaluates once and keeps the typed result. `r: "{{ 'b {{ name }}' }}"` composes to `b {{ name }}`, and a body reference `{{ r }}` inserts that text unchanged. Claudine's lifecycle values (verb operands, `set` and `with` values, and `when`/`while`/`until` predicates, at every nesting depth) are single-pass too, and Claudine refuses a nested span there before any provider starts.
 
 Write the value with `+` instead. It resolves on every surface:
 

@@ -1332,6 +1332,41 @@ let rendered = SubtreeCompose::new(&json!("{{ err.msg }}: {{ missing }}"), &docu
 assert_eq!(rendered, json!("boom: ")); // an absent property renders empty
 ```
 
+A whole composition takes host globals too. `HostGlobals::associate(view,
+entries)` runs the same registration checks once, and
+`ComposeOptions::with_host_globals` hands the result to every evaluation
+surface of the document and of each document it transcludes: frontmatter
+values, the body, `when=` conditions, and page blocks. A declared global wins
+over a frontmatter key of the same name for bare, dotted, and bracket reads,
+while `fm.<name>` still reads the key. A compose-time frontmatter value may read
+a declared global even when a deferred key (`with_exclude_keys`) shares its
+name; an explicit `fm.<name>` read of that key is still rejected. A read of a
+global declared unavailable fails the composition, in a transcluded document
+too, and `MarkdownError::unavailable_binding` finds it in the cause chain.
+Without host globals nothing changes: every non-reserved root is a document
+property.
+
+```rust
+use darkmatter::markdown::compose::ComposeOptions;
+use darkmatter::markdown::compose::expression::HostGlobals;
+
+// `loop:` is a configuration key the host defers; `loop` is also its global.
+let view = Arc::new(
+    BindingView::builder(ScopeId::new("iteration"))
+        .declare("loop", "The iteration's values.", Availability::Available)
+        .build()?,
+);
+let globals = HostGlobals::associate(
+    view,
+    [("loop".to_string(), RuntimeBinding::eager(json!({ "count": 2 })))],
+)?;
+let options = ComposeOptions::new()
+    .with_exclude_keys(["loop"])
+    .with_host_globals(globals);
+// `label: "pass {{ loop.count }}"` composes to `pass 2`; `{{ fm.loop }}` in the
+// body renders the configuration block.
+```
+
 ### Lazy `ctx.*` Resolution
 
 Context capture is **lazy**: only the context groups actually referenced by
