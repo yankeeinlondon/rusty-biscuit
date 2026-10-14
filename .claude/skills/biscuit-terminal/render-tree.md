@@ -59,11 +59,13 @@ overrides, and containers project migrated children structurally instead of
 falling back to ANSI-stripped text. The connector-list per-item `Style` lowering
 gap is closed too (`render_tree_connector_list` applies each list item's
 `Paragraph` `Style`), so `FileSystem`'s terminal styling is at parity.
-`FileSystem::render` still uses its bespoke terminal path: that flip stays
-**deferred as an accepted specialization** — the target-agnostic projection emits
-portable Unicode icons and cannot reproduce the bespoke Nerd Font terminal icons.
-`FileSystem` is off the darkmatter production path, so this is not a blocker (CSS
-Box Architecture closeout disposition; see its `component-assessment.md`).
+`FileSystem::render` still uses its bespoke terminal path. Its tree projection
+preserves both icon variants in `Extended { token: "icon" }` nodes:
+`nerd_font_auto: true` selects the Nerd Font glyph only when the rendering
+terminal reports `is_nerd_font == Some(true)`. Unicode fallback children keep
+Markdown and browser output portable. Existing `nerd_font_preferred` payloads
+retain their explicit preference behavior. Root headers stay unlinked even
+when entry hyperlinks are enabled.
 
 The **projection layer** (`render_tree::projection`) converts
 `RenderableTerminalContent` into tree nodes:
