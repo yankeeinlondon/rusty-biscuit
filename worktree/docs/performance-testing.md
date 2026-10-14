@@ -11,7 +11,7 @@ This document defines the worktree-owned performance surfaces for `wt list` and 
 
 The first owned cost center is [`list_worktrees`](../../worktree/lib/src/worktree.rs), which produces the status table.
 
-- It runs `git worktree list --porcelain`, resolves the default branch once, and reads every branch tip with one `git for-each-ref refs/heads refs/remotes`.
+- It lists the worktrees (the answer of `git worktree list --porcelain`, read in-process for a plain repository), resolves the default branch once, and reads every branch tip in one in-process ref read (the answer of `git for-each-ref refs/heads refs/remotes`; see [Git processes](#git-processes)).
 - The caption compares the local default branch with its local tracking ref `origin/<default>` (cached like any other pair) and records the tracking tip it read. Its counts also choose the default-branch target, so a warm run makes no `merge-base` call. The library listing path never touches the network; the CLI reads it after its worker's check and fetch (see [Live Remote Head](#live-remote-head)).
 - Per-worktree `git status --porcelain` and per-branch comparisons (`git rev-list --left-right --count` plus a speculative `git merge-tree --write-tree`, against the target and, for a branch whose fork parent is another branch, against the parent) are dispatched in parallel via `std::thread::scope`.
 - `git status` is passed `-c core.untrackedCache=true`; benchmarks assume a warm untracked-cache so the measurement reflects steady-state behavior rather than the first cold walk.
@@ -22,6 +22,7 @@ The first owned cost center is [`list_worktrees`](../../worktree/lib/src/worktre
 The second owned cost center is graph data collection in the library, [`worktree::graph`](../lib/src/graph.rs). The CLI only converts the gathered facts for biscuit-terminal and renders them ([`git_graph.rs`](../cli/src/commands/git_graph.rs)).
 
 - [`gather`](../lib/src/graph.rs) reads whether the repository is shallow once, then works in three stages, each stage's branches concurrently: it classifies every drawn branch (one `merge-base --is-ancestor` per candidate lane, plus `rev-list --first-parent --parents` and `rev-list --ancestry-path` for a merged branch) and finds its fork (`merge-base`); it builds every branch lane (`log --first-parent`), classifying the lane's boundary (the first commit below it) the same way, so a branch that kept going after its merge is extended through that merge; then it builds the default lane. Each fork, merge, or label commit outside a lane's window costs one `rev-list --first-parent --count`, and a lane's anchors are verified together in one `log --no-walk`. See [git-graph.md](./git-graph.md).
+- Each of those Git commands names a **question**, which is answered in-process from the repository's commits (read with `gix`, one reader per gather shared by its threads) and starts no git process. Only when `gix` cannot read the repository, or Git would rewrite parents there (replace refs, a grafts file), does the command itself run. A gather of the graph alone therefore starts no git process; verbose details still run their two `git log` listings. In tests and with the `count-git` feature, every question is recorded in [`worktree::questions`](../lib/src/questions.rs) however it was answered, so a test still pins the question budget below and can still fail one question (`recorder::fail_matching`).
 - Graph data is only gathered when the terminal reports inline-image support. On non-image terminals the entire graph-data path is skipped.
 - `GitGraph` measures each trimming candidate with the renderer (`GitGraph::plan`). That cost is in the `graph_render` stage, never in `graph_history`, `local_gather`, or the table.
 
@@ -89,7 +90,7 @@ An observation, not a threshold: one quick sample on the macOS development host 
 
 ## Git processes
 
-Starting a git process is the dominant cost of the refresh worker on Windows: about 47 ms each there, against about 5 ms on macOS (measured 2026-10-05 on `build-win-native` and the macOS development host). So the metadata both `wt list` and its worker read repeatedly is read in-process with `gix`, and git runs only for work that needs it ([`git_metadata.rs`](../lib/src/git_metadata.rs)):
+Starting a git process is the dominant cost of the refresh worker and of `wt remove` on Windows: about 47 ms each there, against about 5 ms on macOS (measured 2026-10-05 on `build-win-native` and the macOS development host). So the metadata `wt list`, its worker, and `wt remove` read repeatedly is read in-process with `gix`, and git runs only for work that needs it ([`git_metadata.rs`](../lib/src/git_metadata.rs)):
 
 | Read | Answers the same as |
 | --- | --- |
@@ -98,10 +99,26 @@ Starting a git process is the dominant cost of the refresh worker on Windows: ab
 | whether a name is a usable branch name | `git check-ref-format --branch` |
 | `core.sshCommand` | `git config --get core.sshCommand` |
 | a tracking ref's object ID | `git rev-parse --verify --quiet` |
+| the commit a branch or tracking ref points at (`wt remove`'s tips) | `git rev-parse --verify --quiet <ref>^{commit}` |
+| the common Git directory | `git rev-parse --path-format=absolute --git-common-dir` |
+| a checkout's top level, Git directory, and common directory (the refresh worker's check that it runs from a main checkout) | `git rev-parse --path-format=absolute --show-toplevel --git-dir --git-common-dir` |
+| the worktree listing of a plain repository (`git::worktree_list*`): main checkout first, linked ones sorted by path as Git sorts them | `git worktree list --porcelain` |
+| an index's entries, mode, object ID, stage, and path (`git::staged_entries_*`) | `git ls-files --stage -z` |
+| that an object `origin` reported is a commit this repository holds (`wt remove`'s `--force-remote` preflight) | `git cat-file -e <object>^{commit}` succeeding |
+| `branch.<name>.remote` and `branch.<name>.merge` | `git config --get` |
+| whether `origin` exists at all | `git remote get-url origin` failing with "No such remote" |
+| every branch and remote-tracking tip (`RefTips::read_in`, [`listing.rs`](../lib/src/listing.rs)) | `git for-each-ref --format='%(objectname) %(refname) %(symref)' refs/heads refs/remotes` |
+| whether the repository is shallow (the graph) | `git rev-parse --is-shallow-repository` |
+| the graph's history questions: ancestry, merge bases, first-parent chains and counts ([`graph/topology/commits.rs`](../lib/src/graph/topology/commits.rs)) | `git merge-base [--is-ancestor]`, `git rev-list --first-parent [--count\|--parents]`, `git rev-list --ancestry-path`, `git log --first-parent`, `git log --no-walk`, `git cat-file -e` |
 
 - Each read opens the repository afresh, so a configuration change between two reads (an `origin` replaced while the worker runs) is still seen.
-- When `gix` cannot read the repository (an owner it does not trust, a reftable repository), that read runs the git command in the right-hand column instead.
-- Parity tests in `git_metadata.rs` compare every read with its git command, and `remote_update::tests::a_fetching_attempt_starts_only_ls_remote_and_fetch` pins a fetching attempt to exactly two git processes.
+- When `gix` cannot read the repository (an owner it does not trust, a reftable repository), that read runs the git command in the right-hand column instead. The listing and index reads also leave to Git everything but a plain repository, so Git's own wording and spelling stay authoritative: a bare repository, `GIT_DIR`, `GIT_COMMON_DIR`, or `GIT_INDEX_FILE` set, a locked worktree or one Git would mark `prunable`, a relative recorded path, a path Git might quote, a split or sparse index. The commit check answers only "yes" in-process; a "no" is asked of Git, which may still fetch a promisor object.
+- A test that acts at a chosen Git call (a `git` shim first on `PATH`) sets `WT_TEST_LIST_THROUGH_GIT` (spelled `worktree::git::TEST_LIST_THROUGH_GIT_VAR`), so the listing and index reads are Git calls again. Only debug builds read it.
+- Parity tests in `git_metadata.rs` compare every read with its git command (`listing::repo_tests::ref_tips_read_in_process_match_git_for_each_ref` the ref read). The graph's tests run the classifier and lane builders against both answerers (`graph::tests::with_each_history`), and the CLI's failure-injection graph tests gather every view both ways and require the same facts. A merge base is painted down from both commits in commit-date order exactly as Git's `paint_down_to_common` does, so the two agree on which of several best bases comes first.
+- `remote_update::tests::a_fetching_attempt_starts_only_ls_remote_and_fetch` pins a fetching attempt to exactly two git processes.
+- `refresh_worker::tests::a_fetching_worker_starts_only_ls_remote_and_fetch` runs the whole worker against a local `origin` ahead of its tracking ref and pins it to exactly two: `ls-remote` and `fetch` (it locates the checkout in-process). The worker runs its PR and head halves on their own threads, which carry the caller's count scope (`git::calls::TaskHandle`), so one scope around the worker counts both.
+
+A clean, merged `wt remove` used to start 36 git processes, then 18, and now starts 10. Besides these reads, it lists the worktrees once to find both the base checkout and the target, and its final unregister no longer inspects the index a second time before the check that binds it to the approval. The removal's deliberate re-reads all still happen, each at its own step: the plan's checks, the recheck after the usage query, the index binding, the same checks again just before the rename, the association verified after it, and the final unregister's listing and index check. Their listings and plain index reads are answered in-process, so the processes left are the report's file inventory and three safety-tier reads, the recheck's `status`, the two `ls-files --stage --debug` bindings, the final listing (Git's, since the deleted checkout is `prunable` by then), `worktree remove`, and `branch -D`. `remove::lifecycle::tests::a_clean_removal_starts_only_its_deliberate_git_processes` pins the removal's processes and its in-process reads one by one, and the CLI test `remove::a_clean_removal_starts_10_git_processes` pins the whole command through `GIT_TRACE`.
 
 A fetching attempt used to start 14 git processes in sequence, 12 of them these reads:
 
@@ -109,6 +126,23 @@ A fetching attempt used to start 14 git processes in sequence, 12 of them these 
 | --- | ---: | ---: |
 | worker, Windows | 1021 ms | 425 ms |
 | `wt list`, Windows | 1315 ms | 644 ms |
+
+### One process per git call on Windows
+
+The `git` that Windows finds on `PATH` is usually Git for Windows' `cmd\git.exe`, a small launcher that sets up the environment and then starts the real `mingw64\bin\git.exe`. Going through it costs a second process creation on every call: 100 × `git --version` took 2.6–2.8 s through the launcher and 1.6 s calling the real binary (`build-win-native`, 2026-10-12).
+
+So every git process `wt` starts, and every one its test fixtures start, is built by `git::command()` ([`git/program.rs`](../lib/src/git/program.rs)):
+
+- On Windows, when `git` on `PATH` is `<top>\cmd\git.exe` or `<top>\bin\git.exe` beside exactly one `<top>\<prefix>\bin\git.exe`, it starts that binary directly and sets what the launcher would have set: `MSYSTEM`, `PLINK_PROTOCOL=ssh` and `HOME` when unset, and `PATH` prefixed with Git's `mingw64\bin`, `usr\bin`, and `%HOME%\bin`. Hooks, `!` aliases, `GIT_SSH_COMMAND`, and the transports therefore find the same `sh`, `ssh`, and helpers as before.
+- Anything else (another layout, a `git.exe` that Windows would find before `PATH`, an `etc\git-bash.config`, which makes the launcher also edit `MSYS`, or any other OS) runs plain `git`, exactly as before.
+- `git::program::tests::the_direct_program_sees_the_launchers_environment` runs a `!` alias through both and asserts the environment the alias sees is identical.
+- **The first in-process read in a process costs three more process creations unless `EXEPATH` is set.** gix-path finds Git for Windows' system configuration by running `git --exec-path` through the launcher with a hidden console (launcher, `git.exe`, and `conhost.exe`), once per process, unless `EXEPATH` names the installation, as Git Bash sets it. `wt`'s `main` therefore sets `EXEPATH` to the launcher layout's `<top>` when neither it nor `GIT_EXEC_PATH` is set (`git::name_installation_for_gix`), and removes it again from every process `wt` starts (`git::forget_installation_hint`), since the launcher does not set it. Measured on `build-win-native` (2026-10-13): a `wt list` test with three listings and their workers started 79 processes before, 58 after. `git::program::tests::the_named_installation_is_the_prefix_git_reports_and_stays_out_of_git_children` checks the prefix against `git --exec-path`, and `list_output::a_listing_never_asks_git_for_its_exec_path` traces a real listing (`GIT_TRACE2_EVENT`).
+
+```mermaid
+flowchart LR
+    wt -->|before| L["cmd\git.exe (launcher)"] --> G["mingw64\bin\git.exe"]
+    wt -->|"git::command()"| G
+```
 
 ## Ahead/Behind + Merge Result Cache
 
@@ -381,7 +415,8 @@ Never parse the human report. Never add a concurrent region's children together 
   - Only debug builds read it: the `dev` and `test` Cargo profiles that `cargo nextest run` and CI's test archives build. A release build, such as the one `just install` makes, always waits 3 s. The `-r`/`--ff` wait is never shortened.
   - A value that is not a positive whole number panics, so a typo cannot pass silently on the 3 s wait.
   - Keep the wait long enough for whatever must finish inside it. `list_remote_head.rs` uses 300 ms (`HELD_WAIT`) when the worker is held before anything the listing shows could finish, and 1 s (`STEP_WAIT`) when one step must finish first, such as the check before a held fetch.
-  - At least one functional test keeps the real wait (`list_prs.rs`'s `a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint`). Performance tests never set the variable: the held-worker gates assert that the wait lasted at least 3 s, so a leaked override fails them.
+  - The real wait is proven elsewhere: `commands::list::tests::a_listing_launches_the_real_worker_and_waits_the_real_budgets` pins the release wiring (the real launch, 3 s, and the forced wait), and the performance tests run it end to end. `list_prs.rs`'s `a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint` waits 2.5 s, long enough for its head half to finish inside the wait on a loaded runner. Performance tests never set the variable: the held-worker gates assert that the wait lasted at least 3 s, so a leaked override fails them.
+- **A functional test that holds the worker's PR request raises the worker's deadline.** The worker gives up on a request after 10 s, so a held request on a heavily loaded host can end before the test checks that the worker still holds its lock. The stand-in's command builder (`MixedFixture::wt_command_via_gitea`) therefore sets `WT_TEST_REFRESH_DEADLINE_MS` (spelled `worktree_cli::env::TEST_REFRESH_DEADLINE_VAR`) to 60 s, longer than any wait the test or its teardown makes, and the held request ends only when the test releases it. Like the wait override, only debug builds read it, and a value that is not a positive whole number panics.
 - Tests of the report itself (`perf_flag.rs`, `worktree::timing` unit tests) may read `Timings`; they check its shape and reconciliation, not its speed.
 - The human report's layout is tested in two layers. Unit tests in `cli/src/perf/tests.rs` render synthetic trees at a fixed width and check exact rows: shares, remainders under a millisecond, over-attribution, and worker sections of every status. `cli/tests/level2_list_perf.rs` runs the real `wt list --perf` in a tmux pane at 80, 100, and 120 columns against a local `origin`. It checks the structure only, because durations vary: tree connectors, `[n git]` suffixes, percentages on sequential rows, `—` on concurrent and worker rows (the worker heading included), aligned value and share columns, and no wrapped rows.
 
@@ -413,12 +448,12 @@ For contention-free wall-clock measurement of the SLA, run perf tests serially v
 
 Asserts the subprocess-count bounds the optimization guarantees, on a fixture repository with one linked feature worktree:
 
-- `list_worktrees()` resolves the default branch in-process (no `symbolic-ref` process) and reads tips with one `for-each-ref`. Wall-clock is printed for observability; the full-command SLA that subsumes this piece is asserted by the integration test below.
-- The base-view `gather` on that fixture, where every branch has only the default lane as a candidate, issues one `rev-parse` (the shallow check); per branch, two `merge-base --is-ancestor` (its tip and its lane's boundary), one fork `merge-base`, and one `rev-list` (the boundary's first-parent chain); and one `git log` per branch plus one for the default lane.
+- `list_worktrees()` resolves the default branch in-process (no `symbolic-ref` process) and reads tips in one in-process ref read (no `for-each-ref` process). Wall-clock is printed for observability; the full-command SLA that subsumes this piece is asserted by the integration test below.
+- The base-view `gather` on that fixture starts no git process. Where every branch has only the default lane as a candidate, it asks one `rev-parse` question (the shallow check); per branch, two `merge-base --is-ancestor` (its tip and its lane's boundary), one fork `merge-base`, and one `rev-list` (the boundary's first-parent chain); and one `git log` per branch plus one for the default lane.
 
 ### `graph_and_verbose_share_one_merge_base` (unit test, `lib/src/graph/tests.rs`)
 
-Subprocess-count guard for the image-terminal `wt list -v` data-gather path (graph facts + verbose details) on a controlled feature-branch fixture: exactly one merge base, shared by the graph's fork and the verbose details, two `merge-base --is-ancestor` (the branch's tip and its lane's boundary), and zero `rev-parse --short`. Rasterization is excluded (this test never renders).
+Question-count guard for the image-terminal `wt list -v` data-gather path (graph facts + verbose details) on a controlled feature-branch fixture: exactly one merge base, shared by the graph's fork and the verbose details, two `merge-base --is-ancestor` (the branch's tip and its lane's boundary), and zero `rev-parse --short`. The only git processes are verbose's two `git log` listings. Rasterization is excluded (this test never renders).
 
 ### `perf_full_command_non_image_meets_sla` (integration test, `tests/perf_command_sla.rs`)
 
@@ -567,6 +602,19 @@ A later change (2026-09-28) draws a branch that kept going after its merge as on
 - **Older essential connections rises about 40 ms.** Its one lane is merged, so its boundary, 5,000 first-parent commits down `main`, is classified. That classification's `rev-list --first-parent --parents` walks those commits inside Git: one call, a long walk.
 - **Observed sparse lanes rises about 30 ms.** `fix/wt-ux` now accepts one merge, which re-reads its window and classifies the next boundary, and every lane classifies its boundary. Git calls in the base view go from 24 to 40 (`log` 5 → 11, `rev-list` 10 → 16, `merge-base --is-ancestor` 4 → 8; `merge-base`, `for-each-ref`, and `rev-parse` unchanged), and the incomplete-history notice this shape used to show is gone.
 - **Render is unchanged**, and every full-command SLA test still passes (`just -d worktree test-perf`, 30 passed).
+
+A later change (2026-10-12) answers the gather's history questions in-process ([Git processes](#git-processes)), so a graph gather starts no git process; the questions and the facts are unchanged. Same host and command, release profile, 10 samples, median (min–max). *Before* is the previous table's run 1:
+
+| Fixture | Size | `graph_history` before | after |
+|---|---|---:|---:|
+| floor | 120×40 | 10.6 ms | 0.41 ms (0.33–0.55) |
+| ordinary | 120×40 | 54.2 ms | 1.4 ms (1.2–1.7) |
+| older essential connections | 120×40 | 177.2 ms | 60.2 ms (48.8–79.5) |
+| multiple selected branches | 120×40 | 74.0 ms | 3.4 ms (2.9–3.8) |
+| observed sparse lanes | 200×60 | 112.2 ms | 3.1 ms (3.0–3.7) |
+
+- **The cost is now commit reads, not process starts.** Older essential connections keeps the most, because classifying its boundary 5,000 first-parent commits down `main` reads that chain and paints merge bases across it; Git did the same walk inside one process.
+- On Windows, where a git process costs ~25–47 ms, the saving per gather is that much per question: `graph::tests::fork_origin_cutoff_matrix`, 19 gathers, went from 7.2 s to 1.1 s on `build-win-native`.
 
 ## `git status` Cost (Investigated, Not Changed)
 

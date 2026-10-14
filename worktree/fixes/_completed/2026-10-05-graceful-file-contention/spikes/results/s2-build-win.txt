@@ -1,0 +1,196 @@
+S2 os=linux root=/home/ken/coding/gfc-run/gfc-s2 watcher-kind=Inotify
+S2 inotify max_user_watches=524288
+S2 inotify max_user_instances=128
+S2 inotify max_queued_events=16384
+S2 ===== strategy A-child-watch
+S2 watch parent=None checkout=None admin=None
+S2 threads before=1 with-watcher=2
+S2 [01 baseline-no-action] events=2
+    +   0ms Access(Open(Any)) [parent/checkout]
+    +   0ms Access(Open(Any)) [parent/checkout/sub]
+S2 [02 create checkout/sub/new.txt] events=4
+    +   0ms Create(File) [parent/checkout/sub/new.txt]
+    +   0ms Access(Open(Any)) [parent/checkout/sub/new.txt]
+    +   0ms Modify(Data(Any)) [parent/checkout/sub/new.txt]
+    +   0ms Access(Close(Write)) [parent/checkout/sub/new.txt]
+S2 [03 append checkout/a.txt] events=3
+    +   0ms Access(Open(Any)) [parent/checkout/a.txt]
+    +   0ms Modify(Data(Any)) [parent/checkout/a.txt]
+    +   0ms Access(Close(Write)) [parent/checkout/a.txt]
+S2 [04 metadata-only (readonly on/off) checkout/a.txt] events=1
+    +   0ms Modify(Metadata(Any)) [parent/checkout/a.txt]
+S2 [05 delete checkout/b.txt] events=1
+    +   0ms Remove(File) [parent/checkout/b.txt]
+S2 [06 admin: index.lock -> index (rename-replace), sharedindex.* create] events=11
+    +   0ms Create(File) [admin/index.lock]
+    +   0ms Access(Open(Any)) [admin/index.lock]
+    +   0ms Modify(Data(Any)) [admin/index.lock]
+    +   0ms Access(Close(Write)) [admin/index.lock]
+    +   0ms Modify(Name(From)) [admin/index.lock]
+    +   0ms Modify(Name(To)) [admin/index]
+    +   0ms Modify(Name(Both)) [admin/index.lock, admin/index]
+    +   0ms Create(File) [admin/sharedindex.0123abcd]
+    +   0ms Access(Open(Any)) [admin/sharedindex.0123abcd]
+    +   0ms Modify(Data(Any)) [admin/sharedindex.0123abcd]
+    +   0ms Access(Close(Write)) [admin/sharedindex.0123abcd]
+S2 [07 sibling activity in parent (outside both trees)] events=5
+    +   0ms Create(File) [parent/sibling.txt]
+    +   0ms Access(Open(Any)) [parent/sibling.txt]
+    +   0ms Modify(Data(Any)) [parent/sibling.txt]
+    +   0ms Access(Close(Write)) [parent/sibling.txt]
+    +   0ms Create(Folder) [parent/othersib]
+S2 noreplace rename checkout->quarantine while watched: Ok
+S2 [08 rename checkout -> .checkout.wt-removal-q1] events=4
+    +   0ms Modify(Name(From)) [parent/checkout]
+    +   0ms Modify(Name(To)) [parent/.checkout.wt-removal-q1]
+    +   0ms Modify(Name(Both)) [parent/checkout, parent/.checkout.wt-removal-q1]
+    +   0ms Modify(Name(From)) [parent/checkout]
+S2 [09 write inside quarantine (no new watch)] events=0
+S2 [10 recreate original checkout/ + recreated.txt] events=1
+    +   0ms Create(Folder) [parent/checkout]
+S2 unwatch(original checkout path) after rename = Some(Error { kind: WatchNotFound, paths: ["/home/ken/coding/gfc-run/gfc-s2/A-child-watch/parent/checkout"] })
+S2 watch(quarantine) = None
+S2 [11 write inside quarantine (fresh watch)] events=6
+    +   0ms Access(Open(Any)) [parent/.checkout.wt-removal-q1]
+    +   0ms Access(Open(Any)) [parent/.checkout.wt-removal-q1/sub]
+    +   0ms Create(File) [parent/.checkout.wt-removal-q1/sub/after-rewatch.txt]
+    +   0ms Access(Open(Any)) [parent/.checkout.wt-removal-q1/sub/after-rewatch.txt]
+    +   0ms Modify(Data(Any)) [parent/.checkout.wt-removal-q1/sub/after-rewatch.txt]
+    +   0ms Access(Close(Write)) [parent/.checkout.wt-removal-q1/sub/after-rewatch.txt]
+S2 [11b write inside recreated original (old watch removed)] events=0
+S2 [12 delete quarantine children (operation-owned)] events=5
+    +   0ms Remove(File) [parent/.checkout.wt-removal-q1/sub/new.txt]
+    +   0ms Remove(File) [parent/.checkout.wt-removal-q1/sub/after-move.txt]
+    +   0ms Remove(File) [parent/.checkout.wt-removal-q1/sub/after-rewatch.txt]
+    +   0ms Remove(File) [parent/.checkout.wt-removal-q1/a.txt]
+    +   0ms Remove(Folder) [parent/.checkout.wt-removal-q1/sub]
+S2 remove_dir(quarantine root, watched) = Ok
+S2 [13 delete quarantine root itself] events=2
+    +   0ms Remove(Folder) [parent/.checkout.wt-removal-q1]
+    +   0ms Remove(Folder) [parent/.checkout.wt-removal-q1]
+S2 [14 parent still observed after quarantine root removed] events=4
+    +   0ms Create(File) [parent/after-root-removed.txt]
+    +   0ms Access(Open(Any)) [parent/after-root-removed.txt]
+    +   0ms Modify(Data(Any)) [parent/after-root-removed.txt]
+    +   0ms Access(Close(Write)) [parent/after-root-removed.txt]
+S2 handler-dropped (bounded queue full) = 0
+S2 threads after-drop=2 after-drop+300ms=1
+S2 ===== strategy B-parent-recursive
+S2 watch parent(recursive)=None admin=None
+S2 threads before=1 with-watcher=2
+S2 [01 baseline-no-action] events=2
+    +   0ms Access(Open(Any)) [parent/checkout]
+    +   0ms Access(Open(Any)) [parent/checkout/sub]
+S2 [02 create checkout/sub/new.txt] events=4
+    +   0ms Create(File) [parent/checkout/sub/new.txt]
+    +   0ms Access(Open(Any)) [parent/checkout/sub/new.txt]
+    +   0ms Modify(Data(Any)) [parent/checkout/sub/new.txt]
+    +   0ms Access(Close(Write)) [parent/checkout/sub/new.txt]
+S2 [03 append checkout/a.txt] events=3
+    +   0ms Access(Open(Any)) [parent/checkout/a.txt]
+    +   0ms Modify(Data(Any)) [parent/checkout/a.txt]
+    +   0ms Access(Close(Write)) [parent/checkout/a.txt]
+S2 [04 metadata-only (readonly on/off) checkout/a.txt] events=1
+    +   0ms Modify(Metadata(Any)) [parent/checkout/a.txt]
+S2 [05 delete checkout/b.txt] events=1
+    +   0ms Remove(File) [parent/checkout/b.txt]
+S2 [06 admin: index.lock -> index (rename-replace), sharedindex.* create] events=11
+    +   0ms Create(File) [admin/index.lock]
+    +   0ms Access(Open(Any)) [admin/index.lock]
+    +   0ms Modify(Data(Any)) [admin/index.lock]
+    +   0ms Access(Close(Write)) [admin/index.lock]
+    +   0ms Modify(Name(From)) [admin/index.lock]
+    +   0ms Modify(Name(To)) [admin/index]
+    +   0ms Modify(Name(Both)) [admin/index.lock, admin/index]
+    +   0ms Create(File) [admin/sharedindex.0123abcd]
+    +   0ms Access(Open(Any)) [admin/sharedindex.0123abcd]
+    +   0ms Modify(Data(Any)) [admin/sharedindex.0123abcd]
+    +   0ms Access(Close(Write)) [admin/sharedindex.0123abcd]
+S2 [07 sibling activity in parent (outside both trees)] events=6
+    +   0ms Create(File) [parent/sibling.txt]
+    +   0ms Access(Open(Any)) [parent/sibling.txt]
+    +   0ms Modify(Data(Any)) [parent/sibling.txt]
+    +   0ms Access(Close(Write)) [parent/sibling.txt]
+    +   0ms Create(Folder) [parent/othersib]
+    +   0ms Access(Open(Any)) [parent/othersib]
+S2 noreplace rename checkout->quarantine while watched: Ok
+S2 [08 rename checkout -> .checkout.wt-removal-q1] events=5
+    +   0ms Modify(Name(From)) [parent/checkout]
+    +   0ms Modify(Name(To)) [parent/.checkout.wt-removal-q1]
+    +   0ms Modify(Name(Both)) [parent/checkout, parent/.checkout.wt-removal-q1]
+    +   0ms Access(Open(Any)) [parent/.checkout.wt-removal-q1]
+    +   0ms Access(Open(Any)) [parent/.checkout.wt-removal-q1/sub]
+S2 [09 write inside quarantine (no new watch)] events=7
+    +   0ms Create(File) [parent/.checkout.wt-removal-q1/sub/after-move.txt]
+    +   0ms Access(Open(Any)) [parent/.checkout.wt-removal-q1/sub/after-move.txt]
+    +   0ms Modify(Data(Any)) [parent/.checkout.wt-removal-q1/sub/after-move.txt]
+    +   0ms Access(Close(Write)) [parent/.checkout.wt-removal-q1/sub/after-move.txt]
+    +   0ms Access(Open(Any)) [parent/.checkout.wt-removal-q1/a.txt]
+    +   0ms Modify(Data(Any)) [parent/.checkout.wt-removal-q1/a.txt]
+    +   0ms Access(Close(Write)) [parent/.checkout.wt-removal-q1/a.txt]
+S2 [10 recreate original checkout/ + recreated.txt] events=2
+    +   0ms Create(Folder) [parent/checkout]
+    +   0ms Access(Open(Any)) [parent/checkout]
+S2 [12 delete quarantine children (operation-owned)] events=4
+    +   0ms Remove(File) [parent/.checkout.wt-removal-q1/sub/new.txt]
+    +   0ms Remove(File) [parent/.checkout.wt-removal-q1/sub/after-move.txt]
+    +   0ms Remove(File) [parent/.checkout.wt-removal-q1/a.txt]
+    +   0ms Remove(Folder) [parent/.checkout.wt-removal-q1/sub]
+S2 remove_dir(quarantine root, watched) = Ok
+S2 [13 delete quarantine root itself] events=1
+    +   0ms Remove(Folder) [parent/.checkout.wt-removal-q1]
+S2 [14 parent still observed after quarantine root removed] events=4
+    +   0ms Create(File) [parent/after-root-removed.txt]
+    +   0ms Access(Open(Any)) [parent/after-root-removed.txt]
+    +   0ms Modify(Data(Any)) [parent/after-root-removed.txt]
+    +   0ms Access(Close(Write)) [parent/after-root-removed.txt]
+S2 handler-dropped (bounded queue full) = 0
+S2 threads after-drop=2 after-drop+300ms=1
+S2 [O1 bounded(64) queue, 3000 creates, consumer idle] events=64
+    +   0ms Create(File) [flood1/f0]
+    +   0ms Access(Open(Any)) [flood1/f0]
+    +   0ms Modify(Data(Any)) [flood1/f0]
+    +   0ms Access(Close(Write)) [flood1/f0]
+    +   0ms Create(File) [flood1/f1]
+    +   0ms Access(Open(Any)) [flood1/f1]
+    +   0ms Modify(Data(Any)) [flood1/f1]
+    +   0ms Access(Close(Write)) [flood1/f1]
+    +   0ms Create(File) [flood1/f2]
+    +   0ms Access(Open(Any)) [flood1/f2]
+    +   0ms Modify(Data(Any)) [flood1/f2]
+    +   0ms Access(Close(Write)) [flood1/f2]
+    +   0ms Create(File) [flood1/f3]
+    +   0ms Access(Open(Any)) [flood1/f3]
+    +   0ms Modify(Data(Any)) [flood1/f3]
+    +   0ms Access(Close(Write)) [flood1/f3]
+    +   0ms Create(File) [flood1/f4]
+    +   0ms Access(Open(Any)) [flood1/f4]
+    +   0ms Modify(Data(Any)) [flood1/f4]
+    +   0ms Access(Close(Write)) [flood1/f4]
+    ... 24 more ...
+    +   0ms Create(File) [flood1/f11]
+    +   0ms Access(Open(Any)) [flood1/f11]
+    +   0ms Modify(Data(Any)) [flood1/f11]
+    +   0ms Access(Close(Write)) [flood1/f11]
+    +   0ms Create(File) [flood1/f12]
+    +   0ms Access(Open(Any)) [flood1/f12]
+    +   0ms Modify(Data(Any)) [flood1/f12]
+    +   0ms Access(Close(Write)) [flood1/f12]
+    +   0ms Create(File) [flood1/f13]
+    +   0ms Access(Open(Any)) [flood1/f13]
+    +   0ms Modify(Data(Any)) [flood1/f13]
+    +   1ms Access(Close(Write)) [flood1/f13]
+    +   1ms Create(File) [flood1/f14]
+    +   1ms Access(Open(Any)) [flood1/f14]
+    +   1ms Modify(Data(Any)) [flood1/f14]
+    +   1ms Access(Close(Write)) [flood1/f14]
+    +   1ms Create(File) [flood1/f15]
+    +   1ms Access(Open(Any)) [flood1/f15]
+    +   1ms Modify(Data(Any)) [flood1/f15]
+    +   1ms Access(Close(Write)) [flood1/f15]
+S2 O1 received=64 dropped-by-our-handler=11936
+S2 O2 wrote 40000 files in 1485ms with the backend blocked
+S2 O2 created=40000 create-events=4097 other-events=12291 rescan-events=1 errors=0 rescan_info=["Other None"]
+S2 O2 watcher drop took 0ms
+S2 L1 watcher instances created=121 in 134ms outcome=recommended_watcher() failed at #121: kind=Io(Os { code: 24, kind: TooManyOpenFiles, message: "Too many open files" }) Too many open files (os error 24) threads=122
+S2 L1 threads after dropping all=1

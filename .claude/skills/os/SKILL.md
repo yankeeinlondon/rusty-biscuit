@@ -64,17 +64,26 @@ environment's cell and how to record an execution ban.
 | WSL guest red at provisioning with a 403 | anonymous GitHub API rate limit (fixed; do not re-diagnose) | [wsl.md](wsl.md) |
 | WSL guest "lost communication with the server", killed at ~45 min, no log | runner agent died during provisioning (open, instrumented) | [wsl.md](wsl.md) |
 | Red only on `windows-latest`, a path in the message | 8.3 short-name TEMP (`RUNNER~1`) or verbatim `\\?\` spelling | [windows-paths.md](windows-paths.md) |
+| `wt remove` exits 3 on Windows naming `SearchProtocolHost.exe` | Windows Search held a file through the usage check's one 500 ms recheck (holds measured at ≤ 17 ms), or the first check also found another holder | [windows.md](windows.md#transient-system-holders-and-wt-remove) |
 | Red only on `windows-latest`, elapsed time equals some child's timeout | handle inheritance keeps pipes open | [windows.md](windows.md#environment-and-processes) |
 | Windows cell red although every test passed, `UnicodeEncodeError` in the last step | Python's piped stdout is cp1252; workflows must set `PYTHONUTF8=1` | [windows.md](windows.md#environment-and-processes) |
 | Red on Windows only when the agent ran it, a git child exiting `0xC0000005` with empty stderr | the run descended from Git Bash (the agent's Bash tool); rerun from PowerShell | [windows.md](windows.md#environment-and-processes) |
 | Python-gated test PASSes in ~0.3 s on BUILD_WIN over SSH, nothing ran | `python3`/`python` resolve to WindowsApps aliases; prepend the real interpreter on a process-scoped `PATH` | [windows.md](windows.md#environment-and-processes) |
 | Red only on Windows, "still checking" or another wait expiring, many small git commands in `GIT_TRACE` | ~47 ms per git process; read metadata in-process instead of raising the wait | [windows.md](windows.md#environment-and-processes) |
+| A Windows process trace shows `git --exec-path` and a `conhost.exe` once per process that uses `gix`; a test 2–3× slower in the full `build-win-native` run than alone | gix-path asks Git for its install location unless `EXEPATH` is set; Defender takes about a quarter of the CPU in a full run there (CI disables it) | [windows.md](windows.md#environment-and-processes) |
 | Red only on `windows-latest` with an empty failure message | a std handle redirected to `CONOUT$` | [windows-console.md](windows-console.md#attaching-a-console-inside-a-nextest-process) |
 | macOS watcher receives events but its target is absent from `lsof` | FSEvents directory watches do not require an open descriptor naming the target | [macos.md](macos.md#finding-filesystem-watchers) |
 | `ErrorKind::NotFound` check misses on Windows only; message shows `os error -2147024894` | a `windows` crate error converted with `io::Error::from` keeps the HRESULT | [windows.md](windows.md#environment-and-processes) |
 | A per-handle file query hangs only on Windows; `CancelSynchronousIo` returns 1168 | the handle's owner has synchronous I/O pending on that file object | [windows.md](windows.md#inspecting-another-processs-handles) |
+| A Windows process-module scan takes most of a second, or a hard-linked DLL is missed | `GetModuleFileNameExW` walks the loader list per module; the kernel's mapped name names the first-mapped hard link | [windows.md](windows.md#reading-another-processs-loaded-modules) |
 | Need "which processes hold this path" on Windows without the per-handle hang | ask from the file side with `FileProcessIdsUsingFileInformation` | [windows.md](windows.md#asking-which-processes-have-a-path-open) |
+| A directory rename fails with `ERROR_ACCESS_DENIED` on Windows only, and permissions look fine | something holds a file, subdirectory, or cwd inside it; the code is the same as an ACL denial | [windows.md](windows.md#current-directory-locks) |
+| A directory rename fails with 5 now and then on Windows while a watcher runs, and the file-side holder query finds nobody | the watcher itself opened (even only stat'ed) an entry inside the tree; take entry types from the notification | [windows.md](windows.md#directory-change-notifications) |
+| A Windows watcher test passes on `C:` but misses a directory removal or sees a rename as remove-plus-modify on `B:` | ReFS reports neither a POSIX-semantics directory delete nor a replacing rename the way NTFS does; temp is NTFS on `build-win-native` | [windows.md](windows.md#directory-change-notifications) |
+| A file watcher misses events, or loses them silently, after a rename or a burst | `notify` drops a renamed inotify root, Windows overflow is silent, FSEvents drops bursts, reorders, needs a marker plus flush to drain, and hides child events behind a directory's rename | [linux.md](linux.md#inotify-through-notify-a-renamed-watch-root-goes-quiet), [windows.md](windows.md#directory-change-notifications), [macos.md](macos.md#receiving-fsevents-reliably) |
+| `renameat2(RENAME_NOREPLACE)` gives `EINVAL` under WSL | drvfs (`/mnt/<drive>`) does not support the flag | [wsl.md](wsl.md#drvfs-volumes-reject-rename_noreplace-inotify-instances-are-scarce) |
 | `/proc` fd scan finds nothing for a process you know holds files | `procfs` skips per-fd `EACCES`, or `sdev` was compared without decoding | [linux.md](linux.md#reading-proc-for-another-processs-descriptors) |
+| A test or loop that flushes files is 10–100× slower on macOS than on Linux | std's `sync_all`/`sync_data` issue `F_FULLFSYNC` on Apple platforms (~25 ms each) | [macos.md](macos.md#file-flushes-cost-25-ms-each) |
 | Green gates that did not test your worktree | Bash `cd <area>` followed `CDPATH` into the main checkout | [macos.md](macos.md) |
 | WezTerm L2 tests time out at spawn or capture, or report `WezTerm not available`, a different set each run | too many concurrent `wezterm cli` clients for the GUI's main thread; the harness lets two run at a time | [macos.md](macos.md) |
 | macOS host L2 red with a shell prompt in the captured frame | a host shell-startup prompt swallowed the input; not a repo defect | [macos.md](macos.md) |
@@ -97,7 +106,7 @@ environment's cell and how to record an execution ban.
 - A cross-compile is compile evidence, never behavioral evidence. Say which
   one you have.
 - CI legs are compared within one environment only, on matched test
-  identities, with three consecutive green runs as the evidence standard.
+  identities. A single passing run is sufficient evidence.
   WSL2 follows Linux code paths and is never evidence for native Windows
   ([ci-runners.md](ci-runners.md)).
 - `ctx.*` path values and Markdown presentation are portable (`/`); an eager

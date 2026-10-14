@@ -1,0 +1,10 @@
+---
+source: worktree/cli/tests/remove_recovery_report.rs
+expression: "render(&ambiguous_markup(\"fix-path-spelling\", &candidates))"
+---
+Nothing was removed. fix-path-spelling matches a pending removal and another worktree:
+
+  worktree at /work/fix-path-spelling (branch fix/path-spelling)
+  pending removal of /work/fix-path-spelling (moved to /work/.wt-remove-fix-path-spelling-a91c, operation a91c0000000000000000000000000000)
+
+Neither is removed while the name means both. Rename or remove the other worktree with git worktree, then retry.

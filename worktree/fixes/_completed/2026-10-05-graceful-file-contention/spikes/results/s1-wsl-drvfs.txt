@@ -1,0 +1,24 @@
+/mnt/b/
+/mnt/c/
+/mnt/config/
+/mnt/w/
+/mnt/wsl/
+/mnt/wslg/
+/mnt/y/
+B:\ on /mnt/b type 9p (rw,noatime,aname=drvfs;path=B:\;uid=1000;gid=1000;symlinkroot=/mnt/,cache=0x5,access=client,msize=65536,trans=fd,rfd=6,wfd=6)
+C:\ on /mnt/c type 9p (rw,noatime,aname=drvfs;path=C:\;uid=1000;gid=1000;symlinkroot=/mnt/,cache=0x5,access=client,msize=65536,trans=fd,rfd=6,wfd=6)
+S1 os=linux base=/mnt/b/coding/gfc-run-wsl/gfc-s1
+S1 absent-dest result=Err(kind=InvalidInput, os=Some(22), msg=Invalid argument (os error 22)) identity_before=[dev=72 ino=6917529027642710632] identity_after=[Err(kind=NotFound, os=Some(2), msg=No such file or directory (os error 2))] same=false child_kept=false
+S1 dest-empty-dir noreplace=Err(kind=AlreadyExists, os=Some(17), msg=File exists (os error 17)) src_kept=true dest_identity_unchanged=true
+S1 dest-empty-dir std::fs::rename=Ok src_still_there=false dest_replaced=true
+S1 dest-file noreplace=Err(kind=AlreadyExists, os=Some(17), msg=File exists (os error 17)) src_kept=true dest_identity_unchanged=true
+S1 dest-file std::fs::rename=Err(kind=NotADirectory, os=Some(20), msg=Not a directory (os error 20)) src_still_there=true dest_replaced=false
+S1 dest-nonempty-dir noreplace=Err(kind=AlreadyExists, os=Some(17), msg=File exists (os error 17)) src_kept=true dest_identity_unchanged=true
+S1 dest-nonempty-dir std::fs::rename=Err(kind=DirectoryNotEmpty, os=Some(39), msg=Directory not empty (os error 39)) src_still_there=true dest_replaced=false
+S1 dest-dangling-link noreplace=Err(kind=AlreadyExists, os=Some(17), msg=File exists (os error 17)) link_kept=true nowhere_created=false
+S1 missing-src noreplace=Err(kind=NotFound, os=Some(2), msg=No such file or directory (os error 2))
+S1 in-use child-cwd-in-subdir noreplace=Err(kind=InvalidInput, os=Some(22), msg=Invalid argument (os error 22)) src_kept=true
+S1 in-use open-file-no-share-delete noreplace=Err(kind=InvalidInput, os=Some(22), msg=Invalid argument (os error 22)) src_kept=true
+S1 in-use open-file-std-default-share noreplace=Err(kind=InvalidInput, os=Some(22), msg=Invalid argument (os error 22)) src_kept=true
+S1 in-use own-notify-watcher noreplace=Err(kind=InvalidInput, os=Some(22), msg=Invalid argument (os error 22)) src_kept=true
+S1 permission-denied-parent noreplace=Err(kind=InvalidInput, os=Some(22), msg=Invalid argument (os error 22)) src_kept=true

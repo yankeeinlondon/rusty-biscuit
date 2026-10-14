@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::config::{BaseDirSource, example_base_dir};
+
 #[derive(Debug, Error)]
 pub enum WorktreeError {
     #[error("git is not installed or not found on PATH")]
@@ -8,16 +10,79 @@ pub enum WorktreeError {
     #[error("This directory is not inside a Git repository. Change to a repository or one of its worktrees, then run wt again.")]
     NotInGitRepo,
 
+    /// Neither `WT` nor `~/.worktree.json` names a base directory. The
+    /// message is written for a caller that cannot answer the setup prompt.
     #[error(
-        "base directory not configured: set the WT environment variable or create ~/.worktree.json"
+        "No worktree base directory is configured. Set the WT environment variable to an absolute directory on this host (for example {}), or create ~/.worktree.json containing {{\"base_dir\": \"<absolute directory>\"}}. Running wt create in an interactive terminal offers to set one up.",
+        example_base_dir()
     )]
     BaseDirectoryNotConfigured,
 
-    #[error("base directory '{0}' does not exist")]
-    BaseDirectoryNotFound(String),
+    /// The base-directory value is empty or only whitespace.
+    #[error("The base directory from {origin} is empty. {}", remedy(origin))]
+    BaseDirectoryEmpty { origin: BaseDirSource },
 
-    #[error("base directory '{0}' is itself a git repository -- it must be a plain directory")]
-    BaseDirectoryIsGitRepo(String),
+    /// The value is written in another operating system's path syntax, such
+    /// as `b:\wt` on a POSIX host or `/home/me/wt` on Windows.
+    #[error(
+        "Base directory '{value}' from {origin} uses {} path syntax on this {} host. {}",
+        foreign_style(),
+        host_style(),
+        remedy(origin)
+    )]
+    BaseDirectoryForeignPath { value: String, origin: BaseDirSource },
+
+    /// The value is in this host's syntax but is not an absolute path.
+    #[error(
+        "Base directory '{value}' from {origin} is not an absolute path.{} {}",
+        home_hint(value),
+        remedy(origin)
+    )]
+    BaseDirectoryNotAbsolute { value: String, origin: BaseDirSource },
+
+    /// The value names something that exists but is not a directory.
+    #[error(
+        "Base directory '{value}' from {origin} exists but is not a directory. {}",
+        remedy(origin)
+    )]
+    BaseDirectoryNotDirectory { value: String, origin: BaseDirSource },
+
+    /// The value is not valid Unicode, so it can be neither read as text nor
+    /// saved to `~/.worktree.json` without changing it.
+    #[error(
+        "Base directory '{}' from {origin} is not valid Unicode, which wt needs to read and save it. {}",
+        .value.display(),
+        remedy(origin)
+    )]
+    BaseDirectoryInvalidEncoding {
+        value: std::path::PathBuf,
+        origin: BaseDirSource,
+    },
+
+    /// Nothing exists at the base-directory path.
+    #[error(
+        "Base directory '{value}' from {origin} does not exist. If it is on a drive or mount that is not available, restore the mount. Otherwise {}",
+        remedy_lowercase(origin)
+    )]
+    BaseDirectoryNotFound { value: String, origin: BaseDirSource },
+
+    /// The base directory's state could not be read for a reason other than
+    /// its absence (for example, permission denied).
+    #[error("Cannot check base directory '{value}' from {origin}: {cause}. {}", remedy(origin))]
+    BaseDirectoryUnreadable {
+        value: String,
+        origin: BaseDirSource,
+        #[source]
+        cause: std::io::Error,
+    },
+
+    /// The base directory has a `.git` file or folder directly inside it.
+    /// Directories further inside a repository are not checked.
+    #[error(
+        "Base directory '{value}' from {origin} is the root of a Git repository (it has .git directly inside). {}",
+        remedy(origin)
+    )]
+    BaseDirectoryIsGitRepo { value: String, origin: BaseDirSource },
 
     /// `~/.worktree.json` exists but cannot be parsed or is missing `base_dir`.
     #[error("~/.worktree.json has an invalid format: {message}")]
@@ -26,8 +91,13 @@ pub enum WorktreeError {
         message: String,
     },
 
-    /// `~/.worktree.json` `base_dir` points to a directory that is itself a git repo.
-    #[error("base directory '{dir}' (from ~/.worktree.json) is itself a git repository")]
+    /// `~/.worktree.json` `base_dir` points to a directory with `.git`
+    /// directly inside it (a repository root).
+    #[error(
+        "Base directory '{dir}' from the config file {} is the root of a Git repository (it has .git directly inside). {}",
+        .config_path.display(),
+        remedy(&BaseDirSource::ConfigFile(config_path.clone()))
+    )]
     ConfigBaseDirIsGitRepo {
         config_path: std::path::PathBuf,
         dir: String,
@@ -65,50 +135,17 @@ pub enum WorktreeError {
     #[error("{0}")]
     BlockedByEnvironment(String),
 
-    /// The worktree's path no longer holds a real directory when removal is
-    /// about to run (for example, a link replaced the checkout after it was
-    /// checked). Nothing was removed.
-    #[error("{} is no longer the worktree's own directory (it is a link or not a directory), so nothing was removed", .0.display())]
-    NotARealDirectory(std::path::PathBuf),
+    /// A removal that changed something and then stopped, or failed before
+    /// changing anything for a reason no fresh run or other environment is
+    /// known to fix. The message is Prose markup, one line per `\n`, that
+    /// says what was moved, deleted, and kept. Exit 1.
+    #[error("{0}")]
+    RemovalFailed(String),
 
     /// A branch about to be deleted no longer points at the tip its deletion
     /// was decided on. The branch is kept.
     #[error("branch {branch} moved from {expected} to {found} after it was checked, so it was kept")]
     BranchMoved { branch: String, expected: String, found: String },
-
-    /// Other programs work in the worktree directory: `processes` stand in
-    /// it, or, when empty, the Windows probe found it held (an open file).
-    /// Nothing was removed.
-    #[error("{}", in_use_message(path, processes))]
-    DirectoryInUse {
-        path: std::path::PathBuf,
-        processes: Vec<sniff::os::WorkingProcess>,
-    },
-
-    /// `git worktree remove` unregistered the worktree and then failed, and
-    /// the rest of its folder could not be deleted either. Nothing after the
-    /// worktree (branch, origin) was removed.
-    #[error(
-        "git unregistered worktree {} but could not delete all of its folder ({reason}). \
-        Nothing else was removed. Delete what is left with: {}",
-        .path.display(),
-        delete_command(path)
-    )]
-    FolderNotFullyRemoved { path: std::path::PathBuf, reason: String },
-
-    /// The Windows lock probe renamed the worktree and could not rename it
-    /// back. Nothing was removed; `move` restores the original name.
-    #[error(
-        "the worktree was left at {} after a lock check and could not be renamed back; \
-        restore it with: move \"{}\" \"{}\"",
-        .temporary.display(),
-        .temporary.display(),
-        .original.display()
-    )]
-    LockProbeRenameBack {
-        original: std::path::PathBuf,
-        temporary: std::path::PathBuf,
-    },
 
     /// `wt create --from` was given for a branch that already exists.
     #[error(
@@ -167,85 +204,48 @@ pub struct WorktreeCandidate {
     pub path: std::path::PathBuf,
 }
 
-fn in_use_message(path: &std::path::Path, processes: &[sniff::os::WorkingProcess]) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |since| since.as_secs());
-    in_use_message_at(path, processes, now)
-}
-
-/// Longest command line shown per program before it is cut with `…`.
-const COMMAND_SHOWN: usize = 160;
-
-/// Lists only the topmost process of each tree standing in the folder: a
-/// script's loop starts a fresh child every second, so its children would
-/// show pids that are gone by the time the user reads them, and ending the
-/// parent ends them.
-fn in_use_message_at(
-    path: &std::path::Path,
-    processes: &[sniff::os::WorkingProcess],
-    now: u64,
-) -> String {
-    let path = path.display();
-    if processes.is_empty() {
-        return format!("Nothing was removed: the folder {path} is in use by another program.");
-    }
-    let is_listed = |pid: Option<u32>| pid.is_some_and(|pid| processes.iter().any(|p| p.pid == pid));
-    let (roots, children): (Vec<_>, Vec<_>) =
-        processes.iter().partition(|process| !is_listed(process.parent));
-
-    let who = match roots.len() {
-        1 => "another program".to_string(),
-        count => format!("{count} other programs"),
-    };
-    let started = match children.len() {
-        0 => String::new(),
-        1 => " (and 1 process they started)".to_string(),
-        count => format!(" (and {count} processes they started)"),
-    };
-    let mut message = format!("Nothing was removed: the folder {path} is in use by {who}{started}:");
-    for process in &roots {
-        let mut facts = vec![format!("pid {}", process.pid)];
-        if process.started > 0 {
-            let age = crate::util::age_text(now.saturating_sub(process.started));
-            facts.push(format!("started {age} ago"));
+/// What to do about a rejected base directory, by where it came from.
+fn remedy(origin: &BaseDirSource) -> String {
+    let example = example_base_dir();
+    match origin {
+        BaseDirSource::Env => format!(
+            "Set WT to an absolute directory on this host (for example {example}), or unset it. \
+            Editing ~/.worktree.json alone does not override a nonempty WT."
+        ),
+        BaseDirSource::ConfigFile(path) => format!(
+            "Set base_dir in {} to an absolute directory on this host (for example {example}), \
+            or remove that file and run wt create again in an interactive terminal to choose one.",
+            path.display()
+        ),
+        BaseDirSource::Prompt => {
+            format!("Choose an absolute directory on this host (for example {example}).")
         }
-        // On Unix an orphan is adopted by pid 1; one still standing in a
-        // worktree is usually a leaked script nobody will come back for.
-        if cfg!(unix) && process.parent == Some(1) {
-            facts.push("orphaned".to_string());
-        }
-        message.push_str(&format!("\n  - {}: {}", facts.join(", "), command_text(process)));
     }
-    let pids = roots.iter().map(|p| p.pid.to_string()).collect::<Vec<_>>();
-    let end = if cfg!(windows) {
-        format!("Stop-Process -Id {}", pids.join(", "))
-    } else {
-        format!("kill {}", pids.join(" "))
-    };
-    message.push_str(&format!(
-        "\nClose them, or move them out of it, and run wt remove again. To end them: {end}"
-    ));
-    message
 }
 
-/// The command line, or the executable's name when the OS hides it.
-fn command_text(process: &sniff::os::WorkingProcess) -> String {
-    if process.command.is_empty() {
-        return process.name.clone();
+fn remedy_lowercase(origin: &BaseDirSource) -> String {
+    let remedy = remedy(origin);
+    let mut chars = remedy.chars();
+    match chars.next() {
+        Some(first) => first.to_lowercase().chain(chars).collect(),
+        None => remedy,
     }
-    let mut text = process.command.join(" ");
-    if text.chars().count() > COMMAND_SHOWN {
-        text = text.chars().take(COMMAND_SHOWN).collect::<String>() + "…";
-    }
-    text
 }
 
-fn delete_command(path: &std::path::Path) -> String {
-    if cfg!(windows) {
-        format!("Remove-Item -Recurse -Force \"{}\"", path.display())
+fn host_style() -> &'static str {
+    if cfg!(windows) { "Windows" } else { "POSIX" }
+}
+
+fn foreign_style() -> &'static str {
+    if cfg!(windows) { "POSIX" } else { "Windows" }
+}
+
+/// wt never expands `~`, so a home-relative value gets a pointer to the fix.
+fn home_hint(value: &str) -> &'static str {
+    if value.trim_start().starts_with('~') {
+        " wt does not expand ~; write the full home-directory path instead."
     } else {
-        format!("rm -rf \"{}\"", path.display())
+        ""
     }
 }
 
@@ -265,66 +265,140 @@ fn ambiguous_message(name: &str, candidates: &[WorktreeCandidate]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
-    use sniff::os::WorkingProcess;
-    use std::path::Path;
 
-    const NOW: u64 = 1_000_000;
-
-    fn process(pid: u32, parent: u32, command: &[&str], age: u64) -> WorkingProcess {
-        WorkingProcess {
-            pid,
-            name: command.first().map_or("x", |c| c).rsplit('/').next().unwrap().to_string(),
-            command: command.iter().map(|arg| arg.to_string()).collect(),
-            parent: Some(parent),
-            started: NOW - age,
-            cwd: "/wt/feat-x".into(),
-        }
+    fn config() -> BaseDirSource {
+        BaseDirSource::ConfigFile(PathBuf::from("/tmp/home/.worktree.json"))
     }
 
     #[test]
-    fn a_script_is_shown_by_its_command_line_and_its_children_are_folded_into_it() {
-        let processes = [
-            process(11231, 1, &["/bin/sh", "/tmp/.tmpA/bin/opencode", "run"], 4 * 86_400),
-            process(78796, 11231, &["/bin/sleep", "1"], 0),
-        ];
-
-        let message = in_use_message_at(Path::new("/wt/feat-x"), &processes, NOW);
-
-        assert!(message.contains("in use by another program (and 1 process they started):"), "{message}");
-        assert!(message.contains("/bin/sh /tmp/.tmpA/bin/opencode run"), "{message}");
-        assert!(!message.contains("78796"), "{message}");
+    fn origin_display_names_each_source() {
+        assert_eq!(BaseDirSource::Env.to_string(), "the WT environment variable");
+        assert_eq!(config().to_string(), "the config file /tmp/home/.worktree.json");
+        assert_eq!(BaseDirSource::Prompt.to_string(), "the setup prompt");
     }
 
     #[test]
-    fn each_program_shows_its_age_and_whether_its_parent_exited() {
-        let processes = [
-            process(11231, 1, &["/bin/sh", "a.sh"], 4 * 86_400),
-            process(25749, 900, &["rust-analyzer"], 120),
-        ];
-
-        let message = in_use_message_at(Path::new("/wt/feat-x"), &processes, NOW);
-
-        let orphan = if cfg!(unix) { ", orphaned" } else { "" };
+    fn incident_message_names_value_config_and_remedy() {
+        let error = WorktreeError::BaseDirectoryForeignPath {
+            value: r"b:\wt".into(),
+            origin: config(),
+        };
+        let message = error.to_string();
+        assert!(message.contains(r"'b:\wt'"), "{message}");
+        assert!(message.contains("/tmp/home/.worktree.json"), "{message}");
+        assert!(message.contains("Set base_dir in /tmp/home/.worktree.json"), "{message}");
+        let (foreign, host) = if cfg!(windows) { ("POSIX", "Windows") } else { ("Windows", "POSIX") };
         assert!(
-            message.contains(&format!("pid 11231, started 4 days ago{orphan}: /bin/sh a.sh")),
+            message.contains(&format!("uses {foreign} path syntax on this {host} host")),
             "{message}"
         );
-        assert!(message.contains("pid 25749, started 2 min ago: rust-analyzer"), "{message}");
-        let end = if cfg!(windows) { "Stop-Process -Id 11231, 25749" } else { "kill 11231 25749" };
-        assert!(message.ends_with(&format!("To end them: {end}")), "{message}");
     }
 
     #[test]
-    fn a_hidden_command_line_falls_back_to_the_name_and_a_long_one_is_cut() {
-        let mut hidden = process(7, 1, &[], 0);
-        hidden.name = "launchd-helper".into();
-        let long_arg = "x".repeat(400);
-        let long = process(8, 1, &["/bin/sh", &long_arg], 0);
+    fn foreign_message_never_calls_a_drive_relative_value_absolute() {
+        let message = WorktreeError::BaseDirectoryForeignPath {
+            value: "b:wt".into(),
+            origin: BaseDirSource::Env,
+        }
+        .to_string();
+        assert!(!message.contains("is absolute"), "{message}");
+        assert!(!message.contains("an absolute path on"), "{message}");
+    }
 
-        let message = in_use_message_at(Path::new("/wt/feat-x"), &[hidden, long], NOW);
+    #[test]
+    fn env_remedy_says_editing_json_does_not_override() {
+        let message = WorktreeError::BaseDirectoryNotAbsolute {
+            value: "wt".into(),
+            origin: BaseDirSource::Env,
+        }
+        .to_string();
+        assert!(message.contains("'wt' from the WT environment variable"), "{message}");
+        assert!(message.contains("or unset it"), "{message}");
+        assert!(message.contains("Editing ~/.worktree.json alone does not override a nonempty WT"), "{message}");
+    }
 
-        assert!(message.contains(": launchd-helper\n"), "{message}");
-        assert!(message.contains(&format!("/bin/sh {}…", "x".repeat(COMMAND_SHOWN - 8))), "{message}");
+    #[test]
+    fn home_relative_value_gets_full_path_hint_from_every_source() {
+        for origin in [BaseDirSource::Env, config(), BaseDirSource::Prompt] {
+            let message = WorktreeError::BaseDirectoryNotAbsolute {
+                value: "~/wt".into(),
+                origin: origin.clone(),
+            }
+            .to_string();
+            assert!(message.contains("write the full home-directory path"), "{message}");
+            assert!(message.contains(&origin.to_string()), "{message}");
+        }
+        let plain = WorktreeError::BaseDirectoryNotAbsolute {
+            value: "./wt".into(),
+            origin: BaseDirSource::Prompt,
+        }
+        .to_string();
+        assert!(!plain.contains("home-directory"), "{plain}");
+    }
+
+    #[test]
+    fn missing_directory_names_config_and_mount_recovery() {
+        let message = WorktreeError::BaseDirectoryNotFound {
+            value: "/mnt/b/wt".into(),
+            origin: config(),
+        }
+        .to_string();
+        assert!(message.contains("'/mnt/b/wt' from the config file /tmp/home/.worktree.json does not exist"), "{message}");
+        assert!(message.contains("restore the mount"), "{message}");
+        assert!(message.contains("set base_dir in /tmp/home/.worktree.json"), "{message}");
+    }
+
+    #[test]
+    fn every_value_variant_names_value_origin_and_remedy() {
+        let origin = BaseDirSource::Prompt;
+        let remedy = "Choose an absolute directory on this host";
+        let errors = [
+            WorktreeError::BaseDirectoryNotDirectory { value: "/srv/file".into(), origin: origin.clone() },
+            WorktreeError::BaseDirectoryInvalidEncoding { value: "/srv/file".into(), origin: origin.clone() },
+            WorktreeError::BaseDirectoryUnreadable {
+                value: "/srv/file".into(),
+                origin: origin.clone(),
+                cause: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+            },
+            WorktreeError::BaseDirectoryIsGitRepo { value: "/srv/file".into(), origin: origin.clone() },
+        ];
+        for error in errors {
+            let message = error.to_string();
+            assert!(message.contains("'/srv/file' from the setup prompt"), "{message}");
+            assert!(message.contains(remedy), "{message}");
+        }
+        let empty = WorktreeError::BaseDirectoryEmpty { origin }.to_string();
+        assert!(empty.contains("from the setup prompt is empty"), "{empty}");
+        assert!(empty.contains(remedy), "{empty}");
+    }
+
+    #[test]
+    fn unreadable_keeps_its_io_cause() {
+        use std::error::Error as _;
+        let error = WorktreeError::BaseDirectoryUnreadable {
+            value: "/srv/wt".into(),
+            origin: BaseDirSource::Env,
+            cause: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+        };
+        let cause = error.source().expect("an underlying I/O cause");
+        assert_eq!(
+            cause.downcast_ref::<std::io::Error>().map(std::io::Error::kind),
+            Some(std::io::ErrorKind::PermissionDenied)
+        );
+    }
+
+    #[test]
+    fn repository_root_messages_identify_origin_and_root_only_check() {
+        let message = WorktreeError::ConfigBaseDirIsGitRepo {
+            config_path: "/tmp/home/.worktree.json".into(),
+            dir: "/srv/repo".into(),
+        }
+        .to_string();
+        assert!(message.contains("'/srv/repo' from the config file /tmp/home/.worktree.json"), "{message}");
+        assert!(message.contains(".git directly inside"), "{message}");
+        assert!(message.contains("Set base_dir in /tmp/home/.worktree.json"), "{message}");
     }
 }

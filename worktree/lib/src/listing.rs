@@ -40,12 +40,17 @@ impl RefTips {
     }
 
     /// Reads every local and remote-tracking branch tip in the repository at
-    /// `repo`. `None` when git fails, so a failure is never mistaken for a
-    /// repository without branches.
+    /// `repo`, in-process when `gix` can read its refs and with `git
+    /// for-each-ref` otherwise. `None` when the read fails, so a failure is
+    /// never mistaken for a repository without branches.
     pub fn read_in(repo: &Path) -> Option<Self> {
-        git_command_in(repo, &["for-each-ref", Self::FORMAT, "refs/heads", "refs/remotes"])
-            .ok()
-            .map(|output| Self::parse(&output))
+        let args = ["for-each-ref", Self::FORMAT, "refs/heads", "refs/remotes"];
+        crate::questions::ask(&args).ok()?;
+        let output = match for_each_ref_in_process(repo) {
+            Some(output) => output,
+            None => git_command_in(repo, &args).ok()?,
+        };
+        Some(Self::parse(&output))
     }
 
     /// Parses `<sha> <full refname> [<symref target>]` lines; other lines are
@@ -77,6 +82,32 @@ impl RefTips {
     pub fn remote(&self, name: &str) -> Option<&str> {
         self.remote.get(name).map(String::as_str)
     }
+}
+
+/// What `git for-each-ref --format='%(objectname) %(refname) %(symref)'
+/// refs/heads refs/remotes` prints, read with `gix`: a symbolic ref names the
+/// object its target resolves to, and one whose target does not resolve is
+/// left out, as Git leaves out a broken ref. `None` when `gix` cannot read
+/// every ref (or a name is not UTF-8), for Git to read instead.
+fn for_each_ref_in_process(repo: &Path) -> Option<String> {
+    let repo = crate::git_metadata::open(repo)?;
+    let platform = repo.references().ok()?;
+    let mut output = String::new();
+    for prefix in ["refs/heads/", "refs/remotes/"] {
+        for reference in platform.prefixed(prefix).ok()? {
+            let mut reference = reference.ok()?;
+            let name = std::str::from_utf8(reference.name().as_bstr()).ok()?.to_string();
+            let symref = match reference.target() {
+                gix::refs::TargetRef::Symbolic(target) => std::str::from_utf8(target.as_bstr()).ok()?.to_string(),
+                gix::refs::TargetRef::Object(_) => String::new(),
+            };
+            let Ok(id) = reference.follow_to_object() else {
+                continue;
+            };
+            output.push_str(&format!("{id} {name} {symref}\n"));
+        }
+    }
+    Some(output)
 }
 
 /// One ref read: the tips it found, whether `for-each-ref` succeeded, and
@@ -962,6 +993,42 @@ mod repo_tests {
         list.caption.as_ref().map(Caption::state)
     }
 
+    /// The in-process ref read gives what `git for-each-ref` prints, line for
+    /// line: loose, packed, and symbolic refs, a remote ref naming an annotated
+    /// tag, a broken symbolic ref, and from a linked checkout.
+    #[test]
+    fn ref_tips_read_in_process_match_git_for_each_ref() {
+        let repo = TestRepo::new();
+        let linked = repo.add_linked_worktree("topic");
+        let lines = |output: &str| {
+            let mut lines: Vec<String> = output.lines().map(|line| line.trim_end().to_string()).filter(|line| !line.is_empty()).collect();
+            lines.sort();
+            lines
+        };
+        let check = |case: &str| {
+            for from in [repo.path(), linked.clone()] {
+                let git = repo.git_in(&from, &["for-each-ref", RefTips::FORMAT, "refs/heads", "refs/remotes"]);
+                let read = for_each_ref_in_process(&from).expect("gix reads the refs");
+                assert_eq!(lines(&read), lines(&git), "{case} from {from:?}");
+                assert_eq!(RefTips::read_in(&from), Some(RefTips::parse(&git)), "{case} from {from:?}");
+            }
+        };
+        repo.git(&["branch", "feat/x"]);
+        repo.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        repo.git(&["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+        repo.git(&["tag", "-a", "-m", "annotated", "v1"]);
+        repo.git(&["update-ref", "refs/remotes/origin/tagged", "refs/tags/v1"]);
+        repo.git(&["symbolic-ref", "refs/heads/alias", "refs/heads/main"]);
+        check("loose");
+        repo.git(&["pack-refs", "--all"]);
+        check("packed");
+        repo.git(&["update-ref", "refs/heads/later", "HEAD"]);
+        repo.git(&["update-ref", "refs/remotes/origin/main", "feat/x"]);
+        check("packed and loose");
+        repo.git(&["symbolic-ref", "refs/remotes/upstream/HEAD", "refs/remotes/upstream/gone"]);
+        check("a broken symbolic ref");
+    }
+
     /// One merge on `main`'s own line brings in two side commits: the line
     /// is one step, a merge, though `main` gained three commits.
     #[test]
@@ -1354,7 +1421,7 @@ mod repo_tests {
         let base = repo.add_worktree("feat/base", "feat-base", "main");
         fork(&repo, "feat/base", "main", 1);
         repo.commit_in(&base, "base.txt");
-        repo.git(&["push", "-q", "origin", "feat/base"]);
+        repo.publish("feat/base");
         let child = repo.add_worktree("feat/child", "feat-child", "feat/base");
         fork(&repo, "feat/child", "feat/base", 2);
         repo.commit_in(&child, "child.txt");

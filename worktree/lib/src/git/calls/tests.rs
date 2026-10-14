@@ -200,7 +200,7 @@ fn every_helper_counts_one_start_however_it_is_wrapped() {
 #[serial_test::serial]
 fn a_fast_forward_counts_every_git_process_it_starts() {
     let repo = TestRepo::with_origin();
-    repo.push_commit_to_origin("main", "remote.txt");
+    crate::test_support::commit_to_origin(&repo.origin_path(), "main", "remote.txt");
     repo.git(&["fetch", "-q", "origin"]);
 
     recorder::start_recording();

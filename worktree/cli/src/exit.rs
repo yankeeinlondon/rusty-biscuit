@@ -19,17 +19,21 @@ pub const BLOCKED_BY_ENVIRONMENT: i32 = 4;
 pub fn exit_code(error: &WorktreeError) -> i32 {
     match error {
         WorktreeError::Cancelled => SUCCESS,
-        WorktreeError::RefusedToLoseWork(_) | WorktreeError::NotARealDirectory(_) => REFUSED_TO_LOSE_WORK,
-        WorktreeError::BlockedByEnvironment(_) | WorktreeError::DirectoryInUse { .. } => {
-            BLOCKED_BY_ENVIRONMENT
-        }
+        WorktreeError::RefusedToLoseWork(_) => REFUSED_TO_LOSE_WORK,
+        WorktreeError::BlockedByEnvironment(_) => BLOCKED_BY_ENVIRONMENT,
         _ => FAILURE,
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use worktree::config::BaseDirSource;
+
     use super::*;
+
+    fn config() -> BaseDirSource {
+        BaseDirSource::ConfigFile("/h/.worktree.json".into())
+    }
 
     #[test]
     fn refusals_and_cancel_map_to_their_codes() {
@@ -38,16 +42,8 @@ mod tests {
             exit_code(&WorktreeError::RefusedToLoseWork("dirty".into())),
             3
         );
-        assert_eq!(exit_code(&WorktreeError::NotARealDirectory("/wt/feat-x".into())), 3);
         assert_eq!(
             exit_code(&WorktreeError::BlockedByEnvironment("no wrapper".into())),
-            4
-        );
-        assert_eq!(
-            exit_code(&WorktreeError::DirectoryInUse {
-                path: "C:\\wt\\feat-x".into(),
-                processes: Vec::new(),
-            }),
             4
         );
     }
@@ -65,10 +61,22 @@ mod tests {
             WorktreeError::FromBranchNotFound("nope".into()),
             WorktreeError::IncludeRulesIndeterminate { path: "rules".into(), reason: "unreadable".into() },
             WorktreeError::IncludeSetDiscovery("git failed".into()),
-            WorktreeError::LockProbeRenameBack {
-                original: "a".into(),
-                temporary: "b".into(),
+            WorktreeError::RemovalFailed("stopped after the move".into()),
+            WorktreeError::BaseDirectoryNotConfigured,
+            WorktreeError::BaseDirectoryEmpty { origin: BaseDirSource::Env },
+            WorktreeError::BaseDirectoryForeignPath { value: r"b:\wt".into(), origin: config() },
+            WorktreeError::BaseDirectoryNotAbsolute { value: "wt".into(), origin: BaseDirSource::Prompt },
+            WorktreeError::BaseDirectoryNotDirectory { value: "/srv/file".into(), origin: config() },
+            WorktreeError::BaseDirectoryInvalidEncoding { value: "/srv/wt".into(), origin: BaseDirSource::Env },
+            WorktreeError::BaseDirectoryNotFound { value: "/mnt/b/wt".into(), origin: config() },
+            WorktreeError::BaseDirectoryUnreadable {
+                value: "/srv/wt".into(),
+                origin: BaseDirSource::Env,
+                cause: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
             },
+            WorktreeError::BaseDirectoryIsGitRepo { value: "/srv/repo".into(), origin: BaseDirSource::Env },
+            WorktreeError::ConfigInvalidFormat { config_path: "/h/.worktree.json".into(), message: "bad".into() },
+            WorktreeError::ConfigBaseDirIsGitRepo { config_path: "/h/.worktree.json".into(), dir: "/srv/repo".into() },
         ];
         for error in failures {
             assert_eq!(exit_code(&error), 1, "{error:?}");

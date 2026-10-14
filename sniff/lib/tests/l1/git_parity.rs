@@ -1807,6 +1807,11 @@ fn phase3_merge_conflict_detected_and_reported() {
     let conflicts = merge_conflicts_at(dir.path()).unwrap();
     assert_eq!(conflicts.len(), 1);
     assert_eq!(norm(&conflicts[0]), "file.txt");
+    let observed = sniff::filesystem::FilesystemObservation::discover(dir.path())
+        .detect_merge_conflicts()
+        .unwrap()
+        .expect("repo found");
+    assert_eq!(observed, conflicts, "a retained observation reads the same index");
 
     let info = detect_git_with_request(dir.path(), &GitRequest::full())
         .unwrap()

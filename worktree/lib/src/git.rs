@@ -1,9 +1,12 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 use std::io::Write;
 
 use crate::error::WorktreeError;
+
+mod program;
+pub use program::{command, forget_installation_hint, name_installation_for_gix};
 
 #[derive(Debug, Clone)]
 pub struct RepoInfo {
@@ -61,7 +64,7 @@ pub fn repo_info() -> Result<RepoInfo, WorktreeError> {
 /// so its directory name is the canonical repo name even when called from
 /// inside a linked worktree.
 fn main_worktree_name() -> Result<String, WorktreeError> {
-    let output = git_command(&["worktree", "list", "--porcelain"])?;
+    let output = worktree_list()?;
     let main_path = output
         .lines()
         .find_map(|line| line.strip_prefix("worktree "))
@@ -72,9 +75,109 @@ fn main_worktree_name() -> Result<String, WorktreeError> {
         .ok_or_else(|| WorktreeError::GitParse("cannot determine repo name".into()))
 }
 
+/// The command [`worktree_list`] and its variants answer.
+const WORKTREE_LIST: [&str; 3] = ["worktree", "list", "--porcelain"];
+
+/// `git worktree list --porcelain` in the current directory, trimmed as
+/// [`git_command`] returns it. Read in-process when
+/// [`crate::git_metadata::worktree_list_porcelain`] can answer exactly as
+/// git would, and by git otherwise: on Windows a git process costs tens of
+/// milliseconds, and one `wt remove` lists the worktrees several times.
+pub fn worktree_list() -> Result<String, WorktreeError> {
+    match listed_in_process(Path::new("."))? {
+        Some(listing) => Ok(listing),
+        None => git_command(&WORKTREE_LIST),
+    }
+}
+
+/// [`worktree_list`] for the repository at `dir`, as [`git_command_in`]
+/// runs it.
+pub fn worktree_list_in(dir: &Path) -> Result<String, WorktreeError> {
+    match listed_in_process(dir)? {
+        Some(listing) => Ok(listing),
+        None => git_command_in(dir, &WORKTREE_LIST),
+    }
+}
+
+/// [`worktree_list`] for the repository at `dir`, as [`git_from`] runs it
+/// from `base`.
+pub fn worktree_list_from(base: &Path, dir: &Path) -> Result<String, WorktreeError> {
+    match listed_in_process(&base.join(dir))? {
+        Some(listing) => Ok(listing),
+        None => git_from(base, dir, &WORKTREE_LIST),
+    }
+}
+
+/// Set (to anything) in a debug build's environment, it makes every
+/// [`worktree_list`] and [`staged_entries_from`] run git: for tests that act
+/// at a chosen Git call, such as `cli/tests/remove_recovery.rs`'s shims,
+/// which stop `wt remove` at the listing after its move. Release builds never
+/// read it.
+pub const TEST_LIST_THROUGH_GIT_VAR: &str = "WT_TEST_LIST_THROUGH_GIT";
+
+/// The in-process listing, trimmed; asked through [`crate::questions`], so
+/// tests count it and can fail it like the git command it replaces.
+fn listed_in_process(dir: &Path) -> Result<Option<String>, WorktreeError> {
+    crate::questions::ask(&WORKTREE_LIST).map_err(|()| WorktreeError::GitCommand("injected failure".to_string()))?;
+    #[cfg(debug_assertions)]
+    if std::env::var_os(TEST_LIST_THROUGH_GIT_VAR).is_some() {
+        return Ok(None);
+    }
+    Ok(crate::git_metadata::worktree_list_porcelain(dir).map(|listing| listing.trim().to_string()))
+}
+
+/// The command [`staged_entries_from`] and [`staged_entries_of`] answer.
+const LS_FILES_STAGE: [&str; 3] = ["ls-files", "--stage", "-z"];
+
+/// `git -C <dir> ls-files --stage -z` run from `base`, as [`git_from_bytes`]
+/// returns it: the index of the checkout `dir` is in, read in-process when
+/// [`crate::git_metadata::staged_entries`] can, and by git otherwise.
+pub fn staged_entries_from(base: &Path, dir: &Path) -> Result<Vec<u8>, WorktreeError> {
+    let read = || crate::git_metadata::staged_entries(&crate::git_metadata::index_path(&base.join(dir))?);
+    match staged_in_process(read)? {
+        Some(listing) => Ok(listing),
+        None => git_from_bytes(base, dir, &LS_FILES_STAGE, None),
+    }
+}
+
+/// `git ls-files --stage -z` for the index file `index` (`GIT_INDEX_FILE`),
+/// run from `base` as [`git_from_bytes_with_env`] runs it; read in-process
+/// when it can be.
+pub(crate) fn staged_entries_of(base: &Path, index: &Path) -> Result<Vec<u8>, WorktreeError> {
+    match staged_in_process(|| crate::git_metadata::staged_entries(index))? {
+        Some(listing) => Ok(listing),
+        None => git_from_bytes_with_env(base, base, &LS_FILES_STAGE, &[("GIT_INDEX_FILE", index.as_os_str())]),
+    }
+}
+
+/// `read`, asked through [`crate::questions`] like the git command it
+/// replaces, so tests count it and can fail it.
+fn staged_in_process(read: impl FnOnce() -> Option<Vec<u8>>) -> Result<Option<Vec<u8>>, WorktreeError> {
+    crate::questions::ask(&LS_FILES_STAGE).map_err(|()| WorktreeError::GitCommand("injected failure".to_string()))?;
+    #[cfg(debug_assertions)]
+    if std::env::var_os(TEST_LIST_THROUGH_GIT_VAR).is_some() {
+        return Ok(None);
+    }
+    Ok(read())
+}
+
+/// The top level, git directory, and common directory of the checkout `dir`
+/// is in, canonicalized, as `git rev-parse --path-format=absolute
+/// --show-toplevel --git-dir --git-common-dir` names them; `None` where git
+/// fails (outside a repository, a bare one) or a path does not resolve.
+/// Read in-process when `gix` can open the repository.
+pub fn checkout_layout(dir: &Path) -> Option<[PathBuf; 3]> {
+    if let Some(layout) = crate::git_metadata::checkout_layout(dir) {
+        return layout;
+    }
+    let out = git_from(dir, dir, &["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir"]).ok()?;
+    let mut paths = out.lines().map(|line| std::fs::canonicalize(line.trim()).ok());
+    Some([paths.next()??, paths.next()??, paths.next()??])
+}
+
 /// Run `git rev-parse` with the given argument and return trimmed stdout.
 fn git_rev_parse(arg: &str) -> Result<String, WorktreeError> {
-    let output = calls::output(Command::new("git").args(["rev-parse", arg]))
+    let output = calls::output(program::command().args(["rev-parse", arg]))
         .map_err(|e| WorktreeError::GitCommand(e.to_string()))?;
 
     if !output.status.success() {
@@ -118,7 +221,7 @@ fn git_command_status(dir: Option<&Path>, args: &[&str], allow_no_match: bool) -
         }
     }
 
-    let mut command = Command::new("git");
+    let mut command = program::command();
     if let Some(dir) = dir {
         command.current_dir(dir);
     }
@@ -182,7 +285,7 @@ pub(crate) fn git_from_output(base: &Path, dir: &Path, args: &[&OsStr]) -> std::
     }
 
     calls::output(
-        Command::new("git")
+        program::command()
             .current_dir(base)
             .arg("-C")
             .arg(dir)
@@ -201,7 +304,7 @@ fn git_from_bytes_status(base: &Path, dir: &Path, args: &[&str], stdin: Option<&
     #[cfg(any(test, feature = "count-git"))]
     recorder::record(args);
 
-    let mut command = Command::new("git");
+    let mut command = program::command();
     command.current_dir(base).arg("-C").arg(dir).args(args).envs(env.iter().copied())
         .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
     if stdin.is_some() {
@@ -224,6 +327,11 @@ fn git_from_bytes_status(base: &Path, dir: &Path, args: &[&str], stdin: Option<&
         }
         Ok::<_, WorktreeError>(output)
     })?;
+
+    #[cfg(test)]
+    if recorder::failed_after_running(args) {
+        return Err(WorktreeError::GitCommand("injected failure after running".to_string()));
+    }
 
     if !output.status.success() && !(allow_no_match && output.status.code() == Some(1)) {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -458,12 +566,53 @@ pub mod recorder {
         FailureGuard(())
     }
 
-    /// Ends a [`fail_matching`] injection when dropped.
+    /// Ends a [`fail_matching`] injection (or, in tests, a
+    /// `fail_after_running` one) when dropped.
     pub struct FailureGuard(());
 
     impl Drop for FailureGuard {
         fn drop(&mut self) {
             *FAIL_WHEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            #[cfg(test)]
+            {
+                *FAIL_AFTER.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            }
+        }
+    }
+
+    /// Runs after a call [`fail_after_running`] matches.
+    #[cfg(test)]
+    type Aftermath = Box<dyn Fn() + Send>;
+
+    #[cfg(test)]
+    static FAIL_AFTER: Mutex<Option<(FailWhen, Aftermath)>> = Mutex::new(None);
+
+    /// Makes every [`git_from`](super::git_from)-family call whose arguments
+    /// `predicate` matches run Git for real, then run `aftermath`, then fail,
+    /// until the returned guard drops: Git's own side effects happen, yet the
+    /// caller sees an error. `aftermath` runs under a lock, so it must not
+    /// start Git through this module.
+    #[cfg(test)]
+    #[must_use = "the failure injection ends when the guard drops"]
+    pub fn fail_after_running(
+        predicate: impl Fn(&[&str]) -> bool + Send + 'static,
+        aftermath: impl Fn() + Send + 'static,
+    ) -> FailureGuard {
+        *FAIL_AFTER.lock().expect("recorder mutex poisoned") = Some((Box::new(predicate), Box::new(aftermath)));
+        FailureGuard(())
+    }
+
+    /// Whether [`fail_after_running`] fails this completed call; runs its
+    /// aftermath when it does.
+    #[cfg(test)]
+    pub(crate) fn failed_after_running(args: &[&str]) -> bool {
+        let guard = FAIL_AFTER.lock().expect("recorder mutex poisoned");
+        match guard.as_ref() {
+            Some((predicate, aftermath)) if predicate(args) => {
+                aftermath();
+                true
+            }
+            _ => false,
         }
     }
 
@@ -488,13 +637,12 @@ pub mod recorder {
 mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::process::Command;
 
     use super::*;
     use crate::worktree::default_branch;
 
     fn run_git(repo: &Path, args: &[&str]) {
-        let status = Command::new("git")
+        let status = crate::git::command()
             .current_dir(repo)
             .args(args)
             .status()

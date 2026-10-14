@@ -128,8 +128,9 @@ fn watch_fields(path: &Path) -> String {
     format!("ino:{:x} sdev:{:x}", metadata.ino(), kernel_sdev(metadata.dev()))
 }
 
+/// A registration line as the kernel prints it, `wd` in hexadecimal.
 fn registration(wd: i64, path: &Path) -> String {
-    format!("inotify wd:{wd} {} mask:fff ignored_mask:0\n", watch_fields(path))
+    format!("inotify wd:{wd:x} {} mask:fff ignored_mask:0\n", watch_fields(path))
 }
 
 fn coverage(report: &PathUsageReport, mechanism: Mechanism) -> &Coverage {
@@ -273,6 +274,10 @@ fn the_fdinfo_reader_gives_every_malformed_shape_a_defined_outcome() {
         cell("ino wider than 64 bits", edit_field(&base, WD3, "ino", Some("1ffffffffffffffff")), 0, 1, Partial, 1),
         cell("sdev wider than dev_t", edit_field(&base, WD3, "sdev", Some("100000000")), 0, 1, Partial, 1),
         cell("signed wd", edit_field(&base, WD3, "wd", Some("+3")), 0, 1, Partial, 1),
+        cell("negative wd", edit_field(&base, WD3, "wd", Some("-3")), 0, 1, Partial, 1),
+        cell("wd prefixed 0x", edit_field(&base, WD3, "wd", Some("0x3")), 0, 1, Partial, 1),
+        cell("wd beyond i64", edit_field(&base, WD3, "wd", Some("8000000000000000")), 0, 1, Partial, 1),
+        cell("wd wider than 64 bits", edit_field(&base, WD3, "wd", Some("1ffffffffffffffff")), 0, 1, Partial, 1),
         cell("wrong type, every line", edit_field(&base, EVERY, "ino", Some("zz")), 0, 0, Failed, 3),
         cell(
             "no registration lines",
@@ -286,12 +291,12 @@ fn the_fdinfo_reader_gives_every_malformed_shape_a_defined_outcome() {
     ];
     for field in ["wd", "ino", "sdev", "mask"] {
         let (absent, empty, wrong) = match field {
-            "wd" => ("wd absent", "wd empty", "wd not decimal"),
+            "wd" => ("wd absent", "wd empty", "wd not hex"),
             "ino" => ("ino absent", "ino empty", "ino not hex"),
             "sdev" => ("sdev absent", "sdev empty", "sdev not hex"),
             _ => ("mask absent", "mask empty", "mask not hex"),
         };
-        let bad = if field == "wd" { "x" } else { "zz" };
+        let bad = "zz";
         cells.push(cell(absent, edit_field(&base, WD3, field, None), 0, 1, Partial, 1));
         cells.push(cell(empty, edit_field(&base, WD3, field, Some("")), 0, 1, Partial, 1));
         cells.push(cell(wrong, edit_field(&base, WD3, field, Some(bad)), 0, 1, Partial, 1));
@@ -328,6 +333,40 @@ fn the_fdinfo_reader_gives_every_malformed_shape_a_defined_outcome() {
         assert_eq!(coverage(&report, Mechanism::OpenHandles).status, Complete, "{name}");
         assert_eq!(report.outcome, Outcome::Usable, "{name}");
     }
+}
+
+/// The kernel prints `wd` with `%x`, so a watcher past its ninth registration
+/// writes letters, and `wd:10` is descriptor 16.
+#[test]
+fn hexadecimal_watch_ids_past_nine_are_reported_with_their_kernel_values() {
+    let scene = scene();
+    let base = matrix_base(&scene);
+    let text = edit_field(&base, WD3, "wd", Some("a"));
+    let text = edit_field(&text, "inotify wd:2 ", "wd", Some("f"));
+    let sub = scene.root.join("sub");
+    let b = scene.root.join("sub/b.txt");
+    let text = format!("{text}{}{}", registration(0x10, &sub), registration(0x1a, &b));
+    assert!(text.contains("wd:a ") && text.contains("wd:f ") && text.contains("wd:10 ") && text.contains("wd:1a "));
+    scene.process(PID, START, "watcher").anon(9, "inotify", &text);
+
+    let report = scene.query(&scene.root, &PathUsageOptions::default());
+
+    assert_eq!(report.outcome, Outcome::Usable);
+    assert_eq!(watch_ids(&report), vec![10, 15, 16, 26]);
+    let watched = |id: i64| {
+        let watch = evidence(&report, EvidenceKind::WatchRegistration)
+            .into_iter()
+            .find(|e| e.watch.as_ref().and_then(|w| w.watch_id) == Some(id))
+            .unwrap_or_else(|| panic!("no watch {id}"));
+        paths(watch)
+    };
+    assert_eq!(watched(10), vec![scene.root.join("file.txt")]);
+    assert_eq!(watched(15), vec![scene.root.clone()]);
+    assert_eq!(watched(16), vec![sub]);
+    assert_eq!(watched(26), vec![b]);
+    let inotify = coverage(&report, Mechanism::Inotify);
+    assert_eq!(inotify.status, CoverageStatus::Complete, "{inotify:#?}");
+    assert!(inotify.limitations.is_empty(), "{inotify:#?}");
 }
 
 #[test]
@@ -683,6 +722,40 @@ fn a_budget_expiring_between_descriptors_keeps_what_was_read() {
     );
 }
 
+#[test]
+fn a_budget_expiring_during_descriptors_never_starts_the_cwd_read() {
+    let scene = scene();
+    let process = scene.process(PID, START, "busy");
+    process.open(3, &scene.root.join("file.txt"), "0100000");
+    process.open(4, &scene.root.join("sub/b.txt"), "0100000");
+    process.cwd(&scene.root.join("sub"));
+    let mut control = scene.backend();
+    let budget = Budget::start(Duration::from_secs(60)).unwrap();
+    run(&scene.root, &PathUsageOptions::default(), &mut control, &budget, chrono::Utc::now()).unwrap();
+    assert_eq!(control.cwd_reads, 1, "an unexpired query reads the cwd");
+
+    // The first per-descriptor check passes; the second finds it expired.
+    let mut backend = super::tests::ExpiringDuringInspection::new(scene.backend(), 1);
+    let budget = Budget::start(Duration::from_secs(60)).unwrap();
+    let report = run(&scene.root, &PathUsageOptions::default(), &mut backend, &budget, chrono::Utc::now())
+        .expect("report");
+
+    assert_eq!(backend.inner.cwd_reads, 0, "the cwd read started after the budget expired");
+    assert_eq!(evidence(&report, EvidenceKind::OpenHandle).len(), 1, "{report:#?}");
+    assert!(evidence(&report, EvidenceKind::WorkingDirectory).is_empty());
+    let cwd = coverage(&report, Mechanism::WorkingDirectories);
+    assert_eq!(cwd.status, CoverageStatus::NotAttempted, "{cwd:#?}");
+    assert_eq!(cwd.attempted, Some(0));
+    assert_eq!(limitation_count(cwd, LimitationKind::BudgetExhausted), 1);
+    for mechanism in [Mechanism::OpenHandles, Mechanism::Inotify] {
+        let record = coverage(&report, mechanism);
+        assert_eq!(record.status, CoverageStatus::Partial, "{mechanism:?}");
+        assert_eq!(limitation_count(record, LimitationKind::BudgetExhausted), 1, "{mechanism:?}");
+    }
+    assert!(report.budget_exhausted);
+    assert_eq!(report.outcome, Outcome::Usable);
+}
+
 /// Live `/proc` on Linux and WSL2.
 #[cfg(target_os = "linux")]
 mod live {
@@ -725,6 +798,7 @@ mod live {
             let c_path = CString::new(path.clone().into_os_string().into_vec()).unwrap();
             let wd = unsafe { libc::inotify_add_watch(inotify, c_path.as_ptr(), libc::IN_ALL_EVENTS) };
             assert!(wd >= 0, "watch {}: {}", path.display(), std::io::Error::last_os_error());
+            println!("watch {wd}");
         }
         println!("ready {inotify}");
         std::io::stdout().flush().unwrap();
@@ -744,8 +818,9 @@ mod live {
     }
 
     /// Starts [`usage_child`] and waits for its readiness line, which
-    /// carries its inotify descriptor number.
-    fn spawn_child(open: &[PathBuf], cwd: &Path, watch: &[PathBuf]) -> (ChildGuard, u64) {
+    /// carries its inotify descriptor number. The returned watch descriptors
+    /// are in `watch` order, as the child's `inotify_add_watch` returned them.
+    fn spawn_child(open: &[PathBuf], cwd: &Path, watch: &[PathBuf]) -> (ChildGuard, u64, Vec<i64>) {
         let mut command = Command::new(std::env::current_exe().expect("test executable"));
         command
             .args([
@@ -762,10 +837,14 @@ mod live {
             .stderr(Stdio::inherit());
         let mut child = ChildGuard(command.spawn().expect("spawn the usage child"));
         let stdout = child.0.stdout.take().unwrap();
+        let mut watch_ids = Vec::new();
         for line in BufReader::new(stdout).lines() {
             let line = line.expect("child stdout");
-            if let Some(fd) = line.strip_prefix("ready ") {
-                return (child, fd.trim().parse().expect("inotify fd"));
+            if let Some(wd) = line.strip_prefix("watch ") {
+                watch_ids.push(wd.trim().parse().expect("watch descriptor"));
+            } else if let Some(fd) = line.strip_prefix("ready ") {
+                assert_eq!(watch_ids.len(), watch.len(), "one descriptor per watch");
+                return (child, fd.trim().parse().expect("inotify fd"), watch_ids);
             }
         }
         panic!("the usage child exited before it was ready");
@@ -801,14 +880,22 @@ mod live {
             root.join("doomed.txt"),
             scene.sibling.join("file.txt"),
         ];
-        let watch = [
+        // Past sixteen registrations, so the kernel prints watch descriptors
+        // with letters (`wd:a`) and with a hexadecimal carry (`wd:10`).
+        let numbered: Vec<PathBuf> = (0..18).map(|n| root.join(format!("w{n:02}"))).collect();
+        for dir in &numbered {
+            std::fs::create_dir(dir).unwrap();
+        }
+        let mut watch = vec![
             root.clone(),
             root.join("a"),
             root.join("b"),
             scene.base.clone(),
             scene.sibling.clone(),
         ];
-        let (child, inotify_fd) = spawn_child(&open, &root.join("sub"), &watch);
+        watch.extend(numbered.iter().cloned());
+        let (child, inotify_fd, watch_ids) = spawn_child(&open, &root.join("sub"), &watch);
+        assert!(watch_ids.iter().any(|&wd| wd >= 16), "{watch_ids:?}");
         let child_pid = child.0.id();
         std::fs::remove_file(root.join("doomed.txt")).unwrap();
 
@@ -844,9 +931,20 @@ mod live {
 
         let watches: Vec<&Evidence> =
             record.evidence.iter().filter(|e| e.kind == EvidenceKind::WatchRegistration).collect();
-        let mut watched: Vec<PathBuf> = watches.iter().flat_map(|e| paths(e)).collect();
-        watched.sort();
-        assert_eq!(watched, vec![root.clone(), root.join("a"), root.join("b")]);
+        let mut reported: Vec<(PathBuf, i64)> = watches
+            .iter()
+            .map(|e| (paths(e)[0].clone(), e.watch.as_ref().unwrap().watch_id.unwrap()))
+            .collect();
+        reported.sort();
+        let mut expected: Vec<(PathBuf, i64)> = watch
+            .iter()
+            .cloned()
+            .zip(watch_ids.iter().copied())
+            .filter(|(path, _)| path.starts_with(root))
+            .collect();
+        expected.sort();
+        assert_eq!(expected.len(), 21);
+        assert_eq!(reported, expected, "every in-scope watch, with the child's own descriptor");
         let mut ids = Vec::new();
         for watch in &watches {
             let path = &paths(watch)[0];
@@ -861,7 +959,7 @@ mod live {
         }
         ids.sort();
         ids.dedup();
-        assert_eq!(ids.len(), 3, "distinct registrations are not collapsed");
+        assert_eq!(ids.len(), 21, "distinct registrations are not collapsed");
 
         let outside = |e: &&Evidence| paths(e).iter().any(|p| !p.starts_with(root));
         assert!(!record.evidence.iter().any(|e| outside(&e)), "{:#?}", record.evidence);
@@ -872,6 +970,13 @@ mod live {
             .find(|l| l.kind == LimitationKind::AncestorWatch)
             .unwrap_or_else(|| panic!("no ancestor-watch limitation: {inotify:#?}"));
         assert!(ancestor.examples.iter().any(|e| e.pid == Some(child_pid)), "{ancestor:#?}");
+        let child_malformed = inotify
+            .limitations
+            .iter()
+            .filter(|l| l.kind == LimitationKind::MalformedRecord)
+            .flat_map(|l| &l.examples)
+            .any(|e| e.pid == Some(child_pid));
+        assert!(!child_malformed, "the child's records are all well formed: {inotify:#?}");
         drop(child);
     }
 
@@ -880,7 +985,7 @@ mod live {
         let scene = scene();
         let root = &scene.root;
         std::fs::create_dir(root.join("a")).unwrap();
-        let (child, _) = spawn_child(
+        let (child, _, _) = spawn_child(
             &[root.join("file.txt")],
             &root.join("sub"),
             &[root.clone(), root.join("a")],

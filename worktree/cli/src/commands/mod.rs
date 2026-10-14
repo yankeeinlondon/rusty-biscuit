@@ -9,7 +9,7 @@ pub mod remove;
 #[cfg(test)]
 mod test_support;
 
-pub use create::run as create;
+pub use create::{base_dir_error_markup, run as create};
 pub use go::run as go;
 pub use list::{ListFlags, run as list};
 pub use remove::{Flags as RemoveFlags, run as remove, run_handoff as remove_handoff};

@@ -270,6 +270,39 @@ ship). No new permanent tests, no docs, no skills, no package sources changed
   probe (`name[](min(1))` loads, validates, survives `merge_baseline`, and is
   visible in the typed view) is the acceptance shape.
 
+### Phase 1 re-run (2026-10-10)
+
+A new Phase 1 run was dispatched. Every Phase 1 task was already done and
+checked off in `plan.md`. The survey, accessor/caller table, resolver seam
+map, content-policy constraint check, and rulings R1–R8 above still hold,
+because nothing under `lib/src/markdown/schemas/` has changed since. This run
+only re-checked the gate and the area's test and lint results:
+
+- `2026-09-28-recursive-schema-types/spec.md` still says `status: draft-spec`.
+  Its directory still contains only `spec.md`, last modified Sep 28.
+- `TypeExpr` (`lib/src/markdown/schemas/simplified/types.rs`) still has only
+  the `Primitive`, `InlineObject`, and `Imported` variants.
+- `resolve.rs:1328` still raises "cannot apply `[]`/constraints to the
+  union-typed named type", the same error the Phase 1 probe hit. `$defs`
+  appears only in the reject-list at `resolve.rs:633`.
+- `git log -- lib/src/markdown/schemas/`: the newest commit is still
+  `39ef11404` / `b9ce7c893`, so there has been no work on recursive types.
+- **Gate result: still FAILED.** Phases 2–6 stay stopped. No source, doc,
+  or skill file was touched. The probe was not re-added, because the code
+  that rejects the probe's shape has not changed.
+
+Verification on this host (macOS), with no source changes:
+
+- `just lint` in `darkmatter/`: green (clippy + wasm32-wasip2 zed-dmls check).
+- `just test` in `darkmatter/`: 9115 passed, 11 skipped, 0 failed. The two
+  date-boundary failures recorded above (`hash_kind_save_diff`) did not recur.
+- I did not run anything on another OS, because nothing changed.
+
+Requirement-to-test mapping: Phase 1 is a survey-and-gate phase and changes
+no behavior, so this run added no tests. The only executable requirement,
+"named union as `name[](min(1))` loads", was checked by the Phase 1 probe
+(it failed as expected, and the evidence is recorded above).
+
 ## Phase 2
 
 **Outcome: NOT STARTED — the dependency gate still fails.** The phase-2

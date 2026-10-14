@@ -14,6 +14,8 @@ use clap_complete::CompleteEnv;
 
 fn main() {
     let process_start = std::time::Instant::now();
+    // SAFETY: nothing else runs yet; see the function's docs.
+    unsafe { worktree::git::name_installation_for_gix() };
 
     CompleteEnv::with_factory(Cli::command).complete();
 
@@ -24,11 +26,20 @@ fn main() {
             // These carry their own Prose markup and heading, and are printed
             // after one blank line.
             worktree::WorktreeError::RefusedToLoseWork(markup)
-            | worktree::WorktreeError::BlockedByEnvironment(markup) => {
+            | worktree::WorktreeError::BlockedByEnvironment(markup)
+            | worktree::WorktreeError::RemovalFailed(markup) => {
                 eprintln!();
                 markup.clone()
             }
-            _ => error_markup(&e.to_string()),
+            // Base-directory errors link the config file and may add a WSL
+            // hint; they are printed after one blank line.
+            e => match commands::base_dir_error_markup(e) {
+                Some(markup) => {
+                    eprintln!();
+                    markup
+                }
+                None => error_markup(&e.to_string()),
+            },
         };
         let rendered = Prose::new(msg).with_line_breaks(LineBreaks::Hard).render(&terminal);
         eprintln!("{rendered}");

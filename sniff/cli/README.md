@@ -77,6 +77,7 @@ sniff hardware    # Hardware information (CPU, GPU, memory, storage)
 sniff network     # Network information (interfaces, local IPs, WAN IP)
 sniff filesystem  # Filesystem information (git, languages, monorepo)
 sniff filesystem query <path>  # Processes using a file or directory tree
+sniff filesystem query <path> --json --perf  # Coverage, evidence, and work counters
 ```
 
 **Discovery Tools:**

@@ -7,7 +7,7 @@ use super::backend::{
 };
 use super::budget::Budget;
 use super::identity::{self, FileIdentity};
-use super::matching::ObservedObject;
+use super::matching::{ObjectMatch, ObservedObject};
 use super::*;
 use crate::performance::testing::measure;
 use std::collections::HashMap;
@@ -88,7 +88,19 @@ impl UsageBackend for Fake {
         if let Some(hook) = self.on_inspect.as_mut() {
             hook(candidate.pid, context);
         }
-        candidate.payload.clone()
+        // Like a real backend, validate path-only evidence during inspection;
+        // the query makes no path lookup of its own.
+        let mut inspections = candidate.payload.clone();
+        for inspection in &mut inspections {
+            inspection.evidence.retain_mut(|raw| {
+                if raw.object.identity.is_some() || raw.matched.is_some() {
+                    return true;
+                }
+                raw.matched = context.match_object(&raw.object);
+                raw.matched.is_some()
+            });
+        }
+        inspections
     }
 
     fn creation_token(&mut self, pid: u32) -> Option<u64> {
@@ -101,6 +113,62 @@ impl UsageBackend for Fake {
             .get(&pid)
             .cloned()
             .unwrap_or_else(|| Ok(named(&format!("proc-{pid}"))))
+    }
+}
+
+/// Delegates to a real backend, letting the first process inspection make
+/// `checks` budget checks before the budget expires, so a full query can
+/// expire partway through one process's inspection.
+pub(super) struct ExpiringDuringInspection<B> {
+    pub(super) inner: B,
+    checks: Option<i64>,
+}
+
+impl<B> ExpiringDuringInspection<B> {
+    pub(super) fn new(inner: B, checks: i64) -> Self {
+        Self {
+            inner,
+            checks: Some(checks),
+        }
+    }
+}
+
+impl<B: UsageBackend> UsageBackend for ExpiringDuringInspection<B> {
+    type Payload = B::Payload;
+
+    fn mechanisms(&self) -> Vec<MechanismSupport> {
+        self.inner.mechanisms()
+    }
+
+    fn enumerate(&mut self, budget: &Budget) -> Result<Enumeration<B::Payload>, String> {
+        self.inner.enumerate(budget)
+    }
+
+    fn inspect(
+        &mut self,
+        candidate: &ProcessCandidate<B::Payload>,
+        context: &InspectionContext<'_>,
+    ) -> Vec<MechanismInspection> {
+        if let Some(checks) = self.checks.take() {
+            context.budget.expire_after_further_checks(checks);
+        }
+        self.inner.inspect(candidate, context)
+    }
+
+    fn inspect_paths(
+        &mut self,
+        context: &InspectionContext<'_>,
+        candidates: &[ProcessCandidate<B::Payload>],
+    ) -> Option<(Vec<super::process::Observation>, Coverage)> {
+        self.inner.inspect_paths(context, candidates)
+    }
+
+    fn creation_token(&mut self, pid: u32) -> Option<u64> {
+        self.inner.creation_token(pid)
+    }
+
+    fn details(&mut self, pid: u32) -> Result<ProcessDetails, String> {
+        self.inner.details(pid)
     }
 }
 
@@ -139,6 +207,7 @@ fn handle(path: &Path, descriptor: u64) -> RawEvidence {
         watch: None,
         access: None,
         event_only: None,
+        matched: None,
     }
 }
 
@@ -154,6 +223,7 @@ fn path_only(path: &Path) -> RawEvidence {
         watch: None,
         access: None,
         event_only: None,
+        matched: None,
     }
 }
 
@@ -714,6 +784,57 @@ fn a_budget_expiring_during_inspection_keeps_collected_evidence() {
 }
 
 #[test]
+fn a_mechanism_the_budget_stopped_for_one_process_is_partial() {
+    let tree = tree();
+    let a = tree.root.join("a.txt");
+    let mut fake = Fake::new(vec![
+        candidate(1, Some(1), both_clean()),
+        candidate(
+            2,
+            Some(2),
+            vec![
+                found(Mechanism::OpenHandles, vec![handle(&a, 3)]),
+                result(Mechanism::WorkingDirectories, InspectionResult::NotAttempted),
+            ],
+        ),
+    ]);
+    let report = query(&tree.root, &PathUsageOptions::default(), &mut fake);
+    let cwd = coverage(&report, Mechanism::WorkingDirectories);
+    assert_eq!(cwd.status, CoverageStatus::Partial, "{cwd:#?}");
+    assert_eq!((cwd.attempted, cwd.succeeded), (Some(1), Some(1)));
+    let budget = cwd
+        .limitations
+        .iter()
+        .find(|l| l.kind == LimitationKind::BudgetExhausted)
+        .expect("budget limitation");
+    assert_eq!(budget.count, 1);
+    assert_eq!(coverage(&report, Mechanism::OpenHandles).status, CoverageStatus::Complete);
+    assert_eq!(report.processes.iter().map(|p| p.pid).collect::<Vec<_>>(), vec![2]);
+}
+
+#[test]
+fn a_mechanism_the_budget_stopped_for_every_process_is_not_attempted() {
+    let tree = tree();
+    let a = tree.root.join("a.txt");
+    let mut fake = Fake::new(vec![candidate(
+        1,
+        Some(1),
+        vec![
+            found(Mechanism::OpenHandles, vec![handle(&a, 3)]),
+            result(Mechanism::WorkingDirectories, InspectionResult::NotAttempted),
+        ],
+    )]);
+    let report = query(&tree.root, &PathUsageOptions::default(), &mut fake);
+    let cwd = coverage(&report, Mechanism::WorkingDirectories);
+    assert_eq!(cwd.status, CoverageStatus::NotAttempted, "{cwd:#?}");
+    assert_eq!(cwd.attempted, Some(0));
+    assert!(cwd.reason.as_deref().is_some_and(|r| r.contains("budget")));
+    assert!(has_limitation(&cwd.limitations, LimitationKind::BudgetExhausted));
+    assert_eq!(report.processes.len(), 1);
+    assert_eq!(report.outcome, Outcome::Usable);
+}
+
+#[test]
 fn a_budget_expiring_before_any_inspection_is_not_attempted() {
     let tree = tree();
     let mut fake = Fake::new(vec![candidate(1, Some(1), both_clean())]);
@@ -1010,6 +1131,35 @@ fn a_path_only_observation_inside_the_tree_matches_by_lookup() {
     assert_eq!(evidence.match_basis, MatchBasis::PathLookup);
     assert_eq!(evidence.identity, Some(id(&b)));
     assert_eq!(counts.get(crate::performance::counters::QUERY_PATH_LOOKUPS), 1);
+}
+
+#[test]
+fn a_path_match_the_backend_validated_survives_a_budget_that_expires_before_projection() {
+    let tree = tree();
+    let b = tree.root.join("sub/b.txt");
+    let mut validated = path_only(&b);
+    validated.matched = Some(ObjectMatch {
+        matched_paths: vec![b.clone()],
+        basis: MatchBasis::PathLookup,
+        identity: id(&b),
+    });
+    let mut fake = Fake::new(vec![candidate(
+        1,
+        Some(1),
+        vec![found(Mechanism::OpenHandles, vec![validated])],
+    )]);
+    // Expires after the backend's lookup and before the query projects it.
+    fake.on_inspect = Some(Box::new(|_, context| context.budget.expire()));
+    let (report, counts) = measure(|| query(&tree.root, &PathUsageOptions::default(), &mut fake));
+
+    assert!(report.budget_exhausted);
+    assert_eq!(report.processes.len(), 1, "{:#?}", report.processes);
+    let evidence = &report.processes[0].evidence[0];
+    assert_eq!(paths(evidence), vec![b.clone()]);
+    assert_eq!(evidence.match_basis, MatchBasis::PathLookup);
+    assert_eq!(evidence.identity, Some(id(&b)));
+    // The query made no lookup of its own.
+    assert_eq!(counts.get(crate::performance::counters::QUERY_PATH_LOOKUPS), 0);
 }
 
 #[test]

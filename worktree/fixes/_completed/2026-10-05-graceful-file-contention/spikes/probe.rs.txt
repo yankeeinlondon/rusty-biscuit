@@ -1,0 +1,731 @@
+//! Spike probe for 2026-10-05-graceful-file-contention, Phase 1.
+//!
+//! `gfc-probe s1 <base> [<other-volume-base>]` - no-replacement rename (S1)
+//! `gfc-probe s2 <base>`                        - notify 8 watcher capabilities (S2)
+//!
+//! Throwaway: prints findings as `S1 ...` / `S2 ...` lines.
+
+use std::fs;
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{Receiver, sync_channel};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use notify::{Event, RecursiveMode, Watcher};
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    match args.get(1).map(String::as_str) {
+        Some("s1") => s1(Path::new(&args[2]), args.get(3).map(PathBuf::from)),
+        Some("s2") => s2(Path::new(&args[2])),
+        Some("b1") => {
+            let root = Path::new(&args[2]).join("gfc-b1");
+            fresh(&root);
+            barrier(&fs::canonicalize(&root).unwrap(), args.get(3).map(|n| n.parse().unwrap()).unwrap_or(2000));
+            let _ = fs::remove_dir_all(&root);
+        }
+        _ => eprintln!("usage: gfc-probe s1|s2 <base> [other]"),
+    }
+}
+
+fn err_str(error: &io::Error) -> String {
+    format!("Err(kind={:?}, os={:?}, msg={})", error.kind(), error.raw_os_error(), error)
+}
+
+/// Windows only: which step of the rename failed ("open" = CreateFileW with
+/// DELETE access, "set-info" = SetFileInformationByHandle).
+static LAST_STAGE: std::sync::Mutex<&'static str> = std::sync::Mutex::new("");
+
+fn res_str(result: &io::Result<()>) -> String {
+    match result {
+        Ok(()) => "Ok".into(),
+        Err(error) if cfg!(windows) => format!("{} stage={}", err_str(error), LAST_STAGE.lock().unwrap()),
+        Err(error) => err_str(error),
+    }
+}
+
+// ---------------------------------------------------------------- S1 rename
+
+#[cfg(target_os = "linux")]
+fn noreplace_rename(from: &Path, to: &Path) -> io::Result<()> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let f = CString::new(from.as_os_str().as_bytes()).unwrap();
+    let t = CString::new(to.as_os_str().as_bytes()).unwrap();
+    let rc = unsafe { libc::renameat2(libc::AT_FDCWD, f.as_ptr(), libc::AT_FDCWD, t.as_ptr(), libc::RENAME_NOREPLACE) };
+    if rc == 0 { Ok(()) } else { Err(io::Error::last_os_error()) }
+}
+
+#[cfg(target_os = "macos")]
+fn noreplace_rename(from: &Path, to: &Path) -> io::Result<()> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let f = CString::new(from.as_os_str().as_bytes()).unwrap();
+    let t = CString::new(to.as_os_str().as_bytes()).unwrap();
+    let rc = unsafe { libc::renamex_np(f.as_ptr(), t.as_ptr(), libc::RENAME_EXCL) };
+    if rc == 0 { Ok(()) } else { Err(io::Error::last_os_error()) }
+}
+
+#[cfg(windows)]
+fn wide(path: &Path) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    path.as_os_str().encode_wide().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(windows)]
+fn open_for(path: &Path, access: u32) -> io::Result<windows_sys::Win32::Foundation::HANDLE> {
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::Storage::FileSystem::*;
+    let w = wide(path);
+    let h = unsafe {
+        CreateFileW(
+            w.as_ptr(),
+            access,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            std::ptr::null_mut(),
+        )
+    };
+    if h == INVALID_HANDLE_VALUE { Err(io::Error::last_os_error()) } else { Ok(h) }
+}
+
+/// `SetFileInformationByHandle(FileRenameInfo)` with `ReplaceIfExists = FALSE`
+/// (the Win32 face of `NtSetInformationFile(FileRenameInformation)`).
+#[cfg(windows)]
+fn noreplace_rename(from: &Path, to: &Path) -> io::Result<()> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::Storage::FileSystem::*;
+    *LAST_STAGE.lock().unwrap() = "open";
+    let h = open_for(from, DELETE | SYNCHRONIZE)?;
+    *LAST_STAGE.lock().unwrap() = "set-info";
+    let name: Vec<u16> = wide(to);
+    let name_bytes = (name.len() - 1) * 2;
+    let header = std::mem::offset_of!(FILE_RENAME_INFO, FileName);
+    let total = header + name_bytes + 2;
+    let mut buf = vec![0u64; total.div_ceil(8)];
+    let info = buf.as_mut_ptr() as *mut FILE_RENAME_INFO;
+    unsafe {
+        (*info).Anonymous.ReplaceIfExists = false;
+        (*info).RootDirectory = std::ptr::null_mut();
+        (*info).FileNameLength = name_bytes as u32;
+        std::ptr::copy_nonoverlapping(name.as_ptr(), (*info).FileName.as_mut_ptr(), name.len());
+    }
+    let ok = unsafe { SetFileInformationByHandle(h, FileRenameInfo, info as *const _, total as u32) };
+    let result = if ok == 0 { Err(io::Error::last_os_error()) } else { Ok(()) };
+    unsafe { CloseHandle(h) };
+    result
+}
+
+#[cfg(windows)]
+fn movefile_noreplace(from: &Path, to: &Path) -> io::Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::MoveFileExW;
+    let ok = unsafe { MoveFileExW(wide(from).as_ptr(), wide(to).as_ptr(), 0) };
+    if ok == 0 { Err(io::Error::last_os_error()) } else { Ok(()) }
+}
+
+#[cfg(unix)]
+fn identity(path: &Path) -> String {
+    use std::os::unix::fs::MetadataExt;
+    match fs::symlink_metadata(path) {
+        Ok(m) => format!("dev={} ino={}", m.dev(), m.ino()),
+        Err(e) => err_str(&e),
+    }
+}
+
+#[cfg(windows)]
+fn identity(path: &Path) -> String {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::Storage::FileSystem::*;
+    let h = match open_for(path, 0) {
+        Ok(h) => h,
+        Err(e) => return err_str(&e),
+    };
+    let mut legacy: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    let ok1 = unsafe { GetFileInformationByHandle(h, &mut legacy) };
+    let mut id: FILE_ID_INFO = unsafe { std::mem::zeroed() };
+    let ok2 = unsafe { GetFileInformationByHandleEx(h, FileIdInfo, &mut id as *mut _ as *mut _, std::mem::size_of::<FILE_ID_INFO>() as u32) };
+    unsafe { CloseHandle(h) };
+    format!(
+        "legacy(ok={} vsn={:x} idx={:x}{:08x}) id128(ok={} vsn={:x} id={})",
+        ok1,
+        legacy.dwVolumeSerialNumber,
+        legacy.nFileIndexHigh,
+        legacy.nFileIndexLow,
+        ok2,
+        id.VolumeSerialNumber,
+        id.FileId.Identifier.iter().map(|b| format!("{b:02x}")).collect::<String>()
+    )
+}
+
+fn fresh(dir: &Path) {
+    let _ = fs::remove_dir_all(dir);
+    fs::create_dir_all(dir).unwrap();
+}
+
+fn make_src(src: &Path) {
+    fs::create_dir_all(src.join("sub")).unwrap();
+    fs::write(src.join("sub/file.txt"), b"payload").unwrap();
+}
+
+fn s1(base: &Path, other: Option<PathBuf>) {
+    let root = base.join("gfc-s1");
+    fresh(&root);
+    let src = root.join("src");
+    let dst = root.join("dst");
+    println!("S1 os={} base={}", std::env::consts::OS, root.display());
+
+    // 1. plain move to an absent destination; identity preserved
+    make_src(&src);
+    let before = identity(&src);
+    let r = noreplace_rename(&src, &dst);
+    let after = identity(&dst);
+    println!("S1 absent-dest result={} identity_before=[{before}] identity_after=[{after}] same={} child_kept={}", res_str(&r), before == after, dst.join("sub/file.txt").exists());
+    fresh(&root);
+
+    // 2-4. existing destinations of each kind must not be replaced
+    for (case, setup) in [
+        ("dest-empty-dir", Box::new(|d: &Path| fs::create_dir(d).unwrap()) as Box<dyn Fn(&Path)>),
+        ("dest-file", Box::new(|d: &Path| fs::write(d, b"x").unwrap())),
+        ("dest-nonempty-dir", Box::new(|d: &Path| {
+            fs::create_dir(d).unwrap();
+            fs::write(d.join("keep"), b"k").unwrap();
+        })),
+    ] {
+        make_src(&src);
+        setup(&dst);
+        let dest_before = identity(&dst);
+        let r = noreplace_rename(&src, &dst);
+        println!(
+            "S1 {case} noreplace={} src_kept={} dest_identity_unchanged={}",
+            res_str(&r),
+            src.join("sub/file.txt").exists(),
+            identity(&dst) == dest_before
+        );
+        #[cfg(windows)]
+        {
+            let r = movefile_noreplace(&src, &dst);
+            println!("S1 {case} MoveFileExW(no flags)={} src_kept={} dest_identity_unchanged={}", res_str(&r), src.exists(), identity(&dst) == dest_before);
+        }
+        // Contrast: std::fs::rename's contract permits replacement.
+        let r = fs::rename(&src, &dst);
+        println!("S1 {case} std::fs::rename={} src_still_there={} dest_replaced={}", res_str(&r), src.exists(), identity(&dst) != dest_before);
+        fresh(&root);
+    }
+
+    // 5. dangling symlink at destination
+    make_src(&src);
+    #[cfg(unix)]
+    let made = std::os::unix::fs::symlink(root.join("nowhere"), &dst);
+    #[cfg(windows)]
+    let made = std::os::windows::fs::symlink_dir(root.join("nowhere"), &dst);
+    match made {
+        Ok(()) => {
+            let r = noreplace_rename(&src, &dst);
+            println!("S1 dest-dangling-link noreplace={} link_kept={} nowhere_created={}", res_str(&r), fs::symlink_metadata(&dst).map(|m| m.file_type().is_symlink()).unwrap_or(false), root.join("nowhere").exists());
+        }
+        Err(e) => println!("S1 dest-dangling-link setup-failed={}", err_str(&e)),
+    }
+    fresh(&root);
+
+    // 6. missing source
+    let r = noreplace_rename(&src, &dst);
+    println!("S1 missing-src noreplace={}", res_str(&r));
+
+    // 7. cross-device
+    if let Some(other) = &other {
+        let odst = other.join("gfc-s1-xdev-dst");
+        let _ = fs::remove_dir_all(&odst);
+        make_src(&src);
+        let r = noreplace_rename(&src, &odst);
+        println!("S1 cross-device to={} noreplace={} src_kept={} dest_exists={}", odst.display(), res_str(&r), src.join("sub/file.txt").exists(), odst.exists());
+        let _ = fs::remove_dir_all(&odst);
+        fresh(&root);
+    }
+
+    // 8. in-use cases
+    in_use_cases(&root, &src, &dst);
+    let _ = fs::remove_dir_all(&root);
+}
+
+fn in_use_cases(root: &Path, src: &Path, dst: &Path) {
+    // (b) open file inside, no delete sharing (Windows) / plain open (Unix)
+    make_src(src);
+    #[cfg(windows)]
+    let held = {
+        use std::os::windows::fs::OpenOptionsExt;
+        fs::OpenOptions::new().read(true).share_mode(1 | 2).open(src.join("sub/file.txt")).unwrap()
+    };
+    #[cfg(unix)]
+    let held = fs::File::open(src.join("sub/file.txt")).unwrap();
+    let r = noreplace_rename(src, dst);
+    println!("S1 in-use open-file-no-share-delete noreplace={} src_kept={}", res_str(&r), src.exists());
+    drop(held);
+    fresh(root);
+
+    // (c) open file inside with std's default sharing (includes FILE_SHARE_DELETE)
+    make_src(src);
+    let held = fs::File::open(src.join("sub/file.txt")).unwrap();
+    let r = noreplace_rename(src, dst);
+    println!("S1 in-use open-file-std-default-share noreplace={} src_kept={}", res_str(&r), src.exists());
+    drop(held);
+    fresh(root);
+
+    // (d) a notify watcher (this process) on the directory
+    make_src(src);
+    let mut watcher = notify::recommended_watcher(|_res: notify::Result<Event>| {}).unwrap();
+    watcher.watch(src, RecursiveMode::Recursive).unwrap();
+    let r = noreplace_rename(src, dst);
+    println!("S1 in-use own-notify-watcher noreplace={} src_kept={}", res_str(&r), src.exists());
+    drop(watcher);
+    fresh(root);
+
+    // (d2) a recursive notify watcher on the PARENT of the directory
+    make_src(src);
+    let mut watcher = notify::recommended_watcher(|_res: notify::Result<Event>| {}).unwrap();
+    watcher.watch(root, RecursiveMode::Recursive).unwrap();
+    let r = noreplace_rename(src, dst);
+    println!("S1 in-use own-notify-watcher-on-parent-recursive noreplace={} moved={}", res_str(&r), dst.exists());
+    drop(watcher);
+    fresh(root);
+
+    // (e) a handle on the directory itself (Windows backup semantics, std default share)
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        make_src(src);
+        let held = fs::OpenOptions::new().read(true).custom_flags(0x0200_0000).open(src.join("sub")).unwrap();
+        let r = noreplace_rename(src, dst);
+        println!("S1 in-use handle-on-subdir noreplace={} src_kept={}", res_str(&r), src.exists());
+        drop(held);
+        fresh(root);
+        make_src(src);
+        let held = fs::OpenOptions::new().read(true).custom_flags(0x0200_0000).open(src).unwrap();
+        let r = noreplace_rename(src, dst);
+        println!("S1 in-use handle-on-root-dir noreplace={} src_kept={}", res_str(&r), src.exists());
+        drop(held);
+        fresh(root);
+        // (f) read-only attribute on the directory (a non-sharing permission-like failure)
+        make_src(src);
+        let r = deny_delete_acl_probe(src, dst);
+        println!("S1 permission-deny-DE-on-src {r}");
+        fresh(root);
+        // (g) deny add-subdirectory on the parent
+        make_src(src);
+        let user = std::env::var("USERNAME").unwrap_or_default();
+        let deny = std::process::Command::new("icacls").arg(root).args(["/deny", &format!("{user}:(AD)")]).output();
+        let r = noreplace_rename(src, dst);
+        let _ = std::process::Command::new("icacls").arg(root).args(["/remove:d", &user]).output();
+        println!("S1 permission-deny-AD-on-parent icacls_ok={} noreplace={} src_kept={}", deny.map(|o| o.status.success()).unwrap_or(false), res_str(&r), src.exists());
+        fresh(root);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        make_src(src);
+        fs::set_permissions(root, fs::Permissions::from_mode(0o555)).unwrap();
+        let r = noreplace_rename(src, dst);
+        fs::set_permissions(root, fs::Permissions::from_mode(0o755)).unwrap();
+        println!("S1 permission-denied-parent noreplace={} src_kept={}", res_str(&r), src.exists());
+        fresh(root);
+    }
+    // (a) a child process whose cwd is inside the directory
+    make_src(src);
+    #[cfg(windows)]
+    let child = std::process::Command::new("ping").args(["-n", "4", "127.0.0.1"]).stdout(std::process::Stdio::null()).current_dir(src.join("sub")).spawn();
+    #[cfg(unix)]
+    let child = std::process::Command::new("sleep").arg("3").current_dir(src.join("sub")).spawn();
+    let mut child = child.unwrap();
+    std::thread::sleep(Duration::from_millis(400));
+    let r = noreplace_rename(src, dst);
+    println!("S1 in-use child-cwd-in-subdir noreplace={} src_kept={}", res_str(&r), src.exists());
+    let _ = child.kill();
+    let _ = child.wait();
+    fresh(root);
+
+    let _ = fs::remove_dir_all(root);
+}
+
+/// Windows: a permission failure for comparison with a sharing failure.
+/// Uses `icacls` to deny DELETE on the source to the current user.
+#[cfg(windows)]
+fn deny_delete_acl_probe(src: &Path, dst: &Path) -> String {
+    let user = std::env::var("USERNAME").unwrap_or_default();
+    let deny = std::process::Command::new("icacls").arg(src).args(["/deny", &format!("{user}:(DE)")]).output();
+    let r = noreplace_rename(src, dst);
+    let _ = std::process::Command::new("icacls").arg(src).args(["/remove:d", &user]).output();
+    format!("icacls_ok={} noreplace={} src_kept={}", deny.map(|o| o.status.success()).unwrap_or(false), res_str(&r), src.exists())
+}
+
+// ---------------------------------------------------------------- S2 watcher
+
+fn thread_count() -> i64 {
+    #[cfg(target_os = "linux")]
+    {
+        let status = fs::read_to_string("/proc/self/status").unwrap();
+        status.lines().find_map(|l| l.strip_prefix("Threads:")).map(|v| v.trim().parse().unwrap()).unwrap_or(-1)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let mut info: libc::proc_taskinfo = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of::<libc::proc_taskinfo>() as i32;
+        let n = unsafe { libc::proc_pidinfo(libc::getpid(), libc::PROC_PIDTASKINFO, 0, &mut info as *mut _ as *mut _, size) };
+        if n == size { info.pti_threadnum as i64 } else { -1 }
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Diagnostics::ToolHelp::*;
+        use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+        unsafe {
+            let snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+            let mut entry: THREADENTRY32 = std::mem::zeroed();
+            entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+            let me = GetCurrentProcessId();
+            let mut count = 0;
+            if Thread32First(snap, &mut entry) != 0 {
+                loop {
+                    if entry.th32OwnerProcessID == me {
+                        count += 1;
+                    }
+                    if Thread32Next(snap, &mut entry) == 0 {
+                        break;
+                    }
+                }
+            }
+            CloseHandle(snap);
+            count
+        }
+    }
+}
+
+type Rx = Receiver<notify::Result<Event>>;
+
+fn short(root: &Path, p: &Path) -> String {
+    p.strip_prefix(root).map(|r| r.display().to_string()).unwrap_or_else(|_| format!("!{}", p.display()))
+}
+
+fn drain(label: &str, root: &Path, rx: &Rx, wait: Duration) -> Vec<Event> {
+    let start = Instant::now();
+    let mut out = Vec::new();
+    let mut lines = Vec::new();
+    while let Some(left) = wait.checked_sub(start.elapsed()) {
+        match rx.recv_timeout(left) {
+            Ok(Ok(ev)) => {
+                lines.push(format!(
+                    "    +{:>4}ms {:?} [{}]{}{}",
+                    start.elapsed().as_millis(),
+                    ev.kind,
+                    ev.paths.iter().map(|p| short(root, p)).collect::<Vec<_>>().join(", "),
+                    if ev.need_rescan() { " RESCAN" } else { "" },
+                    ev.info().map(|i| format!(" info={i}")).unwrap_or_default()
+                ));
+                out.push(ev);
+            }
+            Ok(Err(e)) => lines.push(format!("    +{:>4}ms ERROR {e:?}", start.elapsed().as_millis())),
+            Err(_) => break,
+        }
+    }
+    println!("S2 [{label}] events={}", lines.len());
+    // Collapse long listings (floods) to head + tail.
+    if lines.len() > 40 {
+        for l in &lines[..20] {
+            println!("{l}");
+        }
+        println!("    ... {} more ...", lines.len() - 40);
+        for l in &lines[lines.len() - 20..] {
+            println!("{l}");
+        }
+    } else {
+        for l in &lines {
+            println!("{l}");
+        }
+    }
+    let _ = io::stdout().flush();
+    out
+}
+
+fn s2(base: &Path) {
+    let root = base.join("gfc-s2");
+    fresh(&root);
+    let root = fs::canonicalize(&root).unwrap();
+    #[cfg(windows)]
+    let root = PathBuf::from(root.display().to_string().trim_start_matches(r"\\?\"));
+    println!("S2 os={} root={} watcher-kind={:?}", std::env::consts::OS, root.display(), <notify::RecommendedWatcher as Watcher>::kind());
+    #[cfg(target_os = "linux")]
+    for f in ["max_user_watches", "max_user_instances", "max_queued_events"] {
+        println!("S2 inotify {f}={}", fs::read_to_string(format!("/proc/sys/fs/inotify/{f}")).unwrap_or_default().trim());
+    }
+    lifecycle(&root, "A-child-watch", false);
+    lifecycle(&root, "B-parent-recursive", true);
+    barrier(&root, 2000);
+    overflow_bounded(&root);
+    overflow_blocked_backend(&root);
+    instance_limit(&root);
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// B1: a flush barrier. Write N files then a marker; read until the marker's
+/// event arrives. Are all earlier events delivered before it (ordering)?
+fn barrier(root: &Path, n: usize) {
+    let dir = root.join("barrier");
+    fresh(&dir);
+    for round in 0..3 {
+        let (tx, rx) = sync_channel::<notify::Result<Event>>(100_000);
+        let mut w = notify::recommended_watcher(move |res| {
+            let _ = tx.try_send(res);
+        })
+        .unwrap();
+        w.watch(&dir, RecursiveMode::Recursive).unwrap();
+        
+        for i in 0..n {
+            fs::write(dir.join(format!("r{round}-f{i}")), b"x").unwrap();
+        }
+        let marker = dir.join(format!(".barrier-{round}"));
+        let t = Instant::now();
+        fs::write(&marker, b"").unwrap();
+        let mut seen = std::collections::HashSet::new();
+        let mut marker_ms = None;
+        let mut after_marker = 0;
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while Instant::now() < deadline {
+            match rx.recv_timeout(Duration::from_millis(5000)) {
+                Ok(Ok(ev)) => {
+                    if ev.need_rescan() {
+                        println!("S2 B1 RESCAN {:?}", ev.info());
+                    }
+                    for p in &ev.paths {
+                        if p.file_name() == marker.file_name() {
+                            marker_ms.get_or_insert(t.elapsed().as_millis());
+                        } else if marker_ms.is_some() {
+                            if let Some(name) = p.file_name() {
+                                if !seen.contains(name) {
+                                    after_marker += 1;
+                                    if after_marker <= 4 {
+                                        println!("S2 B1 after-marker {:?} {:?}", ev.kind, name);
+                                    }
+                                }
+                            }
+                        } else if let Some(name) = p.file_name() {
+                            seen.insert(name.to_os_string());
+                        }
+                    }
+                }
+                Ok(Err(e)) => println!("S2 B1 error {e:?}"),
+                Err(_) => break,
+            }
+        }
+        println!("S2 B1 round={round} files={n} distinct-before-marker={} marker-latency-ms={marker_ms:?} new-paths-after-marker={after_marker}", seen.len());
+        drop(rx);
+        drop(w);
+        fresh(&dir);
+    }
+}
+
+/// Strategy A: parent non-recursive + checkout recursive + admin.
+/// Strategy B: parent recursive (covers both names) + admin.
+fn lifecycle(root: &Path, name: &str, parent_recursive: bool) {
+    let top = root.join(name);
+    let parent = top.join("parent");
+    let checkout = parent.join("checkout");
+    let admin = top.join("admin");
+    fs::create_dir_all(checkout.join("sub")).unwrap();
+    fs::create_dir_all(&admin).unwrap();
+    fs::write(checkout.join("a.txt"), b"a").unwrap();
+    fs::write(checkout.join("b.txt"), b"b").unwrap();
+    fs::write(admin.join("index"), b"index-v1").unwrap();
+    println!("S2 ===== strategy {name}");
+
+    let wait = Duration::from_millis(600);
+    let threads0 = thread_count();
+    let (tx, rx) = sync_channel::<notify::Result<Event>>(1024);
+    let dropped = Arc::new(AtomicUsize::new(0));
+    let d2 = dropped.clone();
+    let mut watcher = notify::recommended_watcher(move |res| {
+        if tx.try_send(res).is_err() {
+            d2.fetch_add(1, Ordering::SeqCst);
+        }
+    })
+    .unwrap();
+    if parent_recursive {
+        let w1 = watcher.watch(&parent, RecursiveMode::Recursive);
+        let w3 = watcher.watch(&admin, RecursiveMode::NonRecursive);
+        println!("S2 watch parent(recursive)={:?} admin={:?}", w1.err(), w3.err());
+    } else {
+        let w1 = watcher.watch(&parent, RecursiveMode::NonRecursive);
+        let w2 = watcher.watch(&checkout, RecursiveMode::Recursive);
+        let w3 = watcher.watch(&admin, RecursiveMode::NonRecursive);
+        println!("S2 watch parent={:?} checkout={:?} admin={:?}", w1.err(), w2.err(), w3.err());
+    }
+    println!("S2 threads before={threads0} with-watcher={}", thread_count());
+
+    drain("01 baseline-no-action", &top, &rx, wait);
+    fs::write(checkout.join("sub/new.txt"), b"n").unwrap();
+    drain("02 create checkout/sub/new.txt", &top, &rx, wait);
+    fs::OpenOptions::new().append(true).open(checkout.join("a.txt")).unwrap().write_all(b"more").unwrap();
+    drain("03 append checkout/a.txt", &top, &rx, wait);
+    let mut perms = fs::metadata(checkout.join("a.txt")).unwrap().permissions();
+    perms.set_readonly(true);
+    fs::set_permissions(checkout.join("a.txt"), perms.clone()).unwrap();
+    #[allow(clippy::permissions_set_readonly_false)]
+    perms.set_readonly(false);
+    fs::set_permissions(checkout.join("a.txt"), perms).unwrap();
+    drain("04 metadata-only (readonly on/off) checkout/a.txt", &top, &rx, wait);
+    fs::remove_file(checkout.join("b.txt")).unwrap();
+    drain("05 delete checkout/b.txt", &top, &rx, wait);
+    fs::write(admin.join("index.lock"), b"index-v2").unwrap();
+    fs::rename(admin.join("index.lock"), admin.join("index")).unwrap();
+    fs::write(admin.join("sharedindex.0123abcd"), b"shared").unwrap();
+    drain("06 admin: index.lock -> index (rename-replace), sharedindex.* create", &top, &rx, wait);
+    fs::write(parent.join("sibling.txt"), b"s").unwrap();
+    fs::create_dir(parent.join("othersib")).unwrap();
+    fs::write(parent.join("othersib/x"), b"x").unwrap();
+    drain("07 sibling activity in parent (outside both trees)", &top, &rx, wait);
+
+    let quarantine = parent.join(".checkout.wt-removal-q1");
+    let r = noreplace_rename(&checkout, &quarantine);
+    println!("S2 noreplace rename checkout->quarantine while watched: {}", res_str(&r));
+    drain("08 rename checkout -> .checkout.wt-removal-q1", &top, &rx, wait);
+    if r.is_ok() {
+        fs::write(quarantine.join("sub/after-move.txt"), b"m").unwrap();
+        fs::OpenOptions::new().append(true).open(quarantine.join("a.txt")).unwrap().write_all(b"q").unwrap();
+        drain("09 write inside quarantine (no new watch)", &top, &rx, wait);
+        fs::create_dir(&checkout).unwrap();
+        fs::write(checkout.join("recreated.txt"), b"r").unwrap();
+        drain("10 recreate original checkout/ + recreated.txt", &top, &rx, wait);
+        if !parent_recursive {
+            let uw = watcher.unwatch(&checkout);
+            println!("S2 unwatch(original checkout path) after rename = {:?}", uw.err());
+            let wq = watcher.watch(&quarantine, RecursiveMode::Recursive);
+            println!("S2 watch(quarantine) = {:?}", wq.err());
+            fs::write(quarantine.join("sub/after-rewatch.txt"), b"w").unwrap();
+            drain("11 write inside quarantine (fresh watch)", &top, &rx, wait);
+            fs::write(checkout.join("recreated2.txt"), b"r").unwrap();
+            drain("11b write inside recreated original (old watch removed)", &top, &rx, wait);
+        }
+        for p in ["sub/new.txt", "sub/after-move.txt", "sub/after-rewatch.txt", "a.txt"] {
+            let _ = fs::remove_file(quarantine.join(p));
+        }
+        fs::remove_dir(quarantine.join("sub")).unwrap();
+        drain("12 delete quarantine children (operation-owned)", &top, &rx, wait);
+        let r = fs::remove_dir(&quarantine);
+        println!("S2 remove_dir(quarantine root, watched) = {}", res_str(&r));
+        drain("13 delete quarantine root itself", &top, &rx, wait);
+        fs::write(parent.join("after-root-removed.txt"), b"p").unwrap();
+        drain("14 parent still observed after quarantine root removed", &top, &rx, wait);
+    }
+    println!("S2 handler-dropped (bounded queue full) = {}", dropped.load(Ordering::SeqCst));
+    drop(rx);
+    drop(watcher);
+    let t_drop = thread_count();
+    std::thread::sleep(Duration::from_millis(300));
+    println!("S2 threads after-drop={} after-drop+300ms={}", t_drop, thread_count());
+}
+
+/// O1: our bounded queue fills because the consumer is not reading.
+fn overflow_bounded(root: &Path) {
+    let dir = root.join("flood1");
+    fresh(&dir);
+    let (tx, rx) = sync_channel::<notify::Result<Event>>(64);
+    let dropped = Arc::new(AtomicUsize::new(0));
+    let d2 = dropped.clone();
+    let mut w = notify::recommended_watcher(move |res| {
+        if tx.try_send(res).is_err() {
+            d2.fetch_add(1, Ordering::SeqCst);
+        }
+    })
+    .unwrap();
+    w.watch(&dir, RecursiveMode::Recursive).unwrap();
+    for i in 0..3000 {
+        fs::write(dir.join(format!("f{i}")), b"x").unwrap();
+    }
+    std::thread::sleep(Duration::from_millis(800));
+    let got = drain("O1 bounded(64) queue, 3000 creates, consumer idle", root, &rx, Duration::from_millis(300)).len();
+    println!("S2 O1 received={got} dropped-by-our-handler={}", dropped.load(Ordering::SeqCst));
+    drop(w);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// O2: the backend thread is blocked inside the handler, so the kernel/OS
+/// buffer must overflow. Does notify surface it (Rescan flag / error)?
+fn overflow_blocked_backend(root: &Path) {
+    let dir = root.join("flood2");
+    fresh(&dir);
+    let (tx, rx) = sync_channel::<notify::Result<Event>>(1);
+    let mut w = notify::recommended_watcher(move |res| {
+        let _ = tx.send(res); // blocks the backend while the consumer sleeps
+    })
+    .unwrap();
+    w.watch(&dir, RecursiveMode::Recursive).unwrap();
+    let n = 40_000;
+    let start = Instant::now();
+    for i in 0..n {
+        fs::write(dir.join(format!("f{i}")), b"x").unwrap();
+    }
+    println!("S2 O2 wrote {n} files in {}ms with the backend blocked", start.elapsed().as_millis());
+    std::thread::sleep(Duration::from_millis(500));
+    let mut creates = 0usize;
+    let mut rescans = 0usize;
+    let mut errors = 0usize;
+    let mut other = 0usize;
+    let mut rescan_info = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
+        match rx.recv_timeout(Duration::from_millis(1500)) {
+            Ok(Ok(ev)) => {
+                if ev.need_rescan() {
+                    rescans += 1;
+                    rescan_info.push(format!("{:?} {:?}", ev.kind, ev.info()));
+                } else if ev.kind.is_create() {
+                    creates += 1;
+                } else {
+                    other += 1;
+                }
+            }
+            Ok(Err(e)) => {
+                errors += 1;
+                println!("S2 O2 error {e:?}");
+            }
+            Err(_) => break,
+        }
+    }
+    println!("S2 O2 created={n} create-events={creates} other-events={other} rescan-events={rescans} errors={errors} rescan_info={:?}", rescan_info.iter().take(3).collect::<Vec<_>>());
+    // The receiver goes first: a backend blocked in `send` would otherwise
+    // make `drop(w)` wait forever (seen on macOS).
+    drop(rx);
+    let t = Instant::now();
+    drop(w);
+    println!("S2 O2 watcher drop took {}ms", t.elapsed().as_millis());
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// L1: how a per-user watcher/instance limit surfaces.
+fn instance_limit(root: &Path) {
+    let dir = root.join("limit");
+    fresh(&dir);
+    let mut watchers = Vec::new();
+    let mut outcome = String::from("no limit hit");
+    let started = Instant::now();
+    for i in 0..300 {
+        match notify::recommended_watcher(|_res: notify::Result<Event>| {}) {
+            Ok(mut w) => match w.watch(&dir, RecursiveMode::NonRecursive) {
+                Ok(()) => watchers.push(w),
+                Err(e) => {
+                    outcome = format!("watch() failed at #{i}: kind={:?} {e}", e.kind);
+                    break;
+                }
+            },
+            Err(e) => {
+                outcome = format!("recommended_watcher() failed at #{i}: kind={:?} {e}", e.kind);
+                break;
+            }
+        }
+    }
+    println!("S2 L1 watcher instances created={} in {}ms outcome={outcome} threads={}", watchers.len(), started.elapsed().as_millis(), thread_count());
+    drop(watchers);
+    std::thread::sleep(Duration::from_millis(300));
+    println!("S2 L1 threads after dropping all={}", thread_count());
+}

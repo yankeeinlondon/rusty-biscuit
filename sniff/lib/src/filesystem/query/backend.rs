@@ -1,6 +1,7 @@
 //! The seam between the platform-neutral query and an OS backend.
 //!
-//! A backend lists processes and inspects each one; the query owns matching,
+//! A backend lists processes and inspects each one, with an optional file-side
+//! scan over the captured tree; the query owns matching,
 //! merging, enrichment ordering, coverage, and the outcome. Tests drive the
 //! query through a fake backend that replays injected observations.
 
@@ -93,6 +94,9 @@ pub(crate) enum InspectionResult {
     /// The process exited, or its PID now names a different lifetime.
     Vanished,
     Failed(String),
+    /// The budget expired before this mechanism started for the process; the
+    /// query counts it as budget-skipped work, not as an attempt.
+    NotAttempted,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -103,6 +107,12 @@ pub(crate) struct RawEvidence {
     pub(crate) watch: Option<WatchInfo>,
     pub(crate) access: Option<Access>,
     pub(crate) event_only: Option<bool>,
+    /// The backend's own match, made while the budget remained. Required for
+    /// a path-only object: the query never looks a path up after inspection,
+    /// because an expired budget would refuse the lookup and discard evidence
+    /// the backend already read. An object with an identity may leave it
+    /// unset; matching an identity consults only the captured tree.
+    pub(crate) matched: Option<ObjectMatch>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -110,7 +120,8 @@ pub(crate) struct MechanismInspection {
     pub(crate) mechanism: Mechanism,
     pub(crate) result: InspectionResult,
     /// Evidence that is not in scope is dropped by the query; a backend may
-    /// pre-filter with [`InspectionContext::match_object`] to bound memory.
+    /// pre-filter with [`InspectionContext::match_object`] to bound memory,
+    /// and must for a path-only object (see [`RawEvidence::matched`]).
     pub(crate) evidence: Vec<RawEvidence>,
     pub(crate) limitations: Vec<Limitation>,
 }
@@ -135,7 +146,8 @@ impl InspectionContext<'_> {
 /// When a backend inspects the querying process itself it must omit exactly
 /// the handles it opened for that inspection, and nothing else: the query's
 /// genuine usage, including a caller's own open files and cwd, stays in the
-/// report.
+/// report where the OS exposes it. Windows' file-side API excludes the calling
+/// process; that native limitation must be documented.
 pub(crate) trait UsageBackend {
     /// Backend-private state carried from enumeration to inspection.
     type Payload;
@@ -153,6 +165,16 @@ pub(crate) trait UsageBackend {
         candidate: &ProcessCandidate<Self::Payload>,
         context: &InspectionContext<'_>,
     ) -> Vec<MechanismInspection>;
+
+    /// File-side mechanisms scan the already-collected tree once, independently
+    /// of the process count. Coverage counts paths rather than processes.
+    fn inspect_paths(
+        &mut self,
+        _context: &InspectionContext<'_>,
+        _candidates: &[ProcessCandidate<Self::Payload>],
+    ) -> Option<(Vec<super::process::Observation>, super::report::Coverage)> {
+        None
+    }
 
     /// Re-reads `pid`'s creation token so enrichment can prove the PID still
     /// names the inspected lifetime.
@@ -222,6 +244,16 @@ impl Tally {
         MechanismInspection {
             mechanism: self.mechanism,
             result: InspectionResult::Vanished,
+            evidence: Vec::new(),
+            limitations: Vec::new(),
+        }
+    }
+
+    /// The budget expired before this mechanism started; nothing was read.
+    pub(crate) fn not_attempted(self) -> MechanismInspection {
+        MechanismInspection {
+            mechanism: self.mechanism,
+            result: InspectionResult::NotAttempted,
             evidence: Vec::new(),
             limitations: Vec::new(),
         }

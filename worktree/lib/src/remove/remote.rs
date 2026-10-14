@@ -23,15 +23,26 @@ use crate::git::{git_from, git_from_raw};
 use crate::live_remote::{PUSH_DEADLINE, RemoteHeads, run_noninteractive};
 use super::safety::Commit;
 
+/// What `git remote get-url origin` prints, `None` where it fails (no
+/// `origin` remote). Read in-process; Git runs only when that read can't
+/// decide, such as an `origin` configured without a URL.
+pub fn origin_url(base: &Path) -> Option<String> {
+    match crate::git_metadata::origin_url(base) {
+        Some(Some(url)) => Some(url),
+        Some(None) if crate::git_metadata::remote_absent(base, "origin") == Some(true) => None,
+        _ => git_from(base, base, &["remote", "get-url", "origin"]).ok(),
+    }
+}
+
 /// The branch's name on origin: its configured upstream when that is on
 /// origin, else its own name. `None` when there is no `origin` remote.
 ///
 /// A PR from another repository never names the destination.
 pub fn remote_destination(base: &Path, branch: &str) -> Option<String> {
-    git_from(base, base, &["remote", "get-url", "origin"]).ok()?;
+    origin_url(base)?;
     let config = |key: &str| {
-        git_from(base, base, &["config", "--get", &format!("branch.{branch}.{key}")])
-            .ok()
+        crate::git_metadata::branch_config(base, branch, key)
+            .unwrap_or_else(|| git_from(base, base, &["config", "--get", &format!("branch.{branch}.{key}")]).ok())
             .filter(|value| !value.is_empty())
     };
     let upstream = (config("remote").as_deref() == Some("origin"))
@@ -249,8 +260,14 @@ pub fn preflight_remote_deletion(
 
 fn remote_only_commits(base: &Path, remote_sha: &str, tip: &str) -> RemoteOnly {
     let object = format!("{remote_sha}^{{commit}}");
-    if git_from(base, base, &["cat-file", "-e", &object]).is_err() {
+    // In-process only when it surely exists; git decides the rest.
+    let held = crate::questions::ask(&["cat-file", "-e", &object]).is_ok() && crate::git_metadata::surely_a_commit(base, remote_sha);
+    if !held && git_from(base, base, &["cat-file", "-e", &object]).is_err() {
         return RemoteOnly::Unknown;
+    }
+    if remote_sha == tip {
+        // `<commit>..<commit>` names no commit; git would print nothing.
+        return RemoteOnly::Known(Vec::new());
     }
     let range = format!("{tip}..{remote_sha}");
     match git_from(base, base, &["log", "--format=%h%x1f%s", &range]) {

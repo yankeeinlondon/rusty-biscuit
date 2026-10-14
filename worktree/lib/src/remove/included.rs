@@ -66,7 +66,7 @@ fn digest(bytes: &[u8]) -> String {
 }
 
 fn source_for(base: &Path, worktree: &Path, branch: Option<&str>) -> Option<PathBuf> {
-    let entries = parse_worktree_list(&git_from(base, base, &["worktree", "list", "--porcelain"]).ok()?);
+    let entries = parse_worktree_list(&crate::git::worktree_list_from(base, base).ok()?);
     let store = ForkOriginStore::load_from(&fork_origin_path(base).ok()?);
     let fork = branch.and_then(|name| store.get(name)).map(|record| record.base_branch.as_str());
     let source = match copy_source(&entries, fork) {

@@ -41,6 +41,9 @@ pub(crate) struct ProcBackend {
     ancestors: Option<HashSet<FileIdentity>>,
     /// Inode numbers present in the tree index, built on first need.
     tree_inodes: Option<HashSet<u64>>,
+    /// Working-directory reads started, so tests can prove one was skipped.
+    #[cfg(test)]
+    pub(crate) cwd_reads: u64,
 }
 
 impl ProcBackend {
@@ -54,6 +57,8 @@ impl ProcBackend {
             proc_root,
             ancestors: None,
             tree_inodes: None,
+            #[cfg(test)]
+            cwd_reads: 0,
         }
     }
 
@@ -151,10 +156,19 @@ impl UsageBackend for ProcBackend {
         let mut inotify = Tally::new(Mechanism::Inotify, pid);
         let mut cwd = Tally::new(Mechanism::WorkingDirectories, pid);
         self.inspect_descriptors(&dir, context, &mut handles, &mut inotify);
-        inspect_cwd(&dir, context, &mut cwd);
+        let cwd_started = !context.budget.expired();
+        if cwd_started {
+            #[cfg(test)]
+            {
+                self.cwd_reads += 1;
+            }
+            inspect_cwd(&dir, context, &mut cwd);
+        }
 
         // A changed or missing start time means the PID was reused or the
         // process exited during inspection, so nothing read can be attributed.
+        // The check runs even after the budget expired: it is what makes the
+        // evidence already read attributable.
         if candidate.creation_token.is_some()
             && read_stat(&dir).ok().map(|s| s.start_ticks) != candidate.creation_token
         {
@@ -163,7 +177,8 @@ impl UsageBackend for ProcBackend {
                 .map(Tally::vanished)
                 .collect();
         }
-        vec![handles.finish(), cwd.finish(), inotify.finish()]
+        let cwd = if cwd_started { cwd.finish() } else { cwd.not_attempted() };
+        vec![handles.finish(), cwd, inotify.finish()]
     }
 
     fn creation_token(&mut self, pid: u32) -> Option<u64> {
@@ -302,6 +317,7 @@ impl ProcBackend {
                     }),
                     access: None,
                     event_only: None,
+                    matched: None,
                 });
             } else if self.ancestors(context).contains(&identity) {
                 inotify.note(
@@ -379,6 +395,7 @@ fn matched_descriptor(
         watch: None,
         access,
         event_only: None,
+        matched: None,
     });
 }
 
@@ -421,6 +438,7 @@ fn inspect_cwd(dir: &Path, context: &InspectionContext<'_>, cwd: &mut Tally) {
         watch: None,
         access: None,
         event_only: None,
+        matched: None,
     });
 }
 
@@ -581,10 +599,10 @@ pub(crate) struct Fdinfo {
 /// Parses `/proc/<pid>/fdinfo/<fd>` text.
 ///
 /// A record is an inotify record when any line's first word is `inotify`.
-/// Every such line must carry `wd` (decimal) and `ino`, `sdev`, `mask`
-/// (hexadecimal) exactly once; unknown `key:value` fields are ignored. In an
-/// inotify record, a line that is neither a registration nor a `key: value`
-/// header is malformed. Malformed lines never discard their siblings.
+/// Every such line must carry `wd`, `ino`, `sdev`, and `mask` (all
+/// hexadecimal, as the kernel prints them) exactly once; unknown `key:value`
+/// fields are ignored. In an inotify record, a line that is neither a
+/// registration nor a `key: value` header is malformed. Malformed lines never discard their siblings.
 pub(crate) fn parse_fdinfo(text: &str) -> Fdinfo {
     let mut fdinfo = Fdinfo::default();
     let is_inotify = text
@@ -645,9 +663,10 @@ fn parse_registration(line: &str) -> Result<Registration, String> {
         *slot = Some(value);
     }
     let watch_id = required(watch_id, "wd")?;
-    let watch_id = parse_decimal(watch_id)
+    // The kernel prints `wd` with `%x`: `wd:10` is watch descriptor 16.
+    let watch_id = parse_hex(watch_id)
         .and_then(|value| i64::try_from(value).ok())
-        .ok_or_else(|| format!("`wd:{watch_id}` is not a decimal watch descriptor"))?;
+        .ok_or_else(|| format!("`wd:{watch_id}` is not a hexadecimal watch descriptor"))?;
     let hex = |key: &str, value: Option<&str>| {
         let value = required(value, key)?;
         parse_hex(value).ok_or_else(|| format!("`{key}:{value}` is not a 64-bit hexadecimal value"))

@@ -108,6 +108,12 @@ Without that assertion, a runner too slow to meet the short deadline can pass
 through a different branch that produces the same outcome. Keep a separate
 test that checks the production constructor wires in the real deadline.
 
+A size cap is the same case: a test of "past the cap, the result is
+truncated" that writes the production cap's worth of files pays for every
+one. Sniff's 10,000-file inventory cap made two tests take 6–10 s on native
+Windows; injecting a cap of 48 through the walk's internal entry point made
+them under 0.1 s.
+
 ### 4. The same expensive work repeated in every row
 
 If every row of a matrix rebuilds an identical expensive input (a parsed
@@ -115,3 +121,57 @@ catalog or a validated document set), compute it once per test process with
 `std::sync::LazyLock` and share it across rows. Share only data the rows do
 not modify, and key any cache on the input's content, so a changed file is
 always recomputed.
+
+Under nextest every test is its own process, so a `LazyLock` shares nothing
+between tests. When many tests build the same starting fixture, build it
+once on disk beside the test binary, keyed by the binary (a rebuild gets a
+new key), rename it into place from a temporary directory so racing
+processes are safe, and copy it per test. `worktree/cli/tests/remove.rs`'s
+`template()` does this for its repository and bare origin; with the setup
+pushes replaced too, its fixtures went from about 0.65 s to about 0.2 s each
+on Windows.
+
+### 5. A process per question on Windows
+
+A test that starts a `git` (or any) process per fact it builds or reads is
+fast on macOS and Linux (~1–5 ms a process) and slow on native Windows
+(~25–47 ms). 150–250 processes made worktree tests 5–19 s there while they
+ran in under 4 s elsewhere. Count the spawns first (the `worktree` skill's
+`fixtures.md` has a shim that ranks a whole suite), then cut them where they
+come from: answer repeated reads in-process in the product (with a parity
+test against the command each replaces), and build fixtures in bulk (one
+`git fast-import`, one `update-ref --stdin`, batched self-checks). Measured
+on `build-win-native`, alone: `fork_origin_cutoff_matrix` 7.2 s → 1.0 s, and
+a four-case pipeline test at 6.8 s became four tests of about 1 s each.
+
+### 6. Fast alone, 2–3× slower in the full run
+
+A test that takes 1.5 s alone and 3.5–5 s in its package's full run is not
+waiting on anything: it is one of many tests that each keep a core busy at
+the same moment. Nextest runs a binary's tests together, so a binary of
+process-heavy tests (`wt remove`, `wt list` with its worker) saturates the
+host while it runs. Measure CPU, not only wall time: a Job Object around
+one test (CPU about equal to wall means it is CPU-bound, not waiting) and a
+sampler of host CPU during the full run. On `build-win-native` Defender
+alone was a quarter of the CPU (the `os` skill's `windows.md`).
+
+Threads inside the product were not the cause there (`wt` averaged five,
+and a test's CPU never exceeded its wall time alone), so capping them would
+not have helped. What helped is less work per test across the whole
+window: fewer processes per `wt` run (in-process reads with parity tests),
+fewer per stand-in request, fixtures copied from a template instead of
+built, and a matrix row per test. Measured on `build-win-native`, full
+`worktree-cli` run, 2026-10-13: slowest test 3.97 s → 3.46 s (5.33 s in an earlier run on a busier host), total test
+time 607 s → 548 s.
+
+### 7. A system service that serves one process at a time
+
+A test that is about 1 s alone and 6–9 s in its full run, alongside others
+at the same duration, may be queuing on a host daemon rather than on CPU.
+Run the test binary 1, 3, and 6 times at once: wall time that grows in step
+with the count while user CPU stays low is serialization. On macOS, CoreAudio
+setup behaves this way (the `os` skill's `macos.md`), and sniff's library
+suite had thirteen tests paying it although only five assert on audio or on
+the full default path. Narrow the request of every test that does not assert what the service
+returns; a live network lookup the test never reads is the same case. Measured
+on a development Mac, full sniff run: slowest of those tests 8.7 s → 2.8 s.

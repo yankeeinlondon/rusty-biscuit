@@ -234,6 +234,16 @@ impl FilesystemObservation {
         self.with_repository(GitRepo::file_changes)
     }
 
+    /// Repository-relative paths left unmerged in the index, read with the
+    /// retained repository handle.
+    ///
+    /// Reads only the index, so it is cheaper than
+    /// [`Self::detect_file_changes`]. Returns `Ok(None)` for a retained
+    /// non-repository observation.
+    pub fn detect_merge_conflicts(&self) -> Result<Option<Vec<PathBuf>>> {
+        self.with_repository(GitRepo::merge_conflicts)
+    }
+
     fn with_repository<T>(&self, f: impl FnOnce(&GitRepo) -> Result<T>) -> Result<Option<T>> {
         match &self.git {
             GitObservation::Present(repository) => {

@@ -1,0 +1,16 @@
+S1 os=macos base=/tmp/gfc-run/gfc-s1
+S1 absent-dest result=Ok identity_before=[dev=16777233 ino=856043131] identity_after=[dev=16777233 ino=856043131] same=true child_kept=true
+S1 dest-empty-dir noreplace=Err(kind=AlreadyExists, os=Some(17), msg=File exists (os error 17)) src_kept=true dest_identity_unchanged=true
+S1 dest-empty-dir std::fs::rename=Ok src_still_there=false dest_replaced=true
+S1 dest-file noreplace=Err(kind=AlreadyExists, os=Some(17), msg=File exists (os error 17)) src_kept=true dest_identity_unchanged=true
+S1 dest-file std::fs::rename=Err(kind=NotADirectory, os=Some(20), msg=Not a directory (os error 20)) src_still_there=true dest_replaced=false
+S1 dest-nonempty-dir noreplace=Err(kind=AlreadyExists, os=Some(17), msg=File exists (os error 17)) src_kept=true dest_identity_unchanged=true
+S1 dest-nonempty-dir std::fs::rename=Err(kind=DirectoryNotEmpty, os=Some(66), msg=Directory not empty (os error 66)) src_still_there=true dest_replaced=false
+S1 dest-dangling-link noreplace=Err(kind=AlreadyExists, os=Some(17), msg=File exists (os error 17)) link_kept=true nowhere_created=false
+S1 missing-src noreplace=Err(kind=NotFound, os=Some(2), msg=No such file or directory (os error 2))
+S1 cross-device to=/Volumes/coding/.gfc-xdev/gfc-s1-xdev-dst noreplace=Err(kind=CrossesDevices, os=Some(18), msg=Cross-device link (os error 18)) src_kept=true dest_exists=false
+S1 in-use child-cwd-in-subdir noreplace=Ok src_kept=false
+S1 in-use open-file-no-share-delete noreplace=Ok src_kept=false
+S1 in-use open-file-std-default-share noreplace=Ok src_kept=false
+S1 in-use own-notify-watcher noreplace=Ok src_kept=false
+S1 permission-denied-parent noreplace=Err(kind=PermissionDenied, os=Some(13), msg=Permission denied (os error 13)) src_kept=true

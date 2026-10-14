@@ -101,53 +101,57 @@ failure:
 finalize:
     stack:
         - when: "human_in_the_loop && !err"
-          message: |-
-            - the first review after the implementation of `{{spec_name}}` was conducted and there are decisions that require your attention:
+          action:
+              - message: |-
+                    - the first review after the implementation of `{{spec_name}}` was conducted and there are decisions that require your attention:
 
-            {{human_in_the_loop}}
-          info: |-
-              - the first review after the implementation of {{ link(spec) }} was conducted and there are decisions that require your attention:
-    
-              {{human_in_the_loop}}
-          stop
+                    {{human_in_the_loop}}
+              - info: |-
+                    - the first review after the implementation of {{ link(spec) }} was conducted and there are decisions that require your attention:
+
+                    {{human_in_the_loop}}
+              - stop
         - when: "refreshed && !err"
-          message: |-
-            - we have finished the review/fix cycle for `{{spec_name}}` but we are in a multi-spec pipeline
-            - the next spec which will be implemented is `{{parent_dir(next_spec)}}`
-            - the spec and plan have been refreshed:
+          action:
+              - message: |-
+                    - we have finished the review/fix cycle for `{{spec_name}}` but we are in a multi-spec pipeline
+                    - the next spec which will be implemented is `{{parent_dir(next_spec)}}`
+                    - the spec and plan have been refreshed:
 
-            {{refreshed}}
+                    {{refreshed}}
 
-            > **Note:** no human review was needed for this refresh
-          info: |-
-            - we have finished the review/fix cycle for `{{link(spec)}}` but we are in a multi-spec pipeline
-            - the next spec which will be implemented is `{{link(next_spec)}}`
-            - the spec and plan have been refreshed:
+                    > **Note:** no human review was needed for this refresh
+              - info: |-
+                    - we have finished the review/fix cycle for `{{link(spec)}}` but we are in a multi-spec pipeline
+                    - the next spec which will be implemented is `{{link(next_spec)}}`
+                    - the spec and plan have been refreshed:
 
-            {{refreshed}}
+                    {{refreshed}}
 
-            > **Note:** no human review was needed for this refresh
+                    > **Note:** no human review was needed for this refresh
         - when: "refresh_review && !err"
-          message: |-
-            - we have finished the review/fix cycle for `{{spec_name}}` but we are in a multi-spec pipeline
-            - the next spec which will be implemented is `{{parent_dir(next_spec)}}`
-            - the spec and plan have decisions that require human intervention:
-  
-            {{refresh_review}}
-          info: |-
-            - we have finished the review/fix cycle for `{{link(spec)}}` but we are in a multi-spec pipeline
-            - the next spec which will be implemented is `{{link(next_spec)}}`
-            - the spec and plan have been refreshed:
-  
-            {{refreshed}}     
-          stop
+          action:
+              - message: |-
+                    - we have finished the review/fix cycle for `{{spec_name}}` but we are in a multi-spec pipeline
+                    - the next spec which will be implemented is `{{parent_dir(next_spec)}}`
+                    - the spec and plan have decisions that require human intervention:
+
+                    {{refresh_review}}
+              - info: |-
+                    - we have finished the review/fix cycle for `{{link(spec)}}` but we are in a multi-spec pipeline
+                    - the next spec which will be implemented is `{{link(next_spec)}}`
+                    - the spec and plan have been refreshed:
+
+                    {{refreshed}}
+              - stop
         - when: "no_refresh && !err"
-          message: |-
-            - we have finished the review/fix cycle for `{{spec_name}}` and are in a multi-spec pipeline
-            - the next _spec_ and _plan_ -- {{parent_dir(next_spec)}} -- was evaluated but did not need to be refreshed to be ready for implementation
-          info: |-
-              - we have finished the review/fix cycle for `{{spec_name}}` and are in a multi-spec pipeline
-              - the next _spec_ and _plan_ -- {{parent_dir(next_spec)}} -- was evaluated but did not need to be refreshed to be ready for implementation
+          action:
+              - message: |-
+                    - we have finished the review/fix cycle for `{{spec_name}}` and are in a multi-spec pipeline
+                    - the next _spec_ and _plan_ -- {{parent_dir(next_spec)}} -- was evaluated but did not need to be refreshed to be ready for implementation
+              - info: |-
+                    - we have finished the review/fix cycle for `{{spec_name}}` and are in a multi-spec pipeline
+                    - the next _spec_ and _plan_ -- {{parent_dir(next_spec)}} -- was evaluated but did not need to be refreshed to be ready for implementation
 ---
 # Review of {{title_case(without_date(parent_dir(spec)))}}
 

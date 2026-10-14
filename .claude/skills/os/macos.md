@@ -75,6 +75,31 @@ conditions that masquerade as repository defects.
   sniff-cli's `relative_base_with_unreadable_cwd_fails` does (measured
   2026-10-06). Keep such a test to one lookup.
 
+## File flushes cost ~25 ms each
+
+On Apple platforms Rust's `File::sync_all` **and** `File::sync_data` call
+`fcntl(F_FULLFSYNC)`. That call also empties the drive's own write cache,
+which costs about 25 ms per call on the primary host's APFS volumes. The
+`worktree` recovery-store tests flush a file and its directory on every write.
+With std's calls they took 0.3–4 s each; with plain `libc::fsync` they took
+about 30 ms (measured 2026-10-12).
+
+Plain `fsync` survives a process or kernel crash, not a power loss. When the
+code claims only process-crash durability, call `libc::fsync` under
+`#[cfg(target_vendor = "apple")]` (`worktree/lib/src/remove/recovery/storage.rs`,
+`flush`). Do not call std's flush in a per-batch loop on macOS without
+measuring it first.
+
+## Homebrew link paths
+
+Cargo can retain a native library search path to a removed Homebrew Cellar
+version. A Sniff rebuild failed with `library 'git2' not found` while
+`/opt/homebrew/opt/libgit2/lib/libgit2.dylib` still existed (2026-10-11).
+A process-local `LIBRARY_PATH=/opt/homebrew/opt/libgit2/lib` allowed the
+focused nextest build to link without changing dependencies or project
+configuration. Check that the library exists before using this workaround;
+the missing Cellar path alone is not evidence of a source defect.
+
 ## Process groups
 
 - One `kill(-pgid, SIGKILL)` does not reach a child that a group member is
@@ -156,6 +181,59 @@ not treat an empty `lsof` or vnode-descriptor scan as proof that no process
 watches a directory. See the [FSEvents guide](https://developer.apple.com/library/archive/documentation/Darwin/Conceptual/FSEvents_ProgGuide/UsingtheFSEventsFramework/UsingtheFSEventsFramework.html)
 and [Node's platform mapping](https://nodejs.org/api/fs.html#availability).
 
+### Receiving FSEvents reliably
+
+Measured 2026-10-11 with `notify` 8.2 (FSEvents backend; latency 0,
+`kFSEventStreamCreateFlagNoDefer`) on this host:
+
+- **Bursts drop events even when the handler never blocks.** Every
+  2,000-file burst produced several `MustScanSubDirs` events flagged "user
+  dropped". Bursts of 64–1,000 files did not.
+- **Delivery is not ordered against a marker.** In 1 of 9 rounds, 8 files
+  written *before* a marker file were reported *after* the marker's event.
+  At 2,000 files the marker event was itself lost twice. So "write a
+  marker, wait for its event" is not a drain on macOS by itself.
+- **`FSEventStreamFlushSync` is not a drain by itself either** (measured
+  2026-10-12, `fsevent-sys` 4.1, latency 0.1 s, file events). It delivers
+  only what fseventsd has already read from the kernel, which takes about
+  10 ms: 1 of 50 write-then-flush rounds missed the write. A marker *plus*
+  flushing until the marker's event arrives is a drain, because fseventsd
+  reads the kernel's events in order, across volumes (a checkout on
+  `/Volumes/coding` behind a marker in the system temp dir held for 25 of 25
+  rounds). Each such drain costs about 11 ms idle and up to ~650 ms under a
+  full test-suite load. `wt remove` does exactly this
+  (`worktree/lib/src/remove/observation/fsevents.rs`).
+- **`FSEventStreamStart` returns before events are routed to the stream.** A
+  file written right after it was never reported. Confirm with one marker
+  before relying on the stream.
+- **A directory's removal or rename replaces pending child events.** Write
+  `d/f` then rename (or delete) `d` within one delivery batch: only `d`'s
+  event arrives, even at latency 0 (0 of 5 at no wait; 5 of 5 once the
+  write had been delivered first). Drain between changing a directory's
+  children and renaming or removing it.
+- **Stream registration is serialized by fseventsd.** Alone it takes about
+  20 ms; with ~15 test processes starting streams together under suite load
+  it took up to 5 s each. Run FSEvents tests in a nextest test group with
+  `max-threads = 1` (the repo's `fsevents-l1`).
+- **Events lag by 100–600 ms under load**, crossing any fixed wait window.
+- **History flags are cumulative.** A file created and later deleted can be
+  reported, at deletion time, as `Create` plus `Remove` plus a data change,
+  so event kind alone cannot tell "we deleted it" from "someone wrote it".
+  The same holds for a rename (measured 2026-10-12): a directory created
+  moments before it was renamed away was reported with `Created` beside the
+  rename flag, so `wt remove`'s deletion engine first stopped on its own
+  quarantine move. Match by "the history includes the expected flag" and the
+  path's current state, never by "every flag is expected".
+- **Watches are path-based.** After a watched directory is renamed, writes
+  under the new name are unobserved until that name is watched. A recursive
+  watch on the parent covers both names.
+- `notify`'s handler runs on the stream's thread. If it blocks (for example
+  `send` on a full bounded channel whose receiver is not being read),
+  dropping the watcher **hangs forever**. Feed a bounded queue with
+  `try_send` instead.
+- Starting a stream costs about 19 ms (300 watchers in 5.6 s), and no
+  thread is left behind once they are dropped.
+
 ### Reading other processes' descriptors and cwd
 
 Measured 2026-10-05 on macOS 27.2 (arm64) for Sniff's path-usage query:
@@ -191,6 +269,22 @@ Measured 2026-10-05 on macOS 27.2 (arm64) for Sniff's path-usage query:
   `vst_dev as i32 as u64`, or a device with the high bit set never matches.
 
 ## Host conditions that look like repo failures
+
+- **`getcwd` for a removed directory directly under `$TMPDIR` takes about
+  9 s.** With the process cwd deleted, macOS `getcwd` falls back to searching
+  the parent's entries, and the shared `/var/folders/.../T/` made a sniff-cli
+  "unreadable cwd" test take 17–20 s (`std::env::current_dir()` measured
+  9.8 s there, 2 ms under `/private/tmp/...`, 70 µs inside an empty private
+  parent). Create the directory to delete inside its own `TempDir` and remove
+  only the child.
+- **CoreAudio client setup is serialized across processes.** The first
+  `AudioObjectGetPropertyData*` call in a process initializes the HAL
+  (`HALSystem::CheckOutInstance`), about 0.75 s of serial time each on this
+  host (seven third-party HAL plug-ins under `/Library/Audio/Plug-Ins/HAL`):
+  1 process 1.1 s, 3 together 2.4 s each, 6 together 4.6 s each, with under
+  0.2 s of user CPU apiece. A test suite whose tests each enumerate audio
+  devices therefore slows down by the count of such tests, not by core
+  count; keep the number of audio-enumerating tests small (sniff's `testing.md`).
 
 - **A Homebrew upgrade of `libgit2` breaks linking with `ld: library 'git2'
   not found`.** `libgit2-sys` links the system library when `pkg-config`
@@ -428,3 +522,12 @@ APFS on this macOS host rejects invalid UTF-8 directory names with error 92,
 whose filesystem supports them. Native-path lookup tests can instead build a
 catalog of nonexistent paths under a canonicalized temporary root; this proves
 byte identity without asking APFS to create an unsupported filename.
+
+## Stale Homebrew library search paths
+
+A cached `libgit2-sys` build script can retain a removed versioned Cellar path
+when Homebrew updates libgit2. Linking then fails with `library 'git2' not found`
+even though `/opt/homebrew/opt/libgit2/lib` contains the installed library.
+For a scoped local verification run, `LIBRARY_PATH=/opt/homebrew/opt/libgit2/lib`
+lets the linker find the current library without changing repository code or
+modifying cached artifacts. This was verified with the Sniff L1 suite.

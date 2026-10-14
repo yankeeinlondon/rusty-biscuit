@@ -13,6 +13,7 @@ The `worktree` package area has two crates:
 | `worktree-cli` | `worktree/cli/` | The `wt` binary, plus rendering, the shell wrapper, and the refresh worker |
 
 User-facing behavior is documented in `worktree/README.md`,
+`worktree/docs/base-directory.md`,
 `worktree/docs/cli/list.md`, `worktree/docs/cli/remove.md`,
 `worktree/docs/git-graph.md`, and
 `worktree/docs/performance-testing.md`. The pages below hold implementation
@@ -22,9 +23,11 @@ facts and traps, not user docs.
 
 | You are touching | Load |
 | ---------------- | ---- |
-| Shell wrapper (`--completions`, `WT_SHELL_WRAPPER`, `cd:` protocol), exit codes, interactivity, worktree name resolution | [cli-contracts.md](cli-contracts.md) |
+| Shell wrapper (`--completions`, `WT_SHELL_WRAPPER`, `cd:` protocol), exit codes, interactivity, the base directory (`WT`, `~/.worktree.json`, setup), worktree name resolution | [cli-contracts.md](cli-contracts.md) |
 | `wt create`, fork-origin records, `.worktreeinclude`, include copying and copy records | [create-and-include.md](create-and-include.md) |
 | `wt remove`: inventory fingerprint, safety tiers, handoff, `--force-remote` endpoint checks | [remove.md](remove.md) |
+| `wt remove`'s removal lifecycle (`remove::lifecycle`): order of steps, exit classes, crash recovery, retry resolution, resume | [lifecycle.md](lifecycle.md) |
+| `wt remove`'s activity observer (watched scopes, lost coverage, inotify, FSEvents, and `ReadDirectoryChangesW` adapters, handle registration), the deletion inventory, and the checked deletion engine | [observation.md](observation.md) |
 | `wt list` local pipeline, comparison cache, caption, table, columns, `--ff`, `--ignore-api` | [list.md](list.md) |
 | `wt list` background worker, PR store, live-head store, receipts, the wait and its budgets | [list-remote.md](list-remote.md) |
 | The `wt list` git graph: gathering, classification, layout, Kitty L2, graph perf | [git-graph.md](git-graph.md) |
@@ -59,13 +62,40 @@ facts and traps, not user docs.
   Without it the thread's Git calls silently drop out of a `git_calls` count
   (scopes are per thread). Any new helper that starts Git calls
   `calls::started()` once, after a successful spawn, or uses `calls::output`.
+- **Build every Git process with `git::command()`**, never
+  `Command::new("git")`, in production code and test fixtures alike
+  (`crate::git::command()` inside the library, `worktree::git::command()`
+  elsewhere). On Windows it starts the real `git.exe` behind Git for Windows'
+  `cmd\git.exe` launcher with the environment the launcher would set, so
+  each call is one process creation instead of two (`lib/src/git/program.rs`;
+  the os skill's `windows.md` has the launcher facts). Counting is the
+  caller's job as before.
 - **Read repository metadata through `git_metadata`, not a git process.**
-  Origin URL, default branch, branch-name validity, `core.sshCommand`, and ref
-  targets are read in-process with `gix`, falling back to git only when `gix`
+  Origin URL, default branch, branch-name validity, `core.sshCommand`, ref
+  targets and branch tips, `branch.<name>.*`, and the common directory are
+  read in-process with `gix`, falling back to git only when `gix`
   cannot read the repository. A git process costs ~47 ms on Windows, and a
   dozen redundant ones once pushed the refresh worker past `wt list`'s 3 s
-  wait there. A new read gets a parity test against the git command it
+  wait there. Branch tips (`RefTips::read_in`) and every graph history
+  question (`graph::topology::Commits`) are read in-process too; count and
+  fail them through `crate::questions`, not the process `recorder`
+  ([git-graph.md](git-graph.md)). So are a plain repository's worktree
+  listing (`git::worktree_list*`) and index entries
+  (`git::staged_entries_*`): call those, never `git worktree list
+  --porcelain` or `git ls-files --stage -z` directly. They leave anything
+  unusual (locked, prunable, bare, split or sparse index, `GIT_*`
+  overrides) to Git, so its wording stays authoritative. A new read gets a
+  parity test against the git command it
   replaces ([performance-testing](../../../worktree/docs/performance-testing.md#git-processes)).
+- **A test that acts at a chosen Git call** (a `git` shim on `PATH`) sets
+  `worktree::git::TEST_LIST_THROUGH_GIT_VAR`, or the read it waits for
+  never becomes a process (`cli/tests/remove_recovery.rs`).
+- **On Windows the first `gix` open in a process costs three process
+  creations** (gix-path's `git --exec-path` through the launcher, with a
+  hidden console) unless `EXEPATH` is set. `wt`'s `main` sets it
+  (`git::name_installation_for_gix`) and strips it from children. A test
+  helper that swaps one git process for an in-process read in a test
+  process that opens no repository otherwise trades one process for three.
 - **Tests never reach the network.** Use the stand-ins in
   [testing.md](testing.md) and `example.invalid` origins.
 - **The graph never substitutes what it cannot draw.** It marks the plan

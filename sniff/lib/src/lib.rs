@@ -439,6 +439,22 @@ fn detect_with_plan_inner(
 mod tests {
     use super::*;
 
+    /// The plan `detect_with_config(config)` runs, with every domain the
+    /// config keeps lowered to its cheap tier (hardware to CPU/memory,
+    /// network to local interfaces), for tests that assert only which
+    /// domains are present. `test_detect_returns_result` keeps the full
+    /// default path covered.
+    fn cheap_tiers(config: SniffConfig) -> DetectionPlan {
+        let mut plan = DetectionPlan::from(config);
+        if plan.hardware.is_some() {
+            plan = plan.hardware(HardwareRequest::summary());
+        }
+        if plan.network.is_some() {
+            plan = plan.network(NetworkRequest::interfaces_only());
+        }
+        plan
+    }
+
     #[test]
     #[serial_test::serial]
     fn test_detect_returns_result() {
@@ -554,7 +570,7 @@ mod tests {
     fn test_skip_os_returns_none() {
         // Skip filesystem too (not asserted here) to avoid a monorepo scan.
         let config = SniffConfig::new().skip_os().skip_filesystem();
-        let result = detect_with_config(config).unwrap();
+        let result = detect_with_plan(cheap_tiers(config)).unwrap();
         assert!(result.os.is_none(), "OS should be None when skip_os is set");
     }
 
@@ -563,7 +579,7 @@ mod tests {
     fn test_os_present_by_default() {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let config = SniffConfig::new().base_dir(temp_dir.path().to_path_buf());
-        let result = detect_with_config(config).unwrap();
+        let result = detect_with_plan(cheap_tiers(config)).unwrap();
         assert!(result.os.is_some(), "OS should be Some by default");
     }
 
