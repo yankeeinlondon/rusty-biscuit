@@ -327,7 +327,7 @@ immutable:
 | `cell` | A version-2 receipt cell, unchanged. |
 | `proof` | `{nextest_version, target, expected_listing_digest, completion_record_digest}`. Required for `rig`, `hosted`, and `seed`; forbidden for `hook`, which proves through the report counts in its cell. A **failing** observation may omit `proof`, and a failing one that carries it may omit `completion_record_digest`: `completion.py` refuses a run with a failing test, so a completed failure has no record to cite, and it still blocks reuse. A passing observation cites all four. For a `rig` or `seed` observation the two digests name `<package>-<gate>.expected.json` and `<package>-<gate>.completion.json` inside `producer.host.report_dir`, which a reader on that host rechecks byte for byte (another host's directory is accepted with its provenance). |
 | `reports[]` | `{path, sha256, bytes, store}` with `store` `host-dir` (under `producer.host.report_dir`) or `artifact`. A complete cell's own `report` must be cited. |
-| `features` | Optional. The isolated feature arguments the run used, verbatim; absent means none. |
+| `features` | Optional. The isolated feature arguments the run used, verbatim; absent means none. The verifier refuses an observation whose `features` differ from the plan build's, so every producer records them: `rig` and `hosted` from the plan's build, `hook` from each package's plan `test_args`, which `just ci-local` passes to `_test` and `_test_l2` verbatim. A `hook` observation published before 2026-10-13 carries none and can satisfy only a cell planned without features. |
 
 **Reading.** The verifier gathers every observation reachable from the head
 first, then resolves each `{package, environment, gate}`. A candidate qualifies

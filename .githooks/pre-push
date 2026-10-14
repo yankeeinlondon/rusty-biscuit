@@ -729,7 +729,7 @@ else
             CELLS="$(jq -r '.cells | length' "$RECEIPT_FILE")"
             PUBLISH_STATUS=0
             python3 "$REPO_ROOT/scripts/ci/observation_notes.py" publish-receipt \
-                --receipt "$RECEIPT_FILE" --head "$HEAD_SHA" \
+                --receipt "$RECEIPT_FILE" --plan "$HEAD_PLAN_FILE" --head "$HEAD_SHA" \
                 --environment "$ENVIRONMENT" --remote "$REMOTE_NAME" || PUBLISH_STATUS=$?
             if [ "$PUBLISH_STATUS" -eq 0 ]; then
                 echo "Published $CELLS $ENVIRONMENT cell(s) of evidence for $SHORT_HEAD (base $(git rev-parse --short=9 "$BASE_SHA")). Reports retained under $REPORT_DIR."
