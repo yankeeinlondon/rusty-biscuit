@@ -2,8 +2,10 @@
 //!
 //! Every awaited endpoint call returns its data or a [`CallError`]: a
 //! [`TransportError`] when no response head arrived, or an [`ApiError`] with
-//! the [`ResponseMeta`] of the reply that carried it. [`Replies`] classifies
-//! both the same way for every provider; only the meaning of a 401 differs.
+//! the [`ResponseMeta`] of the reply that carried it. A fetched list page
+//! fails with a [`PagerError`] carrying the same two cases. [`Replies`]
+//! classifies them the same way for every provider; only the meaning of a 401
+//! differs.
 //!
 //! ## What is safe to report
 //!
@@ -13,6 +15,7 @@
 //! or an unredacted request URL never reaches a message.
 
 use reqwest::header::HeaderMap;
+use schematic_schema::schematic_runtime::pager::{Page, PagerError};
 use schematic_schema::schematic_runtime::{
     ApiError, BuildError, CallError, ErrorKind, ResponseMeta, TransportError,
 };
@@ -48,6 +51,22 @@ impl Replies {
     /// The data of an awaited call, or the error it classifies as.
     pub(super) fn value<T, E>(&self, sent: Result<T, CallError<E>>) -> Result<T, SniffError> {
         sent.map_err(|error| self.error(&error))
+    }
+
+    /// A fetched list page, or the error it classifies as.
+    ///
+    /// Transport and response failures classify as they do for a call. Any
+    /// other pager failure (an unusable continuation, an expired deadline) has
+    /// no status and is reported by its redacted `Display`.
+    pub(super) fn page<T, E>(
+        &self,
+        fetched: Result<Page<T>, PagerError<E>>,
+    ) -> Result<Page<T>, SniffError> {
+        fetched.map_err(|error| match &error {
+            PagerError::Transport(error) => self.transport(error),
+            PagerError::Api { error, meta } => self.failure(meta, error),
+            other => self.remote_api(0, other.to_string()),
+        })
     }
 
     /// The error a failed call classifies as.

@@ -5,7 +5,8 @@
 
 use async_trait::async_trait;
 use schematic_schema::github::*;
-use schematic_schema::schematic_runtime::{AuthMethod, CallError};
+use schematic_schema::schematic_runtime::AuthMethod;
+use schematic_schema::schematic_runtime::pager::PagerError;
 
 use super::{
     count_api_request,
@@ -448,34 +449,36 @@ impl RemoteRepoProvider for GitHubRemote {
         repo: &str,
         limit: usize,
     ) -> Result<Vec<CiCdInfo>, SniffError> {
-        let call = self
-            .client
-            .list_workflow_runs(owner, repo)
-            .per_page(limit as i64);
+        let call = self.client.list_workflow_runs(owner, repo);
+        // `per_page` is pager-managed: one page is fetched at this size. The
+        // definition bounds it to 1..=100, and a size outside the bounds is
+        // refused before sending, so the limit is clamped into them.
+        let page_size = u32::try_from(limit.clamp(1, 100)).unwrap_or(100);
 
         count_api_request("workflow_runs");
-        let first = call.clone().await;
+        let first = call.clone().page_size(page_size).fetch_page().await;
         // Public workflow runs are readable anonymously, so a credential the API
         // rejects is retried once without one. A reply to an anonymous request is
         // final: the runtime never retries, and resending it would change nothing.
         let rejected_credential = matches!(
             &first,
-            Err(CallError::Api { meta, .. })
+            Err(PagerError::Api { meta, .. })
                 if matches!(meta.status.as_u16(), 401 | 403)
                     && meta.request.auth != AuthMethod::Anonymous
         );
         let reply = if rejected_credential {
             count_api_request("workflow_runs");
-            call.anonymous().await
+            call.anonymous().page_size(page_size).fetch_page().await
         } else {
             first
         };
-        let response = REPLIES.value(reply)?;
+        let page = REPLIES.page(reply)?;
 
-        // `per_page` bounds the server-side page, but a generous or non-honoring
-        // response could still exceed `limit`; `take(limit)` pins the invariant.
-        Ok(response
-            .workflow_runs
+        // The page size bounds the server-side page, but a generous or
+        // non-honoring response could still exceed `limit`; `take(limit)` pins
+        // the invariant.
+        Ok(page
+            .items
             .into_iter()
             .map(map_workflow_run)
             .take(limit)

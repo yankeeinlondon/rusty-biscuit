@@ -631,6 +631,34 @@ mod github_tests {
         assert_eq!(runs[1].event, Some("pull_request".to_string()));
     }
 
+    /// The page size is pager-managed and bounded to GitHub's 1..=100, so a
+    /// limit outside that range is clamped rather than refused before sending.
+    #[tokio::test]
+    async fn list_workflow_runs_clamps_the_page_size_to_githubs_bounds() {
+        let (server, provider) = setup_github_mock().await;
+
+        for (limit, per_page, expected_runs) in [(150, "100", 2), (0, "1", 0)] {
+            server.reset().await;
+            Mock::given(method("GET"))
+                .and(path("/repos/test-owner/test-repo/actions/runs"))
+                .and(query_param("per_page", per_page))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_json(github_workflow_runs_fixture()),
+                )
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let runs = provider
+                .list_workflow_runs("test-owner", "test-repo", limit)
+                .await
+                .unwrap_or_else(|error| panic!("limit {limit}: {error}"));
+
+            assert_eq!(runs.len(), expected_runs, "limit {limit}");
+            server.verify().await;
+        }
+    }
+
     #[tokio::test]
     async fn list_workflow_runs_caps_results_at_limit() {
         let (server, provider) = setup_github_mock().await;

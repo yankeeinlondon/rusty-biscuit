@@ -851,18 +851,23 @@ methods make one request each and never retry. The single exception is
 GitHub `list_workflow_runs`: when a request that carried a credential gets a
 401 or 403, the same call is sent once more with `.anonymous()`, which sends
 no credential from any source. A 401 or 403 to an anonymous request is
-final.
+final. The runs are one page fetched through the generated pager, whose page
+size is the requested limit clamped to GitHub's 1..=100.
 
 ```rust
-let call = self.client.list_workflow_runs(owner, repo).per_page(limit as i64);
-let first = call.clone().await;
+let call = self.client.list_workflow_runs(owner, repo);
+let first = call.clone().page_size(page_size).fetch_page().await;
 let retry = matches!(
     &first,
-    Err(CallError::Api { meta, .. })
+    Err(PagerError::Api { meta, .. })
         if matches!(meta.status.as_u16(), 401 | 403)
             && meta.request.auth != AuthMethod::Anonymous
 );
-let reply = if retry { call.anonymous().await } else { first };
+let reply = if retry {
+    call.anonymous().page_size(page_size).fetch_page().await
+} else {
+    first
+};
 ```
 
 Some failures read as absence rather than errors:
