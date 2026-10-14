@@ -3,8 +3,9 @@
 //!
 //! The CLI's tests cannot reach the crate-private fakes, and a real
 //! preparation would synthesize speech. With [`TEST_PREWARM_ENV`] set to
-//! `record:<path>` every preparation appends its text and a newline to
-//! `<path>` and succeeds; with `block:<path>` it appends and then never
+//! `record:<path>` every preparation appends one line to `<path>` and
+//! succeeds: its text, a tab, and its playback configuration serialized as
+//! JSON; with `block:<path>` it appends and then never
 //! completes, so a test can prove launch does not wait on it. Any other value,
 //! or none, leaves the production preparer in place. The gates still apply:
 //! the recorder only replaces what a started worker calls.
@@ -41,12 +42,13 @@ struct FileRecorder {
 }
 
 impl Preparer for FileRecorder {
-    fn prepare(&self, text: String, _config: TtsConfig) -> PrepareFuture {
+    fn prepare(&self, text: String, config: TtsConfig) -> PrepareFuture {
+        let config = serde_json::to_string(&config).unwrap_or_default();
         let recorded = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(&self.path)
-            .and_then(|mut file| file.write_all(format!("{text}\n").as_bytes()));
+            .and_then(|mut file| file.write_all(format!("{text}\t{config}\n").as_bytes()));
         let blocks = self.blocks;
         Box::pin(async move {
             if blocks {

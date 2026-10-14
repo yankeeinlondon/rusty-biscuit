@@ -25,6 +25,7 @@ mod report;
 mod resolve;
 mod review;
 mod task_frames;
+mod task_prewarm;
 mod task_run;
 
 use jit::StepComposeContext;

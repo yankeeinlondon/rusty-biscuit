@@ -70,6 +70,18 @@ pub use shell::{
     TaskShellError, TaskShellRunner,
 };
 
+/// The settings a sequence task's `setup:`/`teardown:` stacks play speech
+/// with, for a top-level task and every group member alike.
+///
+/// Task stacks do not read the user's `config.json`: their `say` uses the
+/// auto-detected provider and no requested voice. Task playback and TTS
+/// pre-warm of task stacks both take their settings from here, so a prepared
+/// phrase matches the configuration it later plays with.
+#[must_use]
+pub fn task_playback_settings() -> crate::events::GlobalSettings {
+    crate::events::GlobalSettings::default()
+}
+
 /// Which stage of a task produced a diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskStage {

@@ -37,7 +37,7 @@ fn inputs(frontmatter: &Value) -> PrewarmInputs {
 /// newly queued.
 fn submit(handle: &PrewarmHandle, frontmatter: &Value) -> usize {
     let config = lifecycle(frontmatter);
-    handle.submit_phrases(lifecycle_phrases(&config), &inputs(frontmatter))
+    handle.submit_phrases(&TtsConfig::new(), lifecycle_phrases(&config), &inputs(frontmatter))
 }
 
 fn texts(values: &[&str]) -> Vec<String> {
@@ -121,6 +121,31 @@ async fn every_accepted_playa_dry_run_spelling_starts_nothing() {
     assert_eq!(fake.texts(), texts(&["done"]));
 }
 
+/// Explicit provider and voice, as `{ "tts": { "provider": "kokoro", "voice":
+/// "af_heart" } }` bridges.
+fn kokoro_settings() -> GlobalSettings {
+    GlobalSettings {
+        tts: Some(TtsSettings {
+            provider: Some("kokoro".into()),
+            voice: Some("af_heart".into()),
+            rate: None,
+        }),
+        ..GlobalSettings::default()
+    }
+}
+
+/// Submit `frontmatter`'s lifecycle as a preparation site does: gated by
+/// `user`, prepared for the path that plays with `playback`.
+fn submit_for(
+    handle: &PrewarmHandle,
+    user: &GlobalSettings,
+    playback: &GlobalSettings,
+    frontmatter: &Value,
+) -> usize {
+    let config = lifecycle(frontmatter);
+    handle.submit(user, playback, lifecycle_phrases(&config), &inputs(frontmatter))
+}
+
 #[tokio::test]
 #[serial_test::serial]
 async fn candidates_use_the_lifecycle_playback_configuration() {
@@ -134,9 +159,9 @@ async fn candidates_use_the_lifecycle_playback_configuration() {
         ..GlobalSettings::default()
     };
     let fake = FakePreparer::recording();
-    let worker = PrewarmWorker::start_gated(&settings, false, Arc::new(fake.clone()));
+    let worker = PrewarmWorker::deferred_with(false, Arc::new(fake.clone()));
 
-    submit(&worker.handle(), &json!({ "success": [{ "say": "done" }] }));
+    submit_for(&worker.handle(), &settings, &settings, &json!({ "success": [{ "say": "done" }] }));
     fake.wait_for_calls(1).await;
 
     assert_eq!(
@@ -146,10 +171,69 @@ async fn candidates_use_the_lifecycle_playback_configuration() {
     );
 }
 
+/// Two speech paths of one invocation play with different settings: each
+/// candidate is prepared with its own path's configuration, the same text for
+/// two configurations is two candidates, and the same text for one
+/// configuration is one.
+#[tokio::test]
+#[serial_test::serial]
+async fn each_candidate_is_prepared_with_its_own_playback_configuration() {
+    let _live = test_toolkit::EnvGuard::remove_safe("PLAYA_DRY_RUN");
+    let user = kokoro_settings();
+    let task = GlobalSettings::default();
+    let fake = FakePreparer::recording();
+    let worker = PrewarmWorker::deferred_with(false, Arc::new(fake.clone()));
+    let handle = worker.handle();
+    let speaking = json!({ "success": [{ "say": "done" }] });
+
+    assert_eq!(submit_for(&handle, &user, &task, &speaking), 1, "a task path first");
+    assert_eq!(submit_for(&handle, &user, &user, &speaking), 1, "same text, another config");
+    assert_eq!(submit_for(&handle, &user, &task, &speaking), 0, "same text and config");
+    assert_eq!(submit_for(&handle.clone(), &user, &user, &speaking), 0, "same text and config");
+    fake.wait_for_calls(2).await;
+    drop(worker);
+
+    let calls = fake.calls();
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert_eq!(fake.texts(), texts(&["done", "done"]));
+    assert_eq!(calls[0].config, tts_config_from_settings(None), "the task path's config");
+    assert_eq!(
+        calls[1].config,
+        tts_config_from_settings(user.tts.as_ref()),
+        "the user path's config"
+    );
+    assert_ne!(calls[0].config, calls[1].config);
+}
+
+/// The gates come from the user's settings, never from the settings a path
+/// plays with: a first submission for a path that plays with defaults does
+/// not turn on what `prewarm: false` turned off.
+#[tokio::test]
+#[serial_test::serial]
+async fn prewarm_false_holds_when_the_first_submission_plays_with_default_settings() {
+    let _live = test_toolkit::EnvGuard::remove_safe("PLAYA_DRY_RUN");
+    let user = GlobalSettings {
+        tts_prewarm: false,
+        ..kokoro_settings()
+    };
+    let task = GlobalSettings::default();
+    assert!(task.tts_prewarm, "the control: the task defaults would enable pre-warm");
+    let fake = FakePreparer::recording();
+    let worker = PrewarmWorker::deferred_with(false, Arc::new(fake.clone()));
+    let handle = worker.handle();
+    let speaking = json!({ "success": [{ "say": "done" }] });
+
+    assert_eq!(submit_for(&handle, &user, &task, &speaking), 0);
+    assert!(!handle.is_enabled());
+    assert_eq!(submit_for(&handle, &user, &user, &speaking), 0);
+    drop(worker);
+    assert!(fake.calls().is_empty(), "{:?}", fake.calls());
+}
+
 #[tokio::test]
 async fn submission_returns_while_preparation_is_blocked_and_runs_serially() {
     let fake = FakePreparer::blocking();
-    let worker = PrewarmWorker::start_with(TtsConfig::new(), Arc::new(fake.clone()));
+    let worker = PrewarmWorker::start_with(Arc::new(fake.clone()));
     let frontmatter = json!({
         "title": "Widget",
         "success": [{ "say": "{{ title }} is done" }],
@@ -173,7 +257,7 @@ async fn submission_returns_while_preparation_is_blocked_and_runs_serially() {
 #[tokio::test]
 async fn a_candidate_is_queued_once_per_invocation() {
     let fake = FakePreparer::blocking();
-    let worker = PrewarmWorker::start_with(TtsConfig::new(), Arc::new(fake.clone()));
+    let worker = PrewarmWorker::start_with(Arc::new(fake.clone()));
     let handle = worker.handle();
     let frontmatter = json!({
         "title": "Widget",
@@ -207,7 +291,7 @@ async fn failures_warn_once_without_the_phrase_and_later_candidates_still_run() 
     let fake = FakePreparer::recording()
         .failing_on("first secret phrase")
         .failing_on("second secret phrase");
-    let worker = PrewarmWorker::start_with(TtsConfig::new(), Arc::new(fake.clone()));
+    let worker = PrewarmWorker::start_with(Arc::new(fake.clone()));
     let frontmatter = json!({
         "start": [{ "say": "first secret phrase" }],
         "success": [{ "say": "second secret phrase" }],
@@ -244,7 +328,7 @@ async fn a_successful_or_no_op_preparation_counts_as_done() {
     // The recording fake's success is exactly what a provider that produces no
     // file, or an unresolvable default, returns.
     let fake = FakePreparer::recording();
-    let worker = PrewarmWorker::start_with(TtsConfig::new(), Arc::new(fake.clone()));
+    let worker = PrewarmWorker::start_with(Arc::new(fake.clone()));
     let frontmatter = json!({ "success": [{ "say": "done" }] });
 
     assert_eq!(submit(&worker.handle(), &frontmatter), 1);
@@ -258,7 +342,7 @@ async fn a_successful_or_no_op_preparation_counts_as_done() {
 #[tokio::test]
 async fn dropping_the_worker_cancels_without_draining_and_keeps_completed_work() {
     let fake = FakePreparer::blocking();
-    let worker = PrewarmWorker::start_with(TtsConfig::new(), Arc::new(fake.clone()));
+    let worker = PrewarmWorker::start_with(Arc::new(fake.clone()));
     let handle = worker.handle();
     let frontmatter = json!({
         "start": [{ "say": "one" }],

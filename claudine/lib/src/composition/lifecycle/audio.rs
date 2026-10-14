@@ -81,6 +81,9 @@ impl LifecycleSignal {
 }
 
 /// Build the TTS configuration lifecycle speech uses from global settings.
+///
+/// Pre-warm builds its candidates with this same function: a prepared phrase
+/// is reused only when playback resolves an identical configuration.
 pub(crate) fn tts_config_from_settings(tts: Option<&TtsSettings>) -> TtsConfig {
     let mut config = TtsConfig::new();
     let Some(settings) = tts else {

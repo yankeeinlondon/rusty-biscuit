@@ -12,8 +12,10 @@
 //!   resolving it would mean executing it;
 //! - `ctx`/`env`, whose document capture does not exist yet.
 //!
-//! Each document's own preparation submits again later, through the same
-//! invocation-wide de-duplication, and finds what preflight had to skip.
+//! Each document's own preparation submits again later, and each task's
+//! `setup:`/`teardown:` is submitted again by [`submit_task_stacks`] when the
+//! task's context is established, through the same invocation-wide
+//! de-duplication, finding what preflight had to skip.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -22,15 +24,21 @@ use darkmatter::markdown::compose::ComposeContext;
 use serde_json::{Map, Value};
 
 use super::super::bindings::LifecycleScope;
+use super::super::actions::LifecycleNode;
 use super::super::{LifecycleSignal, parse_lifecycle_config, parse_task_action_stack};
 use super::{DocumentContext, Phrase, PrewarmHandle, PrewarmInputs, lifecycle_phrases, stack_phrases};
 use crate::composition::sequence::reserved::ROOT_OVERLAY_KEYS;
+use crate::composition::sequence::task::task_playback_settings;
 use crate::composition::{PreflightAction, PreflightGraph, PreflightTask, ResolvedCompositionSource};
 use crate::events::GlobalSettings;
 
 /// Submit every early phrase `graph` statically reaches.
 ///
-/// `sequence` is the sequence document; its own lifecycle is walked when a
+/// `settings` are the invocation's bridged user settings: they decide the
+/// pre-warm gates and are what prompt document lifecycles play with. Task
+/// `setup:`/`teardown:` stacks, of top-level tasks and group members alike,
+/// are prepared with [`task_playback_settings`] instead, which is what they
+/// play with. `sequence` is the sequence document; its own lifecycle is walked when a
 /// step runs its body. `caller_keys` are the top-level keys the caller set
 /// for every step. `context` only satisfies the evaluator: no phrase reading
 /// `ctx` or `env` is resolved here.
@@ -49,7 +57,8 @@ pub fn submit_sequence_preflight(
     }
     let walk = Walk {
         handle,
-        settings,
+        user: settings,
+        task_playback: task_playback_settings(),
         graph,
         sequence: authored_frontmatter(sequence),
         injected: ROOT_OVERLAY_KEYS
@@ -71,7 +80,10 @@ pub fn submit_sequence_preflight(
 
 struct Walk<'a> {
     handle: &'a PrewarmHandle,
-    settings: &'a GlobalSettings,
+    /// The user's settings: the gates, and prompt document playback.
+    user: &'a GlobalSettings,
+    /// What task `setup:`/`teardown:` stacks play with.
+    task_playback: GlobalSettings,
     graph: &'a PreflightGraph,
     /// The sequence document's authored frontmatter, which a task's
     /// `setup:`/`teardown:` reads.
@@ -83,18 +95,13 @@ struct Walk<'a> {
 impl Walk<'_> {
     fn task(&self, task: &PreflightTask) -> usize {
         let mut queued = 0;
-        for (raw, signal, scope, property) in [
-            (&task.setup, LifecycleSignal::Start, LifecycleScope::TaskSetup, "setup"),
-            (&task.teardown, LifecycleSignal::Finalize, LifecycleScope::TaskTeardown, "teardown"),
-        ] {
-            let Some(raw) = raw.as_ref().filter(|raw| !raw.is_null()) else {
-                continue;
-            };
-            // A stack that does not parse is reported by the task at its turn.
-            let Ok(nodes) = parse_task_action_stack(signal, raw, &task.origin_path, property) else {
-                continue;
-            };
-            queued += self.submit(stack_phrases(scope, &nodes), &self.sequence, &self.injected);
+        for (scope, nodes) in parsed_task_stacks(task) {
+            queued += self.submit(
+                &self.task_playback,
+                stack_phrases(scope, &nodes),
+                &self.sequence,
+                &self.injected,
+            );
         }
         match &task.action {
             PreflightAction::Prompt { path, .. } => {
@@ -122,12 +129,19 @@ impl Walk<'_> {
     fn document(&self, frontmatter: &Map<String, Value>, path: &Path, injected: &BTreeSet<String>) -> usize {
         // A lifecycle that does not parse is reported when its document runs.
         match parse_lifecycle_config(&Value::Object(frontmatter.clone()), path) {
-            Ok(lifecycle) => self.submit(lifecycle_phrases(&lifecycle), frontmatter, injected),
+            Ok(lifecycle) => self.submit(self.user, lifecycle_phrases(&lifecycle), frontmatter, injected),
             Err(_) => 0,
         }
     }
 
-    fn submit(&self, phrases: Vec<Phrase<'_>>, frontmatter: &Map<String, Value>, injected: &BTreeSet<String>) -> usize {
+    /// Submit `phrases`, to be prepared with what their path plays with.
+    fn submit(
+        &self,
+        playback: &GlobalSettings,
+        phrases: Vec<Phrase<'_>>,
+        frontmatter: &Map<String, Value>,
+        injected: &BTreeSet<String>,
+    ) -> usize {
         if phrases.is_empty() {
             return 0;
         }
@@ -148,8 +162,70 @@ impl Walk<'_> {
             context: DocumentContext::Pending(self.context.clone()),
             sequence_injected_keys: late,
         };
-        self.handle.submit(self.settings, phrases, &inputs)
+        self.handle.submit(self.user, playback, phrases, &inputs)
     }
+}
+
+/// Submit the early phrases of one task's own `setup:`/`teardown:`, now that
+/// the task's inputs exist.
+///
+/// Called wherever a task's context is established: a top-level task, a
+/// serial group member, and a parallel group member. Preflight had to skip a
+/// phrase reading `ctx`, `env`, or a frontmatter value it could only get by
+/// evaluating a template; here `frontmatter` is the effective frontmatter the
+/// task's stacks are evaluated against and `context` the `ctx`/`env` binding
+/// they are spoken with, so those phrases resolve. Group members and prompt
+/// documents are not walked: each member submits when its own context is
+/// established, and a prompt document when it is prepared.
+///
+/// `user` are the invocation's bridged user settings (the gates only); every
+/// candidate is prepared with [`task_playback_settings`]. The sequence's
+/// per-step overlay keys stay late, as do the keys `handle` was scoped with
+/// (the step's setters and the runtime writes it composed with). A phrase
+/// preflight already queued is not queued again.
+///
+/// Returns how many new candidates were queued.
+pub fn submit_task_stacks(
+    handle: &PrewarmHandle,
+    user: &GlobalSettings,
+    task: &PreflightTask,
+    frontmatter: &Map<String, Value>,
+    context: &ComposeContext,
+) -> usize {
+    if !handle.is_enabled() {
+        return 0;
+    }
+    let stacks = parsed_task_stacks(task);
+    let phrases: Vec<Phrase<'_>> = stacks
+        .iter()
+        .flat_map(|(scope, nodes)| stack_phrases(*scope, nodes))
+        .collect();
+    if phrases.is_empty() {
+        return 0;
+    }
+    let inputs = PrewarmInputs {
+        frontmatter: frontmatter.clone(),
+        context: DocumentContext::Captured(context.clone()),
+        sequence_injected_keys: ROOT_OVERLAY_KEYS.iter().map(|key| (*key).to_string()).collect(),
+    };
+    handle.submit(user, &task_playback_settings(), phrases, &inputs)
+}
+
+/// A task's own `setup:` and `teardown:` stacks, parsed as the task parses
+/// them, each with the scope it is spoken in. A stack that does not parse is
+/// left out: the task reports it at its turn.
+fn parsed_task_stacks(task: &PreflightTask) -> Vec<(LifecycleScope, Vec<LifecycleNode>)> {
+    [
+        (&task.setup, LifecycleSignal::Start, LifecycleScope::TaskSetup, "setup"),
+        (&task.teardown, LifecycleSignal::Finalize, LifecycleScope::TaskTeardown, "teardown"),
+    ]
+    .into_iter()
+    .filter_map(|(raw, signal, scope, property)| {
+        let raw = raw.as_ref().filter(|raw| !raw.is_null())?;
+        let nodes = parse_task_action_stack(signal, raw, &task.origin_path, property).ok()?;
+        Some((scope, nodes))
+    })
+    .collect()
 }
 
 fn authored_frontmatter(source: &ResolvedCompositionSource) -> Map<String, Value> {

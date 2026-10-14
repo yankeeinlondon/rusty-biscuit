@@ -100,7 +100,7 @@ pub(super) fn tts_config_from_claudine(
     tts
 }
 
-/// Speak a message via biscuit-speaks TTS (fire-and-forget).
+/// Build a [`TtsConfig`] from bridged [`TtsSettings`](crate::events::TtsSettings).
 #[cfg(test)]
 fn tts_config_from_settings(settings: Option<&crate::events::TtsSettings>) -> TtsConfig {
     let mut config = TtsConfig::new();

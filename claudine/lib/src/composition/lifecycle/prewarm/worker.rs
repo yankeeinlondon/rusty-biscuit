@@ -3,9 +3,12 @@
 //! [`PrewarmWorker`] is owned by the top-level command and cancels on drop;
 //! [`PrewarmHandle`] is the cheap, cloneable submitter every preparation site
 //! holds. Submission classifies phrases (no I/O), records each candidate's
-//! [`PrewarmKey`] when it is queued, and returns without waiting. The worker
-//! prepares one candidate at a time on its own thread, so provider discovery
-//! and synthesis never occupy a thread of the runtime that launches the agent.
+//! [`PrewarmKey`] when it is queued, and returns without waiting. Each
+//! candidate carries the playback configuration of the speech path that will
+//! play it, so one invocation can prepare for paths configured differently
+//! (a sequence's tasks and its prompt documents). The worker prepares one
+//! candidate at a time on its own thread, so provider discovery and synthesis
+//! never occupy a thread of the runtime that launches the agent.
 
 use std::collections::{BTreeSet, HashSet};
 use std::sync::{Arc, Mutex};
@@ -58,9 +61,10 @@ pub(crate) fn disabled_by(
 /// The invocation-owned pre-warm worker.
 ///
 /// A deferred worker starts nothing until the first submission that carries
-/// phrases: that submission's settings decide the gates and the candidate
-/// configuration, so a command whose documents speak nothing never starts a
-/// thread or reads a setting. Dropping the worker stops accepting work and
+/// phrases: that submission's user settings decide the gates, so a command
+/// whose documents speak nothing never starts a thread or reads a setting.
+/// The gates are decided once; every candidate is prepared with the playback
+/// configuration its own submission carried. Dropping the worker stops accepting work and
 /// cancels the preparation in flight; queued candidates are discarded, never
 /// drained. Completed cache files are unaffected.
 pub struct PrewarmWorker {
@@ -77,8 +81,8 @@ impl PrewarmWorker {
         Self::deferred_with(dry_run, production_preparer())
     }
 
-    /// [`Self::deferred`] with the preparer injected; the gates and the
-    /// candidate configuration are the production ones.
+    /// [`Self::deferred`] with the preparer injected; the gates are the
+    /// production ones.
     pub(crate) fn deferred_with(dry_run: bool, preparer: Arc<dyn Preparer>) -> Self {
         // `--dry-run` is known now, so the worker is off before any site asks.
         let state = if dry_run { State::Off } else { State::Pending };
@@ -91,7 +95,8 @@ impl PrewarmWorker {
         }
     }
 
-    /// Start the worker now with `settings`, unless a gate disables it.
+    /// Start the worker now, gated by the user's `settings`, unless a gate
+    /// disables it.
     #[cfg(test)]
     pub(crate) fn start_gated(
         settings: &GlobalSettings,
@@ -112,8 +117,8 @@ impl PrewarmWorker {
     /// Start a worker that prepares every candidate through `preparer`,
     /// without consulting any gate.
     #[cfg(test)]
-    pub(crate) fn start_with(config: TtsConfig, preparer: Arc<dyn Preparer>) -> Self {
-        let state = State::spawn(config, Arc::clone(&preparer));
+    pub(crate) fn start_with(preparer: Arc<dyn Preparer>) -> Self {
+        let state = State::spawn(Arc::clone(&preparer));
         Self {
             slot: Some(Arc::new(Slot {
                 dry_run: false,
@@ -187,24 +192,21 @@ enum State {
 }
 
 impl State {
-    /// Start the gated worker for `settings`.
-    fn start(slot: &Slot, settings: &GlobalSettings) -> Self {
+    /// Start the worker unless a gate disables it; only `user`'s
+    /// `tts_prewarm` is read.
+    fn start(slot: &Slot, user: &GlobalSettings) -> Self {
         let playa_dry_run = std::env::var("PLAYA_DRY_RUN").ok();
-        match disabled_by(slot.dry_run, settings.tts_prewarm, playa_dry_run.as_deref()) {
+        match disabled_by(slot.dry_run, user.tts_prewarm, playa_dry_run.as_deref()) {
             Some(_) => Self::Off,
-            None => Self::spawn(
-                tts_config_from_settings(settings.tts.as_ref()),
-                Arc::clone(&slot.preparer),
-            ),
+            None => Self::spawn(Arc::clone(&slot.preparer)),
         }
     }
 
-    fn spawn(config: TtsConfig, preparer: Arc<dyn Preparer>) -> Self {
+    fn spawn(preparer: Arc<dyn Preparer>) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
         let (cancel, cancelled) = watch::channel(false);
         let (exited_sender, exited) = std::sync::mpsc::channel();
         let shared = Arc::new(Shared {
-            config: config.clone(),
             queued: Mutex::new(HashSet::new()),
             sender,
             cancel,
@@ -220,7 +222,7 @@ impl State {
                     let _entered = span.enter();
                     match tokio::runtime::Builder::new_current_thread().enable_all().build() {
                         Ok(runtime) => {
-                            runtime.block_on(run(receiver, cancelled, config, preparer.as_ref()));
+                            runtime.block_on(run(receiver, cancelled, preparer.as_ref()));
                         }
                         Err(_) => warn!("TTS pre-warm could not start; speech is synthesized when it plays"),
                     }
@@ -267,12 +269,15 @@ impl std::fmt::Debug for PrewarmHandle {
     }
 }
 
+/// One queued preparation: resolved text and the playback configuration of
+/// the path that will speak it.
+type Candidate = (String, TtsConfig);
+
 struct Shared {
-    config: TtsConfig,
     /// Every key ever queued in this invocation, so a candidate is attempted
     /// at most once, whether it succeeded, failed, or is still in progress.
     queued: Mutex<HashSet<PrewarmKey>>,
-    sender: mpsc::UnboundedSender<String>,
+    sender: mpsc::UnboundedSender<Candidate>,
     cancel: watch::Sender<bool>,
 }
 
@@ -303,49 +308,60 @@ impl PrewarmHandle {
         }
     }
 
-    /// Classify `phrases` against `inputs` and queue each early one, starting
-    /// a deferred worker with `settings` first.
+    /// Classify `phrases` against `inputs` and queue each early one for the
+    /// speech path configured by `playback`.
+    ///
+    /// `user` is the invocation's bridged user settings: a deferred worker's
+    /// gates are decided from them, never from `playback`, so a path that
+    /// plays with default settings cannot turn on what the user turned off.
+    /// `playback` is what the path that later speaks these phrases plays with;
+    /// each candidate is prepared and de-duplicated with its configuration.
     ///
     /// Returns how many new candidates were queued.
     pub(crate) fn submit<'a>(
         &self,
-        settings: &GlobalSettings,
+        user: &GlobalSettings,
+        playback: &GlobalSettings,
         phrases: Vec<Phrase<'a>>,
         inputs: &PrewarmInputs,
     ) -> usize {
         if phrases.is_empty() {
             return 0;
         }
-        match self.running(Some(settings)) {
-            Some(shared) => self.queue(&shared, phrases, inputs),
+        match self.running(Some(user)) {
+            Some(shared) => {
+                let config = tts_config_from_settings(playback.tts.as_ref());
+                self.queue(&shared, &config, phrases, inputs)
+            }
             None => 0,
         }
     }
 
     /// Classify `phrases` against `inputs` and queue each early one on a
-    /// started worker.
+    /// started worker, to be prepared with `config`.
     ///
     /// Returns how many new candidates were queued. Nothing is classified when
     /// the worker is deferred, disabled, or cancelled.
     #[cfg(test)]
     pub(crate) fn submit_phrases<'a>(
         &self,
+        config: &TtsConfig,
         phrases: impl IntoIterator<Item = Phrase<'a>>,
         inputs: &PrewarmInputs,
     ) -> usize {
         match self.running(None) {
-            Some(shared) => self.queue(&shared, phrases, inputs),
+            Some(shared) => self.queue(&shared, config, phrases, inputs),
             None => 0,
         }
     }
 
-    /// The started, uncancelled worker, starting a deferred one when
-    /// `settings` are given.
-    fn running(&self, settings: Option<&GlobalSettings>) -> Option<Arc<Shared>> {
+    /// The started, uncancelled worker, starting a deferred one gated by the
+    /// `user` settings when they are given.
+    fn running(&self, user: Option<&GlobalSettings>) -> Option<Arc<Shared>> {
         let slot = self.slot.as_ref()?;
         let mut state = slot.lock();
-        if let (State::Pending, Some(settings)) = (&*state, settings) {
-            *state = State::start(slot, settings);
+        if let (State::Pending, Some(user)) = (&*state, user) {
+            *state = State::start(slot, user);
         }
         match &*state {
             State::Running(shared, _) if !*shared.cancel.borrow() => Some(Arc::clone(shared)),
@@ -356,6 +372,7 @@ impl PrewarmHandle {
     fn queue<'a>(
         &self,
         shared: &Shared,
+        config: &TtsConfig,
         phrases: impl IntoIterator<Item = Phrase<'a>>,
         inputs: &PrewarmInputs,
     ) -> usize {
@@ -376,41 +393,41 @@ impl PrewarmHandle {
                 Classification::Early(text) => Some(text),
                 Classification::Skip(_) => None,
             })
-            .filter(|text| shared.enqueue(text))
+            .filter(|text| shared.enqueue(text, config))
             .count()
     }
 }
 
 impl Shared {
-    /// Queue `text` unless its key was queued before; `true` when queued.
-    fn enqueue(&self, text: &str) -> bool {
-        let key = PrewarmKey::new(text, &self.config);
+    /// Queue `text` for `config` unless that key was queued before; `true`
+    /// when queued.
+    fn enqueue(&self, text: &str, config: &TtsConfig) -> bool {
+        let key = PrewarmKey::new(text, config);
         let mut queued = self.queued.lock().unwrap_or_else(|poison| poison.into_inner());
         if !queued.insert(key) {
             return false;
         }
-        self.sender.send(text.to_string()).is_ok()
+        self.sender.send((text.to_string(), config.clone())).is_ok()
     }
 }
 
 /// Prepare queued candidates one at a time until cancelled.
 async fn run(
-    mut receiver: mpsc::UnboundedReceiver<String>,
+    mut receiver: mpsc::UnboundedReceiver<Candidate>,
     mut cancelled: watch::Receiver<bool>,
-    config: TtsConfig,
     preparer: &dyn Preparer,
 ) {
     let mut warned = false;
     loop {
-        let text = tokio::select! {
+        let (text, config) = tokio::select! {
             biased;
             _ = cancelled.wait_for(|cancelled| *cancelled) => return,
             next = receiver.recv() => match next {
-                Some(text) => text,
+                Some(candidate) => candidate,
                 None => return,
             },
         };
-        let preparation = preparer.prepare(text, config.clone());
+        let preparation = preparer.prepare(text, config);
         tokio::select! {
             biased;
             // Dropping the preparation is its cancellation.

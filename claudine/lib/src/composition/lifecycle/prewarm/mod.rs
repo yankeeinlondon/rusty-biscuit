@@ -8,11 +8,11 @@
 //! invocation prepares on. Every preparation goes through the [`Preparer`]
 //! seam, so tests observe calls with a fake rather than a real speech
 //! provider.
-
 //!
 //! Every preparation site calls one entry point: [`collect_and_submit`] for a
-//! document's lifecycle, or [`submit_sequence_preflight`] for everything a
-//! sequence's static graph reaches. One [`PrewarmWorker`] belongs to each
+//! document's lifecycle, [`submit_sequence_preflight`] for everything a
+//! sequence's static graph reaches, or [`submit_task_stacks`] for a sequence
+//! task's own `setup:`/`teardown:` once the task's context is established. One [`PrewarmWorker`] belongs to each
 //! top-level command and travels to those sites as a [`PrewarmHandle`] on the
 //! invocation context.
 
@@ -32,7 +32,7 @@ pub(crate) use key::PrewarmKey;
 pub(crate) use preparer::{Preparer, SpeakPreparer};
 #[cfg(test)]
 pub(crate) use preparer::{PrepareFuture, PrewarmError};
-pub use sequence::submit_sequence_preflight;
+pub use sequence::{submit_sequence_preflight, submit_task_stacks};
 pub use worker::{PrewarmHandle, PrewarmWorker};
 
 use super::LifecycleConfig;
@@ -42,9 +42,10 @@ use crate::events::GlobalSettings;
 ///
 /// The one entry point a document's bootstrap, stabilized reread, loop
 /// refresh, retry/resume, and `proxy` target preparation call; a future
-/// `prep` directive calls it too. `settings` are the lifecycle settings the
-/// document plays speech with; the first submission that carries phrases
-/// starts the invocation's worker with them. `inputs` is only built when the
+/// `prep` directive calls it too. `settings` are the invocation's bridged
+/// user settings, which a document's lifecycle also plays speech with: every
+/// candidate is prepared with their configuration, and the first submission
+/// that carries phrases decides the gates from them. `inputs` is only built when the
 /// handle is live and the lifecycle speaks, so a silent document costs
 /// nothing.
 ///
@@ -63,7 +64,7 @@ pub fn collect_and_submit(
     if phrases.is_empty() {
         return 0;
     }
-    handle.submit(settings, phrases, &inputs())
+    handle.submit(settings, settings, phrases, &inputs())
 }
 
 #[cfg(test)]

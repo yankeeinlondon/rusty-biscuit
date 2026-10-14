@@ -58,6 +58,7 @@ use crate::commands::wrap::composition::execute_composition_request_inner;
 
 use super::iterate::{SequenceRunContext, StepOutcome};
 use super::task_frames::SequenceTaskSink;
+use super::task_prewarm::TaskStackPrewarm;
 
 /// Run a step's explicit task and report it as a step outcome.
 #[allow(clippy::too_many_arguments)]
@@ -97,13 +98,15 @@ pub(super) fn run_step_task(
     document_epoch.record_prepared_context_consumer(
         claudine::invocation_context::PreparedContextConsumer::Lifecycle,
     );
+    let prewarm = TaskStackPrewarm::new(run, &frontmatter);
+    prewarm.submit(&run.prep_context.invocation, task, &task_context);
 
     // A task stack mutates relative to the document that authored the task,
     // including when that document lives outside the sequence repository.
     let mutation_root = task.origin_dir.clone();
     let engine = EffectEngine::builder().mutation_root(&mutation_root).build();
     let emitter = DefaultLifecycleEmitter;
-    let settings = claudine::events::GlobalSettings::default();
+    let settings = claudine::composition::sequence::task::task_playback_settings();
     let messaging = claudine::messaging::RuntimeMessagingSettings {
         user: None,
         repo: None,
@@ -137,7 +140,7 @@ pub(super) fn run_step_task(
         settings: &settings,
     };
 
-    let prompt_runner = WrapperPromptRunner::new(run, env_overrides, target, runtime_state);
+    let prompt_runner = WrapperPromptRunner::new(run, env_overrides, target, runtime_state, prewarm);
     let shell = SystemTaskShell::default();
     // `--silent` drops the sink entirely rather than rendering frames nobody
     // reads; the library then skips the render altogether.
@@ -408,6 +411,8 @@ struct WrapperPromptRunner<'a> {
     env_overrides: &'a BTreeMap<String, String>,
     target: Option<&'a ResolvedExecutionTarget>,
     runtime_state: &'a std::sync::Arc<RuntimeState>,
+    /// Submits each group member's stacks when its context is opened.
+    prewarm: TaskStackPrewarm<'a>,
     /// The most recent prompt run's perf record and provider.
     ///
     /// Interior mutability because [`PromptTaskRunner::run`] takes `&self` — the
@@ -432,12 +437,14 @@ impl<'a> WrapperPromptRunner<'a> {
         env_overrides: &'a BTreeMap<String, String>,
         target: Option<&'a ResolvedExecutionTarget>,
         runtime_state: &'a std::sync::Arc<RuntimeState>,
+        prewarm: TaskStackPrewarm<'a>,
     ) -> Self {
         Self {
             run,
             env_overrides,
             target,
             runtime_state,
+            prewarm,
             last_run: std::sync::Mutex::new(PromptRunRecord::default()),
         }
     }
@@ -492,6 +499,7 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         epoch.record_prepared_context_consumer(
             claudine::invocation_context::PreparedContextConsumer::Lifecycle,
         );
+        self.prewarm.submit(&document, task, &context);
         Some(TaskRun {
             context,
             run,
@@ -517,6 +525,7 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         epoch.record_prepared_context_consumer(
             claudine::invocation_context::PreparedContextConsumer::Lifecycle,
         );
+        self.prewarm.submit(&document, task, &context);
         Some(TaskRun {
             context,
             run,
