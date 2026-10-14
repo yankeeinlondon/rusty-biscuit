@@ -187,7 +187,10 @@ fn inline_composition_uses_effective_frontmatter() {
     assert!(prepared.prompt.contains("summary of what you did"));
     assert!(prepared.prompt.find("List three colors").unwrap() < prepared.prompt.find("IMPORTANT").unwrap());
     assert!(!prepared.prompt.contains("Return the replacement Markdown body"));
-    assert!(prepared.launch_schema.is_none(), "no `$schema` declared");
+    // With no `$schema`, the launch schema is Claudine's trigger payload alone.
+    let launch = prepared.launch_schema.as_ref().expect("Claudine's triggers match");
+    assert!(launch.effective.simplified.is_none(), "no authored `$schema`");
+    assert!(crate::composition::schema::bundle::is_claudine_owned(&launch.effective, "prompt"));
 
     // Effective frontmatter should contain composed keys
     assert!(prepared.effective_frontmatter.is_object());

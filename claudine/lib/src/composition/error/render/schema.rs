@@ -147,23 +147,56 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
         }
         CompositionError::CompletionSchemaFailed {
             source_path,
+            problems,
             status,
-            ..
         } => {
             let file_link = render_file_link(source_path);
-            let body = vec![
-                Prose::new(format!(
-                    "{file_link} does not satisfy its `$schema` now that the run has completed."
-                )),
-                crate::composition::schema::schema_status_report_prose(status),
-            ];
+            // A document with no authored `$schema` was judged by trigger
+            // schemas alone, whose status is the raw report.
+            let schema = if status.raw_json_schema { "schema" } else { "`$schema`" };
+            let mut body = vec![Prose::new(format!(
+                "{file_link} does not satisfy its {schema} now that the run has completed."
+            ))];
+            // The status table lists the authored `$schema`'s properties; a
+            // problem on a property only a trigger schema (Claudine's
+            // payload) declares appears in no table row, so it is listed here.
+            let tabled: std::collections::BTreeSet<&str> = if status.raw_json_schema {
+                std::collections::BTreeSet::new()
+            } else {
+                body.push(crate::composition::schema::schema_status_report_prose(status));
+                status
+                    .required
+                    .iter()
+                    .chain(&status.optional)
+                    .map(|property| property.name.as_str())
+                    .collect()
+            };
+            let untabled: Vec<_> = problems
+                .iter()
+                .filter(|problem| {
+                    let root = problem.property.split(['.', '[']).next().unwrap_or(&problem.property);
+                    !tabled.contains(root)
+                })
+                .collect();
+            if !untabled.is_empty() {
+                let mut listed = String::from("<b>Problems:</b>");
+                for problem in untabled {
+                    listed.push_str(&format!(
+                        "\n- <cyan>`{}`</cyan>: {}",
+                        crate::composition::schema::escape_schema_prose(&problem.property),
+                        crate::composition::schema::escape_schema_prose(&problem.message),
+                    ));
+                }
+                body.push(Prose::new(listed).with_line_breaks(biscuit_terminal::components::prose::LineBreaks::Hard));
+            }
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("CompositionError", "completion schema"))
                 .body(body)
                 .hint(
-                    "A property declared `required` must be present and valid when the run \
-                     finishes. Either the producing actor did not set it, or the schema \
-                     declares an obligation nothing fulfills.",
+                    "A property declared `required` must be present, and every present \
+                     property valid, when the run finishes. Either the producing actor did \
+                     not set it correctly, or the schema declares an obligation nothing \
+                     fulfills.",
                 )
         }
         CompositionError::MissingProperties {

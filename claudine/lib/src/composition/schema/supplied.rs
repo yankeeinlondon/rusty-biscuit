@@ -13,7 +13,7 @@ use darkmatter::markdown::schemas::{
 
 use super::{
     CompositionError, ResolvedCompositionSource, build_effective_instance,
-    is_composition_independent, load_effective_schema, top_level_pointer_segment,
+    is_composition_independent, load_authored_schema, top_level_pointer_segment,
     value_needs_composition,
 };
 
@@ -41,7 +41,7 @@ pub fn unresolved_supplied_files(
         return Vec::new();
     }
     let Ok(Some(effective)) =
-        load_effective_schema(source, None, document_context, records)
+        load_authored_schema(source, None, document_context, records)
     else {
         return Vec::new();
     };

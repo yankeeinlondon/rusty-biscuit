@@ -446,22 +446,23 @@ fn prepared_request(
     Ok(super::compose_request(compose_opts, options.file_resolution_context.clone())?)
 }
 
-/// Resolve the document's `$schema` once for this preparation so it can be
-/// retained on the prepared composition.
+/// Resolve the document's effective schema (its matching trigger schemas
+/// under its `$schema`) once for this preparation so it can be retained on
+/// the prepared composition; triggers match the composed `effective_frontmatter`
+/// the verdict judges.
 ///
 /// A deferred-verdict read tolerates a schema that cannot be prepared (the
 /// stabilized reread reports it); every other read surfaces the typed
 /// [`CompositionError::SchemaLoad`] / [`CompositionError::SchemaParse`].
 fn resolve_launch_schema(
     source: &ResolvedCompositionSource,
+    effective_frontmatter: &serde_json::Value,
     options: &PrepareOptions,
     phase: Option<SchemaPhase>,
 ) -> Result<Option<LaunchSchema>, CompositionError> {
-    if !source.markdown.frontmatter().as_map().contains_key("$schema") {
-        return Ok(None);
-    }
     match super::schema::load_effective_schema(
         source,
+        Some(effective_frontmatter),
         options.file_ref_fallback_dir.as_deref(),
         &options.file_resolution_context,
         &options.schema_caller_records(),
@@ -678,7 +679,7 @@ pub(super) fn prepare_direct_with_prompt(
 
     // Resolved after a successful compose so a schema that cannot be prepared
     // keeps surfacing through the composer's own typed failure.
-    let launch_schema = resolve_launch_schema(source, &options, None)?;
+    let launch_schema = resolve_launch_schema(source, &effective_frontmatter, &options, None)?;
     let source_repo_root = options.source_repo_root.clone();
 
     Ok(PreparedComposition {
@@ -774,7 +775,8 @@ pub fn prepare_inline(
         });
     }
 
-    let launch_schema = resolve_launch_schema(source, &options, Some(SchemaPhase::Launch))?;
+    let launch_schema =
+        resolve_launch_schema(source, &effective_frontmatter, &options, Some(SchemaPhase::Launch))?;
     let source_repo_root = options.source_repo_root.clone();
 
     // The agent works on the file: it is told which file, what the schema

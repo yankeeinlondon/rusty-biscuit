@@ -1940,6 +1940,7 @@ fn schema_reference_stays_document_relative_through_claudine_load() {
     // Fallback points at a dir WITHOUT schema.yaml.
     let effective = load_effective_schema(
         &source,
+        None,
         Some(fallback_dir.path()),
         &crate::test_support::context_for(&source.resolved_path),
         &Default::default(),
@@ -1969,6 +1970,7 @@ fn root_union_schema_string_arm_stays_document_relative_through_claudine_load() 
 
     let effective = load_effective_schema(
         &source,
+        None,
         Some(fallback_dir.path()),
         &crate::test_support::context_for(&source.resolved_path),
         &Default::default(),
