@@ -626,7 +626,7 @@ checks, and DMLS's `nested_span.rs` mirrors its path spelling.
   catalog through `LifecycleParseOptions`. The public `parse_lifecycle_config`
   lives in `lifecycle/mod.rs` and supplies `audio.rs::is_known_effect`.
 - **Removed grammar.** `stack`, the `action` aggregator or discriminator map,
-  `say_first`, communication `message`/`sound`/`route` parameters, and
+  the speech-ordering flag, communication `message`/`sound`/`route` parameters, and
   `_loop_*` reads are `CompositionError::RemovedGrammar { path, removed,
   replacement }`, checked before any other shape error; loop-root
   `action`/`actions` stay iteration controls.
