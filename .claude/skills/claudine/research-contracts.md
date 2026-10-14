@@ -110,7 +110,7 @@ Each of these cost a failed run.
 | A dry run composes prompts and fires no lifecycle event | Prove a prompt with a real run. For events alone, use a copy of the prompt with a one-line task |
 | A lifecycle command may not take its executable from interpolation | Use `has_binary(name)`, or a literal executable with interpolated arguments |
 | `err.message` is not a field | Use `err.msg` |
-| A lifecycle write outside the repository is dropped without a message, with every later action in that stack item | Keep test documents inside the repository, such as under `target/` |
+| A lifecycle write outside the repository is dropped without a message, with every later action in its list | Keep test documents inside the repository, such as under `target/` |
 | `validate_schema()` in a lifecycle event cannot resolve a relative `$schema` | Run `md schema validate` through `set` with `$( … )::result` |
 | Runs work in parallel and may read a document another is writing | Guard file reads with `env.AGENT == agent &&` |
 | A usage limit is not cured by retrying | Test `err.category == 'cap'` before `retry` |

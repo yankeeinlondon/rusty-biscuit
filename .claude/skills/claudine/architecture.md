@@ -603,6 +603,44 @@ repository and `@` from the launch tree, in composition and in completion
 (`CommittedPrompt::resolve` derives such a prompt with
 `composition::derive_request_context_for_source`, composition's policy).
 
+### Lifecycle grammar
+
+Every stack (the six events, the `loop:` block's loose verbs or `gate:` list,
+and a task's `setup:`/`teardown:`) parses into `Vec<LifecycleNode>`
+(`lifecycle/actions.rs`): `Action(LifecycleAction)` or
+`Conditional(LifecycleConditional { when, then, otherwise, path })`, at most
+five `when` levels deep. `LifecycleConfig` holds only `stacks`. A dictionary
+bundle expands at parse time in canonical order (`set`; `stdout`, `stderr`,
+`info`, `warn`, `success`, `message`, `notify`, `effect`, `say`/`speak`;
+`shell`; other verbs by ASCII name; the one directive), so the executor never
+iterates a map. Each node carries its authored `LifecyclePath`
+(`source_map.rs`, e.g. `failure[0].else[1].shell.command`), which every
+diagnostic's `property` and `ActionLocation` render; there is no synthetic
+index. `validate.rs::walk_stack` is the one recursive walker (both branches)
+for nested-span, `err`-availability, retired-loop-read, and shell-collection
+checks, and DMLS's `nested_span.rs` mirrors its path spelling.
+
+- **Lift-ready slice.** `parse`, `action_shape`, `actions`, `validate`,
+  `signatures`, and `source_map` name no Claudine runtime type
+  (`lib/tests/l1/lifecycle_lift_ready_guard.rs`); the caller injects the effect
+  catalog through `LifecycleParseOptions`. The public `parse_lifecycle_config`
+  lives in `lifecycle/mod.rs` and supplies `audio.rs::is_known_effect`.
+- **Removed grammar.** `stack`, the `action` aggregator or discriminator map,
+  `say_first`, communication `message`/`sound`/`route` parameters, and
+  `_loop_*` reads are `CompositionError::RemovedGrammar { path, removed,
+  replacement }`, checked before any other shape error; loop-root
+  `action`/`actions` stay iteration controls.
+- **Execution.** `executor.rs::execute_nodes` runs nodes serially, evaluates a
+  reached guard once, runs only the selected body, and the first directive
+  ends the whole event. Audio is published in list position (no
+  `audio_phases`). `LifecycleRunGuard::emit_signal` (the drop safety net) emits
+  only root, unguarded, literal communication.
+- **`with` overlays.** `proxy` and `retry` share `WithOverlay` and
+  `executor.rs::resolve_with_overlay`; errors are the `LifecycleWith*` family
+  (`LifecycleWithUnsupported` elsewhere). A retry overlay travels as
+  `StackControl::Retry.overlay` into `HarnessPromptState.pending_retry_overlay`
+  and applies to one transition (see [cli-commands.md](cli-commands.md)).
+
 ### Agent text is data
 
 Anything a run *produces* (agent output, expression results, file reads) is
@@ -611,9 +649,12 @@ wrote (the document, `--set`/`key=value`, interactive answers) is a template.
 Claudine enforces this at two boundaries:
 
 - **In memory — `LayeredOverrides`** (`runtime_state.rs`). Runtime values stay
-  raw and typed (`outputs`, `_loop_*`, loop action results, lifecycle `set:`,
+  raw and typed (`outputs`, loop action results, lifecycle `set:`,
   task `params`, group `variables`, the step overlay, and the per-document
-  `PrepareOptions::proxy_overlay`). `LayeredOverrides::apply_to` is the only
+  `PrepareOptions::proxy_overlay`, which carries the retained proxy overlay
+  with any one-read `retry.with` overlay merged on top). A loop iteration's
+  values are not an override: they are the host-declared `loop` global
+  (`ComposeOptions::with_host_globals`). `LayeredOverrides::apply_to` is the only
   call to Darkmatter's `with_override_layers`, splitting keys into an authored
   and a data layer. `cli/tests/l1/override_boundary_guard.rs` fails on any
   other override hand-off and on any `literal_token` reference in the runtime
@@ -656,7 +697,13 @@ a malformed span, an unknown function, or a read of an unavailable global, and
 an absent document property is `null`. Which globals a scope may read comes
 from `lifecycle/bindings.rs` (`binding_view`/`runtime_bindings`), handed to
 Darkmatter as a `BindingView`; `group` outside an established group is an
-unavailable global (`claudine.outside-group`).
+unavailable global (`claudine.outside-group`). `loop` is declared the same way:
+an iteration's `{count, is_first, is_last, last_output, last_exit_code}` inside
+a loop, `claudine.outside-loop` outside one, and execution-dependent for a loop
+document prepared before its first iteration. The five retired `_loop_*` names
+are declared unavailable (`claudine.removed-loop-name`) so a read that only a
+later render introduces still maps to `CompositionError::RemovedGrammar`
+(`path: "render"`), including during preflight discovery.
 Known limits: Darkmatter's `expression` format validator is
 string-only, so decoded data with `{{` in an expression-typed field passes
 lexically; the public `pre_validate_schema[_for_mode]` treats every override
