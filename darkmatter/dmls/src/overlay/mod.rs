@@ -16,6 +16,7 @@ pub mod directives;
 pub mod doc_links;
 pub mod expressions;
 pub mod frontmatter;
+pub mod named_types;
 pub mod schema;
 pub mod shell;
 pub mod suggestions;
@@ -29,8 +30,9 @@ use biscuit_hash::xx_hash_bytes;
 use crate::context::DocumentResolution;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::compose::file_resolution_context_identity;
+use darkmatter::markdown::schemas::resolve::expand_named_types;
 use darkmatter::markdown::schemas::{
-    SchemaError, StandaloneSchemaDocument, StandaloneSchemaEnvelope,
+    SchemaError, SchemaRoots, SchemaSourceId, StandaloneSchemaDocument, StandaloneSchemaEnvelope,
     SuggestionLintProblem, parse_standalone_schema_document,
 };
 use darkmatter::markdown::schemas::triggers::{TriggerRegistry, scan as scan_triggers};
@@ -42,6 +44,7 @@ pub use frontmatter::{
     FmEntry, FmEntryRole, FmPathSegment, FmScalarStyle, FmValueKind, FrontmatterAst,
     YamlParseError, format_dotted,
 };
+pub use named_types::NamedTypeCatalog;
 pub use schema::{
     FrontmatterSchemaValue, MetaSchemaKind, SchemaAuthoringState, SchemaBundle,
 };
@@ -107,6 +110,12 @@ pub struct DocumentOverlay {
     pub suggestions: SuggestionState,
     /// Parsed semantic schema-authoring regions and standalone state.
     pub schema_authoring: SchemaAuthoringState,
+    /// The schema files the document's own explicit named-type references
+    /// import, read when the overlay was assembled.
+    pub named_types: Arc<NamedTypeCatalog>,
+    /// Why a standalone schema document's own named-type references do not
+    /// resolve (an unknown name, contradictory reuse, or an import cycle).
+    pub standalone_resolution: Option<Arc<SchemaError>>,
 }
 
 impl DocumentOverlay {
@@ -152,6 +161,10 @@ struct OverlayCache {
     /// Cached effective schema per document URI, invalidated by content hash,
     /// configuration, trigger registry, or the document's context.
     schema: HashMap<String, CachedSchema>,
+    /// Named-type resolution of each open standalone schema document,
+    /// invalidated by content hash, the document's context, or a change to
+    /// any file it imports.
+    standalone_resolution: HashMap<String, CachedStandalone>,
 }
 
 #[derive(Clone)]
@@ -172,8 +185,10 @@ struct CachedSchema {
     key: u64,
     /// Each dependency file with the xxHash of its bytes at assembly time. The
     /// set covers the effective schema's dependencies (imports, examples, and the
-    /// referenced `$schema` file itself) plus the extension-baseline files (each
-    /// matched extension's own path and the types it imports). A cache hit
+    /// referenced `$schema` file itself), the extension-baseline files (each
+    /// matched extension's own path and the types it imports), the files the
+    /// named-type catalog read, and — for a failed assembly — the schema files
+    /// its error names. A cache hit
     /// additionally requires every entry to re-hash to the same value, so editing
     /// a referenced schema file, an imported types file, a referenced example, or
     /// a configured extension baseline invalidates the bundle even when the
@@ -182,6 +197,45 @@ struct CachedSchema {
     /// extra I/O.
     deps: Vec<(PathBuf, u64)>,
     outcome: SchemaOutcome,
+    named_types: Arc<NamedTypeCatalog>,
+    /// Invalid `suggest(...)` candidates written on the inline `$schema`'s
+    /// references, judged against the resolved targets.
+    reference_suggestions: Arc<Vec<SuggestionLintProblem>>,
+}
+
+/// What [`OverlayCache::schema_for`] assembled for a Markdown document.
+struct FrontmatterSchema {
+    outcome: SchemaOutcome,
+    named_types: Arc<NamedTypeCatalog>,
+    reference_suggestions: Arc<Vec<SuggestionLintProblem>>,
+}
+
+impl FrontmatterSchema {
+    fn new(outcome: SchemaOutcome) -> Self {
+        Self {
+            outcome,
+            named_types: Arc::default(),
+            reference_suggestions: Arc::default(),
+        }
+    }
+}
+
+/// One standalone schema document's named-type resolution and the files it
+/// read, cached like [`CachedSchema`].
+struct CachedStandalone {
+    key: u64,
+    deps: Vec<(PathBuf, u64)>,
+    resolved: StandaloneNamedTypes,
+}
+
+/// What resolving a standalone schema document's own references produced.
+#[derive(Clone, Default)]
+struct StandaloneNamedTypes {
+    named_types: Arc<NamedTypeCatalog>,
+    error: Option<Arc<SchemaError>>,
+    /// Invalid `suggest(...)` candidates written on references, judged
+    /// against the resolved targets.
+    suggestions: Vec<SuggestionLintProblem>,
 }
 
 impl OverlayState {
@@ -226,15 +280,16 @@ impl OverlayState {
                 text
             };
             let schema_text = schema_text.to_string();
-            let schema = cache.schema_for(
-                &uri_key,
-                &schema_text,
-                path,
-                config,
-                workspace_roots,
-                resolution,
-            );
-            let suggestions = suggestions::inline_lints(text, ast.as_deref());
+            let FrontmatterSchema { outcome: schema, named_types, reference_suggestions } = cache
+                .schema_for(&uri_key, &schema_text, path, config, workspace_roots, resolution);
+            let mut suggestions = suggestions::inline_lints(text, ast.as_deref());
+            // A stale outcome was assembled from the last-good text, whose
+            // spans do not describe the current buffer.
+            if let SuggestionState::Inline(problems) = &mut suggestions
+                && !stale
+            {
+                problems.extend(reference_suggestions.iter().cloned());
+            }
             let schema_authoring = schema::frontmatter_authoring(ast.as_deref(), &schema);
             return Some(DocumentOverlay {
                 ast,
@@ -243,6 +298,8 @@ impl OverlayState {
                 schema,
                 suggestions,
                 schema_authoring,
+                named_types,
+                standalone_resolution: None,
             });
         }
 
@@ -263,6 +320,8 @@ impl OverlayState {
                         schema: SchemaOutcome::Ready(None),
                         suggestions: SuggestionState::TriggerError(Arc::new(error)),
                         schema_authoring: SchemaAuthoringState::Inactive,
+                        named_types: Arc::default(),
+                        standalone_resolution: None,
                     });
                 }
                 Ok(Some(_)) => {
@@ -286,6 +345,8 @@ impl OverlayState {
                             schema: SchemaOutcome::Ready(None),
                             suggestions: SuggestionState::TriggerError(error),
                             schema_authoring: SchemaAuthoringState::Inactive,
+                            named_types: Arc::default(),
+                            standalone_resolution: None,
                         });
                     }
                 }
@@ -300,12 +361,20 @@ impl OverlayState {
         match parse_standalone_schema_document(text, path) {
             Ok(Some(document)) => {
                 let envelope = document.envelope;
-                let problems = document.suggestion_lints.clone();
+                let mut problems = document.suggestion_lints.clone();
                 let model = Arc::new(document);
                 let mut cache = self.inner.lock().expect("overlay lock poisoned");
                 cache
                     .standalone_last_good
                     .insert(uri.as_str().to_string(), Arc::clone(&model));
+                let resolved = cache.standalone_named_types(
+                    uri.as_str(),
+                    text,
+                    &model,
+                    workspace_roots,
+                    resolution,
+                );
+                problems.extend(resolved.suggestions.iter().cloned());
                 return Some(DocumentOverlay {
                     ast: None,
                     stale: false,
@@ -322,6 +391,8 @@ impl OverlayState {
                         stale: false,
                         error: None,
                     },
+                    named_types: resolved.named_types,
+                    standalone_resolution: resolved.error,
                 });
             }
             Ok(None) if claim.is_none() => {}
@@ -368,6 +439,8 @@ impl OverlayState {
                         stale,
                         error: Some(error),
                     },
+                    named_types: Arc::default(),
+                    standalone_resolution: None,
                 });
             }
         }
@@ -382,6 +455,7 @@ impl OverlayState {
         cache.last_good_text.remove(uri.as_str());
         cache.standalone_last_good.remove(uri.as_str());
         cache.schema.remove(uri.as_str());
+        cache.standalone_resolution.remove(uri.as_str());
     }
 
     /// Takes trigger-load diagnostic ownership changes since the last refresh.
@@ -402,18 +476,18 @@ impl OverlayCache {
         config: &DmlsConfig,
         workspace_roots: &[PathBuf],
         resolution: &DocumentResolution,
-    ) -> SchemaOutcome {
+    ) -> FrontmatterSchema {
         // A document whose context failed resolves no `$schema` reference or
         // trigger payload; its context-failure diagnostic says why.
         let Ok(context) = resolution.context() else {
             self.schema.remove(uri_key);
-            return SchemaOutcome::Ready(None);
+            return FrontmatterSchema::new(SchemaOutcome::Ready(None));
         };
         let registry = match self.trigger_registry(path, workspace_roots, context) {
             Ok(registry) => registry,
             Err(error) => {
                 self.schema.remove(uri_key);
-                return SchemaOutcome::Failed(error);
+                return FrontmatterSchema::new(SchemaOutcome::Failed(error));
             }
         };
         let registry_key = registry
@@ -432,8 +506,16 @@ impl OverlayCache {
             && cached.key == key
             && deps_unchanged(&cached.deps)
         {
-            return cached.outcome.clone();
+            return FrontmatterSchema {
+                outcome: cached.outcome.clone(),
+                named_types: Arc::clone(&cached.named_types),
+                reference_suggestions: Arc::clone(&cached.reference_suggestions),
+            };
         }
+        let schema_roots: Vec<PathBuf> = registry
+            .as_ref()
+            .map(|registry| registry.roots.search_paths().to_vec())
+            .unwrap_or_default();
         let outcome = match schema::assemble(
             path,
             text,
@@ -445,10 +527,100 @@ impl OverlayCache {
             Ok(bundle) => SchemaOutcome::Ready(bundle.map(Arc::new)),
             Err(error) => SchemaOutcome::Failed(Arc::new(error)),
         };
-        let deps = collect_dep_hashes(&outcome);
-        self.schema
-            .insert(uri_key.to_string(), CachedSchema { key, deps, outcome: outcome.clone() });
-        outcome
+        let named_types = Arc::new(frontmatter_named_types(text, path, &schema_roots, context));
+        let reference_suggestions = Arc::new(
+            FrontmatterAst::parse(text)
+                .and_then(|parse| parse.ast)
+                .and_then(|ast| suggestions::inline_schema(text, Some(&ast)))
+                .map_or_else(Vec::new, |schema| {
+                    let base_dir = path.parent().unwrap_or(path);
+                    suggestions::reference_lints(&schema, base_dir, None, &schema_roots, context)
+                }),
+        );
+        let deps = collect_dep_hashes(&outcome, &named_types);
+        let schema = FrontmatterSchema {
+            outcome,
+            named_types,
+            reference_suggestions,
+        };
+        self.schema.insert(
+            uri_key.to_string(),
+            CachedSchema {
+                key,
+                deps,
+                outcome: schema.outcome.clone(),
+                named_types: Arc::clone(&schema.named_types),
+                reference_suggestions: Arc::clone(&schema.reference_suggestions),
+            },
+        );
+        schema
+    }
+
+    /// Resolves a standalone schema document's own named-type references
+    /// against its current buffer, cached until the text, the context, or an
+    /// imported file changes.
+    ///
+    /// Local references read nothing; explicit references read their targets
+    /// through the document's context, as resolving the saved file would.
+    fn standalone_named_types(
+        &mut self,
+        uri_key: &str,
+        text: &str,
+        model: &StandaloneSchemaDocument,
+        workspace_roots: &[PathBuf],
+        resolution: &DocumentResolution,
+    ) -> StandaloneNamedTypes {
+        let Ok(context) = resolution.context() else {
+            self.standalone_resolution.remove(uri_key);
+            return StandaloneNamedTypes::default();
+        };
+        let key = xx_hash_bytes(text.as_bytes())
+            ^ file_resolution_context_identity(context)
+            ^ xx_hash_bytes(resolution.generation().to_string().as_bytes());
+        if let Some(cached) = self.standalone_resolution.get(uri_key)
+            && cached.key == key
+            && deps_unchanged(&cached.deps)
+        {
+            return cached.resolved.clone();
+        }
+        let path = model.path.as_path();
+        // A schema file's bare-name targets use the same roots a consuming
+        // document in its workspace folder would use.
+        let schema_roots = if schema::trigger_boundary(path, workspace_roots).is_some() {
+            SchemaRoots::for_document(&context.for_source(path))
+                .map(|roots| roots.search_paths().to_vec())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let base_dir = path.parent().unwrap_or(path);
+        let named_types = Arc::new(NamedTypeCatalog::build(
+            &model.declaration,
+            base_dir,
+            &schema_roots,
+            context,
+        ));
+        let expanded = match model.schema() {
+            Some(schema) => {
+                expand_named_types(schema, base_dir, Some(path), &schema_roots, context)
+                    .map(|(_, imports)| imports)
+            }
+            None => Ok(Vec::new()),
+        };
+        let (imports, error) = match expanded {
+            Ok(imports) => (imports, None),
+            Err(error) => (error_dependencies(&error), Some(Arc::new(error))),
+        };
+        let suggestions = model.schema().map_or_else(Vec::new, |schema| {
+            suggestions::reference_lints(schema, base_dir, Some(path), &schema_roots, context)
+        });
+        let deps = hash_files(imports.iter().chain(named_types.dependencies()));
+        let resolved = StandaloneNamedTypes { named_types, error, suggestions };
+        self.standalone_resolution.insert(
+            uri_key.to_string(),
+            CachedStandalone { key, deps, resolved: resolved.clone() },
+        );
+        resolved
     }
 
     /// The document's trigger registry. A trigger-file load error keeps the
@@ -518,22 +690,34 @@ fn schema_cache_key(text: &str, config: &DmlsConfig) -> u64 {
 
 /// Reads and hashes each dependency of an assembled bundle, so a later lookup
 /// can detect a content change. Covers the effective schema's dependencies
-/// (imports, examples, referenced `$schema` file) and the extension-baseline
-/// files, which are disjoint sources but may name the same file — dedup by path
-/// so each file is hashed once. A dependency that cannot be read is omitted —
-/// `assemble` already read every one, so an unreadable one is a transient race,
-/// and omitting it forces a fresh assembly on the next lookup rather than
-/// trusting a stale bundle.
-fn collect_dep_hashes(outcome: &SchemaOutcome) -> Vec<(PathBuf, u64)> {
-    let SchemaOutcome::Ready(Some(bundle)) = outcome else {
-        return Vec::new();
+/// (imports, examples, referenced `$schema` file), the extension-baseline
+/// files, and the files the named-type catalog read, which may name the same
+/// file — dedup by path so each file is hashed once. A failed assembly has no
+/// bundle, so its edges come from the files its error names: without them a
+/// fix made in an imported file would never clear the cached failure. A
+/// dependency that cannot be read is omitted — `assemble` already read every
+/// one, so an unreadable one is a transient race, and omitting it forces a
+/// fresh assembly on the next lookup rather than trusting a stale bundle.
+fn collect_dep_hashes(outcome: &SchemaOutcome, named_types: &NamedTypeCatalog) -> Vec<(PathBuf, u64)> {
+    let mut paths: Vec<PathBuf> = match outcome {
+        SchemaOutcome::Ready(Some(bundle)) => bundle
+            .effective
+            .dependencies()
+            .iter()
+            .chain(bundle.extension_dependencies.iter())
+            .cloned()
+            .collect(),
+        SchemaOutcome::Ready(None) => Vec::new(),
+        SchemaOutcome::Failed(error) => error_dependencies(error),
     };
+    paths.extend(named_types.dependencies().cloned());
+    hash_files(paths.iter())
+}
+
+/// Hashes each distinct readable file once.
+fn hash_files<'a>(paths: impl Iterator<Item = &'a PathBuf>) -> Vec<(PathBuf, u64)> {
     let mut seen = std::collections::HashSet::new();
-    bundle
-        .effective
-        .dependencies()
-        .iter()
-        .chain(bundle.extension_dependencies.iter())
+    paths
         .filter(|path| seen.insert((*path).clone()))
         .filter_map(|path| {
             std::fs::read(path)
@@ -541,6 +725,65 @@ fn collect_dep_hashes(outcome: &SchemaOutcome) -> Vec<(PathBuf, u64)> {
                 .map(|bytes| (path.clone(), xx_hash_bytes(&bytes)))
         })
         .collect()
+}
+
+/// The schema files a resolution error names: the referenced schema that
+/// failed, the namespace searched for an unknown name, the file defining a
+/// union a reference misuses, and every file that authored a reference or a
+/// conflicting constraint.
+fn error_dependencies(error: &SchemaError) -> Vec<PathBuf> {
+    fn file(source: &SchemaSourceId, out: &mut Vec<PathBuf>) {
+        if let SchemaSourceId::File(path) = source {
+            out.push(path.clone());
+        }
+    }
+    fn walk(error: &SchemaError, out: &mut Vec<PathBuf>) {
+        match error {
+            SchemaError::Aggregate { errors } => errors.iter().for_each(|error| walk(error, out)),
+            SchemaError::ReferencedSchema { path, source } => {
+                out.push(path.clone());
+                walk(source, out);
+            }
+            SchemaError::UnknownNamedType { namespace, site, .. } => {
+                file(namespace, out);
+                file(&site.source, out);
+            }
+            SchemaError::ConstraintConflict { site, constraints, .. } => {
+                file(&site.source, out);
+                constraints.iter().for_each(|origin| file(&origin.source, out));
+            }
+            SchemaError::UnionReference { site, definition, .. } => {
+                file(&site.source, out);
+                file(&definition.source, out);
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    walk(error, &mut out);
+    out
+}
+
+/// The catalog of files a Markdown document's inline `$schema` imports by
+/// explicit named-type reference. A `$schema` that is a file reference
+/// authors no references of its own.
+fn frontmatter_named_types(
+    text: &str,
+    path: &Path,
+    schema_roots: &[PathBuf],
+    context: &FileResolutionContext,
+) -> NamedTypeCatalog {
+    let markdown: darkmatter::markdown::Markdown = text.into();
+    let Some(value) = markdown
+        .frontmatter()
+        .as_map()
+        .get("$schema")
+        .and_then(|value| serde_yaml_ng::to_value(value).ok())
+    else {
+        return NamedTypeCatalog::default();
+    };
+    let base_dir = path.parent().unwrap_or(path);
+    NamedTypeCatalog::build_tolerant(&value, base_dir, schema_roots, context)
 }
 
 /// Whether every recorded dependency file still hashes to its recorded value. An
@@ -580,6 +823,47 @@ mod tests {
                 )
                 .is_none()
         );
+    }
+
+    #[test]
+    fn local_references_record_no_external_dependency() {
+        let state = OverlayState::default();
+        let root = tempfile::tempdir().unwrap();
+        let root = biscuit_file::canonicalize_simplified(root.path()).unwrap();
+        let cases = [
+            ("doc.md", "---\n$schema:\n  title: base\n  other: 'base@this'\n  base: string\n---\n"),
+            ("types.yaml", "kind: schema\ntypes:\n  title: base\n  base: string\n"),
+        ];
+        for (name, text) in cases {
+            let path = root.join(name);
+            let uri_text = url::Url::from_file_path(&path).unwrap().to_string();
+            let uri_text = uri_text.as_str();
+            let path = path.as_path();
+            let overlay = state
+                .for_document(
+                    &uri(uri_text),
+                    text,
+                    path,
+                    &DmlsConfig::default(),
+                    std::slice::from_ref(&root),
+                    &crate::context::test_support::resolution_for(path),
+                )
+                .unwrap();
+            let path = path.display();
+            assert!(overlay.named_types.externals().is_empty(), "{path}");
+            assert!(overlay.standalone_resolution.is_none(), "{path}");
+            if name == "doc.md" {
+                let bundle = overlay.bundle().expect("local references resolve");
+                assert!(bundle.effective.dependencies().is_empty(), "{path}");
+            }
+            let cache = state.inner.lock().unwrap();
+            let deps = cache
+                .schema
+                .get(uri_text)
+                .map(|cached| cached.deps.len())
+                .or_else(|| cache.standalone_resolution.get(uri_text).map(|cached| cached.deps.len()));
+            assert_eq!(deps, Some(0), "{path}: a local reference reads no file");
+        }
     }
 
     #[test]

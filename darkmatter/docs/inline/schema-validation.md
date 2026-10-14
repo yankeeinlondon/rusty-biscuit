@@ -1,10 +1,3 @@
----
-related_specs:
-    - "@darkmatter/features/_completed/2026-05-11-schemas/spec.md"
-    - "@darkmatter/features/_completed/2026-05-23-compose-schema/spec.md"
-    - "@darkmatter/features/_completed/2026-05-28-schema-coercion/spec.md"
----
-
 # Schema Validation
 
 Schema validation lets a Markdown document declare the **shape of its frontmatter** and have Darkmatter enforce it. You describe the expected properties once — using a friendly single-line grammar called **SimplifiedSchema** — and Darkmatter checks every document against it, reporting a styled error that names the offending property instead of letting a downstream tool fail cryptically.
@@ -58,7 +51,7 @@ $schema:
 ---
 ```
 
-All properties are **optional** unless marked `required`. Any type gains an array form with a `[]` suffix (`string[]`), and item constraints versus array-level constraints are written in separate parenthesised lists (`"string(min(1))[](max(5); unique)"`). The full type vocabulary — `string`, `date`, `datetime`, `time`, `number`, `numberlike`, `boolean`, `boolish`, `object`, `file`, `enum`, `url`, `email`, `any` — and every constraint is tabulated in [the topic reference](../topics/schemas/definition.md#types).
+All properties are **optional** unless marked `required`, and a property whose type admits `null` (`null`, `unknown`, or a union with such an arm) stays optional even then. Any type gains an array form with a `[]` suffix (`string[]`), and item constraints versus array-level constraints are written in separate parenthesised lists (`"string(min(1))[](max(5); unique)"`). The full type vocabulary — `string`, `date`, `datetime`, `time`, `number`, `numberlike`, `boolean`, `boolish`, `object`, `file`, `enum`, `literal`, `url`, `email`, `yaml`, `json`, `expression`, `shell`, `alphanumeric`, `unknown` (alias `any`), `null` — and every constraint is tabulated in [the topic reference](../topics/schemas/definition.md#types).
 
 ### 2. File reference
 
@@ -153,7 +146,10 @@ let done   = effective.validate_for_phase(&frontmatter, SchemaPhase::Completion)
 - Missing and explicit `null` are both **absence**, and `required` alone decides
   whether absence is an error. An eager-only `null` is therefore allowed at both
   phases; a `required; eager` `null` fails at launch; a required-but-not-eager
-  `null` is tolerated at launch and fails at completion.
+  `null` is tolerated at launch and fails at completion. A null-admitting
+  property (`null`, `unknown`, or a union with such an arm) is the exception:
+  it is optional at both phases, whatever `required`, `eager`, or `generated`
+  says (see [Null-Admitting Properties](../topics/schemas/definition.md#null-admitting-properties)).
 - Both phases are **passive**: no mutation, no coercion, no expression or shell
   execution, no schema resolution, and no filesystem access. The eager-`file`
   existence probe belongs to ordinary schema preparation, not to phase
@@ -163,6 +159,11 @@ let done   = effective.validate_for_phase(&frontmatter, SchemaPhase::Completion)
   constrains each present item, while `file[](eager)` validates the array
   property at launch when present. `required` independently controls whether
   the property must exist.
+- A named union's arms are not items in this sense, even under `[]`: an arm's
+  `required`, `generated`, and `eager` belong to the property holding the
+  reference. With `choice: ["string(required; eager)", number]`, both
+  `p: choice` and `p: choice[]` must be supplied at launch. An arm's `eager`
+  never adds an existence check to a lazy `file` arm.
 - Raw JSON Schema has no phase vocabulary and keeps its authored `required`
   behavior at both phases. Trigger match conditions reject `eager` outright,
   because matching is passive and has no launch.
@@ -178,17 +179,46 @@ choosing between the `success` and `failure` lifecycle events.
 
 A **baseline** is a schema that every validated document inherits — useful for a workspace-wide convention without editing each file. The effective schema is `baseline ⊕ document`, a deep merge keyed by property name in which the **document side wins** on any conflict.
 
+Darkmatter ships a **built-in baseline** that types its own frontmatter
+properties (`title`, `last_updated`, `style`, `ctx`, …) and, through Content
+Policy's editor schema, `content_policy`. It is compiled into the library, so
+an installed `md` or `dmls` uses it outside a checkout with no schema files on
+disk. `md compose`, `md schema validate`, and DMLS all apply it by default.
+
+`md schema validate` picks its baseline from the first rule that applies:
+
+| # | Input | Baseline | Example |
+|---|-------|----------|---------|
+| 1 | `--no-baseline-schema` | none | `md schema validate post.md --no-baseline-schema` |
+| 2 | `--schema <path>` | that file, even when the opt-out variable is set | `md schema validate post.md --schema ./schemas/baseline.yaml` |
+| 3 | `DARKMATTER_NO_BASELINE_SCHEMA` is `1`, `true`, `TRUE`, `yes`, or `YES` | none; `BASELINE_SCHEMA` is ignored | `DARKMATTER_NO_BASELINE_SCHEMA=1 md schema validate post.md` |
+| 4 | `BASELINE_SCHEMA=<path>` | that file | `BASELINE_SCHEMA=./schemas/baseline.yaml md schema validate post.md` |
+| 5 | nothing | the built-in baseline | `md schema validate post.md` |
+
+`--no-baseline-schema` and `--schema` cannot be combined (a usage error, exit
+`2`). A custom path resolves from the directory you ran the command in, and a
+custom baseline that cannot be loaded exits `2`; it never falls back. Opting
+out removes only the baseline: the document's own `$schema` and matching
+trigger schemas still apply, and `--no-trigger-schemas` controls triggers
+separately. See
+[Selecting the Baseline](../topics/schemas/definition.md#selecting-the-baseline)
+for the precedence flowchart.
+
+Because the built-in baseline is the default, a document with no `$schema` is
+checked the same way by `md schema validate` and `md compose`:
+
 ```bash
-md schema validate post.md --schema ./schemas/baseline.yaml
-md schema validate post.md          # falls back to $BASELINE_SCHEMA
+printf -- '---\nlast_updated: not-a-date\n---\n' > post.md
+md schema validate post.md                       # exit 1: last_updated is a date
+md schema validate post.md --no-baseline-schema  # exit 0
 ```
 
-`md compose` has its own baseline default: it injects the Darkmatter base
-frontmatter schema unless you pass `--no-baseline-schema` or set
-`DARKMATTER_NO_BASELINE_SCHEMA=1`. Pass `--baseline-schema <path>` to replace
-that default with a custom SimplifiedSchema YAML baseline. `md schema validate`
-does not inject the Darkmatter base schema by default; it keeps the explicit
-`--schema` / `BASELINE_SCHEMA` behavior shown above.
+`md compose` keeps its own flags: `--baseline-schema <path>` replaces the
+built-in baseline, and `--no-baseline-schema` or
+`DARKMATTER_NO_BASELINE_SCHEMA=1` removes it.
+
+A library caller starts with no baseline and attaches one explicitly, either a
+file or the built-in baseline (`with_darkmatter_baseline_json_schema()`):
 
 ```rust
 let api = DarkmatterSchemas::new(context)
@@ -200,20 +230,24 @@ Because a whole property is replaced when both sides declare it, replacing a bas
 ## CLI: `md schema validate`
 
 ```bash
-md schema validate <file>... [--schema <path>] [--format pretty|json] [--quiet]
+md schema validate <file>... [--schema <path> | --no-baseline-schema] [--no-trigger-schemas] [--format pretty|json] [--quiet]
 ```
 
 Pretty output (the default) renders one styled block per file:
 
 ```
-post.md  ✓ valid (schema: ./schemas/post.yaml)
-
-draft.md  ✗ 2 problems
-  • title is required
-      at line 2, column 1 of frontmatter
-  • tags[2] does not match pattern ^[a-z0-9-]+$
-      at line 6, column 5 of frontmatter
+- ✔ the document post.md has a schema definition and is valid.
+- ✗ the document draft.md failed schema validation:
+    - title is a required property (at line 2, column 1)
+    - tags/1 42 is not of type "string" (at line 6, column 5)
 ```
+
+Each location points at the offending YAML node — the value, unknown key, or
+mapping that is wrong — counted in lines of the complete file (the opening
+`---` is line 1) and 1-based UTF-8 byte columns. Above, `tags/1` is the second
+item of a block list on line 6, so its value starts at column 5, after the
+`- `. See [Problem Locations](../topics/schemas/definition.md#problem-locations)
+for the full rules and fallbacks.
 
 `--format json` emits newline-delimited JSON (one object per file) for piping into other tools, and `--quiet` suppresses the success lines.
 
@@ -225,7 +259,7 @@ draft.md  ✗ 2 problems
 | 3 | A file's frontmatter could not be parsed at all. |
 | 64 | Usage error. |
 
-When a document has **no** `$schema` and no baseline is configured, validation succeeds vacuously (with a warning line in pretty mode).
+A document with no `$schema` is validated against the baseline and reported as having a schema definition; in JSON output its `schema` field is still `null`, because the field names the document's own `$schema`. Only with the baseline turned off does such a document succeed vacuously (with a warning line in pretty mode).
 
 ## CLI: `md schema detect`
 
@@ -296,14 +330,33 @@ cannot reference a binding that will only be materialized by this stage. Body
 interpolation and later compose stages can use the binding. Repeating the schema
 stage is idempotent, and serialized composed frontmatter retains the `null` key.
 
-This means `md compose` and `md schema validate` can intentionally diverge when a
-document has no `$schema`: compose sees the default Darkmatter base schema, while
-schema validation is vacuously valid unless `--schema` or `BASELINE_SCHEMA` is
-provided.
+For example, the built-in baseline types `content_policy`, but a document that
+omits it gains no `content_policy` key. A document whose own `$schema` declares
+`content_policy` as an optional property, with no default, gets a `null`
+binding as described above.
 
 ### The shell-deferral contract
 
-A property whose value still contains an unresolved `$(...)` shell expression has not been computed yet at validation time. Such a problem is **deferred** — the downstream consumer (e.g. claudine's `prepare_*_with_schema`) re-validates the post-shell frontmatter. If *every* problem is deferred, compose proceeds; any schema problem that does not depend on shell expansion still fails fast. When shell expansion is disabled, nothing can be deferred and those problems fail immediately.
+A property whose value a later stage will compute has not been computed yet at validation time. Such a problem is **deferred**: once shell expansion and the second interpolation pass have run, compose validates the resolved frontmatter against the same effective schema and reports what remains. Deferral follows what a later stage will actually resolve, not what the text looks like:
+
+| Value before shell expansion | First pass |
+| --- | --- |
+| `rule: "$(echo TimeSensitive)"` — a whole-value command, run in the shell stage | deferred |
+| `content_policy: ["{{ rule }}"]` or `"{{ [rule] }}"`, reading that command's value | deferred, then judged as `[TimeSensitive]` |
+| `content_policy: ["$(echo X)", TimeSensitive]` — `$(...)` inside a list is never run | judged as written, so rejected |
+| `title: "see $(date)"` — `$(...)` after other text is never run | judged as written |
+
+Any schema problem that does not depend on a later stage still fails fast, before a command runs. The post-shell check defers nothing: no later stage resolves frontmatter, so a value that still holds `$(...)` or `{{ … }}` text there is judged as that text. When shell expansion is disabled, nothing can be deferred and those problems fail immediately.
+
+The post-shell check applies whichever schemas are in effect — the document's `$schema`, the baseline, and any matched trigger schema. `--no-trigger-schemas` only removes trigger schemas from that set; it does not skip the check. Shell output is text, so with the built-in baseline:
+
+```yaml
+content_policy: "$(cat policy.txt)"   # policy.txt holds ["Duration(3mo)"]
+```
+
+fails `md compose` and `md compose --no-trigger-schemas` alike: the resolved value is a string, not a list. Only with no effective schema at all (`--no-baseline-schema` and no `$schema` or matching trigger) is the expanded value left unchecked.
+
+A library caller that validates the composed frontmatter itself can take this verdict over with `ComposeOptions::with_caller_owned_post_shell_verdict(true)` (Claudine does, so it can drop an optional value that shell output made invalid). Compose then still judges what that caller does not: values a result suffix (`::ok`, `::exit-code`, `::result`) typed, and, when trigger schemas are enabled, the full post-shell pass. A `{{ … }}` template that does not depend on a shell value has resolved by the time the first pass runs, so its value is checked like any authored value.
 
 ### Error rendering
 
@@ -327,7 +380,9 @@ When a frontmatter value is *trivially* the wrong JSON type but **unambiguously*
 | `number` / `integer` / `numberlike` | numeric string (`"42"`, `"-13"`, `"3.14"`) | real number |
 | `string` (incl. `date`/`url`/`email`/`file`…) | a number or boolean scalar | its canonical string (`42` → `"42"`) |
 | `array` of `T` | an array | each element coerced by `T`'s rule |
-| `object`, `any`, bare `enum`, `null` | — | untouched |
+| `array` of a union `U` | an array | each element coerced on its own by the property-union rule: committed only when exactly one arm's coerced candidate validates |
+| `expression` / `shell` | a number or boolean scalar | its canonical string (`true` → `"true"`) |
+| `object`, `unknown`, `alphanumeric`, bare `enum`, `null` | — | untouched (`3` against `alphanumeric` is a type mismatch) |
 
 Two consequences matter:
 
@@ -348,7 +403,7 @@ Coercion also never *parses into* a constrained string type: a number landing in
 ### Where coercion runs
 
 - **Library validation** coerces a *working copy* of the instance, then validates it. It reports post-coercion validity but performs **no document mutation** — `md schema validate` does not rewrite files.
-- **The compose stage** writes coerced top-level properties back into the frontmatter, so the real boolean/number/string flows to every later stage and into the composed output. Values still holding `$(...)` are skipped here and coerced at the post-shell re-validation point. Coercion is idempotent, so re-validating an already-coerced value is a no-op.
+- **The compose stage** writes coerced top-level properties back into the frontmatter, so the real boolean/number/string flows to every later stage and into the composed output. Values deferred to the post-shell check are skipped here and coerced there. Coercion is idempotent, so re-validating an already-coerced value is a no-op.
 
 For root unions, Darkmatter coerces against each arm in order and commits the first arm that validates post-coercion.
 
@@ -369,6 +424,11 @@ absolute value is a fixpoint, so compose → re-compose never drifts.
 - a present, non-null string selected by `file` or `file(eager)`, including
   top-level properties, inline-object sub-properties, arrays, and the committed
   arm of a root or property union;
+- each item of an array of a union (`assets: asset[]`), judged on its own by
+  the property-union rule: the value is rewritten through the one validating
+  arm that carries an eager `file`, either as the item itself or as a field of
+  an object arm. With `asset: [file(eager), number]`, the item list
+  `["./a.md", 3]` normalizes to `["a.md", 3]`;
 - eager values probe the ordered plan and require the first existing regular
   file; lazy values materialize the first lexically normalized candidate
   without probing;
@@ -384,6 +444,12 @@ absolute value is a fixpoint, so compose → re-compose never drifts.
   recursive plan has no single path shape without I/O; use `file(eager)`;
 - a value that resolves to a remote URL — there is no local path to project.
 - an absent or `null` optional `file(eager)` property.
+- a property or union item that two eager-`file` arms both accept, such as
+  `{ path: ./a.md }` against overlapping object arms that each declare
+  `path: file(eager)`; the rewrite never picks the closest arm.
+- a lazy `file` arm under `eager` written on the union or its array
+  (`lazy_asset[](eager)`): that `eager` is property timing and does not make
+  the arm eager.
 - a value still holding a `$(...)` shell expression or unresolved `{{ ... }}` template — the post-shell re-validation handles it once it expands.
 
 **Read-only validation contract.** Library callers that use `validate` / `validate_with_positions` keep their current contract: validation coerces on a working copy and **does not mutate** the caller's `serde_json::Value`. The eager-`file` rewrite is opt-in via the explicit [`EffectiveSchema::normalize_frontmatter`](../../lib/src/markdown/schemas/mod.rs) API; compose calls it on its accepted effective schema so the normalized values are what downstream interpolation, lifecycle events, and `inline-compose` see.
@@ -426,7 +492,9 @@ it raw too rather than re-anchor it as though the document had authored it.
 ### Root unions and file `match`
 
 Each simplified arm's declared glob is compiled into that arm as
-`x-darkmatter-match`, and an existing file outside it rules the arm out:
+`x-darkmatter-match`, and an existing file outside it rules the arm out. An
+arm with several `match(...)` groups, as when a reused named type adds its
+own, keeps every group, and a file must satisfy each one:
 
 | Value | Result |
 |---|---|

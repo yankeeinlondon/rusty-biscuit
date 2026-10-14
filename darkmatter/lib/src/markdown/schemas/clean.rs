@@ -11,7 +11,9 @@
 //!   quotes the exact authored lexeme and must pass the complete effective
 //!   schema. Coercion is bypassed precisely because it would hide the data
 //!   loss (the number `1.2` coerces to `"1.2"`, silently dropping the
-//!   authored `1.20`).
+//!   authored `1.20`). A node inside a genuine union, whether a property
+//!   union or a `U[]` item union, is never repaired, even when every arm or a
+//!   literal tag agrees on the field's type.
 //! - **Schema-guided key correction and shape/type repair (report-only)** —
 //!   undeclared keys get a did-you-mean against declared properties; missing
 //!   required keys, genuine type mismatches, and constraint violations are
@@ -475,7 +477,10 @@ fn is_string_required_mismatch(
 /// Walks the compiled schema to the property node `problem` failed against
 /// and reports whether that node requires the JSON `string` type — solely.
 /// Nullable wrappers (`anyOf: [null, T]`) are unwrapped; a union with two or
-/// more non-null arms is never "solely string".
+/// more non-null arms is never "solely string", and descent stops at one: a
+/// path below a `U[]` item union (`items: {anyOf: [arm…]}`) finds no
+/// `properties` on the wrapper and is never string-required. No arm is
+/// selected here, so cleanup cannot quote inside a union item.
 fn schema_requires_string(effective: &EffectiveSchema, problem: &ValidationProblem) -> bool {
     let mut node = match problem.arm_index {
         Some(index) => effective
@@ -539,9 +544,9 @@ fn raw_type_mismatch_diagnostic(yaml_source: &str, problem: &ValidationProblem) 
         code: YamlDiagnosticCode::SchemaTypeMismatch,
         span: value_span_for(yaml_source, problem),
         classification: YamlCertainty::DeterministicFindNonDeterministicSolution,
-        message: format!(
-            "{}; the authored scalar could not be proven safe to quote",
-            problem.message
+        message: located_message(
+            problem,
+            format!("{}; the authored scalar could not be proven safe to quote", problem.message),
         ),
         repairs: Vec::new(),
     }
@@ -560,21 +565,21 @@ fn report_only_diagnostic(
             code: YamlDiagnosticCode::SchemaShapeRepair,
             span: missing_key_span_for(yaml_source, problem),
             classification: YamlCertainty::DeterministicFindNonDeterministicSolution,
-            message: problem.message.clone(),
+            message: located_message(problem, problem.message.clone()),
             repairs: Vec::new(),
         },
         ValidationProblemCode::TypeMismatch => YamlDiagnostic {
             code: YamlDiagnosticCode::SchemaTypeMismatch,
             span: value_span_for(yaml_source, problem),
             classification: YamlCertainty::DeterministicFindNonDeterministicSolution,
-            message: problem.message.clone(),
+            message: located_message(problem, problem.message.clone()),
             repairs: Vec::new(),
         },
         _ => YamlDiagnostic {
             code: YamlDiagnosticCode::SchemaShapeRepair,
             span: value_span_for(yaml_source, problem),
             classification: YamlCertainty::DeterministicFindNonDeterministicSolution,
-            message: problem.message.clone(),
+            message: located_message(problem, problem.message.clone()),
             repairs: Vec::new(),
         },
     }
@@ -602,6 +607,7 @@ fn unknown_key_diagnostic(
         ),
         None => format!("key `{offending}` is not declared by the schema"),
     };
+    let message = located_message(problem, message);
     YamlDiagnostic {
         code: YamlDiagnosticCode::SchemaKeyCorrection,
         span,
@@ -614,6 +620,9 @@ fn unknown_key_diagnostic(
 /// The nearest declared key to `offending` at the object `problem` points
 /// at, using the same Damerau distance and thresholds as biscuit-file's
 /// similar-key lint.
+///
+/// A union (property or `U[]` item) declares no `properties` on its `anyOf`
+/// wrapper, so no suggestion is drawn from any one arm.
 fn nearest_declared_key(
     effective: &EffectiveSchema,
     problem: &ValidationProblem,
@@ -698,6 +707,21 @@ fn edit_distance(first: &str, second: &str) -> usize {
         }
     }
     distances[rows - 1][cols - 1]
+}
+
+/// `message` naming the problem's instance path, `` (at `/content_policy/1`) ``,
+/// in the pointer spelling the S2 diagnostic uses. A missing or unknown key's
+/// pointer is its parent object's, and a root-level problem has none; the
+/// message itself names the key.
+///
+/// The span alone cannot stand in for the path: it falls back to the
+/// document start for a flow-context node.
+fn located_message(problem: &ValidationProblem, message: String) -> String {
+    if problem.path.is_empty() {
+        message
+    } else {
+        format!("{message} (at `{}`)", problem.path)
+    }
 }
 
 /// The authored span of the value `problem` points at, or the zero-width

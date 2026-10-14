@@ -59,18 +59,14 @@ const INITIALIZE_PROXY_DOC: &str = "\
 ---
 title: initialize proxy
 initialize:
-  stack:
-    - action: {append_line: [\"events.log\", \"initialize\"]}
-    - action: {proxy: \"no/such/target.md\"}
+  - {append_line: [\"events.log\", \"initialize\"]}
+  - {proxy: \"no/such/target.md\"}
 start:
-  stack:
-    - action: {append_line: [\"events.log\", \"start\"]}
+  - {append_line: [\"events.log\", \"start\"]}
 failure:
-  stack:
-    - action: {append_line: [\"events.log\", \"failure\"]}
+  - {append_line: [\"events.log\", \"failure\"]}
 finalize:
-  stack:
-    - action: {append_line: [\"events.log\", \"finalize\"]}
+  - {append_line: [\"events.log\", \"finalize\"]}
 ---
 Body
 ";
@@ -87,15 +83,12 @@ const TERMINAL_PROXY_DOC: &str = "\
 ---
 title: failure proxy
 start:
-  stack:
-    - action: {append_line: [\"events.log\", \"start\"]}
+  - {append_line: [\"events.log\", \"start\"]}
 failure:
-  stack:
-    - action: {append_line: [\"events.log\", \"failure\"]}
-    - action: {proxy: \"no/such/target.md\"}
+  - {append_line: [\"events.log\", \"failure\"]}
+  - {proxy: \"no/such/target.md\"}
 finalize:
-  stack:
-    - action: {append_line: [\"events.log\", \"finalize\"]}
+  - {append_line: [\"events.log\", \"finalize\"]}
 ---
 Body
 ";
@@ -134,8 +127,7 @@ const PREFLIGHT_SHELL_DOC: &str = "\
 ---
 title: preflight shell denial
 start:
-  stack:
-    - action: {append_line: [\"events.log\", \"start\"]}
+  - {append_line: [\"events.log\", \"start\"]}
 ---
 
 ::shell rm -rf /
@@ -801,8 +793,8 @@ fn level2_proxy_routes_share_identity_across_routes_in_tmux() {
     // per-route `property` is the one intentional structured difference (see the
     // dotted-path assertion below).
     for (name, capture, property) in [
-        ("initialize", &init, "initialize.stack[*].proxy"),
-        ("terminal", &term, "failure.stack[*].proxy"),
+        ("initialize", &init, "initialize[*].proxy"),
+        ("terminal", &term, "failure[*].proxy"),
     ] {
         assert!(
             capture.has_status_block(),

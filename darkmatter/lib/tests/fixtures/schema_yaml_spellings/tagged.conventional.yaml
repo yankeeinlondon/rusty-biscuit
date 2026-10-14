@@ -1,0 +1,8 @@
+kind: schema
+types:
+  title: string(min(3))
+  status:
+    - number
+    - boolean
+    - code: number(min(1))
+  next: boolean

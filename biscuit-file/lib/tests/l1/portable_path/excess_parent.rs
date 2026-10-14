@@ -81,8 +81,8 @@ fn from_reference_generates_the_same_link_as_the_plain_spelling() {
         PortablePath::from_reference(reference(&absolute_text(&via_root_parent(&target)))).with_ctx(&ctx),
     );
 
-    assert_eq!(plain.reference().raw(), "./x.md");
-    assert_eq!(respelled.reference().raw(), "./x.md");
+    assert_eq!(plain.reference().raw(), "docs/x.md");
+    assert_eq!(respelled.reference().raw(), "docs/x.md");
 }
 
 #[test]

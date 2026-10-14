@@ -1,5 +1,5 @@
-//! The request's refresh authority behind the lazy `current` and `current_env`
-//! roots (spec R30–R33).
+//! The request's refresh authority behind the lazy `current` root (spec
+//! R30–R33).
 //!
 //! `ctx` is captured once at the start of a request; `current` is the same key
 //! set observed when a reference is evaluated. The two are kept apart on
@@ -53,9 +53,6 @@ use crate::markdown::compose::expression::ExpressionError;
 
 /// The reserved root mirroring `ctx`.
 pub(crate) const CURRENT_ROOT: &str = "current";
-
-/// The reserved root mirroring `env`.
-pub(crate) const CURRENT_ENV_ROOT: &str = "current_env";
 
 /// The `area` a fail-closed lazy read reports its partial capture under.
 const CURRENT_AREA: &str = "current";
@@ -332,9 +329,9 @@ impl CurrentAuthority {
     /// A passive twin of this authority for pre-flight discovery.
     ///
     /// Discovery evaluates a document's expressions to find its effects, so it
-    /// reaches `current.*` and `current_env.*` references that the real compose
-    /// pass would observe. Observing them here would make a passive pass probe
-    /// the host and reread the environment, so the discovery authority answers
+    /// reaches `current.*` references that the real compose pass would
+    /// observe. Observing them here would make a passive pass probe the host,
+    /// so the discovery authority answers
     /// every member `null` and records nothing. Reaching the reference is the
     /// metadata preflight reports (see
     /// [`DeferredCapabilities`](super::capture::DeferredCapabilities)); the
@@ -409,7 +406,7 @@ impl CurrentAuthority {
     }
 }
 
-/// One expression evaluation's view of the two lazy roots.
+/// One expression evaluation's view of the lazy `current` root.
 ///
 /// The memo is cleared at every expression boundary
 /// ([`EvaluationLookup::begin_expression_scope`]), which is what makes repeated
@@ -447,7 +444,7 @@ impl CurrentScope {
     ///
     /// ## Returns
     ///
-    /// `None` when `path` is not under `current` or `current_env`, leaving the
+    /// `None` when `path` is not under `current`, leaving the
     /// caller's ordinary resolution in charge. Otherwise the reserved root's
     /// answer, which may itself be `Ok(None)` for a member with no value.
     ///
@@ -464,9 +461,6 @@ impl CurrentScope {
     ) -> Option<Result<Option<Value>, ExpressionError>> {
         if let Some(rest) = strip_root(path, CURRENT_ROOT) {
             return Some(self.resolve_current(rest, context));
-        }
-        if let Some(rest) = strip_root(path, CURRENT_ENV_ROOT) {
-            return Some(self.resolve_current_env(rest));
         }
         None
     }
@@ -504,30 +498,6 @@ impl CurrentScope {
             }
         };
         Ok(walk_tail(value, tail))
-    }
-
-    fn resolve_current_env(&self, rest: Option<&str>) -> Result<Option<Value>, ExpressionError> {
-        let Some(rest) = rest else {
-            // `env` has no bare-root value either; the mirror keeps that shape.
-            return Ok(None);
-        };
-        if rest.contains('.') {
-            return Err(unknown_path(CURRENT_ENV_ROOT, rest));
-        }
-        if self.authority.discovering {
-            return Ok(None);
-        }
-        if let Some(value) = self.memoized(CURRENT_ENV_ROOT, rest) {
-            return Ok(Some(value));
-        }
-        // The point of `current_env`: the live process environment at reference
-        // time, not the snapshot `env` froze at capture.
-        let Ok(value) = std::env::var(rest) else {
-            return Ok(None);
-        };
-        let value = Value::String(value);
-        self.remember(CURRENT_ENV_ROOT, rest, value.clone());
-        Ok(Some(value))
     }
 
     fn memoized(&self, root: &str, key: &str) -> Option<Value> {
@@ -797,11 +767,11 @@ mod tests {
     }
 
     #[test]
-    fn the_removed_nesting_is_an_unknown_path_on_both_roots() {
+    fn the_removed_nesting_is_an_unknown_path() {
         let provider = ScriptedRefresh::new([("today", json!("2030-01-01"))]);
         let scope = scope(&provider);
 
-        for path in ["current.ctx.today", "current.env.HOME", "current_env.ctx.today"] {
+        for path in ["current.ctx.today", "current.env.HOME"] {
             assert!(
                 matches!(
                     scope.resolve(path, &context()).unwrap(),
@@ -827,37 +797,9 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial(current_env_scope)]
-    fn current_env_rereads_the_live_environment_once_per_scope() {
-        let key = "DARKMATTER_CURRENT_ENV_SCOPE_TEST";
+    fn paths_outside_the_current_root_are_left_to_ordinary_resolution() {
         let scope = CurrentScope::default();
-        unsafe { std::env::set_var(key, "first") };
-
-        let path = format!("current_env.{key}");
-        assert_eq!(scope.resolve(&path, &context()).unwrap().unwrap(), Some(json!("first")));
-        unsafe { std::env::set_var(key, "second") };
-        assert_eq!(
-            scope.resolve(&path, &context()).unwrap().unwrap(),
-            Some(json!("first")),
-            "one expression scope sees one value",
-        );
-
-        scope.begin_expression_scope();
-        assert_eq!(scope.resolve(&path, &context()).unwrap().unwrap(), Some(json!("second")));
-
-        unsafe { std::env::remove_var(key) };
-        scope.begin_expression_scope();
-        assert_eq!(
-            scope.resolve(&path, &context()).unwrap().unwrap(),
-            None,
-            "a missing `current_env` value resolves like a missing `env` value",
-        );
-    }
-
-    #[test]
-    fn paths_outside_the_two_roots_are_left_to_ordinary_resolution() {
-        let scope = CurrentScope::default();
-        for path in ["ctx.branch", "env.HOME", "currently", "current_environment", "doc.title"] {
+        for path in ["ctx.branch", "env.HOME", "currently", "current_env.HOME", "fm.title"] {
             assert!(scope.resolve(path, &context()).is_none(), "{path}");
         }
     }

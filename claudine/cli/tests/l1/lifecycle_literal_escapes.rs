@@ -16,23 +16,20 @@ use common::{CliProcessFixture, strip_ansi, write, write_dry_run_provider_stub};
 const DOCUMENT: &str = r#"---
 title: probe
 initialize:
-  stack:
-    - action: { stderr: "MIXED-1=[{{{ title }}}]" }
-    - action: { stderr: "MIXED-2=[\\{{ title }}]" }
-    - action: { stderr: "MIXED-3=[\\{\\{ title }}]" }
-    - action: { stderr: "{{{ title }}}" }
-    - action: { stderr: "\\{{ title }}" }
-    - action: { stderr: "\\{\\{ title }}" }
-    - action:
-        set:
-          stored_1: "{{{ title }}}"
-          stored_2: "\\{{ title }}"
-          stored_3: "\\{\\{ title }}"
-    - action: { stderr: "SET-1=[{{ stored_1 }}] SET-2=[{{ stored_2 }}] SET-3=[{{ stored_3 }}]" }
+  - { stderr: "MIXED-1=[{{{ title }}}]" }
+  - { stderr: "MIXED-2=[\\{{ title }}]" }
+  - { stderr: "MIXED-3=[\\{\\{ title }}]" }
+  - { stderr: "{{{ title }}}" }
+  - { stderr: "\\{{ title }}" }
+  - { stderr: "\\{\\{ title }}" }
+  - set:
+      stored_1: "{{{ title }}}"
+      stored_2: "\\{{ title }}"
+      stored_3: "\\{\\{ title }}"
+  - { stderr: "SET-1=[{{ stored_1 }}] SET-2=[{{ stored_2 }}] SET-3=[{{ stored_3 }}]" }
 start:
-  stderr: "START-1=[{{{ title }}}] START-2=[\\{{ title }}] START-3=[\\{\\{ title }}]"
-  stack:
-    - action: { error: "halt before the provider" }
+  - stderr: "START-1=[{{{ title }}}] START-2=[\\{{ title }}] START-3=[\\{\\{ title }}]"
+  - { error: "halt before the provider" }
 ---
 body
 "#;
@@ -89,13 +86,11 @@ fn proxy_with_values_deliver_a_triple_brace_escape_as_literal_text() {
         r#"---
 title: probe
 initialize:
-  stack:
-    - action:
-        action: proxy
-        target: "./target.md"
-        with:
-          whole: "{{{ title }}}"
-          mixed: "MIXED=[{{{ title }}}]"
+  - proxy:
+      target: "./target.md"
+      with:
+        whole: "{{{ title }}}"
+        mixed: "MIXED=[{{{ title }}}]"
 ---
 source body
 "#,
@@ -105,9 +100,8 @@ source body
         r#"---
 title: target
 initialize:
-  stack:
-    - action: { stderr: "WHOLE=[{{ whole }}] {{ mixed }}" }
-    - action: { error: "halt in the target" }
+  - { stderr: "WHOLE=[{{ whole }}] {{ mixed }}" }
+  - { error: "halt in the target" }
 ---
 target body
 "#,
@@ -148,9 +142,8 @@ fn lifecycle_shell_commands_run_a_triple_brace_escape_as_literal_text() {
         r#"---
 title: probe
 start:
-  stack:
-    - action: { shell: "printf '%s' 'SHELL=[{{{ title }}}]' > shell-out.txt" }
-    - action: { error: "halt before the provider" }
+  - { shell: "printf '%s' 'SHELL=[{{{ title }}}]' > shell-out.txt" }
+  - { error: "halt before the provider" }
 ---
 body
 "#,

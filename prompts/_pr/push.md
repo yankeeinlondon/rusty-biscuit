@@ -20,27 +20,24 @@ commits_ahead: "$(git rev-list --count origin/{{base}}..HEAD)::timeout:30"
 step_timeout: 90m
 timeout: 4h
 start:
-    stack:
-        - when: "number(commits_ahead, 0) == 0"
-          action:
-              - set_frontmatter: ["{{ report }}", "status", "error"]
-              - set_frontmatter: ["{{ report }}", "summary", "There was nothing to propose: HEAD has no commits that origin/{{ base }} lacks."]
-              - message: "🤨  nothing to propose from `{{ctx.branch}}` in {{ ctx.area_description || ctx.repo }}: `HEAD` has no commits that `origin/{{base}}` lacks"
-              - error: "`HEAD` has no commits that `origin/{{base}}` lacks, so there is nothing to open a pull request for"
-        - action:
-              - info: "proposing {{ commits_ahead }} commit(s) from `{{ctx.branch}}`; the pre-push hook runs the local test gates on this host ({{ctx.os}}) during the push"
-              - message: "🚦  proposing {{ commits_ahead }} commit(s) from `{{ctx.branch}}` in {{ ctx.area_description || ctx.repo }}; local testing runs on this host ({{ctx.os}}) first"
+    - when: "number(commits_ahead, 0) == 0"
+      then:
+          - set_frontmatter: ["{{ report }}", "status", "error"]
+          - set_frontmatter: ["{{ report }}", "summary", "There was nothing to propose: HEAD has no commits that origin/{{ base }} lacks."]
+          - message: "🤨  nothing to propose from `{{ctx.branch}}` in {{ ctx.area_description || ctx.repo }}: `HEAD` has no commits that `origin/{{base}}` lacks"
+          - error: "`HEAD` has no commits that `origin/{{base}}` lacks, so there is nothing to open a pull request for"
+    - info: "proposing {{ commits_ahead }} commit(s) from `{{ctx.branch}}`; the pre-push hook runs the local test gates on this host ({{ctx.os}}) during the push"
+    - message: "🚦  proposing {{ commits_ahead }} commit(s) from `{{ctx.branch}}` in {{ ctx.area_description || ctx.repo }}; local testing runs on this host ({{ctx.os}}) first"
 success:
-    stack:
-        - when: "frontmatter(report, 'status') == 'passed'"
-          action:
-              - success: "local testing passed on {{ctx.os}}; `{{ frontmatter(report, 'branch') }}` is pushed and ready for CI/CD"
-              - message: |-
-                    ✅  local testing passed on **{{ctx.os}}** for `{{ frontmatter(report, 'branch') }}` in {{ ctx.area_description || ctx.repo }}; the branch is pushed and ready for CI/CD
+    - when: "frontmatter(report, 'status') == 'passed'"
+      then:
+          - success: "local testing passed on {{ctx.os}}; `{{ frontmatter(report, 'branch') }}` is pushed and ready for CI/CD"
+          - message: |-
+                ✅  local testing passed on **{{ctx.os}}** for `{{ frontmatter(report, 'branch') }}` in {{ ctx.area_description || ctx.repo }}; the branch is pushed and ready for CI/CD
 
-                    {{ frontmatter(report, 'summary') }}
-              - say: "Local testing passed on {{ctx.os}}. The branch is pushed and ready for CI CD."
-              - action: proxy
+                {{ frontmatter(report, 'summary') }}
+          - say: "Local testing passed on {{ctx.os}}. The branch is pushed and ready for CI CD."
+          - proxy:
                 target: ./open.md
                 with:
                     base: "{{ base }}"
@@ -48,58 +45,55 @@ success:
                     report: "{{ report }}"
                     title: "{{ title || '' }}"
                     about: "{{ about || '' }}"
-        - when: "frontmatter(report, 'status') == 'local_failed'"
-          action:
-              - warn: "local testing failed on {{ctx.os}}; the push was blocked, and the failures are being diagnosed"
-              - message: |-
-                    ❌  local testing failed on **{{ctx.os}}** for `{{ frontmatter(report, 'branch') }}` in {{ ctx.area_description || ctx.repo }}; the push was blocked, and the failures are being diagnosed
+    - when: "frontmatter(report, 'status') == 'local_failed'"
+      then:
+          - warn: "local testing failed on {{ctx.os}}; the push was blocked, and the failures are being diagnosed"
+          - message: |-
+                ❌  local testing failed on **{{ctx.os}}** for `{{ frontmatter(report, 'branch') }}` in {{ ctx.area_description || ctx.repo }}; the push was blocked, and the failures are being diagnosed
 
-                    {{ frontmatter(report, 'summary') }}
-              - say: "Local testing failed on {{ctx.os}} and the push was blocked. The failures are being diagnosed."
-              - effect: sad-trombone
-              - action: proxy
+                {{ frontmatter(report, 'summary') }}
+          - say: "Local testing failed on {{ctx.os}} and the push was blocked. The failures are being diagnosed."
+          - effect: sad-trombone
+          - proxy:
                 target: ./diagnose.md
                 with:
                     base: "{{ base }}"
                     report: "{{ report }}"
                     on_failure: "{{ on_failure }}"
                     committed: "{{ committed }}"
-        - when: "frontmatter(report, 'status') == 'error'"
-          action:
-              - message: |-
-                    💥  local testing on **{{ctx.os}}** could not produce a verdict for `{{ctx.branch}}` in {{ ctx.area_description || ctx.repo }}
+    - when: "frontmatter(report, 'status') == 'error'"
+      then:
+          - message: |-
+                💥  local testing on **{{ctx.os}}** could not produce a verdict for `{{ctx.branch}}` in {{ ctx.area_description || ctx.repo }}
 
-                    {{ frontmatter(report, 'summary') }}
-              - say: "Local testing on {{ctx.os}} could not produce a verdict. {{ frontmatter(report, 'summary') }}"
-              - error: "{{ frontmatter(report, 'summary') }}"
-        # The agent finished without recording an outcome. It still holds the push
-        # output in its session, so ask it once before giving up; `nudged` lives in
-        # the report because runtime state does not survive the re-entry.
-        - when: "!frontmatter(report, 'nudged')"
-          action:
-              - set_frontmatter: ["{{ report }}", "nudged", "{{ true }}"]
-              - warn: "the push agent finished without recording an outcome; asking it to finish the report"
-              - resume: "You ended the session without recording an outcome. Set `status` in the frontmatter of {{ report }} to `passed`, `local_failed`, or `error`, along with the other properties the report contract requires for that status, and then stop."
-        - action:
-              - message: "💥  the push agent for `{{ctx.branch}}` finished without recording an outcome in `{{report}}`, even after being asked to"
-              - say: "The push agent finished without recording an outcome."
-              - error: "the push agent did not set `status` in {{report}}"
+                {{ frontmatter(report, 'summary') }}
+          - say: "Local testing on {{ctx.os}} could not produce a verdict. {{ frontmatter(report, 'summary') }}"
+          - error: "{{ frontmatter(report, 'summary') }}"
+    # The agent finished without recording an outcome. It still holds the push
+    # output in its session, so ask it once before giving up; `nudged` lives in
+    # the report because runtime state does not survive the re-entry.
+    - when: "!frontmatter(report, 'nudged')"
+      then:
+          - set_frontmatter: ["{{ report }}", "nudged", "{{ true }}"]
+          - warn: "the push agent finished without recording an outcome; asking it to finish the report"
+          - resume: "You ended the session without recording an outcome. Set `status` in the frontmatter of {{ report }} to `passed`, `local_failed`, or `error`, along with the other properties the report contract requires for that status, and then stop."
+    - message: "💥  the push agent for `{{ctx.branch}}` finished without recording an outcome in `{{report}}`, even after being asked to"
+    - say: "The push agent finished without recording an outcome."
+    - error: "the push agent did not set `status` in {{report}}"
 blocked:
     message: "💥  the push stage for `{{ctx.branch}}` in {{ ctx.area_description || ctx.repo }} was **blocked** before the agent started: {{err.msg}}"
     say: "The push stage was blocked before the agent started."
 failure:
-    stack:
-        - when: "err.category == 'timeout'"
-          action:
-              - warn: "the push agent was stopped by a timeout ({{err.code}}); resuming its session"
-              - resume: "You were stopped by a timeout. If the push is still running in the background, keep polling {{ log }}; otherwise continue from where you left off, record the outcome in {{ report }}, and stop."
-        - when: "err.is_transient || err.is_throttled"
-          action:
-              - warn: "the push agent failed with a recoverable error ({{err.code}}); retrying once. The hook reuses the evidence it already published, so the retry is cheap"
-              - retry: 1
-        - action:
-              - message: "❌  the push stage for `{{ctx.branch}}` in {{ ctx.area_description || ctx.repo }} failed ({{ctx.agent}}/{{ctx.model}}: {{err.msg}})"
-              - say: "The push stage of the pull request flow failed in {{ ctx.area_description || ctx.repo }}."
+    - when: "err.category == 'timeout'"
+      then:
+          - warn: "the push agent was stopped by a timeout ({{err.code}}); resuming its session"
+          - resume: "You were stopped by a timeout. If the push is still running in the background, keep polling {{ log }}; otherwise continue from where you left off, record the outcome in {{ report }}, and stop."
+    - when: "err.is_transient || err.is_throttled"
+      then:
+          - warn: "the push agent failed with a recoverable error ({{err.code}}); retrying once. The hook reuses the evidence it already published, so the retry is cheap"
+          - retry: 1
+    - message: "❌  the push stage for `{{ctx.branch}}` in {{ ctx.area_description || ctx.repo }} failed ({{ctx.agent}}/{{ctx.model}}: {{err.msg}})"
+    - say: "The push stage of the pull request flow failed in {{ ctx.area_description || ctx.repo }}."
 ---
 
 # Push a Branch for a Pull Request

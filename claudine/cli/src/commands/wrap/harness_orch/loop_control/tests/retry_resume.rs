@@ -107,6 +107,7 @@ fn canonical_retry_and_resume_reentry_each_produce_exact_epoch_work() {
         max_attempts: 2,
         backoff: RetryBackoff::Fixed,
         delay: "0s".to_string(),
+        overlay: indexmap::IndexMap::new(),
     });
     assert!(matches!(
         dispatch_terminal_control(
@@ -284,6 +285,7 @@ fn dispatch_retry_from_failure_continues_and_resets_guard() {
         max_attempts: 2,
         backoff: RetryBackoff::Fixed,
         delay: "0s".to_string(),
+        overlay: indexmap::IndexMap::new(),
     });
     let action = dispatch_terminal_control(
         &outcome,
@@ -309,7 +311,7 @@ fn dispatch_retry_from_failure_continues_and_resets_guard() {
 
 #[test]
 fn dispatch_retry_from_finalize_continues_and_resets_guard() {
-    // `finalize` is a last-chance recovery surface: a `finalize.stack`
+    // `finalize` is a last-chance recovery surface: a `finalize` stack
     // ending in `retry` must re-enter the loop exactly as `failure` does.
     let fx = fixture(serde_json::json!({}));
     let emitter = RecordingEmitter::default();
@@ -335,6 +337,7 @@ fn dispatch_retry_from_finalize_continues_and_resets_guard() {
         max_attempts: 1,
         backoff: RetryBackoff::Fixed,
         delay: "0s".to_string(),
+        overlay: indexmap::IndexMap::new(),
     });
     let action = dispatch_terminal_control(
         &outcome,
@@ -428,6 +431,7 @@ fn dispatch_retry_exhausts_after_budget() {
         max_attempts: 1,
         backoff: RetryBackoff::Fixed,
         delay: "0s".to_string(),
+        overlay: indexmap::IndexMap::new(),
     });
     // attempt 2 has reached the ceiling → fall through (no continue).
     let action = dispatch_terminal_control(
@@ -548,14 +552,8 @@ fn dispatch_resume_without_session_aborts_typed() {
 #[test]
 fn a_refused_resume_routes_through_failure_then_finalize_with_err() {
     let fx = fixture(serde_json::json!({
-        "failure": {
-            "stack": [
-                {"when": "err", "action": {"append_line": ["events.log", "{{ err.msg }}"]}}
-            ]
-        },
-        "finalize": {
-            "stack": [{"when": "err", "action": {"append_line": ["events.log", "finalize-ran"]}}]
-        }
+        "failure": [{"when": "err", "then": [{"append_line": ["events.log", "{{ err.msg }}"]}]}],
+        "finalize": [{"when": "err", "then": [{"append_line": ["events.log", "finalize-ran"]}]}]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -668,13 +666,7 @@ fn a_resume_whose_only_moved_facet_is_the_overlay_is_refused() {
     let facets = key(&opened).incompatibilities(&key(&refreshed));
     assert_eq!(facets, vec!["provider overlay".to_string()]);
 
-    let fx = fixture(serde_json::json!({
-        "failure": {
-            "stack": [
-                {"when": "err", "action": {"append_line": ["events.log", "{{ err.msg }}"]}}
-            ]
-        }
-    }));
+    let fx = fixture(serde_json::json!({"failure": [{"when": "err", "then": [{"append_line": ["events.log", "{{ err.msg }}"]}]}]}));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
         settings: &fx.settings,
@@ -714,4 +706,68 @@ fn a_resume_whose_only_moved_facet_is_the_overlay_is_refused() {
             .downcast_ref::<CompositionError>()
             .is_some_and(|e| matches!(e, CompositionError::LifecycleResumeIncompatible { .. })),
     );
+}
+
+/// A `retry.with` evaluation failure raises before any dispatch: the run halts
+/// through the evaluation-error path, no retry overlay is staged, no attempt
+/// is spent, and no retry budget is established — even under `no_error`.
+#[test]
+fn a_failed_retry_overlay_spends_no_attempt_and_stages_nothing() {
+    let fx = fixture(serde_json::json!({
+        "failure": [{ "retry": {
+            "max_attempts": 1,
+            "no_error": true,
+            "with": { "reason": "{{ missing_root() }}" },
+        } }],
+    }));
+    std::fs::write(&fx.source_path, "---\ntitle: t\n---\nbody\n").unwrap();
+    let emitter = RecordingEmitter::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &fx.settings,
+        messaging: &fx.messaging,
+        term: &fx.term,
+        source_path: &fx.source_path,
+        repo_root: Some(fx._dir.path()),
+        launch_area: None,
+        context: None,
+    };
+    let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
+    guard.mark_provider_launched();
+    let mut state = prompt_state(&fx.source_path);
+    let mut active = claudine::composition::ActiveDocumentState::initial();
+    let event_err = LifecycleErrorInfo::from_action_failure("agent_failure", "boom");
+
+    let result = drive_terminal_recovery(
+        &mut guard,
+        LifecycleSignal::Failure,
+        Some(&event_err),
+        &fx.materialized,
+        Some(fx._dir.path()),
+        &fx.term,
+        &engine(fx._dir.path()),
+        loop_start_now(),
+        1,
+        active.iteration_mut(),
+        Some("sess-1"),
+        resume_capable_profile(),
+        Provider::Claude,
+        &mut state,
+        &ledger(&fx.source_path),
+        false,
+    );
+
+    let error = match result {
+        Err(error) => error,
+        Ok(_) => panic!("an overlay evaluation failure halts the run"),
+    };
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("`failure[0].retry`")
+            && rendered.contains("could not be resolved for the `retry`"),
+        "the halt is the typed overlay failure at the authored retry: {rendered}"
+    );
+    assert_eq!(state.pending_retry_overlay, None, "no overlay is installed");
+    assert_eq!(state.entry, claudine::composition::DocumentEntryReason::Direct, "no retry entry");
+    assert_eq!(active.iteration().attempt().number(), 1, "no attempt is spent");
+    assert_eq!(active.iteration().retry_budget().ceiling(), None, "no retry budget is established");
 }

@@ -56,8 +56,7 @@ fn level2_file_links_directive_renders_styled_tree_in_real_terminal() {
         frame.plain
     );
 
-    // Extension-specific Unicode glyphs distinguish each document kind (the
-    // projection bakes Unicode icons; the bytes survive regardless of font).
+    // The fixture pins Unicode fallback icons for deterministic captures.
     for (glyph, label) in &[
         ("📝", "txt"),
         ("📕", "pdf"),
@@ -71,14 +70,10 @@ fn level2_file_links_directive_renders_styled_tree_in_real_terminal() {
         );
     }
 
-    // The root is a repository (`.git` present), so it renders the repository
-    // icon (📦); the `sub` subdirectory renders the ordinary folder icon (📂).
-    // Both appearing — each where expected — distinguishes the repo icon from
-    // ordinary folder styling.
+    // The listing starts below the repository root, so both directories use folders.
     assert!(
-        frame.plain.contains("📦"),
-        "expected repository root icon 📦 in capture. plain:\n{}",
-        frame.plain
+        !frame.plain.contains("📦"),
+        "unexpected repository icon in capture: {}", frame.plain
     );
     assert!(
         frame.plain.contains("📂"),
@@ -125,19 +120,19 @@ fn level2_file_links_directive_renders_styled_tree_in_real_terminal() {
     );
 
     // The boundary-relative root prefix renders dimmed (SGR 2) before the
-    // highlighted target: the full `/docs/topics` root label is visible, and the
-    // `/docs/` prefix run carries the dim SGR on its own (distinct from the bold,
+    // highlighted target: the full `docs/topics/` root label is visible, and the
+    // `docs/` prefix run carries the dim SGR on its own (distinct from the bold,
     // non-dim `topics` asserted above).
     assert!(
-        frame.plain.contains("/docs/topics"),
-        "expected visible boundary-relative root `/docs/topics`; plain:\n{}",
+        frame.plain.contains("docs/topics/"),
+        "expected visible boundary-relative root `docs/topics/`; plain:\n{}",
         frame.plain
     );
     let prefix_attrs =
-        active_sgr_params(&styled, "/docs/").expect("/docs/ root prefix missing from capture");
+        active_sgr_params(&styled, "docs/").expect("docs/ root prefix missing from capture");
     assert!(
         prefix_attrs.contains(&2),
-        "dimmed root prefix `/docs/` must carry the dim SGR on its own run; raw:\n{}",
+        "dimmed root prefix `docs/` must carry the dim SGR on its own run; raw:\n{}",
         frame.raw
     );
 

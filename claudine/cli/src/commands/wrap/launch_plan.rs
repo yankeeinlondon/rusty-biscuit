@@ -334,6 +334,9 @@ pub(crate) struct LaunchPlanInputs {
     /// Whether the caller's env plan already carries a `MODEL` entry, which is
     /// the model stage's `has_model_env` input.
     pub(crate) has_model_env: bool,
+    /// The launching document's captured environment, which the model stage's
+    /// provider-variable fallback reads.
+    pub(crate) environment: claudine::invocation_context::DocumentEnvironment,
     /// MCP inputs, `None` when MCP is not in play for this invocation.
     pub(crate) mcp: Option<McpRebuildInputs>,
     /// `OPENCODE_CONFIG_CONTENT` as it stood *before* the MCP, YOLO, and
@@ -417,6 +420,8 @@ impl LaunchPlanInputs {
             system_prompt_scoped_tmp: PathBuf::new(),
             sandbox_requested: false,
             has_model_env: false,
+            // Never read: a recorded-only plan refuses every replay.
+            environment: claudine::invocation_context::DocumentEnvironment::default(),
             mcp: None,
             opencode_config_base: None,
             kilo_config_base: None,
@@ -773,6 +778,7 @@ fn replay(
         facets.model.as_deref(),
         facets.non_interactive,
         inputs.has_model_env,
+        &inputs.environment,
         &mut |key, value| model_env.push((key, value)),
         &mut |warning| {
             warnings.push(LaunchWarning {

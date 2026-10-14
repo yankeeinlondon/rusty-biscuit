@@ -131,8 +131,8 @@ Intelligence for Darkmatter's composition DSL — all **read-only**:
   defined, and shown in hover; a chain ending in `false` that matches nothing
   gets no diagnostic; and a chain that matches nothing otherwise gets one
   broken-path diagnostic carrying the first alternative's failure class.
-- **Interpolation** (`{{ }}`) — completion (frontmatter keys, `ctx.*`,
-  functions), hover showing the resolved static value (falling back to the
+- **Interpolation** (`{{ }}`) — completion (frontmatter keys, the `fm`
+  root and its `fm.<key>` members, `ctx.*`, functions), hover showing the resolved static value (falling back to the
   effective-schema property description for a declared-but-unset key),
   variable → frontmatter-key definition, malformed-expression and
   unknown-function diagnostics, and the undeclared-property advisory (every
@@ -198,7 +198,7 @@ Refactoring and formatting that respect workspace-wide references:
   add a missing required schema key, migrate a deprecated `style:` key,
   close an unclosed `::block`, wrap a malformed `{{ … }}` in an
   interpolation literal (`{{{ … }}}`), and replace a subtraction that spells a
-  frontmatter key (`foo--bar`) with a reference to it (`doc['foo--bar']`).
+  frontmatter key (`foo--bar`) with a reference to it (`fm['foo--bar']`).
 - **Formatting** — whole-document formatting that runs `md clean`'s
   transaction on the unsaved buffer: frontmatter repair plus body formatting
   under the document's `style.markdown`, over the workspace

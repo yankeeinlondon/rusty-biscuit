@@ -7,8 +7,33 @@ description: Use when working in the claudine/ package area or with the Claudine
 
 Claudine is a universal event handler, shared-resource linker, MCP catalog manager, and composition harness for agentic CLIs. It normalizes **16 lifecycle events** across **10 providers** (Claude Code, Codex CLI, Gemini CLI, Goose, Kimi Code, OpenCode, Qwen Code, Kilo, Pi, and Antigravity) into a single configuration model, fires **6 action types** — TTS, sound effects, logging, shell commands, reports, and blocking calls — when those events fire, synchronizes skills/commands/agents/scripts between providers, manages a provider-agnostic MCP catalog plus provider-specific import/sync/runtime behavior, and provides three Markdown composition commands (`compose`, `inline-compose`, `sequence`) that flow through the same wrapper-grade execution pipeline as the provider wrappers.
 
-Lifecycle `say`/`say_first`/`effect` and hook `speak`/`sound_effect` audio is
+Lifecycle `say`/`speak`/`effect` and hook `speak`/`sound_effect` audio is
 fire-and-forget after durable publication to Playa's private per-user queue.
+Lifecycle audio is published in stack order: put `effect` before `say` to hear it first.
+
+**Lifecycle grammar.** Each lifecycle stack (the six events, the `loop:`
+block's loose verbs or `gate:` list, and a task's `setup:`/`teardown:`) parses
+into ordered `LifecycleNode`s — a leaf `LifecycleAction` or a
+`LifecycleConditional` (`when` + `then`/`else` bodies, at most five levels) —
+and every node carries its authored `LifecyclePath`
+(`failure[0].else[1].shell`), which is what diagnostics name. A dictionary
+bundle expands in a fixed canonical order at parse time. Every retired spelling
+(the old stack/aggregator keys, the speech-ordering flag, communication
+`message`/`sound`/`route` parameters, and the retired loop-value names) is
+`CompositionError::RemovedGrammar` with a replacement hint. The parser
+slice (`lifecycle/{parse,action_shape,actions,validate,signatures,source_map}.rs`)
+is lift-ready: `lib/tests/l1/lifecycle_lift_ready_guard.rs` fails if it names a
+Claudine runtime type, so the caller injects the effect catalog
+(`LifecycleParseOptions`). Loop values are the host-declared `loop` global
+(`loop.count`, …), supplied to Darkmatter main compose through
+`ComposeOptions::with_host_globals`; `fm.loop` is the loop configuration.
+`retry.with` shares `proxy.with`'s evaluation (`executor.rs::resolve_with_overlay`)
+and travels as `StackControl::Retry.overlay` into
+`HarnessPromptState.pending_retry_overlay`; `prompt.rs::active_overlay` layers
+it over the retained proxy overlay (retry wins a shared key). The retried
+attempt's preflight read only looks at it and `materialize_harness_prompt`
+consumes it, so it applies to exactly one transition; resume and proxy
+adoption clear it.
 The `claudine` executable intercepts Playa scheduler/delegate modes and the
 biscuit-speaks preparation-helper mode before normal CLI bootstrap, so queued
 audio is serialized and survives the requesting Claudine process.
@@ -202,7 +227,7 @@ of a topic doc.
 
 - [Error Architecture](topics/error-architecture.md) — the `Diagnostic`/`BlockError` pair, the discovery seam, effective-diagnostic selection and the `Semantic`/`Transparent` role contract, the snapshot boundary, typed-wrapper rules, and the lossy-boundary audit
 - [Composition](topics/composition.md) — `compose`, `inline-compose`, `sequence`, lifecycle stacks, provider selection
-- [Lifecycle](topics/flow-control/lifecycle.md) — the seven events, notification fields, action forms, `err`/`timing`/`current` globals, validation errors
+- [Lifecycle](topics/flow-control/lifecycle.md) — the seven events, the list/dictionary stack grammar with `when`/`then`/`else`, action forms, `err`/`timing`/`current` globals, validation errors
 - [Flow Control](topics/flow-control/flow-control.md) and [Flow Control Reference](topics/flow-control/flow-control-reference.md) — the `stop`/`skip`/`error`/`retry`/`resume`/`proxy`/`defer` directives, per-event runtime limits, retry/resume re-entry, `proxy` handoffs and the `with:` overlay
 - [Timeouts](topics/timeouts.md) — the two timeout rules, four env vars, precedence, termination path, the post-exit stream-reader wait (`stream_reader_timeout`), the single output worker that keeps a blocked terminal from stalling the parser or the wrapper (`wrap/output_worker.rs`; run output is a queued frame, and once a run creates the worker every diagnostic — `crate::log`, signal notices, `--perf`, tracing, the panic hook, the library's `render::console` lines — is one too, through `crate::terminal_gate::write`; signal handlers never write the terminal), exit reasons, and the three runaway content guards
 - [Signal Handling](topics/signal-handling.md) — user Ctrl+C vs wrapper-driven SIGTERM/SIGKILL, the unified wait loop, termination labels (`Aborted`/`Interrupted`/`TimedOut`), non-interactive ladder, Windows parity

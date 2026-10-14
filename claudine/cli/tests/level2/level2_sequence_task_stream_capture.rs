@@ -205,13 +205,11 @@ sequence:
         - name: failing-proxy
           prompt: one.md
           setup:
-            - action:
-                - set: {shared: from-failing}
+            - set: {shared: from-failing}
         - name: surviving-proxy
           prompt: two.md
           setup:
-            - action:
-                - set: {shared: from-survivor}
+            - set: {shared: from-survivor}
   - name: verify-merge
     prompt: reader.md
 ---
@@ -913,11 +911,11 @@ fn level2_mega_merge_s10_parallel_proxy_failure_task_integrity() {
     let root = staged.workspace.path();
     write(
         &root.join("one.md"),
-        "---\ninitialize:\n  stack:\n    - action: {proxy: '@failed-target.md'}\n---\n\nFirst router.\n",
+        "---\ninitialize:\n  - {proxy: '@failed-target.md'}\n---\n\nFirst router.\n",
     );
     write(
         &root.join("two.md"),
-        "---\ninitialize:\n  stack:\n    - action: {proxy: '@success-target.md'}\n---\n\nSecond router.\n",
+        "---\ninitialize:\n  - {proxy: '@success-target.md'}\n---\n\nSecond router.\n",
     );
     write(
         &root.join("failed-target.md"),

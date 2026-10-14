@@ -105,7 +105,23 @@ DMLS projects Darkmatter's typed surfaces into LSP:
 
 - Frontmatter and schema diagnostics with source spans.
 - Schema-aware completion for keys, values, suggestions, literal-discriminated
-  union arms, and imported types.
+  union arms, and named types (local names bare, `name@this` only for a
+  built-in collision, imports with their target).
+- Named-type references (`overlay/named_types.rs`,
+  `providers/frontmatter/named_references.rs`, `diagnostics/named_types.rs`):
+  hover and go-to-definition on bare, `@this`, and cross-file spellings;
+  `UnknownNamedType`/`ConstraintConflict`/`ImportCycle` publish as
+  `dm.schema.invalid_type_definition` on the reference's `ImportName` span
+  with conflict origins as `relatedInformation`. Standalone schema files
+  resolve their references through `resolve::expand_named_types`. Imported
+  files are dependency edges, and a failed assembly records the files its
+  error names so a fix clears it; local references add no edge.
+- Type keywords come from `schema_type_descriptors()` plus each descriptor's
+  `aliases`; `alphanumeric` options come from its `type_options`, offered only
+  while `SchemaCursorRole::Constraint.leading_group` is `Some` (no `;` yet).
+  Definition hover adds `schema_type_descriptor` text and, for
+  `alphanumeric`, `PropertyAtom::alphanumeric_options()` with the
+  `AsciiCharSet` `Display` rendering.
 - Expression completion, hover, and parse diagnostics inside
   expression-typed frontmatter.
 - Hover/documentation from typed descriptor catalogs.
@@ -188,7 +204,7 @@ branch, even without frontmatter. It comes from the library's passive
   `reserved_root_descriptors()`, plus the `null` literal). DMLS supplies no
   host descriptors, so Claudine's `err`/`timing`/`group` are undeclared
   properties here, beneath lifecycle keys too, until R7c distributes host
-  descriptors. Root names DMLS needs (`ctx` hover/completion, the `doc[...]`
+  descriptors. Root names DMLS needs (`ctx` hover/completion, the `fm[...]`
   quick-fix) come from `context_root()`/`document_root()`, which read the same
   catalog. `undeclared_property.rs` fails on any root-name string literal, a
   host-global list, or an evaluation-session type in production `src/`.
@@ -200,7 +216,7 @@ branch, even without frontmatter. It comes from the library's passive
   top-level key, gets one key-level finding. A literal operand
   (`iteration - 1`) stays arithmetic. A fix is attached only when the edited
   expression reparses with the replacement as one reference to the key: the
-  bare key first, then `doc['key']` quoted to avoid the value's YAML quote.
+  bare key first, then `fm['key']` quoted to avoid the value's YAML quote.
   The fix rides in `Diagnostic.data` as `KeyReferenceFix`. The code action
   reads `data`, or recomputes the producing provider's diagnostics when a
   client drops `data`, and never parses the message.

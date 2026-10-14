@@ -20,11 +20,19 @@
 //!
 //! Remote (`http://` / `https://`) `$schema` values are rejected up front
 //! with [`SchemaError::RemoteUnsupported`].
+//!
+//! Schema documents compiled into the library (the runtime baseline and the
+//! Content Policy schema it imports) are prepared by `prepare_embedded_schema`
+//! through the same parsing and import expansion. Only the namespace source
+//! differs: an embedded document's imports resolve lexically against the
+//! embedded table by repository-relative virtual path, never against the disk,
+//! the network, or the request's context, and record no dependency edges.
 
 use std::{
     collections::{BTreeSet, HashMap},
     fs,
     path::{Component, Path, PathBuf},
+    sync::Arc,
 };
 
 use biscuit_file::{FileReference, FileReferenceKind, FileResolutionContext};
@@ -33,12 +41,16 @@ use serde_json::{Map, Value};
 use serde_yaml_ng::Value as YamlValue;
 
 use super::{
-    SchemaAdvisory, SchemaArm, SchemaOrigin, SchemaOriginKind, SchemaShape, SimplifiedSchema,
+    SchemaAdvisory, SchemaArm,
+    embedded::{self, EmbeddedDocument}, SchemaOrigin, SchemaOriginKind, SchemaShape, SimplifiedSchema,
     errors::SchemaError,
     simplified::{
-        SchemaDeclaration, parse_standalone_schema_document, parse_yaml_schema, to_json_schema,
+        AlphanumericOptions, SchemaConstraintConflictKind, SchemaConstraintOrigin, SchemaDeclaration,
+        SchemaReferenceSite, SchemaSourceId, SchemaSourceMap, SchemaSourcePath, SchemaUnionRejection,
+        parse_standalone_schema_document, parse_yaml_schema, to_json_schema,
         types::{
-            Constraint, PatternKeyDef, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr,
+            Constraint, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SimplifiedType,
+            TypeExpr,
         },
     },
 };
@@ -163,8 +175,14 @@ pub fn resolve_yaml_schema_with_roots(
             // (Feature B) before conversion — `to_json_schema` rejects a
             // surviving import. This is the top-level document, so `@this`
             // resolves against the inline root (`NamespaceKey::Root`).
-            let (schema, imports) =
-                expand_document_imports(schema, base_dir, NamespaceKey::Root, schema_roots, request_context)?;
+            let (schema, imports) = expand_document_imports(
+                schema,
+                base_dir,
+                NamespaceKey::Root,
+                &SchemaSourcePath::root(),
+                schema_roots,
+                request_context,
+            )?;
             let mut json = to_json_schema(&schema)?;
             // Inline `$schema` mappings have no on-disk path, so `this` example
             // references have no target here (the acceptance driver references
@@ -192,6 +210,96 @@ pub fn resolve_yaml_schema_with_roots(
     }
 }
 
+/// The canonical path of the file an explicit named-type reference
+/// (`Name@reference`) selects, from a schema authored in `base_dir`.
+///
+/// This is the resolver's own target selection, exposed so an editor can find
+/// the file that defines a referenced type without a second lookup rule.
+/// `this` names no file and returns `None`.
+///
+/// ## Errors
+///
+/// The same [`SchemaError`]s named-type expansion reports for the reference:
+/// [`SchemaError::Unresolved`], [`SchemaError::NoMatch`],
+/// [`SchemaError::BareNameSiblingExists`], or
+/// [`SchemaError::RemoteUnsupported`].
+pub fn named_type_reference_path(
+    reference: &str,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+) -> Result<Option<PathBuf>, SchemaError> {
+    if reference.trim() == "this" {
+        return Ok(None);
+    }
+    named_type_file_path(reference, base_dir, schema_roots, request_context)
+        .map(|path| Some(canonical_path(&path)))
+}
+
+/// Expands the named-type references in `schema`, as resolving it would, and
+/// returns the expanded schema with the files its references import.
+///
+/// `defining_file` is the schema file `schema` was authored in, or `None` for
+/// an inline `$schema`; it decides what `this` names and the source of every
+/// reported location. The schema supplies its own named types (an editor
+/// passes its current buffer), so a local reference reads nothing; an
+/// explicit reference reads its target through `request_context` from
+/// `base_dir`. A root union expands each inline arm with that arm's
+/// properties as `this`, as the resolver does; file-reference arms are left
+/// as authored.
+///
+/// ## Errors
+///
+/// [`SchemaError::UnknownNamedType`], [`SchemaError::ConstraintConflict`],
+/// [`SchemaError::UnionReference`], [`SchemaError::ImportCycle`], and any
+/// error reading or resolving an imported file.
+pub fn expand_named_types(
+    schema: &SimplifiedSchema,
+    base_dir: &Path,
+    defining_file: Option<&Path>,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+) -> Result<(SimplifiedSchema, Vec<PathBuf>), SchemaError> {
+    let key = || match defining_file {
+        Some(path) => NamespaceKey::File(canonical_path(path)),
+        None => NamespaceKey::Root,
+    };
+    match schema {
+        SimplifiedSchema::Single(_) => expand_document_imports(
+            schema.clone(),
+            base_dir,
+            key(),
+            &SchemaSourcePath::root(),
+            schema_roots,
+            request_context,
+        ),
+        SimplifiedSchema::Union(arms) => {
+            let mut imports = BTreeSet::new();
+            let mut expanded = Vec::with_capacity(arms.len());
+            for (index, arm) in arms.iter().enumerate() {
+                let SchemaArm::Inline(shape) = arm else {
+                    expanded.push(arm.clone());
+                    continue;
+                };
+                let (schema, found) = expand_document_imports(
+                    SimplifiedSchema::Single(shape.clone()),
+                    base_dir,
+                    key(),
+                    &SchemaSourcePath::root().union_arm(index),
+                    schema_roots,
+                    request_context,
+                )?;
+                imports.extend(found);
+                let SimplifiedSchema::Single(shape) = schema else {
+                    unreachable!("single root-union arm remains single")
+                };
+                expanded.push(SchemaArm::Inline(shape));
+            }
+            Ok((SimplifiedSchema::Union(expanded), imports.into_iter().collect()))
+        }
+    }
+}
+
 fn resolve_root_union(
     items: &[YamlValue],
     base_dir: &Path,
@@ -210,7 +318,7 @@ fn resolve_root_union(
     let mut examples: BTreeSet<PathBuf> = BTreeSet::new();
     let mut referenced_files: BTreeSet<PathBuf> = BTreeSet::new();
     let mut advisories: BTreeSet<SchemaAdvisory> = BTreeSet::new();
-    for item in items {
+    for (index, item) in items.iter().enumerate() {
         match item {
             YamlValue::Mapping(_) => {
                 let arm_schema = parse_yaml_schema(item)?;
@@ -220,6 +328,7 @@ fn resolve_root_union(
                         arm_schema,
                         base_dir,
                         NamespaceKey::Root,
+                        &SchemaSourcePath::root().union_arm(index),
                         schema_roots,
                         request_context,
                     )?;
@@ -522,6 +631,9 @@ fn load_guarded_in_context(
     .map_err(|source| match source {
         SchemaError::Grammar { .. }
         | SchemaError::Convert { .. }
+        | SchemaError::UnknownNamedType { .. }
+        | SchemaError::ConstraintConflict { .. }
+        | SchemaError::UnionReference { .. }
         | SchemaError::Aggregate { .. } => SchemaError::ReferencedSchema {
             path: canonical.clone(),
             source: Box::new(source),
@@ -722,8 +834,14 @@ fn resolve_standalone_schema(
     let key = NamespaceKey::File(canonical_path(path));
     match schema {
         SimplifiedSchema::Single(_) => {
-            let (schema, imports) =
-                expand_document_imports(schema, file_dir, key, schema_roots, request_context)?;
+            let (schema, imports) = expand_document_imports(
+                schema,
+                file_dir,
+                key,
+                &SchemaSourcePath::root(),
+                schema_roots,
+                request_context,
+            )?;
             let mut json_schema = to_json_schema(&schema)?;
             let examples = resolve_document_examples(
                 &mut json_schema,
@@ -755,6 +873,77 @@ fn resolve_standalone_schema(
     }
 }
 
+/// Prepares the embedded schema document registered at `path`: parses it,
+/// expands its imports against `documents` alone, and lowers it.
+///
+/// Embedded documents are immutable build inputs, so the result records no
+/// dependency edges and nothing is read from the disk or the network.
+///
+/// ## Errors
+///
+/// The resolver's typed errors. Failures specific to an embedded source are
+/// [`SchemaError::SchemaDocument`], naming the importing virtual document: an
+/// unregistered `path` or import target, an import that is not a relative
+/// virtual path inside the repository root, a whole-file reference or
+/// root-union document, or an `example(...)` constraint (which would name a
+/// file on disk).
+pub(crate) fn prepare_embedded_schema(
+    path: &str,
+    documents: &[EmbeddedDocument<'_>],
+) -> Result<ResolvedSchema, SchemaError> {
+    let unsupported = |message: &str| SchemaError::SchemaDocument {
+        path: PathBuf::from(path),
+        message: message.to_string(),
+    };
+    let document = embedded::find(documents, path)
+        .ok_or_else(|| unsupported("not a registered embedded schema document"))?;
+    let Some(standalone) = parse_standalone_schema_document(document.text, Path::new(path))? else {
+        return Err(SchemaError::AmbiguousReferenced {
+            path: PathBuf::from(path),
+        });
+    };
+    let schema = match standalone.declaration {
+        SchemaDeclaration::Schema(schema @ SimplifiedSchema::Single(_)) => schema,
+        SchemaDeclaration::Schema(SimplifiedSchema::Union(_)) => {
+            return Err(unsupported("an embedded schema cannot be a root union"));
+        }
+        SchemaDeclaration::Reference(_) => {
+            return Err(unsupported("an embedded schema cannot be a whole-file reference"));
+        }
+    };
+    let (schema, _) = expand_imports(
+        schema,
+        Path::new(""),
+        NamespaceKey::Embedded(path.to_string()),
+        &SchemaSourcePath::root(),
+        NamespaceSource::Embedded(documents),
+    )?;
+    let json_schema = to_json_schema(&schema)?;
+    if contains_example_annotation(&json_schema) {
+        return Err(unsupported("an embedded schema cannot reference `example(...)` artifacts"));
+    }
+    Ok(ResolvedSchema {
+        simplified: Some(schema),
+        json_schema,
+        origin: SchemaOrigin::document(),
+        imports: Vec::new(),
+        examples: Vec::new(),
+        referenced_files: Vec::new(),
+        advisories: Vec::new(),
+    })
+}
+
+/// Whether a lowered schema carries an unresolved `example(...)` reference.
+fn contains_example_annotation(value: &Value) -> bool {
+    match value {
+        Value::Object(map) => {
+            map.contains_key("x-darkmatter-example") || map.values().any(contains_example_annotation)
+        }
+        Value::Array(items) => items.iter().any(contains_example_annotation),
+        _ => false,
+    }
+}
+
 fn resolve_standalone_root_union(
     arms: Vec<SchemaArm>,
     base_dir: &Path,
@@ -771,7 +960,7 @@ fn resolve_standalone_root_union(
     let mut referenced_files = BTreeSet::new();
     let mut advisories = BTreeSet::new();
 
-    for arm in arms {
+    for (index, arm) in arms.into_iter().enumerate() {
         match arm {
             SchemaArm::Inline(shape) => {
                 let schema = SimplifiedSchema::Single(shape);
@@ -779,6 +968,7 @@ fn resolve_standalone_root_union(
                     schema,
                     base_dir,
                     NamespaceKey::File(canonical_path(path)),
+                    &SchemaSourcePath::root().union_arm(index),
                     schema_roots,
                     request_context,
                 )?;
@@ -862,21 +1052,32 @@ fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<ResolvedSchema, Sc
 
 // ── Cross-file named-type imports (Feature B) ───────────────────────────────
 //
-// `Name@fileref` inlines the definition of a named type `Name` from the
-// referenced file at the use site (structural substitution). A schema file's
-// top-level `$schema:` entries are its named types; `@this` targets the
-// current file. Postfix composes outward: `Name[]@file` becomes an array of
-// the inlined type, and `Name(constraints)@file` applies constraints to the
-// inlined value. Expansion is eager, bounded, and cycle-checked (named types
-// form a DAG in v1); `to_json_schema` still rejects any import that survives.
+// `Name@fileref`, or a bare local `Name` (which is `Name@this`), inlines the
+// definition of a named type at the use site (structural substitution). A
+// schema file's top-level mapping entries (under `$schema:`, or `types:` in a
+// `kind: schema` document) are its named types; `@this` targets the schema
+// that writes the reference. Every constraint of the definition survives the
+// reference, including `required` and `generated`. Postfix composes outward:
+// `Name[]@file` becomes an array of the inlined type, and
+// `Name(constraints)@file` merges the use-site constraints into the inherited
+// ones (`apply_import_postfix`). Expansion is eager, bounded, and
+// cycle-checked (named types form a DAG in v1); `to_json_schema` still rejects
+// any import that survives.
+//
+// Each namespace's unexpanded table is parsed once per expansion and shared
+// through an `Arc`: the cache, every later import of that file, and every
+// `@this` hold the same immutable allocation. Only the selected definition is
+// cloned, so each use site expands and modifies its own copy. The sharing
+// ends with `expand_document_imports`; nothing persists across calls.
 
 /// Hard cap on named-type import expansion depth. Mirrors the inline-object
 /// depth cap so import chains cannot bypass the recursion guard indefinitely.
 const MAX_IMPORT_DEPTH: usize = 32;
 
 /// Cycle-detection identity for a named-type namespace. The inline document
-/// root has no path, so it uses a dedicated sentinel; every other namespace is
-/// keyed by the canonicalized path of the file it was loaded from.
+/// root has no path, so it uses a dedicated sentinel; a file namespace is
+/// keyed by the canonicalized path of the file it was loaded from, and an
+/// embedded one by its virtual path, which never equals a host path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum NamespaceKey {
     /// The inline document `$schema` (or a root-union arm) — the top-level
@@ -884,46 +1085,246 @@ enum NamespaceKey {
     Root,
     /// A named-type file, keyed by its canonicalized path.
     File(PathBuf),
+    /// An embedded schema document, keyed by its virtual path. Its imports
+    /// resolve only against the embedded table.
+    Embedded(String),
 }
 
-/// A named-type namespace: the set of top-level `$schema:` entries a file (or
-/// the inline document) exposes for `Name@…` imports, plus the context needed
-/// to resolve relative imports and `@this` inside it.
+impl NamespaceKey {
+    /// The public identity of the source this namespace was authored in.
+    fn source_id(&self) -> SchemaSourceId {
+        match self {
+            Self::Root => SchemaSourceId::InlineDocument,
+            Self::File(path) => SchemaSourceId::File(path.clone()),
+            Self::Embedded(path) => SchemaSourceId::Embedded(path.clone()),
+        }
+    }
+}
+
+/// A named-type namespace: the top-level mapping entries (`$schema:`, or
+/// `types:` under `kind: schema`) a file (or the inline document) exposes for
+/// `Name@…` imports, plus the context needed to resolve relative imports and
+/// `@this` inside it.
 struct Namespace {
     /// Cycle-detection identity for this namespace.
     key: NamespaceKey,
     /// Directory that relative imports authored inside this namespace resolve
     /// against (mirrors `$schema` file-ref resolution).
     base_dir: PathBuf,
-    /// The unexpanded top-level named types (`$schema:` entries).
-    named_types: IndexMap<String, PropertyDef>,
+    /// The unexpanded top-level named types, shared with the namespace cache
+    /// and every other resolution of the same namespace. Never mutated.
+    named_types: Arc<IndexMap<String, PropertyDef>>,
 }
 
 /// Drives eager, bounded, cycle-checked expansion of `Name@file` imports over
 /// a parsed [`SimplifiedSchema`].
-struct ImportEngine {
+struct ImportEngine<'a> {
     /// Stack of `(namespace, type-name)` frames currently being expanded, used
     /// to detect direct and transitive cycles.
     stack: Vec<(NamespaceKey, String)>,
     /// Resolved import file paths, deduplicated — the dependency edges a warm
     /// cache / DMLS index consumes to invalidate on imported-file change.
     dependencies: BTreeSet<PathBuf>,
-    /// Schema-root resolution context for bare-name import targets (Phase 3).
-    schema_roots: Vec<PathBuf>,
-    /// Immutable host request snapshot used by nested import references.
-    file_resolution_context: biscuit_file::FileResolutionContext,
+    /// Where the namespaces that imports name are read from.
+    source: NamespaceSource<'a>,
     /// Parsed named-type namespaces keyed by canonical file path.
     namespace_cache: HashMap<PathBuf, CachedNamespace>,
+    /// Parsed embedded namespaces keyed by virtual path.
+    embedded_cache: HashMap<String, Arc<IndexMap<String, PropertyDef>>>,
+}
+
+/// Where an expansion reads the namespaces its imports name. This is all that
+/// differs between a disk and an embedded expansion: parsing, expansion,
+/// constraint merging, and cycle detection are shared.
+enum NamespaceSource<'a> {
+    /// Schema files, resolved through the request's captured context; bare
+    /// file names try the schema roots first (Phase 3).
+    Files {
+        schema_roots: Vec<PathBuf>,
+        context: Box<biscuit_file::FileResolutionContext>,
+    },
+    /// The embedded table, by virtual path. Nothing is read from the disk or
+    /// the network, and every namespace is [`NamespaceKey::Embedded`].
+    Embedded(&'a [EmbeddedDocument<'a>]),
 }
 
 struct CachedNamespace {
     base_dir: PathBuf,
-    named_types: IndexMap<String, PropertyDef>,
+    named_types: Arc<IndexMap<String, PropertyDef>>,
+}
+
+/// One named-type reference as authored: the type, the namespace it names,
+/// and the postfix the use site adds.
+struct NamedReference {
+    name: String,
+    reference: String,
+    is_array: bool,
+    constraints: Vec<Constraint>,
+    array_constraints: Vec<Constraint>,
+    description: Option<String>,
+}
+
+/// A definition after expansion.
+///
+/// A single atom carries the origin of each top-level constraint, which a
+/// use-site merge needs to report where contradictory values were declared.
+/// A union carries none: a postfix over a union keeps the arms verbatim, and
+/// an arm default it lifts takes its arm's position in the definition.
+enum ExpandedDef {
+    Single(Box<PropertyAtom>, AtomProvenance),
+    Union(Vec<PropertyAtom>),
+}
+
+impl ExpandedDef {
+    fn into_def(self) -> PropertyDef {
+        match self {
+            Self::Single(atom, _) => PropertyDef::Single(*atom),
+            Self::Union(arms) => PropertyDef::Union(arms),
+        }
+    }
+}
+
+/// A union's flattened arms and the property markers hoisted off the
+/// postfixed union arms flattened into it.
+struct FlatUnion {
+    arms: Vec<PropertyAtom>,
+    markers: Vec<Tagged>,
+}
+
+impl FlatUnion {
+    /// The union as a definition. Without hoisted markers it stays a bare arm
+    /// list, so a schema without postfixed union arms resolves as before;
+    /// with them it is the non-array union atom a postfixed union alias
+    /// resolves to, holding the markers.
+    fn into_expanded(self) -> ExpandedDef {
+        if self.markers.is_empty() {
+            return ExpandedDef::Union(self.arms);
+        }
+        let (constraints, value) = self.markers.into_iter().unzip();
+        ExpandedDef::Single(
+            Box::new(PropertyAtom {
+                ty: TypeExpr::Union(self.arms),
+                is_array: false,
+                constraints,
+                array_constraints: Vec::new(),
+                description: None,
+            }),
+            AtomProvenance {
+                value,
+                array: Vec::new(),
+                shape: Vec::new(),
+            },
+        )
+    }
+}
+
+/// Adds a property marker unless `markers` already holds it; markers are
+/// flags, so the first origin is kept.
+fn add_marker(markers: &mut Vec<Tagged>, marker: Tagged) {
+    if !markers.iter().any(|(existing, _)| existing == &marker.0) {
+        markers.push(marker);
+    }
+}
+
+/// Origins of an atom's top-level constraints, index-aligned with its
+/// `constraints`, its `array_constraints`, and (for an inline object) its
+/// shape's `$constraints`.
+///
+/// An inherited constraint keeps the origin of the declaration that
+/// introduced it, however many references it passed through.
+#[derive(Debug, Clone, Default)]
+struct AtomProvenance {
+    value: Vec<SchemaConstraintOrigin>,
+    array: Vec<SchemaConstraintOrigin>,
+    shape: Vec<SchemaConstraintOrigin>,
+}
+
+impl AtomProvenance {
+    /// Origins for an atom authored at `path` in `source`.
+    fn authored(atom: &PropertyAtom, source: &SchemaSourceId, path: &SchemaSourcePath) -> Self {
+        let (value, array) =
+            authored_origins(&atom.constraints, &atom.array_constraints, source, path);
+        let shape = match &atom.ty {
+            TypeExpr::InlineObject(shape) => shape
+                .constraints
+                .iter()
+                .map(|constraint| {
+                    let key = dollar_constraints_key(constraint);
+                    SchemaConstraintOrigin {
+                        source: source.clone(),
+                        path: path.property("$constraints").property(key),
+                        keyword: key.to_string(),
+                        occurrence: 0,
+                        span: None,
+                    }
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        Self {
+            value,
+            array,
+            shape,
+        }
+    }
+}
+
+/// Origins for the constraint groups of one authored atom. `occurrence`
+/// counts same-keyword constraints in source order: the value-level group
+/// precedes the array-level group, as in `T(c)[](c)`.
+fn authored_origins(
+    value: &[Constraint],
+    array: &[Constraint],
+    source: &SchemaSourceId,
+    path: &SchemaSourcePath,
+) -> (Vec<SchemaConstraintOrigin>, Vec<SchemaConstraintOrigin>) {
+    let mut occurrences: HashMap<&'static str, usize> = HashMap::new();
+    let mut origin = |constraint: &Constraint| {
+        let keyword = constraint.keyword();
+        let occurrence = occurrences.entry(keyword).or_default();
+        let origin = SchemaConstraintOrigin {
+            source: source.clone(),
+            path: path.clone(),
+            keyword: keyword.to_string(),
+            occurrence: *occurrence,
+            span: None,
+        };
+        *occurrence += 1;
+        origin
+    };
+    let value = value.iter().map(&mut origin).collect();
+    let array = array.iter().map(&mut origin).collect();
+    (value, array)
+}
+
+/// The `$constraints` key that authors `constraint` (inverse of
+/// `simplified::parse_dollar_constraints`).
+fn dollar_constraints_key(constraint: &Constraint) -> &'static str {
+    match constraint {
+        Constraint::MinKeys(_) => "min-keys",
+        Constraint::MaxKeys(_) => "max-keys",
+        Constraint::MinItems(_) => "min-items",
+        Constraint::MaxItems(_) => "max-items",
+        other => other.keyword(),
+    }
+}
+
+/// The mapping key a pattern property is authored under, which is its
+/// segment in a [`SchemaSourcePath`].
+fn pattern_key_source_name(key: &PatternKey) -> String {
+    match key {
+        PatternKey::CatchAll => "<string>".to_string(),
+        PatternKey::Starting(prefix) => format!("<starting::{prefix}>"),
+        PatternKey::Ending(suffix) => format!("<ending::{suffix}>"),
+        PatternKey::Pattern(pattern) => format!("<pattern::{pattern}>"),
+    }
 }
 
 /// Expands every `Name@file` import in `schema`. `base_dir` and `key` describe
 /// the document being resolved: `base_dir` anchors relative imports and `@this`
 /// resolves against `key` and the document's own top-level named types.
+/// `root` is the declaration's path in its source (a root-union arm of an
+/// inline document is `[N]`), so reported paths match the source map.
 /// `schema_roots` provides bare-name resolution context for import targets
 /// that have no path component.
 ///
@@ -933,17 +1334,34 @@ fn expand_document_imports(
     schema: SimplifiedSchema,
     base_dir: &Path,
     key: NamespaceKey,
+    root: &SchemaSourcePath,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
+) -> Result<(SimplifiedSchema, Vec<PathBuf>), SchemaError> {
+    let source = NamespaceSource::Files {
+        schema_roots: schema_roots.to_vec(),
+        context: Box::new(request_context.clone()),
+    };
+    expand_imports(schema, base_dir, key, root, source)
+}
+
+/// [`expand_document_imports`] over an explicit namespace source.
+fn expand_imports(
+    schema: SimplifiedSchema,
+    base_dir: &Path,
+    key: NamespaceKey,
+    root: &SchemaSourcePath,
+    source: NamespaceSource<'_>,
 ) -> Result<(SimplifiedSchema, Vec<PathBuf>), SchemaError> {
     if !schema_has_imports(&schema) {
         return Ok((schema, Vec::new()));
     }
     // `@this` resolves against the document's own (unexpanded) named types.
-    let named_types = match &schema {
+    // `schema` is consumed by expansion below, so this is the one copy.
+    let named_types = Arc::new(match &schema {
         SimplifiedSchema::Single(shape) => shape.properties.clone(),
         SimplifiedSchema::Union(_) => IndexMap::new(),
-    };
+    });
     let current = Namespace {
         key,
         base_dir: base_dir.to_path_buf(),
@@ -952,31 +1370,34 @@ fn expand_document_imports(
     let mut engine = ImportEngine {
         stack: Vec::new(),
         dependencies: BTreeSet::new(),
-        schema_roots: schema_roots.to_vec(),
-        file_resolution_context: request_context.clone(),
+        source,
         namespace_cache: HashMap::new(),
+        embedded_cache: HashMap::new(),
     };
-    let expanded = engine.expand_schema(schema, &current)?;
+    let expanded = engine.expand_schema(schema, &current, root)?;
     Ok((expanded, engine.dependencies.into_iter().collect()))
 }
 
-impl ImportEngine {
+impl ImportEngine<'_> {
     fn expand_schema(
         &mut self,
         schema: SimplifiedSchema,
         current: &Namespace,
+        root: &SchemaSourcePath,
     ) -> Result<SimplifiedSchema, SchemaError> {
         match schema {
-            SimplifiedSchema::Single(shape) => {
-                Ok(SimplifiedSchema::Single(self.expand_shape(shape, current)?))
-            }
+            SimplifiedSchema::Single(shape) => Ok(SimplifiedSchema::Single(
+                self.expand_shape(shape, current, root)?,
+            )),
             SimplifiedSchema::Union(arms) => {
                 let mut out = Vec::with_capacity(arms.len());
-                for arm in arms {
+                for (index, arm) in arms.into_iter().enumerate() {
                     out.push(match arm {
-                        SchemaArm::Inline(shape) => {
-                            SchemaArm::Inline(self.expand_shape(shape, current)?)
-                        }
+                        SchemaArm::Inline(shape) => SchemaArm::Inline(self.expand_shape(
+                            shape,
+                            current,
+                            &root.union_arm(index),
+                        )?),
                         // File-ref arms are inlined by the root-union resolver,
                         // not here; leave them for `to_json_schema` to reject if
                         // one somehow survives.
@@ -992,16 +1413,20 @@ impl ImportEngine {
         &mut self,
         shape: SchemaShape,
         current: &Namespace,
+        path: &SchemaSourcePath,
     ) -> Result<SchemaShape, SchemaError> {
         let mut properties = IndexMap::with_capacity(shape.properties.len());
         for (name, def) in shape.properties {
-            properties.insert(name, self.expand_property_def(def, current)?);
+            let property_path = path.property(name.as_str());
+            let def = self.expand_property_def(def, current, &property_path)?;
+            properties.insert(name, def);
         }
         let mut pattern_keys = Vec::with_capacity(shape.pattern_keys.len());
         for pk in shape.pattern_keys {
+            let property_path = path.property(pattern_key_source_name(&pk.key));
             pattern_keys.push(PatternKeyDef {
+                def: self.expand_property_def(pk.def, current, &property_path)?,
                 key: pk.key,
-                def: self.expand_property_def(pk.def, current)?,
             });
         }
         Ok(SchemaShape {
@@ -1015,28 +1440,89 @@ impl ImportEngine {
         &mut self,
         def: PropertyDef,
         current: &Namespace,
+        path: &SchemaSourcePath,
     ) -> Result<PropertyDef, SchemaError> {
         match def {
-            PropertyDef::Single(atom) => self.expand_atom(atom, current),
-            PropertyDef::Union(arms) => {
-                // A union-typed named type flattens into the enclosing union.
-                let mut out = Vec::with_capacity(arms.len());
-                for atom in arms {
-                    match self.expand_atom(atom, current)? {
-                        PropertyDef::Single(a) => out.push(a),
-                        PropertyDef::Union(mut arms2) => out.append(&mut arms2),
+            PropertyDef::Single(atom) => Ok(self.expand_atom(atom, current, path)?.into_def()),
+            PropertyDef::Union(arms) => Ok(self
+                .expand_union_arms(arms, current, path)?
+                .into_expanded()
+                .into_def()),
+        }
+    }
+
+    /// Expands the arms of a property-level union. A union-typed named type
+    /// flattens into the enclosing union, which can bring in a second
+    /// `suggest(...)` the authored union never showed, so the at-most-one
+    /// rule is checked again over the flattened arms.
+    ///
+    /// A postfixed union arm (`[U(required), T]`, `[U -> text, T]`) flattens
+    /// too, so every consumer of the lowered `anyOf` sees one list of
+    /// alternatives. Its markers are property-level and are returned in
+    /// [`FlatUnion::markers`] rather than copied onto its arms, where an
+    /// `eager` would turn a `file` arm into `file(eager)`. Its description
+    /// describes each of its arms that has none of its own.
+    fn expand_union_arms(
+        &mut self,
+        arms: Vec<PropertyAtom>,
+        current: &Namespace,
+        path: &SchemaSourcePath,
+    ) -> Result<FlatUnion, SchemaError> {
+        let mut out = Vec::with_capacity(arms.len());
+        let mut markers = Vec::new();
+        for (index, atom) in arms.into_iter().enumerate() {
+            match self.expand_atom(atom, current, &path.union_arm(index))? {
+                ExpandedDef::Single(atom, provenance) => match *atom {
+                    PropertyAtom {
+                        ty: TypeExpr::Union(nested),
+                        is_array: false,
+                        constraints,
+                        array_constraints,
+                        description,
+                    } => {
+                        for marker in constraints
+                            .into_iter()
+                            .zip(provenance.value)
+                            .chain(array_constraints.into_iter().zip(provenance.array))
+                        {
+                            add_marker(&mut markers, marker);
+                        }
+                        out.extend(nested.into_iter().map(|mut arm| {
+                            if arm.description.is_none() {
+                                arm.description.clone_from(&description);
+                            }
+                            arm
+                        }));
                     }
-                }
-                Ok(PropertyDef::Union(out))
+                    atom => out.push(atom),
+                },
+                ExpandedDef::Union(mut nested) => out.append(&mut nested),
             }
         }
+        let suggestions = out
+            .iter()
+            .flat_map(PropertyAtom::property_constraints)
+            .filter(|constraint| matches!(constraint, Constraint::Suggest(_)))
+            .count();
+        if suggestions > 1 {
+            // An inherited candidate's span belongs to another source, so no
+            // span is reported; the property path names the location.
+            return Err(SchemaError::Grammar {
+                property: path.to_string(),
+                message: "a property definition may contain at most one `suggest` constraint"
+                    .into(),
+                span: 0..0,
+            });
+        }
+        Ok(FlatUnion { arms: out, markers })
     }
 
     fn expand_atom(
         &mut self,
         atom: PropertyAtom,
         current: &Namespace,
-    ) -> Result<PropertyDef, SchemaError> {
+        path: &SchemaSourcePath,
+    ) -> Result<ExpandedDef, SchemaError> {
         let PropertyAtom {
             ty,
             is_array,
@@ -1044,93 +1530,150 @@ impl ImportEngine {
             array_constraints,
             description,
         } = atom;
-        match ty {
-            TypeExpr::Primitive(p) => Ok(PropertyDef::Single(PropertyAtom {
-                ty: TypeExpr::Primitive(p),
-                is_array,
-                constraints,
-                array_constraints,
-                description,
-            })),
+        let mut hoisted = Vec::new();
+        let ty = match ty {
+            TypeExpr::Imported { name, reference } => {
+                return self.expand_import(
+                    NamedReference {
+                        name,
+                        reference,
+                        is_array,
+                        constraints,
+                        array_constraints,
+                        description,
+                    },
+                    current,
+                    path,
+                );
+            }
+            TypeExpr::Primitive(p) => TypeExpr::Primitive(p),
             TypeExpr::InlineObject(shape) => {
-                let expanded = self.expand_shape(shape, current)?;
-                Ok(PropertyDef::Single(PropertyAtom {
-                    ty: TypeExpr::InlineObject(expanded),
-                    is_array,
-                    constraints,
-                    array_constraints,
-                    description,
-                }))
+                TypeExpr::InlineObject(self.expand_shape(shape, current, path)?)
             }
-            TypeExpr::Imported { name, reference } => self.expand_import(
-                name,
-                reference,
-                is_array,
-                constraints,
-                array_constraints,
-                description,
-                current,
-            ),
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn expand_import(
-        &mut self,
-        name: String,
-        reference: String,
-        is_array: bool,
-        constraints: Vec<Constraint>,
-        array_constraints: Vec<Constraint>,
-        description: Option<String>,
-        current: &Namespace,
-    ) -> Result<PropertyDef, SchemaError> {
-        if self.stack.len() >= MAX_IMPORT_DEPTH {
-            return Err(SchemaError::ImportCycle {
-                chain: format!(
-                    "named-type import expansion exceeded {MAX_IMPORT_DEPTH} levels near \
-                     `{name}@{reference}`"
-                ),
-            });
-        }
-
-        let target = self.resolve_namespace(&reference, current)?;
-        let def = target.named_types.get(&name).cloned().ok_or_else(|| {
-            // A missing named type is a resolution error, not a grammar error:
-            // the import parsed fine, the target file simply does not define it.
-            SchemaError::Convert {
-                property: name.clone(),
-                message: format!(
-                    "named type `{name}` is not defined in `{reference}` (a schema file's \
-                     top-level `$schema:` entries are its named types)"
-                ),
+            TypeExpr::Union(arms) => {
+                let flat = self.expand_union_arms(arms, current, path)?;
+                hoisted = flat.markers;
+                TypeExpr::Union(flat.arms)
             }
-        })?;
-
-        let frame = (target.key.clone(), name.clone());
-        if self.stack.contains(&frame) {
-            return Err(SchemaError::ImportCycle {
-                chain: self.describe_cycle(&name),
-            });
-        }
-        self.stack.push(frame);
-        let expanded_base = self.expand_property_def(def, &target)?;
-        self.stack.pop();
-
-        // Presence/ownership constraints (`required`, `generated`) describe the
-        // named type's role as a property in its *defining* file, not the
-        // reusable type — so they are stripped on inline. The use site supplies
-        // its own presence via import-site `(constraints)`.
-        let base = strip_top_level_presence(expanded_base);
-        apply_import_postfix(
-            base,
+        };
+        let mut atom = PropertyAtom {
+            ty,
             is_array,
             constraints,
             array_constraints,
             description,
-            &name,
-            &reference,
-        )
+        };
+        let mut provenance = AtomProvenance::authored(&atom, &current.key.source_id(), path);
+        // Markers hoisted off a flattened union arm belong to the property:
+        // the container's list for an array of the union.
+        let (list, origins) = if atom.is_array {
+            (&mut atom.array_constraints, &mut provenance.array)
+        } else {
+            (&mut atom.constraints, &mut provenance.value)
+        };
+        let mut existing: Vec<Tagged> = std::mem::take(list).into_iter().zip(std::mem::take(origins)).collect();
+        for marker in hoisted {
+            add_marker(&mut existing, marker);
+        }
+        (*list, *origins) = existing.into_iter().unzip();
+        Ok(ExpandedDef::Single(Box::new(atom), provenance))
+    }
+
+    /// Expands the reference written at `path` in `current`.
+    ///
+    /// The definition is expanded in its own namespace, so a bare name inside
+    /// it resolves in the file that defines it, and its inherited constraints
+    /// keep the origin of the declaration that introduced them.
+    fn expand_import(
+        &mut self,
+        reference: NamedReference,
+        current: &Namespace,
+        path: &SchemaSourcePath,
+    ) -> Result<ExpandedDef, SchemaError> {
+        if self.stack.len() >= MAX_IMPORT_DEPTH {
+            return Err(SchemaError::ImportCycle {
+                chain: format!(
+                    "named-type import expansion exceeded {MAX_IMPORT_DEPTH} levels near \
+                     `{}@{}`",
+                    reference.name, reference.reference
+                ),
+            });
+        }
+
+        let target = self.resolve_namespace(&reference.reference, current)?;
+        let site = SchemaReferenceSite {
+            source: current.key.source_id(),
+            path: path.clone(),
+        };
+        let Some(def) = target.named_types.get(&reference.name).cloned() else {
+            // A missing named type is a resolution error, not a grammar error:
+            // the reference parsed fine, its namespace simply does not define it.
+            return Err(SchemaError::UnknownNamedType {
+                name: reference.name,
+                namespace: target.key.source_id(),
+                site,
+            });
+        };
+
+        let frame = (target.key.clone(), reference.name.clone());
+        if self.stack.contains(&frame) {
+            return Err(SchemaError::ImportCycle {
+                chain: self.describe_cycle(&reference.name),
+            });
+        }
+        self.stack.push(frame);
+        let definition_path = SchemaSourcePath::root().property(reference.name.as_str());
+        let base = match def {
+            PropertyDef::Single(atom) => self.expand_atom(atom, &target, &definition_path)?,
+            PropertyDef::Union(arms) => {
+                self.expand_union_arms(arms, &target, &definition_path)?.into_expanded()
+            }
+        };
+        self.stack.pop();
+
+        let base = match &target.key {
+            NamespaceKey::File(file) => self.rehome_examples(base, file)?,
+            // An embedded definition's examples are rejected once the
+            // embedded schema is lowered (`prepare_embedded_schema`).
+            NamespaceKey::Root | NamespaceKey::Embedded(_) => base,
+        };
+        let definition = SchemaReferenceSite {
+            source: target.key.source_id(),
+            path: definition_path,
+        };
+        apply_import_postfix(base, reference, &site, &definition)
+    }
+
+    /// Pins the `example(...)` references of a definition inlined from
+    /// `file` to the paths they name from that file.
+    ///
+    /// Examples are resolved after conversion against the top-level schema's
+    /// directory (`resolve_document_examples`), which is the wrong anchor for
+    /// a definition authored elsewhere. Each reference is resolved here,
+    /// through the same ladder, from `file`'s directory (`this` is `file`),
+    /// and replaced by the resolved absolute path, which resolves to itself
+    /// from any directory. A missing example fails here with the error the
+    /// later pass would have raised.
+    fn rehome_examples(&self, base: ExpandedDef, file: &Path) -> Result<ExpandedDef, SchemaError> {
+        let NamespaceSource::Files { schema_roots, context } = &self.source else {
+            unreachable!("a file namespace is only loaded from the file source")
+        };
+        let base_dir = file.parent().unwrap_or_else(|| Path::new("."));
+        let rehome = |atom: &mut PropertyAtom| {
+            rehome_atom_examples(atom, base_dir, file, schema_roots, context)
+        };
+        Ok(match base {
+            ExpandedDef::Single(mut atom, provenance) => {
+                rehome(&mut atom)?;
+                ExpandedDef::Single(atom, provenance)
+            }
+            ExpandedDef::Union(mut arms) => {
+                for atom in &mut arms {
+                    rehome(atom)?;
+                }
+                ExpandedDef::Union(arms)
+            }
+        })
     }
 
     /// Resolves the namespace named on the right of `@`. `this` targets the
@@ -1148,56 +1691,20 @@ impl ImportEngine {
             return Ok(Namespace {
                 key: current.key.clone(),
                 base_dir: current.base_dir.clone(),
-                named_types: current.named_types.clone(),
+                named_types: Arc::clone(&current.named_types),
             });
         }
-        let file_ref =
-            FileReference::new(trimmed).map_err(|source| SchemaError::Unresolved {
-                reference: reference.to_string(),
-                source,
-            })?;
-        if file_ref.class().kind == FileReferenceKind::Url {
-            return Err(SchemaError::RemoteUnsupported {
-                reference: reference.to_string(),
-            });
-        }
-
-        // Bare-name resolution against schema roots (Phase 3).
-        let path = if !self.schema_roots.is_empty() && is_bare_name(&file_ref) {
-            if let Some(p) = try_bare_name_in_roots(
-                &file_ref,
-                &self.schema_roots,
-                &self.file_resolution_context,
-            )? {
-                p
-            } else {
-                // Check sibling for pointed error.
-                let sibling = current.base_dir.join(trimmed);
-                if sibling.is_file() {
-                    return Err(SchemaError::BareNameSiblingExists {
-                        reference: trimmed.to_string(),
-                        suggestion: format!("./{trimmed}"),
-                    });
-                }
-                return Err(SchemaError::NoMatch {
-                    reference: reference.to_string(),
-                    bare_name: true,
-                });
+        let path = match &self.source {
+            NamespaceSource::Files { schema_roots, context } => {
+                named_type_file_path(reference, &current.base_dir, schema_roots, context)?
             }
-        } else {
-            resolve_file_reference_in_context(
-                &file_ref,
-                &current.base_dir,
-                &self.file_resolution_context,
-            )
-                .map_err(|source| SchemaError::Unresolved {
-                    reference: trimmed.to_string(),
-                    source,
-                })?
-                .ok_or_else(|| SchemaError::NoMatch {
-                    reference: trimmed.to_string(),
-                    bare_name: false,
-                })?
+            NamespaceSource::Embedded(documents) => {
+                let documents = *documents;
+                let NamespaceKey::Embedded(importer) = &current.key else {
+                    unreachable!("an embedded expansion holds only embedded namespaces")
+                };
+                return self.resolve_embedded_namespace(documents, importer, reference);
+            }
         };
 
         let canonical = canonical_path(&path);
@@ -1209,10 +1716,10 @@ impl ImportEngine {
             return Ok(Namespace {
                 key: NamespaceKey::File(canonical),
                 base_dir: cached.base_dir.clone(),
-                named_types: cached.named_types.clone(),
+                named_types: Arc::clone(&cached.named_types),
             });
         }
-        let named_types = load_named_types(&path)?;
+        let named_types = Arc::new(load_named_types(&path)?);
         let base_dir = path
             .parent()
             .map(Path::to_path_buf)
@@ -1221,12 +1728,45 @@ impl ImportEngine {
             canonical.clone(),
             CachedNamespace {
                 base_dir: base_dir.clone(),
-                named_types: named_types.clone(),
+                named_types: Arc::clone(&named_types),
             },
         );
         Ok(Namespace {
             key: NamespaceKey::File(canonical),
             base_dir,
+            named_types,
+        })
+    }
+
+    /// Resolves `reference`, written in the embedded document `importer`,
+    /// against the embedded table only. The target contributes no dependency
+    /// edge: embedded documents are immutable build inputs.
+    fn resolve_embedded_namespace(
+        &mut self,
+        documents: &[EmbeddedDocument<'_>],
+        importer: &str,
+        reference: &str,
+    ) -> Result<Namespace, SchemaError> {
+        let invalid = |reason: String| SchemaError::SchemaDocument {
+            path: PathBuf::from(importer),
+            message: format!("embedded import `{}`: {reason}", reference.trim()),
+        };
+        let target = embedded::resolve_path(importer, reference).map_err(invalid)?;
+        let named_types = match self.embedded_cache.get(&target) {
+            Some(cached) => Arc::clone(cached),
+            None => {
+                let document = embedded::find(documents, &target).ok_or_else(|| {
+                    invalid(format!("`{target}` is not an embedded schema document"))
+                })?;
+                let named_types =
+                    Arc::new(named_types_from_text(document.text, Path::new(document.path))?);
+                self.embedded_cache.insert(target.clone(), Arc::clone(&named_types));
+                named_types
+            }
+        };
+        Ok(Namespace {
+            key: NamespaceKey::Embedded(target),
+            base_dir: PathBuf::new(),
             named_types,
         })
     }
@@ -1238,6 +1778,133 @@ impl ImportEngine {
         parts.push(repeat);
         parts.join(" -> ")
     }
+}
+
+/// The file an explicit named-type reference (`Name@reference`) selects,
+/// resolved exactly as the resolver selects it: schema roots nearest-first for
+/// a bare file name when roots are configured, else through `request_context`
+/// from `base_dir` (the directory of the schema that wrote the reference).
+fn named_type_file_path(
+    reference: &str,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+) -> Result<PathBuf, SchemaError> {
+    let trimmed = reference.trim();
+    let file_ref =
+        FileReference::new(trimmed).map_err(|source| SchemaError::Unresolved {
+            reference: reference.to_string(),
+            source,
+        })?;
+    if file_ref.class().kind == FileReferenceKind::Url {
+        return Err(SchemaError::RemoteUnsupported {
+            reference: reference.to_string(),
+        });
+    }
+
+    // Bare-name resolution against schema roots (Phase 3).
+    let path = if !schema_roots.is_empty() && is_bare_name(&file_ref) {
+        if let Some(p) = try_bare_name_in_roots(
+            &file_ref,
+            schema_roots,
+            request_context,
+        )? {
+            p
+        } else {
+            // Check sibling for pointed error.
+            let sibling = base_dir.join(trimmed);
+            if sibling.is_file() {
+                return Err(SchemaError::BareNameSiblingExists {
+                    reference: trimmed.to_string(),
+                    suggestion: format!("./{trimmed}"),
+                });
+            }
+            return Err(SchemaError::NoMatch {
+                reference: reference.to_string(),
+                bare_name: true,
+            });
+        }
+    } else {
+        resolve_file_reference_in_context(
+            &file_ref,
+            base_dir,
+            request_context,
+        )
+            .map_err(|source| SchemaError::Unresolved {
+                reference: trimmed.to_string(),
+                source,
+            })?
+            .ok_or_else(|| SchemaError::NoMatch {
+                reference: trimmed.to_string(),
+                bare_name: false,
+            })?
+    };
+    Ok(path)
+}
+
+/// Rewrites every `example(...)` reference in `atom`, including those of
+/// nested inline-object properties and union arms, to the path it resolves to from
+/// `base_dir` (see [`ImportEngine::rehome_examples`]). A path that is not
+/// valid UTF-8 cannot be spelled as a reference and is left as authored.
+fn rehome_atom_examples(
+    atom: &mut PropertyAtom,
+    base_dir: &Path,
+    this_file: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &FileResolutionContext,
+) -> Result<(), SchemaError> {
+    for constraint in atom
+        .constraints
+        .iter_mut()
+        .chain(atom.array_constraints.iter_mut())
+    {
+        if let Constraint::Example(references) = constraint {
+            for reference in references.iter_mut() {
+                let path = resolve_example_path(
+                    reference,
+                    base_dir,
+                    Some(this_file),
+                    schema_roots,
+                    request_context,
+                )?;
+                if let Some(resolved) = path.to_str() {
+                    *reference = resolved.to_string();
+                }
+            }
+        }
+    }
+    if let TypeExpr::Union(arms) = &mut atom.ty {
+        // An arm inlined from another file was already rehomed there; its
+        // absolute paths resolve to themselves.
+        for arm in arms {
+            rehome_atom_examples(arm, base_dir, this_file, schema_roots, request_context)?;
+        }
+    }
+    if let TypeExpr::InlineObject(shape) = &mut atom.ty {
+        let defs = shape
+            .properties
+            .values_mut()
+            .chain(shape.pattern_keys.iter_mut().map(|pattern| &mut pattern.def));
+        for def in defs {
+            match def {
+                PropertyDef::Single(inner) => {
+                    rehome_atom_examples(inner, base_dir, this_file, schema_roots, request_context)?;
+                }
+                PropertyDef::Union(arms) => {
+                    for inner in arms {
+                        rehome_atom_examples(
+                            inner,
+                            base_dir,
+                            this_file,
+                            schema_roots,
+                            request_context,
+                        )?;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Canonicalizes `path` for stable cycle-detection identity, falling back to
@@ -1263,6 +1930,12 @@ fn load_named_types(path: &Path) -> Result<IndexMap<String, PropertyDef>, Schema
     let text = std::str::from_utf8(&bytes).map_err(|_| SchemaError::AmbiguousReferenced {
         path: path.to_path_buf(),
     })?;
+    named_types_from_text(text, path)
+}
+
+/// The named types a schema document's text declares; `path` identifies the
+/// document in errors.
+fn named_types_from_text(text: &str, path: &Path) -> Result<IndexMap<String, PropertyDef>, SchemaError> {
     let Some(document) = parse_standalone_schema_document(text, path)? else {
         return Err(SchemaError::AmbiguousReferenced {
             path: path.to_path_buf(),
@@ -1283,63 +1956,148 @@ fn load_named_types(path: &Path) -> Result<IndexMap<String, PropertyDef>, Schema
     }
 }
 
-/// Removes the top-level `required` / `generated` constraints from an inlined
-/// named-type definition. Nested constraints (inside inline objects, array
-/// items) are untouched — only the outermost presence/ownership semantics are
-/// re-decided by the use site.
-fn strip_top_level_presence(def: PropertyDef) -> PropertyDef {
-    fn strip(mut atom: PropertyAtom) -> PropertyAtom {
-        atom.constraints
-            .retain(|c| !matches!(c, Constraint::Required | Constraint::Generated));
-        atom.array_constraints
-            .retain(|c| !matches!(c, Constraint::Required | Constraint::Generated));
-        atom
-    }
-    match def {
-        PropertyDef::Single(atom) => PropertyDef::Single(strip(atom)),
-        PropertyDef::Union(arms) => PropertyDef::Union(arms.into_iter().map(strip).collect()),
+// ── Use-site constraint merging ─────────────────────────────────────────────
+
+/// A constraint paired with the declaration that authored it.
+type Tagged = (Constraint, SchemaConstraintOrigin);
+
+/// The reference a merge belongs to, for contradiction errors.
+struct MergeSite<'a> {
+    name: &'a str,
+    site: &'a SchemaReferenceSite,
+}
+
+impl MergeSite<'_> {
+    fn conflict(
+        &self,
+        kind: SchemaConstraintConflictKind,
+        mut constraints: Vec<SchemaConstraintOrigin>,
+    ) -> SchemaError {
+        locate_origin_spans(&mut constraints);
+        SchemaError::ConstraintConflict {
+            name: self.name.to_string(),
+            kind,
+            site: self.site.clone(),
+            constraints,
+        }
     }
 }
 
-/// Applies the import-site postfix (`[]`, `(constraints)`, `-> description`) to
-/// an inlined base definition. Verbatim substitution when the site adds no
-/// postfix; otherwise the base must be a single atom (v1 does not compose
-/// postfix over a union-typed named type).
+/// Fills the span of each origin authored in a schema file by re-reading and
+/// re-projecting that file. Runs only on the error path. A file that can no
+/// longer be read or projected leaves its spans `None`; the error being built
+/// still names the file, path, and keyword.
+fn locate_origin_spans(origins: &mut [SchemaConstraintOrigin]) {
+    let mut documents: HashMap<PathBuf, Option<(String, SchemaSourceMap)>> = HashMap::new();
+    for origin in origins.iter_mut() {
+        let SchemaSourceId::File(path) = &origin.source else {
+            continue;
+        };
+        if origin.span.is_some() {
+            continue;
+        }
+        let document = documents.entry(path.clone()).or_insert_with(|| {
+            let text = fs::read_to_string(path).ok()?;
+            let source_map = parse_standalone_schema_document(&text, path).ok()??.source_map;
+            Some((text, source_map))
+        });
+        if let Some((text, source_map)) = document {
+            origin.span =
+                source_map.constraint_span(text, &origin.path, &origin.keyword, origin.occurrence);
+        }
+    }
+}
+
+/// Applies the use-site postfix (`[]`, `(constraints)`, `-> description`) of
+/// `reference` to its expanded definition.
+///
+/// The definition is inherited verbatim when the use site adds no postfix.
+/// A postfix over a [`UnionTarget`] (a union definition or a postfixed union
+/// alias) is applied by [`apply_union_postfix`]. Over a single atom, use-site constraints are
+/// interpreted against the resolved target and merged with the inherited
+/// ones (Decided 4):
+///
+/// - A use-site `min`/`max` counts characters on a `string` target and items
+///   on a target that is already an array, whose postfix addresses the
+///   container; `suggest` candidates there still describe items.
+/// - Repeated bounds of one kind keep the stricter value; a lower bound above
+///   the upper bound is a [`SchemaError::ConstraintConflict`]. For an inline
+///   object, `$constraints` key bounds and postfix key bounds are one scope.
+/// - Flags are idempotent; every distinct `pattern`, every `match` group, and
+///   every example is kept, inherited first.
+/// - Repeated `scheme` lists intersect and repeated defaults must be equal.
+/// - Item constraints and the constraints of a container added by `Name[]`
+///   never merge with each other.
 fn apply_import_postfix(
-    base: PropertyDef,
-    is_array: bool,
-    mut constraints: Vec<Constraint>,
-    array_constraints: Vec<Constraint>,
-    description: Option<String>,
-    name: &str,
-    reference: &str,
-) -> Result<PropertyDef, SchemaError> {
-    if !is_array && constraints.is_empty() && array_constraints.is_empty() && description.is_none()
+    base: ExpandedDef,
+    reference: NamedReference,
+    site: &SchemaReferenceSite,
+    definition: &SchemaReferenceSite,
+) -> Result<ExpandedDef, SchemaError> {
+    if !reference.is_array
+        && reference.constraints.is_empty()
+        && reference.array_constraints.is_empty()
+        && reference.description.is_none()
     {
         return Ok(base);
     }
 
-    let base_atom = match base {
-        PropertyDef::Single(atom) => atom,
-        PropertyDef::Union(_) => {
-            return Err(SchemaError::Convert {
-                property: name.to_string(),
-                message: format!(
-                    "cannot apply `[]`/constraints to the union-typed named type `{name}@{reference}`"
-                ),
-            });
-        }
+    let (base_atom, base_provenance) = match UnionTarget::of(base) {
+        Ok(target) => return apply_union_postfix(target, reference, site, definition),
+        Err((atom, provenance)) => (*atom, provenance),
     };
+    let NamedReference {
+        name,
+        reference,
+        is_array,
+        mut constraints,
+        array_constraints,
+        description,
+    } = reference;
+
+    // `alphanumeric` options belong to the target's identity, not to its
+    // constraints: a use site may repeat them exactly but never change them.
+    if constraints.iter().any(|constraint| matches!(constraint, Constraint::Options(_))) {
+        let (use_value_origins, _) =
+            authored_origins(&constraints, &array_constraints, &site.source, &site.path);
+        let (options, rest): (Vec<_>, Vec<_>) = constraints
+            .into_iter()
+            .zip(use_value_origins)
+            .partition(|(constraint, _)| matches!(constraint, Constraint::Options(_)));
+        constraints = rest.into_iter().map(|(constraint, _)| constraint).collect();
+        check_use_site_options(
+            &base_atom,
+            &base_provenance,
+            options,
+            &MergeSite { name: &name, site },
+            definition,
+            &reference,
+        )?;
+    }
+
+    // Only a union target gives a list before `[]` a meaning (its property
+    // markers); item constraints on a single named type are not supported.
+    if is_array && let Some(first) = constraints.first() {
+        return Err(SchemaError::Convert {
+            property: site.path.to_string(),
+            message: format!(
+                "constraint `{}` before `[]` is not valid on the named type `{name}@{reference}`; \
+                 only a named union accepts `required`, `generated`, or `eager` there, and \
+                 constraints after `[]` apply to the list",
+                first.keyword()
+            ),
+        });
+    }
 
     if is_array
-        && constraints
+        && array_constraints
             .iter()
             .any(|constraint| matches!(constraint, Constraint::Suggest(_)))
     {
         return Err(SchemaError::Grammar {
             property: name.to_string(),
             message: "`suggest` is not valid at the array level".into(),
-            span: constraints
+            span: array_constraints
                 .iter()
                 .find_map(|constraint| match constraint {
                     Constraint::Suggest(candidates) => candidates.first().map(|candidate| candidate.span.clone()),
@@ -1353,13 +2111,14 @@ fn apply_import_postfix(
         .iter()
         .any(|constraint| matches!(constraint, Constraint::Suggest(_)))
     {
-        let TypeExpr::Primitive(ty @ (SimplifiedType::String | SimplifiedType::Number)) =
-            &base_atom.ty
+        let TypeExpr::Primitive(
+            ty @ (SimplifiedType::String | SimplifiedType::Number | SimplifiedType::Alphanumeric),
+        ) = &base_atom.ty
         else {
             return Err(SchemaError::Grammar {
                 property: name.to_string(),
                 message: format!(
-                    "`suggest` on imported type `{name}@{reference}` requires an exact `string` or `number` target"
+                    "`suggest` on imported type `{name}@{reference}` requires an exact `string`, `number`, or `alphanumeric` target"
                 ),
                 span: constraints
                     .iter()
@@ -1377,7 +2136,7 @@ fn apply_import_postfix(
                 super::simplified::grammar::reinterpret_suggestion_candidates(
                     candidates,
                     *ty,
-                    name,
+                    &name,
                 )?;
             }
         }
@@ -1404,8 +2163,33 @@ fn apply_import_postfix(
         });
     }
 
-    if is_array {
-        if base_atom.is_array {
+    let property = site.path.to_string();
+    let merge_site = MergeSite { name: &name, site };
+    let (use_value_origins, use_array_origins) =
+        authored_origins(&constraints, &array_constraints, &site.source, &site.path);
+    let use_site: Vec<Tagged> = constraints
+        .into_iter()
+        .zip(use_value_origins)
+        .chain(array_constraints.into_iter().zip(use_array_origins))
+        .collect();
+
+    let PropertyAtom {
+        mut ty,
+        is_array: base_is_array,
+        constraints: base_value,
+        array_constraints: base_array,
+        description: base_description,
+    } = base_atom;
+    let AtomProvenance {
+        value: base_value_origins,
+        array: base_array_origins,
+        shape: mut shape_origins,
+    } = base_provenance;
+    let inherited_value: Vec<Tagged> = base_value.into_iter().zip(base_value_origins).collect();
+    let inherited_array: Vec<Tagged> = base_array.into_iter().zip(base_array_origins).collect();
+
+    let (value, array) = if is_array {
+        if base_is_array {
             return Err(SchemaError::Convert {
                 property: name.to_string(),
                 message: format!(
@@ -1413,28 +2197,613 @@ fn apply_import_postfix(
                 ),
             });
         }
-        // `Name[]@file` → array of the inlined base. Import-site `(...)` (which
-        // syntactically follows `[]`) applies at the array level.
-        let mut arr_constraints = array_constraints;
-        arr_constraints.extend(constraints);
-        Ok(PropertyDef::Single(PropertyAtom {
-            ty: base_atom.ty,
-            is_array: true,
-            constraints: base_atom.constraints,
-            array_constraints: arr_constraints,
-            description: description.or(base_atom.description),
-        }))
+        // `Name[](c)`: the constraint list follows `[]`, was parsed at the array
+        // level, and applies to the new container (a list before `[]` was
+        // rejected above). The inherited constraints stay on the items.
+        (inherited_value, merge_constraints(Vec::new(), use_site, &merge_site)?)
+    } else if base_is_array {
+        let (items, container): (Vec<Tagged>, Vec<Tagged>) = use_site
+            .into_iter()
+            .partition(|(constraint, _)| matches!(constraint, Constraint::Suggest(_)));
+        let container = reinterpret_bounds(container, CountedBound::Items, &property)?;
+        (
+            merge_constraints(inherited_value, items, &merge_site)?,
+            merge_constraints(inherited_array, container, &merge_site)?,
+        )
     } else {
-        // `Name(constraints)@file` → constraints applied to the inlined value.
-        let mut merged = base_atom.constraints;
-        merged.extend(constraints);
-        Ok(PropertyDef::Single(PropertyAtom {
-            ty: base_atom.ty,
-            is_array: base_atom.is_array,
-            constraints: merged,
-            array_constraints: base_atom.array_constraints,
-            description: description.or(base_atom.description),
-        }))
+        match &mut ty {
+            TypeExpr::InlineObject(shape) => {
+                // `$constraints` and postfix key bounds are one scope. The
+                // winners go back to the shape so the converter, which applies
+                // the shape's then the atom's key bounds, sees exactly one of
+                // each.
+                let shape_tagged: Vec<Tagged> = std::mem::take(&mut shape.constraints)
+                    .into_iter()
+                    .zip(std::mem::take(&mut shape_origins))
+                    .collect();
+                let (shape_keys, shape_other): (Vec<Tagged>, Vec<Tagged>) =
+                    shape_tagged.into_iter().partition(|(c, _)| is_key_bound(c));
+                let inherited = shape_keys.into_iter().chain(inherited_value).collect();
+                let merged = merge_constraints(inherited, use_site, &merge_site)?;
+                let (keys, value): (Vec<Tagged>, Vec<Tagged>) =
+                    merged.into_iter().partition(|(c, _)| is_key_bound(c));
+                (shape.constraints, shape_origins) = shape_other.into_iter().chain(keys).unzip();
+                (value, inherited_array)
+            }
+            TypeExpr::Primitive(SimplifiedType::String | SimplifiedType::Alphanumeric) => {
+                let use_site = reinterpret_bounds(use_site, CountedBound::Length, &property)?;
+                (merge_constraints(inherited_value, use_site, &merge_site)?, inherited_array)
+            }
+            _ => (merge_constraints(inherited_value, use_site, &merge_site)?, inherited_array),
+        }
+    };
+    let (value, array) = reconcile_property_defaults(value, array, &merge_site)?;
+
+    let (constraints, value_origins) = value.into_iter().unzip();
+    let (array_constraints, array_origins) = array.into_iter().unzip();
+    Ok(ExpandedDef::Single(
+        Box::new(PropertyAtom {
+            ty,
+            is_array: is_array || base_is_array,
+            constraints,
+            array_constraints,
+            description: description.or(base_description),
+        }),
+        AtomProvenance {
+            value: value_origins,
+            array: array_origins,
+            shape: shape_origins,
+        },
+    ))
+}
+
+/// A resolved definition whose value is one of a union's alternatives.
+///
+/// The target is a union however expansion represented it: the arms of a
+/// union definition, or the non-array union atom an earlier postfixed alias
+/// (`R: U(required)`, `D: U -> text`) produced. The alias's markers keep
+/// their origins and, with its description, are inherited by every later
+/// reference.
+struct UnionTarget {
+    arms: Vec<PropertyAtom>,
+    value: Vec<Tagged>,
+    array: Vec<Tagged>,
+    description: Option<String>,
+}
+
+impl UnionTarget {
+    /// Splits a union target from `base`, or returns the single atom (an
+    /// array of a union included) for the ordinary single-type rules.
+    fn of(base: ExpandedDef) -> Result<Self, (Box<PropertyAtom>, AtomProvenance)> {
+        match base {
+            ExpandedDef::Union(arms) => Ok(Self {
+                arms,
+                value: Vec::new(),
+                array: Vec::new(),
+                description: None,
+            }),
+            ExpandedDef::Single(atom, provenance) => match *atom {
+                PropertyAtom {
+                    ty: TypeExpr::Union(arms),
+                    is_array: false,
+                    constraints,
+                    array_constraints,
+                    description,
+                } => Ok(Self {
+                    arms,
+                    value: constraints.into_iter().zip(provenance.value).collect(),
+                    array: array_constraints.into_iter().zip(provenance.array).collect(),
+                    description,
+                }),
+                atom => Err((Box::new(atom), provenance)),
+            },
+        }
+    }
+}
+
+/// Applies a use-site postfix to a union target, producing one atom whose
+/// type is the ordered, flattened [`TypeExpr::Union`].
+///
+/// - Without `[]` only `required`, `generated`, and `eager` apply; they and
+///   the description belong to the property as a whole.
+/// - Markers and a description inherited from a postfixed alias are kept;
+///   with `[]` its markers move to the container, which is the property.
+/// - With `[]` the list after `[]` was parsed at the array level and belongs
+///   to the container; only constraints valid on an array container apply.
+///   A list before `[]` may carry only the markers, which are property-level
+///   and join the container exactly as they do after `[]`.
+/// - `[]` is rejected when a flattened arm is already an array.
+/// - With `[]`, an arm's default lifts to the container only when it is an
+///   array, and merges with the other container defaults under the
+///   equal-value rule; any other inherited default is rejected rather than
+///   discarded or wrapped.
+///
+/// Arms otherwise keep their own constraints and descriptions, so an item
+/// arm lowers exactly as the same arm does in a property-level union.
+/// Presence and generation are read through the arms
+/// ([`PropertyAtom::is_required`]), not copied onto the container.
+fn apply_union_postfix(
+    target: UnionTarget,
+    reference: NamedReference,
+    site: &SchemaReferenceSite,
+    definition: &SchemaReferenceSite,
+) -> Result<ExpandedDef, SchemaError> {
+    let UnionTarget {
+        mut arms,
+        value: inherited_value,
+        array: inherited_array,
+        description: inherited_description,
+    } = target;
+    let NamedReference {
+        name,
+        is_array,
+        constraints,
+        array_constraints,
+        description,
+        ..
+    } = reference;
+    let description = description.or(inherited_description);
+    let merge_site = MergeSite { name: &name, site };
+    let reject = |rejection: SchemaUnionRejection| SchemaError::UnionReference {
+        name: name.clone(),
+        rejection: Box::new(rejection),
+        site: site.clone(),
+        definition: Box::new(definition.clone()),
+    };
+
+    if !is_array {
+        if let Some(rejected) = constraints
+            .iter()
+            .chain(&array_constraints)
+            .find(|constraint| !is_union_marker(constraint))
+        {
+            return Err(reject(SchemaUnionRejection::Constraint {
+                keyword: rejected.keyword().to_string(),
+                array_level: false,
+            }));
+        }
+        let (use_value_origins, use_array_origins) =
+            authored_origins(&constraints, &array_constraints, &site.source, &site.path);
+        let value = merge_constraints(
+            inherited_value,
+            constraints.into_iter().zip(use_value_origins).collect(),
+            &merge_site,
+        )?;
+        let array = merge_constraints(
+            inherited_array,
+            array_constraints.into_iter().zip(use_array_origins).collect(),
+            &merge_site,
+        )?;
+        let (constraints, value_origins) = value.into_iter().unzip();
+        let (array_constraints, array_origins) = array.into_iter().unzip();
+        return Ok(ExpandedDef::Single(
+            Box::new(PropertyAtom {
+                ty: TypeExpr::Union(arms),
+                is_array: false,
+                constraints,
+                array_constraints,
+                description,
+            }),
+            AtomProvenance {
+                value: value_origins,
+                array: array_origins,
+                shape: Vec::new(),
+            },
+        ));
+    }
+
+    if let Some(rejected) = constraints.iter().find(|constraint| !is_union_marker(constraint)) {
+        return Err(reject(SchemaUnionRejection::Constraint {
+            keyword: rejected.keyword().to_string(),
+            array_level: false,
+        }));
+    }
+    if let Some(rejected) = array_constraints
+        .iter()
+        .find(|constraint| !is_union_marker(constraint) && !is_array_container_constraint(constraint))
+    {
+        return Err(reject(SchemaUnionRejection::Constraint {
+            keyword: rejected.keyword().to_string(),
+            array_level: true,
+        }));
+    }
+    let use_site: Vec<Constraint> = constraints.into_iter().chain(array_constraints).collect();
+    // Postfixed union arms were flattened, so `is_array` is the arm's outer
+    // shape; an array inside an object arm does not count.
+    if let Some(arm) = arms.iter().position(|arm| arm.is_array) {
+        return Err(reject(SchemaUnionRejection::ArrayArm { arm }));
+    }
+
+    // An arm's default is a property-level value. On an array of the union it
+    // can only be the array's default, so it lifts when it is one. An alias's
+    // inherited markers are property-level too, and join the container's.
+    let mut lifted: Vec<Tagged> = inherited_value.into_iter().chain(inherited_array).collect();
+    for (index, arm) in arms.iter_mut().enumerate() {
+        for default in take_arm_defaults(arm) {
+            if !default.is_array() {
+                return Err(reject(SchemaUnionRejection::ScalarDefault {
+                    arm: index,
+                    value: default,
+                }));
+            }
+            lifted.push((
+                Constraint::Default(default),
+                SchemaConstraintOrigin {
+                    source: definition.source.clone(),
+                    path: definition.path.union_arm(index),
+                    keyword: "default".to_string(),
+                    occurrence: 0,
+                    span: None,
+                },
+            ));
+        }
+    }
+
+    let (_, use_origins) = authored_origins(&[], &use_site, &site.source, &site.path);
+    let merged = merge_constraints(lifted, use_site.into_iter().zip(use_origins).collect(), &merge_site)?;
+    let (array_constraints, array_origins) = merged.into_iter().unzip();
+    Ok(ExpandedDef::Single(
+        Box::new(PropertyAtom {
+            ty: TypeExpr::Union(arms),
+            is_array: true,
+            constraints: Vec::new(),
+            array_constraints,
+            description,
+        }),
+        AtomProvenance {
+            value: Vec::new(),
+            array: array_origins,
+            shape: Vec::new(),
+        },
+    ))
+}
+
+/// A property marker a union reference accepts without `[]`.
+fn is_union_marker(constraint: &Constraint) -> bool {
+    matches!(
+        constraint,
+        Constraint::Required | Constraint::Generated | Constraint::Eager
+    )
+}
+
+/// A constraint the converter accepts on an array container besides the
+/// property markers (mirrors `convert::apply_array_constraints`).
+fn is_array_container_constraint(constraint: &Constraint) -> bool {
+    matches!(
+        constraint,
+        Constraint::MinItems(_)
+            | Constraint::MaxItems(_)
+            | Constraint::Unique
+            | Constraint::Default(_)
+            | Constraint::Example(_)
+    )
+}
+
+/// Removes every default `arm` supplies to its containing property and
+/// returns them.
+fn take_arm_defaults(arm: &mut PropertyAtom) -> Vec<Value> {
+    let mut defaults = Vec::new();
+    for list in [&mut arm.constraints, &mut arm.array_constraints] {
+        list.retain(|constraint| match constraint {
+            Constraint::Default(value) => {
+                defaults.push(value.clone());
+                false
+            }
+            _ => true,
+        });
+    }
+    defaults
+}
+
+/// What a use-site `min`/`max` counts once the target is known.
+#[derive(Clone, Copy)]
+enum CountedBound {
+    /// Characters of a `string` value.
+    Length,
+    /// Items of an array container.
+    Items,
+}
+
+/// Reinterprets use-site `min`/`max`, which a reference parses as numeric
+/// bounds before its target is known, as counts of `counted`.
+fn reinterpret_bounds(
+    constraints: Vec<Tagged>,
+    counted: CountedBound,
+    property: &str,
+) -> Result<Vec<Tagged>, SchemaError> {
+    constraints
+        .into_iter()
+        .map(|(constraint, origin)| {
+            let constraint = match (constraint, counted) {
+                (Constraint::Min(n), CountedBound::Length) => {
+                    Constraint::MinLen(bound_count(n, "min", property)?)
+                }
+                (Constraint::Max(n), CountedBound::Length) => {
+                    Constraint::MaxLen(bound_count(n, "max", property)?)
+                }
+                (Constraint::Min(n), CountedBound::Items) => {
+                    Constraint::MinItems(bound_count(n, "min", property)?)
+                }
+                (Constraint::Max(n), CountedBound::Items) => {
+                    Constraint::MaxItems(bound_count(n, "max", property)?)
+                }
+                (other, _) => other,
+            };
+            Ok((constraint, origin))
+        })
+        .collect()
+}
+
+/// A count bound must be a non-negative integer (the wording mirrors the
+/// grammar's check for a directly typed `string(min(n))`).
+fn bound_count(n: f64, keyword: &str, property: &str) -> Result<usize, SchemaError> {
+    if !n.is_finite() || n < 0.0 || n.fract() != 0.0 {
+        return Err(SchemaError::Convert {
+            property: property.to_string(),
+            message: format!("`{keyword}` requires a non-negative integer, got `{n}`"),
+        });
+    }
+    Ok(n as usize)
+}
+
+fn is_key_bound(constraint: &Constraint) -> bool {
+    matches!(constraint, Constraint::MinKeys(_) | Constraint::MaxKeys(_))
+}
+
+/// The kind a bound limits; bounds merge only within one kind.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BoundKind {
+    Number,
+    Length,
+    Items,
+    Keys,
+}
+
+#[derive(Clone, Copy)]
+struct Bound {
+    kind: BoundKind,
+    lower: bool,
+    value: f64,
+}
+
+impl Bound {
+    fn of(constraint: &Constraint) -> Option<Self> {
+        let (kind, lower, value) = match constraint {
+            Constraint::Min(n) => (BoundKind::Number, true, *n),
+            Constraint::Max(n) => (BoundKind::Number, false, *n),
+            Constraint::MinLen(n) => (BoundKind::Length, true, *n as f64),
+            Constraint::MaxLen(n) => (BoundKind::Length, false, *n as f64),
+            Constraint::MinItems(n) => (BoundKind::Items, true, *n as f64),
+            Constraint::MaxItems(n) => (BoundKind::Items, false, *n as f64),
+            Constraint::MinKeys(n) => (BoundKind::Keys, true, *n as f64),
+            Constraint::MaxKeys(n) => (BoundKind::Keys, false, *n as f64),
+            _ => return None,
+        };
+        Some(Self { kind, lower, value })
+    }
+
+    fn stricter_than(&self, other: &Self) -> bool {
+        if self.lower {
+            self.value > other.value
+        } else {
+            self.value < other.value
+        }
+    }
+}
+
+fn is_flag(constraint: &Constraint) -> bool {
+    matches!(
+        constraint,
+        Constraint::NotEmpty
+            | Constraint::Integer
+            | Constraint::Unique
+            | Constraint::Eager
+            | Constraint::Required
+            | Constraint::Generated
+    )
+}
+
+/// Checks the `alphanumeric` options a use site wrote against the named
+/// type's. Equal canonical sets are a repetition; any difference is a
+/// [`SchemaConstraintConflictKind::Options`] conflict, and options on a
+/// target that is not `alphanumeric` are not valid.
+fn check_use_site_options(
+    base: &PropertyAtom,
+    base_provenance: &AtomProvenance,
+    options: Vec<Tagged>,
+    merge_site: &MergeSite<'_>,
+    definition: &SchemaReferenceSite,
+    reference: &str,
+) -> Result<(), SchemaError> {
+    let name = merge_site.name;
+    let written = options
+        .iter()
+        .filter_map(|(constraint, _)| match constraint {
+            Constraint::Options(options) => Some(options.iter().copied()),
+            _ => None,
+        })
+        .flatten()
+        .collect::<AlphanumericOptions>();
+    let Some(target) = base.alphanumeric_options() else {
+        return Err(SchemaError::Convert {
+            property: merge_site.site.path.to_string(),
+            message: format!(
+                "`alphanumeric` options ({}) are not valid on the named type \
+                 `{name}@{reference}`, which is not `alphanumeric`",
+                written.keywords().collect::<Vec<_>>().join(", ")
+            ),
+        });
+    };
+    if written.canonical() == target {
+        return Ok(());
+    }
+    let use_origin = options
+        .into_iter()
+        .map(|(_, origin)| origin)
+        .next()
+        .expect("caller passes at least one option list");
+    let base_origin = base
+        .constraints
+        .iter()
+        .zip(&base_provenance.value)
+        .find_map(|(constraint, origin)| {
+            matches!(constraint, Constraint::Options(_)).then(|| origin.clone())
+        })
+        // The base type writes no options; point at its declaration.
+        .unwrap_or_else(|| SchemaConstraintOrigin {
+            source: definition.source.clone(),
+            path: definition.path.clone(),
+            keyword: SimplifiedType::Alphanumeric.as_keyword().to_string(),
+            occurrence: 0,
+            span: None,
+        });
+    Err(merge_site.conflict(SchemaConstraintConflictKind::Options, vec![base_origin, use_origin]))
+}
+
+/// Merges `inherited` and then `use_site` constraints of one level (value or
+/// array container) under the rules on [`apply_import_postfix`]. The result
+/// keeps first-seen order; a stricter bound replaces the looser one in place
+/// and takes its origin.
+fn merge_constraints(
+    inherited: Vec<Tagged>,
+    use_site: Vec<Tagged>,
+    merge_site: &MergeSite<'_>,
+) -> Result<Vec<Tagged>, SchemaError> {
+    // The third field is the position in the inherited-then-use-site stream,
+    // which orders a conflict's origins inherited first.
+    let mut merged: Vec<(Constraint, SchemaConstraintOrigin, usize)> = Vec::new();
+    for (sequence, (constraint, origin)) in inherited.into_iter().chain(use_site).enumerate() {
+        if let Some(bound) = Bound::of(&constraint) {
+            let same_slot = merged.iter().enumerate().find_map(|(index, (existing, ..))| {
+                Bound::of(existing)
+                    .filter(|other| other.kind == bound.kind && other.lower == bound.lower)
+                    .map(|other| (index, other))
+            });
+            match same_slot {
+                Some((index, existing)) if bound.stricter_than(&existing) => {
+                    merged[index] = (constraint, origin, sequence);
+                }
+                Some(_) => {}
+                None => merged.push((constraint, origin, sequence)),
+            }
+            continue;
+        }
+        match &constraint {
+            Constraint::Scheme(schemes) => {
+                if let Some((Constraint::Scheme(existing), existing_origin, _)) = merged
+                    .iter_mut()
+                    .find(|(c, ..)| matches!(c, Constraint::Scheme(_)))
+                {
+                    existing.retain(|scheme| schemes.contains(scheme));
+                    if existing.is_empty() {
+                        return Err(merge_site.conflict(
+                            SchemaConstraintConflictKind::Scheme,
+                            vec![existing_origin.clone(), origin],
+                        ));
+                    }
+                    continue;
+                }
+            }
+            Constraint::Default(value) => {
+                if let Some((Constraint::Default(existing), existing_origin, _)) = merged
+                    .iter()
+                    .find(|(c, ..)| matches!(c, Constraint::Default(_)))
+                {
+                    if defaults_equal(existing, value) {
+                        continue;
+                    }
+                    return Err(merge_site.conflict(
+                        SchemaConstraintConflictKind::Default,
+                        vec![existing_origin.clone(), origin],
+                    ));
+                }
+            }
+            flag_or_pattern
+                if (is_flag(flag_or_pattern) || matches!(flag_or_pattern, Constraint::Pattern(_)))
+                    && merged.iter().any(|(existing, ..)| existing == flag_or_pattern) =>
+            {
+                continue;
+            }
+            _ => {}
+        }
+        merged.push((constraint, origin, sequence));
+    }
+
+    for kind in [BoundKind::Number, BoundKind::Length, BoundKind::Items, BoundKind::Keys] {
+        let find = |lower: bool| {
+            merged.iter().find_map(|(constraint, origin, sequence)| {
+                Bound::of(constraint)
+                    .filter(|bound| bound.kind == kind && bound.lower == lower)
+                    .map(|bound| (bound.value, origin, *sequence))
+            })
+        };
+        if let (Some(lower), Some(upper)) = (find(true), find(false))
+            && lower.0 > upper.0
+        {
+            let mut ordered = [lower, upper];
+            ordered.sort_by_key(|(_, _, sequence)| *sequence);
+            return Err(merge_site.conflict(
+                SchemaConstraintConflictKind::Bounds,
+                ordered.iter().map(|(_, origin, _)| (*origin).clone()).collect(),
+            ));
+        }
+    }
+    Ok(merged
+        .into_iter()
+        .map(|(constraint, origin, _)| (constraint, origin))
+        .collect())
+}
+
+/// A default is a property-level value wherever it is written, so one on the
+/// items and one on the container must agree. An equal duplicate on the
+/// container is dropped.
+fn reconcile_property_defaults(
+    value: Vec<Tagged>,
+    mut array: Vec<Tagged>,
+    merge_site: &MergeSite<'_>,
+) -> Result<(Vec<Tagged>, Vec<Tagged>), SchemaError> {
+    let item_default = value.iter().find_map(|(constraint, origin)| match constraint {
+        Constraint::Default(default) => Some((default, origin)),
+        _ => None,
+    });
+    if let Some((item_default, item_origin)) = item_default {
+        if let Some((_, container_origin)) = array.iter().find(|(constraint, _)| {
+            matches!(constraint, Constraint::Default(default) if !defaults_equal(default, item_default))
+        }) {
+            return Err(merge_site.conflict(
+                SchemaConstraintConflictKind::Default,
+                vec![item_origin.clone(), container_origin.clone()],
+            ));
+        }
+        array.retain(|(constraint, _)| !matches!(constraint, Constraint::Default(_)));
+    }
+    Ok((value, array))
+}
+
+/// Whether two defaults lower to the same JSON value. Integral floats equal
+/// integers (`3.0` is `3`); a string never equals a number. Mirrors the
+/// converter's `normalize_json_number` so a merge accepts exactly the
+/// defaults that lower identically.
+fn defaults_equal(left: &Value, right: &Value) -> bool {
+    normalized_default(left) == normalized_default(right)
+}
+
+fn normalized_default(value: &Value) -> Value {
+    match value {
+        Value::Number(n) if n.is_i64() || n.is_u64() => value.clone(),
+        Value::Number(n) => n
+            .as_f64()
+            .filter(|f| {
+                f.is_finite() && f.fract() == 0.0 && (i64::MIN as f64..=i64::MAX as f64).contains(f)
+            })
+            .map_or_else(|| value.clone(), |f| Value::from(f as i64)),
+        Value::Array(items) => Value::Array(items.iter().map(normalized_default).collect()),
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, item)| (key.clone(), normalized_default(item)))
+                .collect(),
+        ),
+        other => other.clone(),
     }
 }
 
@@ -1466,6 +2835,7 @@ fn atom_has_imports(atom: &PropertyAtom) -> bool {
     match &atom.ty {
         TypeExpr::Imported { .. } => true,
         TypeExpr::InlineObject(shape) => shape_has_imports(shape),
+        TypeExpr::Union(arms) => arms.iter().any(atom_has_imports),
         TypeExpr::Primitive(_) => false,
     }
 }
@@ -1582,27 +2952,18 @@ fn resolve_examples_in_json(
     Ok(())
 }
 
-/// Resolves one `example(...)` reference to a validated example object.
-///
-/// `this` targets the current schema file (`this_file`); every other value is a
-/// `biscuit-file` reference resolved relative to `base_dir` — the same
-/// resolution `$schema` file references use. The referenced file is validated
-/// against the example-artifact envelope with content-hash caching, then — when
-/// `target` is `Some` — its `returns` value is validated against the annotated
-/// property's target schema as a separate, un-cached gate.
-#[allow(clippy::too_many_arguments)]
-fn resolve_one_example(
+/// The file an `example(...)` reference names: `this` is `this_file`; any
+/// other value is a `biscuit-file` reference resolved from `base_dir`, with a
+/// bare name tried against the schema roots first.
+fn resolve_example_path(
     reference: &str,
     base_dir: &Path,
     this_file: Option<&Path>,
-    target: Option<&Value>,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
-    deps: &mut BTreeSet<PathBuf>,
-    reads: &mut HashMap<PathBuf, Vec<u8>>,
-) -> Result<Value, SchemaError> {
+) -> Result<PathBuf, SchemaError> {
     let trimmed = reference.trim();
-    let path = if trimmed == "this" {
+    Ok(if trimmed == "this" {
         this_file
             .map(Path::to_path_buf)
             .ok_or_else(|| SchemaError::InvalidExample {
@@ -1651,8 +3012,29 @@ fn resolve_one_example(
                     bare_name: false,
                 })?
         }
-    };
+    })
+}
 
+/// Resolves one `example(...)` reference to a validated example object.
+///
+/// `this` targets the current schema file (`this_file`); every other value is a
+/// `biscuit-file` reference resolved relative to `base_dir` — the same
+/// resolution `$schema` file references use. The referenced file is validated
+/// against the example-artifact envelope with content-hash caching, then — when
+/// `target` is `Some` — its `returns` value is validated against the annotated
+/// property's target schema as a separate, un-cached gate.
+#[allow(clippy::too_many_arguments)]
+fn resolve_one_example(
+    reference: &str,
+    base_dir: &Path,
+    this_file: Option<&Path>,
+    target: Option<&Value>,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    deps: &mut BTreeSet<PathBuf>,
+    reads: &mut HashMap<PathBuf, Vec<u8>>,
+) -> Result<Value, SchemaError> {
+    let path = resolve_example_path(reference, base_dir, this_file, schema_roots, request_context)?;
     let canonical = canonical_path(&path);
     // Reuse the bytes when another `example(...)` site already read this file
     // during the same resolution run.
@@ -2114,7 +3496,7 @@ mod tests {
                 "kind: schema\ntypes:\n  name: string(required)\n",
             ),
             ("mixed.yaml", "name: string(required)\ncount: 1\n"),
-            ("invalid.yaml", "name: definitely-not-a-type\n"),
+            ("invalid.yaml", "name: string(min(nope))\n"),
         ];
 
         let dir = tempfile::tempdir().unwrap();
@@ -2461,14 +3843,14 @@ mod schema_plus_phase1 {
             "$schema:\n  value: type@./types.yaml\n",
         );
         let resolved = resolve_file(dir.path(), "main.yaml").expect("import must resolve");
-        // `value` is optional, so reach through the null wrapper to the arm
-        // that carries the inlined enum.
+        // `value` inherits the definition's `required`, so it is not
+        // null-wrapped: the inlined enum sits at the property root.
         let value = &resolved.json_schema["properties"]["value"];
-        let arm = &value["anyOf"][1];
         assert!(
-            arm["enum"].is_array(),
+            value["enum"].is_array(),
             "`value` must inline the target's `type` enum: {value}"
         );
+        assert_eq!(resolved.json_schema["required"], serde_json::json!(["value"]));
     }
 
     #[test]
@@ -2480,10 +3862,14 @@ mod schema_plus_phase1 {
             "$schema:\n  type: 'enum(a, b; required)'\n  value: type@this\n",
         );
         let resolved = resolve_file(dir.path(), "self.yaml").expect("`@this` must resolve");
-        let arm = &resolved.json_schema["properties"]["value"]["anyOf"][1];
+        let value = &resolved.json_schema["properties"]["value"];
         assert!(
-            arm["enum"].is_array(),
-            "`value` must inline the same-file `type` enum"
+            value["enum"].is_array(),
+            "`value` must inline the same-file `type` enum and its `required`: {value}"
+        );
+        assert_eq!(
+            resolved.json_schema["required"],
+            serde_json::json!(["type", "value"])
         );
     }
 
@@ -2534,10 +3920,16 @@ mod schema_plus_phase1 {
         );
         let err =
             resolve_file(dir.path(), "main.yaml").expect_err("undefined named type must error");
-        assert!(
-            !matches!(err, SchemaError::Grammar { .. }),
-            "an undefined named type must be a resolution error, not a grammar error: {err:?}"
+        let SchemaError::UnknownNamedType { name, namespace, site } = err else {
+            panic!("an undefined named type must be UnknownNamedType: {err:?}");
+        };
+        assert_eq!(name, "missing");
+        assert_eq!(
+            namespace,
+            SchemaSourceId::File(canonical_path(&dir.path().join("types.yaml")))
         );
+        assert_eq!(site.source, SchemaSourceId::InlineDocument);
+        assert_eq!(site.path, SchemaSourcePath::root().property("value"));
     }
 
     #[test]
@@ -2563,9 +3955,8 @@ mod schema_plus_phase1 {
     #[test]
     fn constrained_import_applies_use_site_constraint() {
         // `Name(constraints)@file` applies the import-site constraint to the
-        // inlined value type. Here `type(required)@this` makes `value` required
-        // even though the named `type` definition's own `required` is stripped
-        // on inline.
+        // inlined value type. Here the named `type` has no presence of its
+        // own, so `type(required)@this` alone makes `value` required.
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
@@ -3599,10 +4990,12 @@ mod bare_name_phase3 {
         let resolved =
             resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &[], &biscuit_file::FileResolutionContext::new(root.join("docs"))).unwrap();
 
-        // All three named types inlined to their declared shapes. Top-level
-        // presence is re-decided at the use site, so each imported type is
-        // optional here and lowers to a nullable `anyOf`.
+        // All three named types inlined to their declared shapes. `A` carries
+        // `required`, which `first` inherits, so `first` is not null-wrapped;
+        // the optional `second` and `third` lower to a nullable `anyOf`.
         let props = resolved.json_schema["properties"].as_object().unwrap();
+        assert_eq!(props["first"], serde_json::json!({"type": "string"}));
+        assert_eq!(resolved.json_schema["required"], serde_json::json!(["first"]));
         let arm_type = |key: &str| -> String {
             props[key]["anyOf"]
                 .as_array()
@@ -3612,7 +5005,6 @@ mod bare_name_phase3 {
                 .map(|t| t.as_str().unwrap().to_string())
                 .unwrap_or_default()
         };
-        assert_eq!(arm_type("first"), "string");
         assert_eq!(arm_type("second"), "number");
         let third_enum = props["third"]["anyOf"]
             .as_array()
@@ -3635,5 +5027,283 @@ mod bare_name_phase3 {
     #[test]
     fn _pathbuf_used() {
         let _ = PathBuf::new();
+    }
+}
+
+/// Shared named-type tables: allocation identity through the real resolver,
+/// and use-site independence through public resolution, for both standalone
+/// mapping envelopes as the import target.
+#[cfg(test)]
+mod shared_type_tables {
+    use super::*;
+    use serde_json::json;
+
+    /// Writes `types.yaml` holding `body` (a two-space-indented mapping) as
+    /// either a pure `$schema:` or a tagged `kind: schema` / `types:` envelope.
+    fn write_types(dir: &Path, tagged: bool, body: &str) -> PathBuf {
+        let header = if tagged { "kind: schema\ntypes:\n" } else { "$schema:\n" };
+        let path = dir.join("types.yaml");
+        std::fs::write(&path, format!("{header}{body}")).unwrap();
+        path
+    }
+
+    fn engine(dir: &Path) -> ImportEngine<'static> {
+        ImportEngine {
+            stack: Vec::new(),
+            dependencies: BTreeSet::new(),
+            source: NamespaceSource::Files {
+                schema_roots: Vec::new(),
+                context: Box::new(FileResolutionContext::new(dir)),
+            },
+            namespace_cache: HashMap::new(),
+            embedded_cache: HashMap::new(),
+        }
+    }
+
+    fn root_namespace(dir: &Path, named_types: IndexMap<String, PropertyDef>) -> Namespace {
+        Namespace {
+            key: NamespaceKey::Root,
+            base_dir: dir.to_path_buf(),
+            named_types: Arc::new(named_types),
+        }
+    }
+
+    fn resolve_root(dir: &Path, schema: &str) -> ResolvedSchema {
+        let value: YamlValue = serde_yaml_ng::from_str(schema).unwrap();
+        resolve_yaml_schema(&value, dir, &FileResolutionContext::new(dir))
+            .expect("schema must resolve")
+    }
+
+    // ── Allocation identity ──────────────────────────────────────────────
+
+    #[test]
+    fn first_load_cache_and_later_imports_share_one_table() {
+        for tagged in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let types = write_types(dir.path(), tagged, "  A: 'string(required)'\n  B: number\n");
+            let mut engine = engine(dir.path());
+            let root = root_namespace(dir.path(), IndexMap::new());
+
+            let first = engine.resolve_namespace("./types.yaml", &root).unwrap();
+            let canonical = canonical_path(&types);
+            assert_eq!(first.key, NamespaceKey::File(canonical.clone()));
+            let cached = &engine.namespace_cache[&canonical];
+            assert!(
+                Arc::ptr_eq(&first.named_types, &cached.named_types),
+                "tagged={tagged}: first load and cache entry must share one allocation"
+            );
+
+            // Two later imports, selecting distinct names and spelling the
+            // reference differently, reach the same canonical cache entry.
+            let for_a = engine.resolve_namespace("./types.yaml", &root).unwrap();
+            let for_b = engine.resolve_namespace("types.yaml", &root).unwrap();
+            assert!(for_a.named_types.contains_key("A"), "tagged={tagged}");
+            assert!(for_b.named_types.contains_key("B"), "tagged={tagged}");
+            for later in [&for_a, &for_b] {
+                assert!(
+                    Arc::ptr_eq(&later.named_types, &first.named_types),
+                    "tagged={tagged}: later imports must reuse the first-loaded table"
+                );
+            }
+
+            // Full expansion of both imports keeps that one cached table.
+            let importer: YamlValue =
+                serde_yaml_ng::from_str("x: A@./types.yaml\ny: B@types.yaml\n").unwrap();
+            let schema = parse_yaml_schema(&importer).unwrap();
+            engine.expand_schema(schema, &root, &SchemaSourcePath::root()).unwrap();
+            assert!(
+                Arc::ptr_eq(&engine.namespace_cache[&canonical].named_types, &first.named_types),
+                "tagged={tagged}: expansion must not replace the cached table"
+            );
+            assert_eq!(engine.dependencies.iter().collect::<Vec<_>>(), vec![&canonical]);
+        }
+    }
+
+    #[test]
+    fn this_from_inline_root_shares_the_root_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let schema: YamlValue = serde_yaml_ng::from_str("name: string\n").unwrap();
+        let SimplifiedSchema::Single(shape) = parse_yaml_schema(&schema).unwrap() else {
+            panic!("mapping schema must parse as a single shape");
+        };
+        let root = root_namespace(dir.path(), shape.properties);
+        let mut engine = engine(dir.path());
+
+        for _ in 0..2 {
+            let this = engine.resolve_namespace("this", &root).unwrap();
+            assert_eq!(this.key, NamespaceKey::Root);
+            assert!(
+                Arc::ptr_eq(&this.named_types, &root.named_types),
+                "`@this` must share the root's table"
+            );
+        }
+        assert!(engine.namespace_cache.is_empty(), "`@this` loads no file");
+        assert!(engine.dependencies.is_empty(), "`@this` records no dependency");
+    }
+
+    #[test]
+    fn this_from_loaded_file_shares_that_files_table() {
+        for tagged in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let types = write_types(dir.path(), tagged, "  name: string\n");
+            let mut engine = engine(dir.path());
+            let root = root_namespace(dir.path(), IndexMap::new());
+            let file = engine.resolve_namespace("./types.yaml", &root).unwrap();
+
+            for _ in 0..2 {
+                let this = engine.resolve_namespace("this", &file).unwrap();
+                assert_eq!(this.key, NamespaceKey::File(canonical_path(&types)));
+                assert!(
+                    Arc::ptr_eq(&this.named_types, &file.named_types),
+                    "tagged={tagged}: `@this` in a file must share that file's table"
+                );
+                assert!(
+                    !Arc::ptr_eq(&this.named_types, &root.named_types),
+                    "tagged={tagged}: a file's table must be distinct from the root's"
+                );
+            }
+        }
+    }
+
+    // ── Use-site independence ────────────────────────────────────────────
+
+    #[test]
+    fn cross_file_type_imported_twice_keeps_each_use_independent() {
+        for tagged in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let types = write_types(dir.path(), tagged, "  name: 'string(required)'\n");
+            let resolved = resolve_root(
+                dir.path(),
+                "primary: 'name(required; not-empty)@./types.yaml -> primary name'\n\
+                 backup: name@./types.yaml\n",
+            );
+            assert_eq!(
+                resolved.json_schema["properties"],
+                json!({
+                    "primary": {"type": "string", "pattern": "\\S", "description": "primary name"},
+                    "backup": {"type": "string"},
+                }),
+                "tagged={tagged}: only `primary` carries its use-site modifiers"
+            );
+            // Both uses inherit the definition's `required`; the second use
+            // is not affected by the first use's postfix.
+            assert_eq!(
+                resolved.json_schema["required"],
+                json!(["primary", "backup"]),
+                "tagged={tagged}"
+            );
+            assert_eq!(resolved.imports, vec![canonical_path(&types)], "tagged={tagged}");
+        }
+    }
+
+    #[test]
+    fn root_this_type_imported_twice_keeps_each_use_independent() {
+        let dir = tempfile::tempdir().unwrap();
+        let resolved = resolve_root(
+            dir.path(),
+            "name: 'number(required)'\n\
+             primary: 'name(required; min(1))@this -> primary count'\n\
+             backup: name@this\n",
+        );
+        assert_eq!(
+            resolved.json_schema["properties"],
+            json!({
+                "name": {"type": "number"},
+                "primary": {"type": "number", "minimum": 1, "description": "primary count"},
+                "backup": {"type": "number"},
+            })
+        );
+        assert_eq!(resolved.json_schema["required"], json!(["name", "primary", "backup"]));
+        assert!(resolved.imports.is_empty());
+    }
+
+    #[test]
+    fn this_inside_imported_file_selects_that_files_type() {
+        for tagged in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let types = write_types(
+                dir.path(),
+                tagged,
+                "  name: 'string(required)'\n  wrapper:\n    \
+                 first: 'name(required; not-empty)@this -> first'\n    second: name@this\n",
+            );
+            // The root defines its own, different `name`, so the output shows
+            // which namespace each `@this` selected.
+            let resolved = resolve_root(
+                dir.path(),
+                "name: number\nlocal: 'name(required)@this'\nw: wrapper@./types.yaml\n",
+            );
+            let properties = &resolved.json_schema["properties"];
+            assert_eq!(properties["local"], json!({"type": "number"}), "tagged={tagged}");
+            assert_eq!(
+                properties["w"],
+                json!({"anyOf": [{"type": "null"}, {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "first": {"type": "string", "pattern": "\\S", "description": "first"},
+                        "second": {"type": "string"},
+                    },
+                    "required": ["first", "second"],
+                }]}),
+                "tagged={tagged}: `@this` inside types.yaml must select its string `name`"
+            );
+            assert_eq!(resolved.json_schema["required"], json!(["local"]), "tagged={tagged}");
+            assert_eq!(resolved.imports, vec![canonical_path(&types)], "tagged={tagged}");
+        }
+    }
+
+    #[test]
+    fn expand_named_types_reads_this_from_the_supplied_schema_not_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        std::fs::write(dir.path().join("types.yaml"), "kind: schema\ntypes:\n  shared: number\n").unwrap();
+        // The defining file on disk is stale: it defines no `base`.
+        let schema_file = dir.path().join("schema.yaml");
+        std::fs::write(&schema_file, "kind: schema\ntypes:\n  other: string\n").unwrap();
+        let buffer = parse_yaml_schema(
+            &serde_yaml_ng::from_str("title: base\ncount: 'shared@./types.yaml'\nbase: string(required)\n")
+                .unwrap(),
+        )
+        .unwrap();
+
+        let (expanded, imports) =
+            expand_named_types(&buffer, dir.path(), Some(&schema_file), &[], &context).unwrap();
+        let SimplifiedSchema::Single(shape) = expanded else { panic!("single schema") };
+        assert!(shape.properties["title"].is_required(), "`base` came from the buffer");
+        assert_eq!(imports, vec![canonical_path(&dir.path().join("types.yaml"))]);
+
+        let missing = parse_yaml_schema(&serde_yaml_ng::from_str("title: nope\n").unwrap()).unwrap();
+        let error = expand_named_types(&missing, dir.path(), Some(&schema_file), &[], &context)
+            .unwrap_err();
+        let SchemaError::UnknownNamedType { name, namespace, site } = error else {
+            panic!("unknown named type: {error:?}")
+        };
+        assert_eq!(name, "nope");
+        assert_eq!(namespace, SchemaSourceId::File(canonical_path(&schema_file)));
+        assert_eq!(site.path, SchemaSourcePath::root().property("title"));
+
+        let inline = expand_named_types(&missing, dir.path(), None, &[], &context).unwrap_err();
+        assert!(matches!(
+            inline,
+            SchemaError::UnknownNamedType { namespace: SchemaSourceId::InlineDocument, .. }
+        ));
+    }
+
+    #[test]
+    fn named_type_reference_path_selects_the_resolver_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let types = dir.path().join("types.yaml");
+        std::fs::write(&types, "kind: schema\ntypes:\n  shared: number\n").unwrap();
+        assert_eq!(named_type_reference_path("this", dir.path(), &[], &context).unwrap(), None);
+        assert_eq!(
+            named_type_reference_path("./types.yaml", dir.path(), &[], &context).unwrap(),
+            Some(canonical_path(&types))
+        );
+        assert!(matches!(
+            named_type_reference_path("./missing.yaml", dir.path(), &[], &context),
+            Err(SchemaError::NoMatch { .. })
+        ));
     }
 }

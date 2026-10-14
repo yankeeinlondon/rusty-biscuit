@@ -2,14 +2,24 @@
 //!
 //! Used by tests (especially `proptest` round-trip tests) to verify that the
 //! parser and the AST agree. The output is canonical (deterministic key
-//! ordering, minimal whitespace) and re-parses to an equal [`PropertyAtom`].
+//! ordering, minimal whitespace) and re-parses to an equal [`PropertyAtom`]
+//! for every atom the passive parser produces, except that `alphanumeric`
+//! options are written in canonical form, which re-parses to the same type
+//! identity rather than the authored option order.
 
 use std::fmt::Write;
 
-use super::types::{Constraint, PropertyAtom, SimplifiedType, TypeExpr};
+use super::{
+    alphanumeric::AlphanumericOptions,
+    types::{Constraint, PropertyAtom, SimplifiedType, TypeExpr},
+};
 
 /// Serialise `atom` into a string suitable for re-parsing via
 /// [`grammar::parse_type_expr`].
+///
+/// Only passively parsed atoms round-trip. A resolved [`TypeExpr::Union`]
+/// (an expanded postfixed union reference) serializes to a display form,
+/// `[arm, arm][]`, that the grammar does not accept.
 ///
 /// [`grammar::parse_type_expr`]: super::grammar::parse_type_expr
 pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
@@ -17,9 +27,10 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
     match &atom.ty {
         TypeExpr::Primitive(ty) => {
             out.push_str(ty.as_keyword());
-            if !atom.constraints.is_empty() {
+            let constraints = render_constraints(&atom.constraints, Some(*ty));
+            if !constraints.is_empty() {
                 out.push('(');
-                write_constraints(&mut out, &atom.constraints, *ty);
+                out.push_str(&constraints);
                 out.push(')');
             } else if matches!(ty, SimplifiedType::Enum) {
                 // The parser rejects bare `enum` without members; if a caller
@@ -32,7 +43,7 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
                 out.push_str("[]");
                 if !atom.array_constraints.is_empty() {
                     out.push('(');
-                    write_constraints(&mut out, &atom.array_constraints, *ty);
+                    out.push_str(&render_constraints(&atom.array_constraints, Some(*ty)));
                     out.push(')');
                 }
             }
@@ -41,30 +52,50 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
             write_inline_object(&mut out, shape, atom.is_array);
             if atom.is_array && !atom.array_constraints.is_empty() {
                 out.push('(');
-                write_constraints(&mut out, &atom.array_constraints, SimplifiedType::String);
+                out.push_str(&render_constraints(&atom.array_constraints, None));
                 out.push(')');
             }
             if !atom.is_array && !atom.constraints.is_empty() {
                 out.push('(');
-                write_constraints(&mut out, &atom.constraints, SimplifiedType::String);
+                out.push_str(&render_constraints(&atom.constraints, None));
                 out.push(')');
             }
         }
-        // Imported type reference: `name ('[]')? ('(' constraints ')')? '@' ref`
-        // — the terminal-`@` grammar (O-B1). Postfix `[]`/constraints ride on
-        // the enclosing atom.
+        // Named-type reference:
+        // `name ('(' constraints ')')? ('[]' ('(' constraints ')')?)? ('@' ref)?`.
+        // A local reference is written bare unless its name is a built-in
+        // keyword, where only `@this` selects the local type.
         TypeExpr::Imported { name, reference } => {
             out.push_str(name);
+            let constraints = render_constraints(&atom.constraints, None);
+            if !constraints.is_empty() {
+                out.push('(');
+                out.push_str(&constraints);
+                out.push(')');
+            }
+            if atom.is_array {
+                out.push_str("[]");
+                if !atom.array_constraints.is_empty() {
+                    out.push('(');
+                    out.push_str(&render_constraints(&atom.array_constraints, None));
+                    out.push(')');
+                }
+            }
+            if !atom.ty.is_local_reference() || SimplifiedType::is_keyword(name) {
+                out.push('@');
+                out.push_str(reference);
+            }
+        }
+        // Display only: the resolver alone produces a union type, and the
+        // bracketed arm list is not a parseable type expression.
+        TypeExpr::Union(arms) => {
+            out.push('[');
+            let rendered: Vec<String> = arms.iter().map(serialize_property_atom).collect();
+            out.push_str(&rendered.join(", "));
+            out.push(']');
             if atom.is_array {
                 out.push_str("[]");
             }
-            if !atom.constraints.is_empty() {
-                out.push('(');
-                write_constraints(&mut out, &atom.constraints, SimplifiedType::Any);
-                out.push(')');
-            }
-            out.push('@');
-            out.push_str(reference);
         }
     }
 
@@ -111,16 +142,34 @@ fn def_single_atom(def: &super::types::PropertyDef) -> &PropertyAtom {
     }
 }
 
-fn write_constraints(out: &mut String, constraints: &[Constraint], ty: SimplifiedType) {
-    for (idx, c) in constraints.iter().enumerate() {
-        if idx > 0 {
+/// Renders a constraint list without its parentheses. `ty` is the target
+/// type, `None` for a reference or inline object. `alphanumeric` options lead
+/// in canonical form, and redundant ones disappear with it.
+fn render_constraints(constraints: &[Constraint], ty: Option<SimplifiedType>) -> String {
+    let mut out = String::new();
+    let options = constraints
+        .iter()
+        .filter_map(|constraint| match constraint {
+            Constraint::Options(options) => Some(options.iter().copied()),
+            _ => None,
+        })
+        .flatten()
+        .collect::<AlphanumericOptions>()
+        .canonical();
+    out.push_str(&options.keywords().collect::<Vec<_>>().join(","));
+    for c in constraints
+        .iter()
+        .filter(|constraint| !matches!(constraint, Constraint::Options(_)))
+    {
+        if !out.is_empty() {
             out.push(';');
         }
-        write_constraint(out, c, ty);
+        write_constraint(&mut out, c, ty);
     }
+    out
 }
 
-fn write_constraint(out: &mut String, c: &Constraint, ty: SimplifiedType) {
+fn write_constraint(out: &mut String, c: &Constraint, ty: Option<SimplifiedType>) {
     match c {
         Constraint::Required => out.push_str("required"),
         Constraint::Eager => out.push_str("eager"),
@@ -165,7 +214,7 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: SimplifiedType) {
                 if i > 0 {
                     out.push(',');
                 }
-                let value = if matches!(ty, SimplifiedType::Number) {
+                let value = if ty == Some(SimplifiedType::Number) {
                     candidate
                         .canonical_decimal
                         .as_deref()
@@ -187,6 +236,7 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: SimplifiedType) {
             }
         }
         Constraint::LiteralValue(value) => write_literal_value(out, value),
+        Constraint::Options(_) => unreachable!("options are rendered first, in canonical form"),
         Constraint::Match(globs) => {
             out.push_str("match(");
             for (i, g) in globs.iter().enumerate() {
@@ -225,7 +275,7 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: SimplifiedType) {
     }
 }
 
-fn write_default_value(out: &mut String, value: &serde_json::Value, _ty: SimplifiedType) {
+fn write_default_value(out: &mut String, value: &serde_json::Value, _ty: Option<SimplifiedType>) {
     match value {
         serde_json::Value::Null => out.push_str("null"),
         serde_json::Value::Bool(b) => {
@@ -746,5 +796,60 @@ mod tests {
         assert!(parsed.is_array);
         let has_suggest = parsed.constraints.iter().any(|c| matches!(c, Constraint::Suggest(_)));
         assert!(has_suggest, "parsed atom must retain suggest constraint");
+    }
+
+    /// Serializes `source`, asserts the canonical spelling, and asserts that
+    /// it re-parses to the same AST.
+    fn assert_canonical(source: &str, expected: &str) {
+        let parsed = parse_type_expr("value", source)
+            .unwrap_or_else(|error| panic!("parse {source}: {error}"));
+        let serialized = serialize_property_atom(&parsed);
+        assert_eq!(serialized, expected, "{source}");
+        let reparsed = parse_type_expr("value", &serialized)
+            .unwrap_or_else(|error| panic!("reparse {serialized}: {error}"));
+        assert_eq!(reparsed, parsed, "{source} -> {serialized}");
+    }
+
+    #[test]
+    fn local_reference_serializes_bare_and_round_trips() {
+        for (source, expected) in [
+            ("person", "person"),
+            ("person@this", "person"),
+            ("person[]", "person[]"),
+            ("person(required)@this", "person(required)"),
+            ("person[](min(1))", "person[](min(1))"),
+            ("person(min(2); max(5))", "person(min(2);max(5))"),
+            ("person -> The author", "person -> The author"),
+            ("person[]@this -> Reviewers", "person[] -> Reviewers"),
+        ] {
+            assert_canonical(source, expected);
+        }
+    }
+
+    #[test]
+    fn local_reference_with_a_keyword_name_keeps_the_explicit_spelling() {
+        assert_canonical("string@this", "string@this");
+        assert_canonical("file[](required)@this -> Files", "file[](required)@this -> Files");
+        assert_eq!(
+            serialize_property_atom(&parse_type_expr("value", "string").unwrap()),
+            "string"
+        );
+    }
+
+    #[test]
+    fn cross_file_reference_serialization_is_unchanged() {
+        assert_canonical("person@./people.yaml", "person@./people.yaml");
+        assert_canonical(
+            "person[](required)@./people.yaml -> People",
+            "person[](required)@./people.yaml -> People",
+        );
+    }
+
+    #[test]
+    fn local_reference_inside_an_inline_object_round_trips() {
+        assert_canonical(
+            "{ author: person(required) -> The author, editor: string@this }",
+            "{author: person(required) -> The author,editor: string@this}",
+        );
     }
 }

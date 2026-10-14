@@ -1,5 +1,5 @@
-//! The reserved `current` / `current_env` roots through the normal
-//! `md compose` path (AC27, AC32).
+//! The reserved `current` root through the normal `md compose` path (AC27,
+//! AC32), and `current_env` as an ordinary property.
 //!
 //! `md compose` owns its context, so it installs the anchored ambient refresh:
 //! a `current.<key>` read re-observes the key's group at the directory the
@@ -32,24 +32,24 @@ fn a_lazy_root_resolves_through_md_compose() {
         .stdout(predicate::str::contains("{{").not());
 }
 
-/// `current_env.<KEY>` reads the live process environment, so a value handed to
-/// the child reaches the composed document through the reserved root.
+/// `current_env` is an ordinary frontmatter property, not a view of the
+/// composing process's environment: the declared value renders even though the
+/// child's `HOME` is set.
 #[test]
-fn current_env_reads_the_composing_process_environment() {
-    let fixture = CliProcessFixture::named("current_env_reads_the_composing_process_environment");
+fn current_env_is_an_ordinary_frontmatter_property() {
+    let fixture = CliProcessFixture::named("current_env_is_an_ordinary_frontmatter_property");
     let document = fixture.write_file(
         "cwd/doc.md",
-        "live=[{{ current_env.LAZY_ROOT_PROBE_VALUE }}] missing=[{{ current_env.LAZY_ROOT_PROBE_ABSENT }}]\n",
+        "---\ncurrent_env:\n  HOME: userland\n---\n[{{ current_env.HOME }}]\n",
     );
 
     fixture
         .command()
-        .env("LAZY_ROOT_PROBE_VALUE", "supplied")
         .arg("compose")
         .arg(&document)
         .assert()
         .success()
-        .stdout(predicate::str::contains("live=[supplied] missing=[]"));
+        .stdout(predicate::str::contains("[userland]"));
 }
 
 /// R33's clean break, end to end: the removed nesting is an unknown path, not

@@ -26,6 +26,11 @@ uses `detect_schema_with_contexts` (library detection is passive and turns a
 context that does not admit the document into `string`). User contract:
 `darkmatter/docs/cli/index.md#every-file-argument-uses-this-grammar`.
 
+A custom baseline path (`schema validate --schema`, `BASELINE_SCHEMA`, and
+`compose --baseline-schema`) is a launch-context file argument too, resolved
+with `resolve_file_path`; it never falls back when it fails. Baseline
+selection order is in [schema.md](schema.md#runtime-baseline).
+
 Rendering flags are presentation policy. `CliStyleClaims` captures explicitly
 supplied global CLI style claims so command handlers can merge them with
 frontmatter without mistaking defaults for user intent. Keep parsing in

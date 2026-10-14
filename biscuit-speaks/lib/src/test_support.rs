@@ -34,12 +34,6 @@ pub(crate) const REQUIRED_PROVIDERS_VAR: &str = "BISCUIT_SPEAKS_REQUIRED_PROVIDE
 /// Playa's repository-wide switch: any real audio resource is required.
 const GLOBAL_REQUIRED_VAR: &str = "PLAYA_REAL_AUDIO_REQUIRED";
 
-/// Playa's dry-run switch. Set means no real playback may occur.
-///
-/// Only the playback tests consult it, and those exist only with `playa`.
-#[cfg(feature = "playa")]
-const DRY_RUN_VAR: &str = "PLAYA_DRY_RUN";
-
 /// Identifier for the EchoGarden provider.
 pub(crate) const ECHOGARDEN: &str = "echogarden";
 
@@ -61,15 +55,6 @@ pub(crate) fn real_provider_required(provider: &str) -> bool {
     required_by_list(
         std::env::var(REQUIRED_PROVIDERS_VAR).ok().as_deref(),
         provider,
-    )
-}
-
-/// Whether Playa's dry-run switch is set, in any of the spellings Playa accepts.
-#[cfg(feature = "playa")]
-pub(crate) fn dry_run_enabled() -> bool {
-    matches!(
-        std::env::var(DRY_RUN_VAR).as_deref(),
-        Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes")
     )
 }
 

@@ -49,11 +49,18 @@ use crate::log;
 use super::jit::{self, StepComposeContext};
 use super::task_run;
 
-/// Everything the serial loop needs that does not vary per step.
+/// Everything the serial loop needs.
+///
+/// The loop's own context carries the launch document's view. Each step runs
+/// under [`Self::for_document`], whose `prep_context` and `compose` are the
+/// step's own document view.
 pub(super) struct SequenceRunContext<'a> {
     pub(super) plan: &'a SequencePlan,
     pub(super) graph: &'a PreflightGraph,
+    /// Each step's target as planned under the launch map; a step re-selects
+    /// it under its own map through `selection` when it enters.
     pub(super) resolved_targets: &'a [Option<claudine::composition::ResolvedExecutionTarget>],
+    pub(super) selection: super::resolve::StepSelection<'a>,
     pub(super) source: &'a ResolvedCompositionSource,
     pub(super) prep_context: &'a CompositionPrepContext,
     pub(super) shared: &'a SharedComposeArgs,
@@ -68,6 +75,34 @@ pub(super) struct SequenceRunContext<'a> {
     pub(super) silent: bool,
     pub(super) verbose: u8,
     pub(super) perf_enabled: bool,
+}
+
+impl SequenceRunContext<'_> {
+    /// This run context for one step's document: `prep_context` and
+    /// `compose` are that step's own, derived from the view it entered.
+    fn for_document<'b>(
+        &'b self,
+        prep_context: &'b CompositionPrepContext,
+        compose: &'b StepComposeContext<'b>,
+    ) -> SequenceRunContext<'b> {
+        SequenceRunContext {
+            plan: self.plan,
+            graph: self.graph,
+            resolved_targets: self.resolved_targets,
+            selection: self.selection,
+            source: self.source,
+            prep_context,
+            shared: self.shared,
+            compose,
+            approved: self.approved.clone(),
+            user_set_overrides: self.user_set_overrides.clone(),
+            interrupted: self.interrupted,
+            effective_fail_fast: self.effective_fail_fast,
+            silent: self.silent,
+            verbose: self.verbose,
+            perf_enabled: self.perf_enabled,
+        }
+    }
 }
 
 /// How one step finished, before it becomes a [`SequenceStepResult`].
@@ -286,9 +321,6 @@ fn run_one_step(
         Err(error) => return StepOutcome::failed(&error),
     };
 
-    let target = run.resolved_targets.get(step_index).cloned().flatten();
-    let env_overrides =
-        jit::step_env_overrides(run.effective_fail_fast, run.shared, target.as_ref());
     // Dry-run composes against the *initial* state so late-binding references
     // render exactly as a first-step composition would see them.
     let snapshot = (!run.shared.dry_run).then(|| runtime_state.snapshot());
@@ -307,13 +339,49 @@ fn run_one_step(
         .steps
         .get(step_index)
         .is_some_and(|step| step.task.is_some());
+    // Each step is a document of its own: it captures its environment here,
+    // once, before anything of it is prepared, and every stage of it — its
+    // composition, `initialize`, task, prompt document, loop iterations,
+    // retry/resume, handlers, and `finalize` — reads that one map. The run
+    // context below carries the step's view, so nothing downstream reaches
+    // back to the launch document's.
+    let step_invocation = run.prep_context.invocation.capture_document();
+    // The planned target as this step's own map selects its model.
+    let target = run
+        .resolved_targets
+        .get(step_index)
+        .cloned()
+        .flatten()
+        .map(|planned| {
+            run.selection
+                .for_document(planned, step_invocation.document_environment())
+        });
+    let env_overrides =
+        jit::step_env_overrides(run.effective_fail_fast, run.shared, target.as_ref());
+    let step_source_context = match step_invocation.derive_composition_source(run.source) {
+        Ok(context) => context,
+        // The step's map can name a tree root the launch map did not.
+        Err(claudine::invocation_context::InvocationContextError::ResolutionContext(error)) => {
+            return StepOutcome::failed(&CompositionError::from(error));
+        }
+        Err(error @ claudine::invocation_context::InvocationContextError::SourceWithoutParent(_)) => {
+            panic!("the sequence source was resolved to a file before any step ran: {error}")
+        }
+    };
+    let step_prep_context = run
+        .prep_context
+        .for_document(step_invocation, step_source_context);
     // One composition run per step: the step's composition of this document,
     // its task, and the task's prompt document observe one view of Git state.
     let step_run = claudine::invocation_context::RunEvidence::default();
     let step_compose = StepComposeContext {
         run_evidence: Some(&step_run),
+        invocation: &step_prep_context.invocation,
+        file_resolution_context: step_prep_context.source_context.file_resolution_context(),
         ..run.compose.clone()
     };
+    let step_document = run.for_document(&step_prep_context, &step_compose);
+    let run = &step_document;
     let composed = match compose_with_late_collection(
         run,
         &step_compose,
@@ -659,7 +727,8 @@ fn emit_step_status(
 /// owns stays with the step: `ledger` is this step's (or task's) chain, and
 /// `scope` carries its caller layers, runtime cell, and output policy (R8).
 /// `file_resolution_context` is the source document's, against which an
-/// uncommitted request resolves.
+/// uncommitted request resolves. Each target captures its own environment
+/// before it is prepared.
 pub(super) fn run_step_proxy_loop(
     initial: SurfacedHandoff,
     ledger: &SharedRunLedger,
@@ -706,7 +775,12 @@ pub(super) fn run_step_proxy_loop(
         let target_file = handoff.authored_target().to_string();
         let mut inline_state = None;
         let adopted_handoff = Some(Box::new(handoff));
-        let source_context = invocation.derive_source(&target_source.resolved_path)?;
+        // The source's map selected the target (the commit above resolved it
+        // in the source's file context); the target is a document of its own
+        // and captures its own map here, before its bootstrap and
+        // `initialize`, for every stage of its lifecycle.
+        let target_invocation = invocation.capture_document();
+        let source_context = target_invocation.derive_source(&target_source.resolved_path)?;
         active_file_resolution_context = source_context.file_resolution_context().clone();
 
         let (outcome, _) = prepare_and_run_active_document(
@@ -729,7 +803,7 @@ pub(super) fn run_step_proxy_loop(
             None,
             Vec::new(),
             std::time::Instant::now(),
-            invocation.clone(),
+            target_invocation,
             source_context,
             Some(scope),
         )?;

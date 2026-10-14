@@ -170,7 +170,7 @@ fn research_sequence(rig: &Rig) -> PathBuf {
     );
     rig.write(
         "inputs/reconcile/prompt.md",
-        "---\nfailure:\n  stack:\n    - action:\n        - action: retry\n          max_attempts: 1\n---\n\
+        "---\nfailure:\n  - retry: { max_attempts: 1 }\n---\n\
          Reconcile. RECONCILE-INPUT PRIOR-PROSE CURATED-LINK.\n",
     );
     rig.write("inputs/maintain/prompt.md", "Maintain the curated list.\n");
@@ -363,7 +363,7 @@ fn automatic_retry_backoff_is_charged_and_capped_to_the_remaining_budget() {
     rig.init("budget.json", "whatsapp", 3, 10, &["--heartbeat", "0.2s"]);
     rig.write(
         "retry.md",
-        "---\nfailure:\n  stack:\n    - action:\n        - action: retry\n          max_attempts: 3\n          delay: 60s\n---\nWork.\n",
+        "---\nfailure:\n  - retry: { max_attempts: 3, delay: 60s }\n---\nWork.\n",
     );
     let sequence = rig.write(
         "run.md",

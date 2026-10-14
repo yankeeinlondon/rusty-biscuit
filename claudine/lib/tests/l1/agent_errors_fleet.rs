@@ -12,8 +12,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::{
-    ControlDispatch, DefaultLifecycleEmitter, LifecycleActionKind, LifecycleControlAction,
-    LifecycleSignal, RetryBackoff, ShellRunError, ShellRunner, StackControl, StackExecutionContext,
+    ControlDispatch, DefaultLifecycleEmitter, LifecycleAction, LifecycleActionKind,
+    LifecycleControlAction, LifecycleNode, LifecycleSignal, RetryBackoff, ShellRunError, ShellRunner, StackControl, StackExecutionContext,
     control_budget_for, decide_control, parse_lifecycle_config,
 };
 use claudine::events::GlobalSettings;
@@ -38,15 +38,46 @@ fn fleet_frontmatter() -> serde_json::Value {
     serde_json::to_value(md.frontmatter().as_map()).expect("frontmatter to json")
 }
 
+/// The guard of a conditional item, or `None` for an unconditional action.
+fn guard(node: &LifecycleNode) -> Option<String> {
+    match node {
+        LifecycleNode::Conditional(conditional) => Some(conditional.when.to_string()),
+        LifecycleNode::Action(_) => None,
+    }
+}
+
+/// The selected (`then`) body of a conditional item, or the action itself.
+fn body(node: &LifecycleNode) -> Vec<&LifecycleAction> {
+    match node {
+        LifecycleNode::Conditional(conditional) => {
+            assert!(
+                conditional.otherwise.is_empty(),
+                "the fleet lifecycle has no `else` branches"
+            );
+            conditional
+                .then
+                .iter()
+                .map(|node| match node {
+                    LifecycleNode::Action(action) => action,
+                    LifecycleNode::Conditional(_) => panic!("the fleet nests no conditionals"),
+                })
+                .collect()
+        }
+        LifecycleNode::Action(action) => vec![action],
+    }
+}
+
+fn is_verb(action: &LifecycleAction, verb: &str) -> bool {
+    matches!(&action.kind, LifecycleActionKind::LifecycleControl(c) if c.verb() == verb)
+}
+
 #[test]
 fn fleet_lifecycle_config_parses() {
     let frontmatter = fleet_frontmatter();
     let config = parse_lifecycle_config(&frontmatter, &fleet_path())
         .expect("the agent-errors fleet lifecycle must parse");
 
-    let success = config
-        .stack(LifecycleSignal::Success)
-        .expect("success stack present");
+    let success = config.stack(LifecycleSignal::Success);
 
     // Missing-output resume, gate shell, missing report, three gate-error
     // scopes, unknown status, findings resume, and clean report.
@@ -60,19 +91,20 @@ fn fleet_lifecycle_config_parses() {
     // conditions can run.
     let shell_actions: Vec<_> = success
         .iter()
-        .flat_map(|item| &item.actions)
+        .flat_map(body)
         .filter(|action| matches!(action.kind, LifecycleActionKind::Shell(_)))
         .collect();
     assert_eq!(shell_actions.len(), 1, "exactly one gate shell is present");
+    assert!(
+        guard(&success[1]).is_none(),
+        "the gate shell runs unconditionally, second in the stack"
+    );
     assert!(
         !shell_actions[0].no_error,
         "the gate shell must fail closed on report persistence errors"
     );
 
-    let conditions: Vec<String> = success
-        .iter()
-        .filter_map(|item| item.when.as_ref().map(ToString::to_string))
-        .collect();
+    let conditions: Vec<String> = success.iter().filter_map(guard).collect();
     for status in ["clean", "findings", "gate_error"] {
         assert!(
             conditions
@@ -97,35 +129,28 @@ fn fleet_lifecycle_config_parses() {
 
     let missing_report_item = success
         .iter()
-        .find(|item| {
-            item.when
-                .as_ref()
-                .is_some_and(|condition| condition.to_string() == "!file_exists(findings)")
-        })
+        .find(|item| guard(item).as_deref() == Some("!file_exists(findings)"))
         .expect("missing-report branch present");
     assert!(matches!(
-        missing_report_item.actions.last().map(|action| &action.kind),
+        body(missing_report_item).last().map(|action| &action.kind),
         Some(LifecycleActionKind::LifecycleControl(
             LifecycleControlAction::Error { .. }
         ))
     ));
 
     // All three agent-correctable postconditions resume, and each control is
-    // terminal in its stack item so later status branches cannot also fire.
+    // terminal in its branch so later status branches cannot also fire.
     let resume_items: Vec<_> = success
         .iter()
-        .filter(|item| {
-            item.actions.iter().any(|a| {
-                matches!(&a.kind, LifecycleActionKind::LifecycleControl(c) if c.verb() == "resume")
-            })
-        })
+        .filter(|item| body(item).iter().any(|action| is_verb(action, "resume")))
         .collect();
     assert_eq!(resume_items.len(), 3, "missing output, document error, and findings resume");
     for item in resume_items {
-        let last = item.actions.last().expect("resume stack item is non-empty");
+        let body = body(item);
+        let last = body.last().expect("resume branch is non-empty");
         assert!(
-            matches!(&last.kind, LifecycleActionKind::LifecycleControl(c) if c.verb() == "resume"),
-            "resume must be the last action in its stack item"
+            is_verb(last, "resume"),
+            "resume must be the last action in its branch"
         );
         let LifecycleActionKind::LifecycleControl(LifecycleControlAction::Resume {
             max_attempts,
@@ -141,11 +166,30 @@ fn fleet_lifecycle_config_parses() {
         );
     }
 
-    let failure = config
-        .stack(LifecycleSignal::Failure)
-        .expect("failure recovery stack present");
-    assert_eq!(failure.len(), 2, "timeout resume plus transient retry");
-    let timeout_control = failure[0].actions.last().expect("timeout control");
+    // `failure` reports first (warn, then message), then the two guarded
+    // recovery branches.
+    let failure = config.stack(LifecycleSignal::Failure);
+    assert_eq!(failure.len(), 4, "two reports, timeout resume, transient retry");
+    let reports: Vec<_> = failure[..2]
+        .iter()
+        .map(|node| match node {
+            LifecycleNode::Action(LifecycleAction {
+                kind: LifecycleActionKind::Communication(comm),
+                ..
+            }) => comm.channel.verb(),
+            other => panic!("expected an unconditional report, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(reports, ["warn", "message"]);
+    let timeout_guard = guard(&failure[2]).expect("the timeout branch is guarded");
+    assert!(
+        timeout_guard.contains("err.category") && timeout_guard.contains("timeout"),
+        "{timeout_guard}"
+    );
+    assert_eq!(guard(&failure[3]).as_deref(), Some("err.is_transient"));
+
+    let timeout_branch = body(&failure[2]);
+    let timeout_control = timeout_branch.last().expect("timeout control");
     let LifecycleActionKind::LifecycleControl(LifecycleControlAction::Resume {
         max_attempts,
         ..
@@ -155,11 +199,13 @@ fn fleet_lifecycle_config_parses() {
     };
     assert_eq!(max_attempts.as_ref().map(ToString::to_string).as_deref(), Some("2"));
 
-    let transient_control = failure[1].actions.last().expect("transient control");
+    let transient_branch = body(&failure[3]);
+    let transient_control = transient_branch.last().expect("transient control");
     let LifecycleActionKind::LifecycleControl(LifecycleControlAction::Retry {
         max_attempts,
         backoff,
         delay,
+        with,
     }) = &transient_control.kind
     else {
         panic!("transient recovery must retry")
@@ -170,6 +216,7 @@ fn fleet_lifecycle_config_parses() {
         delay.as_ref().map(ToString::to_string).as_deref(),
         Some("\"30s\"")
     );
+    assert!(with.is_empty(), "the transient retry carries no overlay");
 }
 
 /// Gate double that deliberately leaves the research document in findings on
@@ -223,9 +270,8 @@ fn exhausted_remediation_fails_finalize_and_preserves_findings() {
     // gate itself and every durable-status branch remain the authored fleet
     // lifecycle; only the unrelated file-date precondition is omitted.
     root.get_mut("success")
-        .and_then(|success| success.get_mut("stack"))
         .and_then(serde_json::Value::as_array_mut)
-        .expect("success stack is an array")
+        .expect("success stack is a list")
         .remove(0);
 
     let config = parse_lifecycle_config(&frontmatter, &fleet_path())
@@ -260,6 +306,7 @@ fn exhausted_remediation_fails_finalize_and_preserves_findings() {
         timing: None,
         current: None,
         group: None,
+        loop_values: None,
         base_dir: Some(dir.path()),
         ctx_base_dir: Some(dir.path()),
         prepared_context: None,

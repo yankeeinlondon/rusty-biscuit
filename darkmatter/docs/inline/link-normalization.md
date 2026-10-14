@@ -14,10 +14,10 @@ that survives moving the document, the repository, or the whole machine.
 ```text
 composed root document: /home/ana/repo/docs/guide/intro.md
 
-/home/ana/repo/docs/guide/setup.md       → ./setup.md
-/home/ana/repo/docs/guide/img/logo.png   → ./img/logo.png
-/home/ana/repo/docs/assets/logo.png      → ../assets/logo.png
-/home/ana/repo/src/main.rs:42            → &src/main.rs:42
+/home/ana/repo/docs/guide/setup.md       → docs/guide/setup.md
+/home/ana/repo/docs/guide/img/logo.png   → docs/guide/img/logo.png
+/home/ana/repo/docs/assets/logo.png      → docs/assets/logo.png
+/home/ana/repo/src/main.rs:42            → src/main.rs:42
 /home/ana/notes/todo.md                  → ~/notes/todo.md
 /opt/shared/assets/save.svg              → {{{ASSETS}}}/save.svg   (ASSETS declared portable)
 /opt/elsewhere/x.md                      → /opt/elsewhere/x.md     (nothing portable reaches it; warns)
@@ -31,15 +31,19 @@ home directory, and captured environment). `PortablePath` tries its default
 strategy in order and keeps the first spelling that it can verify resolves to
 the same file:
 
-1. **A nearby relative link**: the same directory (`./x.md`), a subdirectory
+1. **A bare tree-root path**: `docs/guide/setup.md`, relative to the file-tree
+   root (the repository root inside a repository). The spelling must verify
+   against existing lookup precedence. A different local file at
+   `docs/guide/docs/guide/setup.md` shadows this example, so the next rule runs.
+2. **A nearby relative link**: the same directory (`./x.md`), a subdirectory
    (`./img/x.png`), a sibling directory (`../assets/x.png`), or the parent
    directory (`../x.md`). Deeper climbs such as `../../x.md` are not written.
-2. **The repository root**: `&src/main.rs` for a target in the document's
+3. **The repository root**: `&src/main.rs` for a target in the document's
    repository.
-3. **A portable environment variable**: `{{VAR}}/…` for a target under the
+4. **A portable environment variable**: `{{VAR}}/…` for a target under the
    value of a declared variable; the deepest matching value wins.
-4. **The home directory**: `~/notes/todo.md`.
-5. **The absolute path**, as the last resort. The destination is already
+5. **The home directory**: `~/notes/todo.md`.
+6. **The absolute path**, as the last resort. The destination is already
    absolute, so it is left as written, and a warning says the composed
    document still contains a link tied to this host (see
    [Warnings](#warnings)).
@@ -48,7 +52,7 @@ the same file:
 flowchart TD
     A[absolute destination] --> B[split off #fragment, ?query, :line]
     B --> C[PortablePath with the root document's context]
-    C -->|relative, &, VAR, or ~ verified| D[write the reference + suffix]
+    C -->|bare root, relative, &, VAR, or ~ verified| D[write the reference + suffix]
     C -->|only the absolute path| E[leave as written]
     E --> W{absolute-fallback warning on?}
     W -->|yes, the default| G[warning]
@@ -69,8 +73,8 @@ afterwards. Only a trailing run of digits after a colon counts as a line
 suffix, so a Windows drive colon (`C:/x.md`) stays part of the path.
 
 ```text
-/home/ana/repo/docs/assets/x.md#install   → ../assets/x.md#install
-/home/ana/repo/src/x.rs:3-7               → &src/x.rs:3-7
+/home/ana/repo/docs/assets/x.md#install   → docs/assets/x.md#install
+/home/ana/repo/src/x.rs:3-7               → src/x.rs:3-7
 ```
 
 ## Portable environment variables

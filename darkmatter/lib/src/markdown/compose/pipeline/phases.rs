@@ -533,7 +533,8 @@ impl Markdown {
 /// being replaced by a notice.
 ///
 /// A child that cannot read its runtime context would leave the partially
-/// composed document the missing-capture contract forbids. A child command
+/// composed document the missing-capture contract forbids, and a child that
+/// reads a host global declared unavailable broke the host's scope rule. A child command
 /// missing from the approval set is a broken pre-flight invariant, not a
 /// failure an author can tolerate.
 fn transclusion_failure_is_fatal(error: &MarkdownError) -> bool {
@@ -547,6 +548,7 @@ fn transclusion_failure_is_fatal(error: &MarkdownError) -> bool {
                     | transclusion::TransclusionError::RemoteFetchFailed { .. }
             )
     ) || error.missing_runtime_context().is_some()
+        || error.unavailable_binding().is_some()
         || error.pre_approval_violation().is_some()
         || error.shell_span_failure()
 }

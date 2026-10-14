@@ -156,8 +156,8 @@ fn provided_partial_candidates_filters_to_single_substring_match() {
     seed_spec_tree(tmp.path());
 
     let ctx = ScopeContext::discover_from(tmp.path());
-    let patterns = vec!["**/*spec*.md".to_string()];
-    let got = provided_partial_candidates(&patterns, "everywhere", &ctx);
+    let alternatives = vec![vec![vec!["**/*spec*.md".to_string()]]];
+    let got = provided_partial_candidates(&alternatives, "everywhere", &ctx);
     assert_eq!(got.len(), 1, "expected exactly one substring match: {got:?}");
     assert!(
         got[0].ends_with("2026-06-30-style-everywhere/spec.md"),
@@ -171,8 +171,8 @@ fn provided_partial_candidates_is_case_insensitive() {
     seed_spec_tree(tmp.path());
 
     let ctx = ScopeContext::discover_from(tmp.path());
-    let patterns = vec!["**/*spec*.md".to_string()];
-    let got = provided_partial_candidates(&patterns, "EVERYWHERE", &ctx);
+    let alternatives = vec![vec![vec!["**/*spec*.md".to_string()]]];
+    let got = provided_partial_candidates(&alternatives, "EVERYWHERE", &ctx);
     assert_eq!(got.len(), 1, "case-insensitive substring match: {got:?}");
 }
 
@@ -182,8 +182,8 @@ fn provided_partial_candidates_zero_matches_returns_empty() {
     seed_spec_tree(tmp.path());
 
     let ctx = ScopeContext::discover_from(tmp.path());
-    let patterns = vec!["**/*spec*.md".to_string()];
-    let got = provided_partial_candidates(&patterns, "no-such-partial", &ctx);
+    let alternatives = vec![vec![vec!["**/*spec*.md".to_string()]]];
+    let got = provided_partial_candidates(&alternatives, "no-such-partial", &ctx);
     assert!(got.is_empty(), "expected zero matches: {got:?}");
 }
 

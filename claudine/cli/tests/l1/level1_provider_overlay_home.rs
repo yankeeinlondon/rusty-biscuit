@@ -717,7 +717,7 @@ fn codex_mcp_transition(
     write(
         &router,
         &format!(
-            "---\nagent: codex\nfailure:\n  stack:\n    - action: {failure}\n---\nOpen on Codex with #linear.\n"
+            "---\nagent: codex\nfailure:\n  - {failure}\n---\nOpen on Codex with #linear.\n"
         ),
     );
     write(

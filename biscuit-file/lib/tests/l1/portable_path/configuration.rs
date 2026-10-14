@@ -113,11 +113,11 @@ fn without_a_context_the_repository_is_discovered_from_cwd() {
     let source = fx.file("checkout/src/x.md");
 
     let found = evaluate(PortablePath::from_path(&source).with_cwd(&topics));
-    assert_eq!(found.reference().raw(), "&src/x.md");
-    assert_eq!(found.strategy(), &P::RepoRoot(None));
+    assert_eq!(found.reference().raw(), "src/x.md");
+    assert_eq!(found.strategy(), &P::TreeRootRelative);
 
     let found = evaluate(PortablePath::from_path(&source).with_cwd(&topics).with_base_dir(&checkout));
-    assert_eq!(found.reference().raw(), "&src/x.md", "a base_dir equal to the repository root");
+    assert_eq!(found.reference().raw(), "src/x.md", "a base_dir equal to the repository root");
 
     let error = evaluate_err(
         PortablePath::from_path(&source)

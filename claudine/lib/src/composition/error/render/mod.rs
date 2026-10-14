@@ -44,16 +44,15 @@ impl BlockError for CompositionError {
             | CompositionError::LifecycleNestedSpanInLiteral { .. }
             | CompositionError::LifecycleEvaluationError { .. }
             | CompositionError::RemovedValidationKey { .. }
+            | CompositionError::RemovedGrammar { .. }
             | CompositionError::LifecycleStackInvalidShape { .. }
             | CompositionError::LifecycleWhenExpressionInvalid { .. }
             | CompositionError::LifecycleActionInvalidShortForm { .. }
             | CompositionError::LifecycleActionInvalidLongForm { .. }
             | CompositionError::LifecycleUnknownVerb { .. }
-            | CompositionError::LifecycleStackAmbiguous { .. }
             | CompositionError::LifecycleObjectDataThroughInterpolationPositional { .. }
             | CompositionError::LifecycleObjectDataThroughInterpolationParameter { .. }
             | CompositionError::LifecycleSetPositionalRemoved { .. }
-            | CompositionError::LifecycleSetLongFormRemoved { .. }
             | CompositionError::LifecycleSetNotMapping { .. }
             | CompositionError::LifecycleSetInvalidKey { .. }
             | CompositionError::LifecycleWrongArity { .. }
@@ -64,11 +63,11 @@ impl BlockError for CompositionError {
             | CompositionError::LifecycleInvalidArgs { .. }
             | CompositionError::LifecycleErrNotAvailable { .. }
             | CompositionError::InvalidFileReference { .. } => lifecycle::status_block(self),
-            | CompositionError::LifecycleProxyWithNotMapping { .. }
-            | CompositionError::LifecycleProxyWithWholeMapping { .. }
-            | CompositionError::LifecycleProxyWithDynamicKey { .. }
-            | CompositionError::LifecycleProxyWithEvaluationFailed { .. }
-            | CompositionError::LifecycleProxyOnlyParameter { .. }
+            | CompositionError::LifecycleWithNotMapping { .. }
+            | CompositionError::LifecycleWithWholeMapping { .. }
+            | CompositionError::LifecycleWithDynamicKey { .. }
+            | CompositionError::LifecycleWithEvaluationFailed { .. }
+            | CompositionError::LifecycleWithUnsupported { .. }
             | CompositionError::LifecycleProxyCycle { .. }
             | CompositionError::LifecycleProxyTargetBootstrapFailed { .. }
             | CompositionError::LifecycleProxyWithoutOwningCoordinator { .. }
@@ -211,7 +210,7 @@ fn optional_line(line: usize) -> Value {
 }
 
 /// Escape author or diagnostic text for splicing into Prose markup, so paths,
-/// identifiers such as `_loop_count`, and messages render exactly as written.
+/// identifiers such as `last_exit_code`, and messages render exactly as written.
 /// Code spans a message marks with backticks stay literal.
 ///
 /// Never use it for a value placed inside a code span: a span's contents are
@@ -449,20 +448,19 @@ impl Diagnostic for CompositionError {
             | CompositionError::LifecycleActionInvalidShortForm { .. }
             | CompositionError::LifecycleActionInvalidLongForm { .. }
             | CompositionError::LifecycleUnknownVerb { .. }
-            | CompositionError::LifecycleStackAmbiguous { .. }
             | CompositionError::LifecycleWrongArity { .. }
             | CompositionError::LifecycleActionPlacement { .. }
             | CompositionError::LifecycleActionOrder { .. }
             | CompositionError::LifecycleMultipleLifecycleActions { .. }
             | CompositionError::LifecycleInvalidArgs { .. }
             | CompositionError::LifecycleErrNotAvailable { .. }
-            | CompositionError::LifecycleProxyWithNotMapping { .. }
-            | CompositionError::LifecycleProxyWithWholeMapping { .. }
-            | CompositionError::LifecycleProxyWithDynamicKey { .. }
-            | CompositionError::LifecycleProxyWithEvaluationFailed { .. }
-            | CompositionError::LifecycleProxyOnlyParameter { .. }
+            | CompositionError::LifecycleWithNotMapping { .. }
+            | CompositionError::LifecycleWithWholeMapping { .. }
+            | CompositionError::LifecycleWithDynamicKey { .. }
+            | CompositionError::LifecycleWithEvaluationFailed { .. }
+            | CompositionError::LifecycleWithUnsupported { .. }
+            | CompositionError::RemovedGrammar { .. }
             | CompositionError::LifecycleSetPositionalRemoved { .. }
-            | CompositionError::LifecycleSetLongFormRemoved { .. }
             | CompositionError::LifecycleSetNotMapping { .. }
             | CompositionError::LifecycleSetInvalidKey { .. }
             | CompositionError::LifecycleEvaluationError { .. } => "composition.lifecycle_invalid",
@@ -730,9 +728,6 @@ impl Diagnostic for CompositionError {
             }
             | CompositionError::LifecycleWhenExpressionInvalid {
                 property, message, ..
-            }
-            | CompositionError::LifecycleStackAmbiguous {
-                property, message, ..
             } => {
                 base["property"] = json!(property);
                 base["message"] = json!(message);
@@ -773,7 +768,7 @@ impl Diagnostic for CompositionError {
             // The `with`-rooted family projects the deepest representable
             // path as `property`. The message names the failure without
             // echoing an overlay value.
-            CompositionError::LifecycleProxyWithNotMapping {
+            CompositionError::LifecycleWithNotMapping {
                 property,
                 path,
                 actual,
@@ -782,35 +777,33 @@ impl Diagnostic for CompositionError {
                 base["property"] = json!(format!("{property}.{path}"));
                 base["message"] = json!(format!("`with` must be a mapping, got {actual}"));
             }
-            CompositionError::LifecycleProxyWithWholeMapping { property, path, .. } => {
+            CompositionError::LifecycleWithWholeMapping { property, path, .. } => {
                 base["property"] = json!(format!("{property}.{path}"));
                 base["message"] =
                     json!("`with` cannot be supplied as a whole-mapping interpolation");
             }
-            CompositionError::LifecycleProxyWithDynamicKey {
+            CompositionError::LifecycleWithDynamicKey {
                 property, path, key, ..
             } => {
                 base["property"] = json!(format!("{property}.{path}"));
                 base["message"] = json!(format!("`with` key `{key}` is not a static string"));
             }
-            CompositionError::LifecycleProxyWithEvaluationFailed {
+            CompositionError::LifecycleWithEvaluationFailed {
                 property,
                 path,
                 target,
                 message,
                 ..
             } => {
+                let verb = overlay_directive(property);
                 base["property"] = json!(format!("{property}.{path}"));
-                base["message"] =
-                    json!(format!("could not be resolved for the proxy to `{target}`: {message}"));
+                base["message"] = json!(format!(
+                    "could not be resolved for the `{verb}` to `{target}`: {message}"
+                ));
             }
             CompositionError::LifecycleSetPositionalRemoved { property, path, .. } => {
                 base["property"] = json!(format!("{property}.{path}"));
                 base["message"] = json!("positional `set` form has been removed");
-            }
-            CompositionError::LifecycleSetLongFormRemoved { property, path, .. } => {
-                base["property"] = json!(format!("{property}.{path}"));
-                base["message"] = json!("long-form `set` action has been removed");
             }
             CompositionError::LifecycleSetNotMapping {
                 property,
@@ -830,15 +823,20 @@ impl Diagnostic for CompositionError {
                 base["property"] = json!(format!("{property}.{path}"));
                 base["message"] = json!(message);
             }
-            CompositionError::LifecycleProxyOnlyParameter {
-                property,
-                verb,
-                param,
-                ..
-            } => {
+            CompositionError::LifecycleWithUnsupported { property, verb, .. } => {
                 base["property"] = json!(property);
                 base["message"] =
-                    json!(format!("`{param}` is only valid on `proxy`, not `{verb}`"));
+                    json!(format!("`with` is only valid on `proxy` and `retry`, not `{verb}`"));
+            }
+            CompositionError::RemovedGrammar {
+                path,
+                removed,
+                replacement,
+                ..
+            } => {
+                base["property"] = json!(path);
+                base["message"] =
+                    json!(format!("removed `{removed}` grammar; {replacement}"));
             }
             CompositionError::LifecycleEvaluationError {
                 event,

@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::invocation_context::DocumentEnvironment;
 use crate::model_catalog::ModelCatalogService;
 use crate::provider::{PROVIDERS_DISPLAY_ORDER, Provider, provider_info};
 
@@ -144,7 +145,8 @@ pub fn classify_agent_resolution(
 /// Resolve provider and model for a non-TTY session.
 ///
 /// Returns a fully resolved target or a structured error explaining why
-/// resolution failed.
+/// resolution failed. Model variables are read from `prepared`'s document
+/// environment ([`prepared_environment`]).
 pub fn resolve_target_non_tty(
     explicit_provider: Option<Provider>,
     prepared: &super::types::PreparedComposition,
@@ -152,13 +154,14 @@ pub fn resolve_target_non_tty(
     favorite: Option<Provider>,
     cli_model: Option<&str>,
 ) -> Result<ResolvedExecutionTarget, CompositionError> {
+    let environment = prepared_environment(prepared);
     resolve_target_non_tty_with_env(
         explicit_provider,
         &prepared.selection_hints,
         snapshot,
         favorite,
         cli_model,
-        |var| std::env::var(var).ok(),
+        |var| environment.lookup(var),
         None,
     )
 }
@@ -176,13 +179,14 @@ pub fn resolve_target_non_tty_with_catalog(
     cli_model: Option<&str>,
     catalog: Option<&ModelCatalogService>,
 ) -> Result<ResolvedExecutionTarget, CompositionError> {
+    let environment = prepared_environment(prepared);
     resolve_target_non_tty_with_env(
         explicit_provider,
         &prepared.selection_hints,
         snapshot,
         favorite,
         cli_model,
-        |var| std::env::var(var).ok(),
+        |var| environment.lookup(var),
         catalog,
     )
 }
@@ -193,6 +197,7 @@ pub fn resolve_target_non_tty_with_catalog(
 /// without requiring a fully prepared composition. Used by the CLI for *eager*
 /// target resolution before composition templates are rendered, so
 /// `{{env.AGENT}}` resolves to the chosen provider during body rendering.
+/// Model variables are read from the document's `environment`.
 pub fn resolve_target_non_tty_with_hints(
     explicit_provider: Option<Provider>,
     hints: &EffectiveSelectionHints,
@@ -200,6 +205,7 @@ pub fn resolve_target_non_tty_with_hints(
     favorite: Option<Provider>,
     cli_model: Option<&str>,
     catalog: Option<&ModelCatalogService>,
+    environment: &DocumentEnvironment,
 ) -> Result<ResolvedExecutionTarget, CompositionError> {
     resolve_target_non_tty_with_env(
         explicit_provider,
@@ -207,9 +213,21 @@ pub fn resolve_target_non_tty_with_hints(
         snapshot,
         favorite,
         cli_model,
-        |var| std::env::var(var).ok(),
+        |var| environment.lookup(var),
         catalog,
     )
+}
+
+/// The environment of the document `prepared` was prepared for.
+///
+/// Empty for a composition prepared without a document epoch: the library
+/// never falls back to the process environment.
+pub fn prepared_environment(prepared: &super::types::PreparedComposition) -> DocumentEnvironment {
+    prepared
+        .document_epoch
+        .as_ref()
+        .map(|epoch| epoch.environment().clone())
+        .unwrap_or_default()
 }
 
 fn resolve_target_non_tty_with_env<E>(
@@ -404,17 +422,21 @@ pub fn build_picker_plan_with_hints(
 /// 3. Generic `MODEL` env var
 /// 4. Frontmatter `model` (always forwarded; a catalog only orders lists)
 /// 5. Provider default (`None`)
+///
+/// Steps 2 and 3 read `prepared`'s document environment
+/// ([`prepared_environment`]).
 #[allow(dead_code)]
 pub fn resolve_model(
     provider: Provider,
     prepared: &super::types::PreparedComposition,
     cli_model: Option<&str>,
 ) -> (Option<String>, ModelResolutionReason) {
+    let environment = prepared_environment(prepared);
     resolve_model_with_env(
         provider,
         &prepared.selection_hints,
         cli_model,
-        |var| std::env::var(var).ok(),
+        |var| environment.lookup(var),
         None,
     )
 }
@@ -433,11 +455,12 @@ pub fn resolve_model_with_catalog(
     cli_model: Option<&str>,
     catalog: Option<&ModelCatalogService>,
 ) -> (Option<String>, ModelResolutionReason) {
+    let environment = prepared_environment(prepared);
     resolve_model_with_env(
         provider,
         &prepared.selection_hints,
         cli_model,
-        |var| std::env::var(var).ok(),
+        |var| environment.lookup(var),
         catalog,
     )
 }
@@ -445,23 +468,19 @@ pub fn resolve_model_with_catalog(
 /// Resolve model from raw selection hints, without a prepared composition.
 ///
 /// Mirrors [`resolve_model_with_catalog`] for callers that want to resolve
-/// a model before composition runs (e.g. for eager AGENT injection).
+/// a model before composition runs (e.g. for eager AGENT injection). Steps 2
+/// and 3 read the document's `environment`.
 pub fn resolve_model_with_hints(
     provider: Provider,
     hints: &EffectiveSelectionHints,
     cli_model: Option<&str>,
     catalog: Option<&ModelCatalogService>,
+    environment: &DocumentEnvironment,
 ) -> (Option<String>, ModelResolutionReason) {
-    resolve_model_with_hints_from(provider, hints, cli_model, catalog, ambient_env_lookup)
+    resolve_model_with_hints_from(provider, hints, cli_model, catalog, |var| environment.lookup(var))
 }
 
-/// [`resolve_model_with_hints`] against a caller-supplied environment.
-///
-/// Steps 2 and 3 of the chain read the process environment, which a test
-/// process cannot scrub for itself: `std::env::set_var` is unsound while other
-/// tests share the process, and nextest gives a binary's tests one process
-/// between them. Callers that must be reproducible under whatever the
-/// developer's shell exports supply their own lookup instead.
+/// [`resolve_model_with_hints`] against an arbitrary lookup for steps 2 and 3.
 pub fn resolve_model_with_hints_from<E>(
     provider: Provider,
     hints: &EffectiveSelectionHints,
@@ -473,11 +492,6 @@ where
     E: Fn(&str) -> Option<String>,
 {
     resolve_model_with_env(provider, hints, cli_model, env_lookup, catalog)
-}
-
-/// The process environment, as the chain reads it outside a test.
-pub fn ambient_env_lookup(var: &str) -> Option<String> {
-    std::env::var(var).ok()
 }
 
 fn resolve_model_with_env<E>(

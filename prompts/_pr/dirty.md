@@ -14,34 +14,30 @@ $schema:
     on_failure: enum(ask, fix, stop) -> what happens after a blocked push is diagnosed
 on_failure: ask
 start:
-    stack:
-        - when: "uncommitted == 'abort'"
-          action:
-              - set_frontmatter: ["{{ report }}", "status", "error"]
-              - set_frontmatter: ["{{ report }}", "summary", "The PR flow stopped because the working tree had uncommitted changes and the caller chose not to commit them."]
-              - message: "⏸️  the PR for `{{ctx.branch}}` is paused; the working tree has uncommitted changes and you chose to deal with them yourself"
-              - error: "stopped at the caller's request: the working tree has uncommitted changes"
-        - action:
-              - info: "staging {{ length(ctx.dirty_files) }} uncommitted file(s) and handing them to the commit prompt"
-              - shell: "git add ."
-              - action: proxy
-                target: ../commit.md
-                with:
-                    message: "{{ about || 'These are the uncommitted changes that were in the working tree when a pull request was requested.' }}"
-                    success:
-                        message: "🗳️  the uncommitted changes on `{{ctx.branch}}` are committed; continuing to the push stage"
-                        stack:
-                            - action:
-                                  - action: proxy
-                                    target: "{{ ctx.repo_root + '/prompts/_pr/push.md' }}"
-                                    with:
-                                        base: "{{ base }}"
-                                        branch: "{{ branch || '' }}"
-                                        title: "{{ title || '' }}"
-                                        about: "{{ about || '' }}"
-                                        on_failure: "{{ on_failure }}"
-                                        report: "{{ report }}"
-                                        committed: "{{ true }}"
+    - when: "uncommitted == 'abort'"
+      then:
+          - set_frontmatter: ["{{ report }}", "status", "error"]
+          - set_frontmatter: ["{{ report }}", "summary", "The PR flow stopped because the working tree had uncommitted changes and the caller chose not to commit them."]
+          - message: "⏸️  the PR for `{{ctx.branch}}` is paused; the working tree has uncommitted changes and you chose to deal with them yourself"
+          - error: "stopped at the caller's request: the working tree has uncommitted changes"
+    - info: "staging {{ length(ctx.dirty_files) }} uncommitted file(s) and handing them to the commit prompt"
+    - shell: "git add ."
+    - proxy:
+          target: ../commit.md
+          with:
+              message: "{{ about || 'These are the uncommitted changes that were in the working tree when a pull request was requested.' }}"
+              success:
+                  - message: "🗳️  the uncommitted changes on `{{ctx.branch}}` are committed; continuing to the push stage"
+                  - proxy:
+                        target: "{{ ctx.repo_root + '/prompts/_pr/push.md' }}"
+                        with:
+                            base: "{{ base }}"
+                            branch: "{{ branch || '' }}"
+                            title: "{{ title || '' }}"
+                            about: "{{ about || '' }}"
+                            on_failure: "{{ on_failure }}"
+                            report: "{{ report }}"
+                            committed: "{{ true }}"
 blocked:
     message: "⏸️  the PR flow for `{{ctx.branch}}` stopped at its uncommitted changes: {{err.msg}}"
 failure:

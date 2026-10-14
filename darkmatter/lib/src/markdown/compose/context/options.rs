@@ -306,6 +306,11 @@ pub struct ComposeOptions {
     /// (if known) or the current working directory.
     pub(crate) shell_working_directory: Option<PathBuf>,
 
+    /// The environment `::shell` and frontmatter `$( … )` children start from.
+    ///
+    /// When `None`, they inherit this process's environment.
+    pub(crate) shell_child_environment: Option<super::super::shell_expansion::ShellChildEnvironment>,
+
     /// Callback for interactive shell command approval.
     ///
     /// When set, commands that require approval call this handler
@@ -447,6 +452,13 @@ pub struct ComposeOptions {
     /// and reports the verdict. Default: `false`.
     pub(crate) defer_schema_verdict: bool,
 
+    /// When `true`, the caller re-validates the post-shell frontmatter against
+    /// the document and baseline schema itself (and may scrub invalid optional
+    /// values), so compose judges only what that caller cannot: values a shell
+    /// result suffix typed, and trigger schemas. Default: `false`, so compose
+    /// owns the verdict on shell-resolved values.
+    pub(crate) caller_owns_post_shell_verdict: bool,
+
     /// When `true`, body interpolation renders a `ctx.*` variable whose group
     /// the request never captured as `null` instead of failing. Used only by
     /// the shell-command discovery pass, which composes without page blocks:
@@ -524,6 +536,11 @@ pub struct ComposeOptions {
     /// only resolution is skipped. The caller owns event-time interpolation
     /// of these subtrees. Default: empty (no behavior change for any caller).
     pub(crate) exclude_keys: std::collections::HashSet<String>,
+
+    /// Globals the host declares for this composition and every transcluded
+    /// child. Default: `None` (no globals; every root outside the reserved
+    /// namespaces is a document property).
+    pub(crate) host_globals: Option<crate::markdown::compose::expression::HostGlobals>,
 
     // ── Named-object string coercion (Sequence Plus) ───────────────
     /// Frontmatter keys whose OBJECT values render their `name` string field
@@ -606,6 +623,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("shell_timeout", &self.shell_timeout)
             .field("shell_policy_root", &self.shell_policy_root)
             .field("shell_working_directory", &self.shell_working_directory)
+            .field("shell_child_environment", &self.shell_child_environment.is_some())
             .field(
                 "shell_approval_handler",
                 if self.shell_approval_handler.is_some() {
@@ -653,6 +671,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("context", &self.context)
             .field("remote_read_config", &self.remote_read_config)
             .field("exclude_keys", &self.exclude_keys)
+            .field("host_globals", &self.host_globals)
             .field("name_coercion_keys", &self.name_coercion_keys)
             .field("file_ref_fallback_dir", &self.file_ref_fallback_dir)
             .finish()
@@ -891,6 +910,7 @@ impl ComposeOptions {
             shell_timeout_behavior: ShellTimeoutBehavior::Error,
             shell_policy_root: None,
             shell_working_directory: None,
+            shell_child_environment: None,
             shell_approval_handler: None,
             pre_approved_commands: None,
             list_spacing: crate::markdown::cleanup::rules::ListItemPadding::Preserve,
@@ -915,6 +935,7 @@ impl ComposeOptions {
             remote_read_config: RemoteReadConfig::default(),
             defer_shell_pending_schema_problems: false,
             defer_schema_verdict: false,
+            caller_owns_post_shell_verdict: false,
             defer_missing_runtime_context: false,
             defer_expression_failures: false,
             suppress_shell_probes: false,
@@ -927,6 +948,7 @@ impl ComposeOptions {
             preflight_graph: None,
             remote_fetch: None,
             exclude_keys: std::collections::HashSet::new(),
+            host_globals: None,
             name_coercion_keys: Vec::new(),
             file_ref_fallback_dir: None,
         }
@@ -1390,6 +1412,24 @@ impl ComposeOptions {
         self
     }
 
+    /// Start every shell child from `environment` instead of this process's.
+    #[must_use]
+    pub fn with_shell_child_environment(
+        mut self,
+        environment: super::super::shell_expansion::ShellChildEnvironment,
+    ) -> Self {
+        self.shell_child_environment = Some(environment);
+        self
+    }
+
+    /// The environment shell children start from; `None` inherits this
+    /// process's.
+    pub(crate) fn shell_child_environment(
+        &self,
+    ) -> Option<&super::super::shell_expansion::ShellChildEnvironment> {
+        self.shell_child_environment.as_ref()
+    }
+
     /// Sets the shell approval handler directly on flat compose options.
     #[must_use]
     pub fn with_shell_approval_handler(
@@ -1540,6 +1580,7 @@ impl ComposeOptions {
         context.current = self.current_authority();
         context.caller_file_provenance = self.caller_file_provenance.clone();
         context.nested_compose = self.nested_compose.clone();
+        context.host_globals = self.host_globals.clone();
         context
     }
 
@@ -1585,6 +1626,7 @@ impl ComposeOptions {
         context.alias_resolutions = self.alias_resolutions.clone();
         context.current = self.current_authority();
         context.caller_file_provenance = self.caller_file_provenance.clone();
+        context.host_globals = self.host_globals.clone();
         context
     }
 
@@ -1640,8 +1682,9 @@ impl ComposeOptions {
     /// Attaches the Darkmatter baseline frontmatter schema as the baseline.
     ///
     /// This is a convenience wrapper around
-    /// [`with_baseline_schema`](Self::with_baseline_schema) that loads the
-    /// authored schema from `darkmatter/docs/schemas/darkmatter.yaml`. When both
+    /// [`with_baseline_schema`](Self::with_baseline_schema) that uses the
+    /// compiled-in [`darkmatter_base_schema`](crate::markdown::schemas::darkmatter_base_schema),
+    /// whose imports resolve without reading the disk. When both
     /// the baseline and the document `$schema` declare the same property, the
     /// document side wins.
     ///
@@ -1889,6 +1932,28 @@ impl ComposeOptions {
         &self.exclude_keys
     }
 
+    /// Declares host globals for this composition and every transcluded child.
+    ///
+    /// A variable root is classified as a reserved namespace, then a declared
+    /// global, then a document property, so a declared global wins over a
+    /// same-named frontmatter key for bare, dotted, and bracket reads in
+    /// frontmatter and body interpolation, `when=` conditions, and page
+    /// blocks, while `fm.<name>` still reads the key. A compose-time
+    /// frontmatter value may read a declared global even when a deferred key
+    /// ([`with_exclude_keys`](Self::with_exclude_keys)) has the same name.
+    /// Reading a global declared unavailable fails with
+    /// [`BindingError::Unavailable`](crate::markdown::compose::expression::BindingError::Unavailable).
+    ///
+    /// Default: none.
+    #[must_use]
+    pub fn with_host_globals(
+        mut self,
+        globals: crate::markdown::compose::expression::HostGlobals,
+    ) -> Self {
+        self.host_globals = Some(globals);
+        self
+    }
+
     /// Sets the frontmatter keys whose OBJECT values render their `name` string
     /// field when interpolated in inline string context (`{{key}}`).
     ///
@@ -1918,6 +1983,29 @@ impl ComposeOptions {
     #[must_use]
     pub fn with_deferred_schema_verdict(mut self, deferred: bool) -> Self {
         self.defer_schema_verdict = deferred;
+        self
+    }
+
+    /// Leaves the document and baseline verdict on shell-resolved frontmatter
+    /// to the caller, which re-validates the composed frontmatter itself.
+    ///
+    /// Compose still judges values a shell result suffix (`::ok`,
+    /// `::exit-code`, `::result`) typed, and runs its full post-shell pass
+    /// when trigger schemas are enabled, since the caller does not see
+    /// trigger schemas. Leave it unset unless the caller validates the
+    /// post-shell frontmatter; otherwise a `$(...)` that prints an invalid
+    /// value is accepted.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::compose::ComposeOptions;
+    ///
+    /// let options = ComposeOptions::new().with_caller_owned_post_shell_verdict(true);
+    /// ```
+    #[must_use]
+    pub fn with_caller_owned_post_shell_verdict(mut self, caller_owned: bool) -> Self {
+        self.caller_owns_post_shell_verdict = caller_owned;
         self
     }
 
@@ -2601,6 +2689,7 @@ impl ComposeOptions {
             shell_timeout_behavior,
             shell_policy_root,
             shell_working_directory,
+            shell_child_environment,
             shell_approval_handler,
             pre_approved_commands,
             shell_strip_ansi,
@@ -2623,6 +2712,7 @@ impl ComposeOptions {
             remote_read_config,
             defer_shell_pending_schema_problems,
             defer_schema_verdict,
+            caller_owns_post_shell_verdict,
             defer_missing_runtime_context,
             defer_expression_failures,
             suppress_shell_probes,
@@ -2636,6 +2726,7 @@ impl ComposeOptions {
             current,
             schema_phase,
             exclude_keys,
+            host_globals,
             name_coercion_keys,
             portable_env,
             absolute_fallback_warning,
@@ -2806,6 +2897,21 @@ impl ComposeOptions {
             }
             None => enc.tag(0),
         }
+        enc.field("shell_child_environment");
+        match shell_child_environment {
+            Some(environment) => {
+                enc.tag(1);
+                // Raw OS strings, through the exact native encoding paths use.
+                let mut entries: Vec<_> = environment.iter().collect();
+                entries.sort_unstable();
+                enc.count(entries.len());
+                for (name, value) in entries {
+                    enc.path(Path::new(name));
+                    enc.path(Path::new(value));
+                }
+            }
+            None => enc.tag(0),
+        }
 
         // Unordered set: sort for canonical order.
         enc.field("pre_approved_commands");
@@ -2953,6 +3059,8 @@ impl ComposeOptions {
         enc.bool(*defer_shell_pending_schema_problems);
         enc.field("defer_schema_verdict");
         enc.bool(*defer_schema_verdict);
+        enc.field("caller_owns_post_shell_verdict");
+        enc.bool(*caller_owns_post_shell_verdict);
         enc.field("defer_missing_runtime_context");
         enc.bool(*defer_missing_runtime_context);
         enc.field("defer_expression_failures");
@@ -2971,7 +3079,7 @@ impl ComposeOptions {
         enc.bool(icmp.is_discovery());
         enc.field("icmp_injected_transport");
         enc.bool(icmp.has_injected_transport());
-        // The lazy roots are evaluated per expression and never cached, so only
+        // The lazy root is evaluated per expression and never cached, so only
         // whether a refresh capability exists can change a composed result.
         enc.field("current_provider");
         enc.bool(current.has_provider());
@@ -2987,6 +3095,12 @@ impl ComposeOptions {
             for key in keys {
                 enc.str(key);
             }
+        }
+        // Encoded only when present, so an option set without globals keeps
+        // its historical fingerprint.
+        if let Some(globals) = host_globals {
+            enc.field("host_globals");
+            enc.str(&globals.identity());
         }
         // Ordered vector: preserve the caller's coercion precedence.
         enc.field("name_coercion_keys");
@@ -3131,8 +3245,14 @@ impl ComposeOptions {
         cenc.bool(*trigger_schemas);
         cenc.field("defer_schema_verdict");
         cenc.bool(*defer_schema_verdict);
+        cenc.field("caller_owns_post_shell_verdict");
+        cenc.bool(*caller_owns_post_shell_verdict);
         cenc.field("schema_phase");
         cenc.tag(schema_phase_tag(*schema_phase));
+        if let Some(globals) = host_globals {
+            cenc.field("host_globals");
+            cenc.str(&globals.identity());
+        }
         cenc.field("name_coercion_keys");
         cenc.count(name_coercion_keys.len());
         for key in name_coercion_keys {

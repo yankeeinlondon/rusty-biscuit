@@ -565,6 +565,9 @@ pub fn is_match_safe_constraint(constraint: &Constraint) -> bool {
             // a valid trigger discriminant — the idiomatic replacement for a
             // single-member `enum(...)` tag.
             | Constraint::LiteralValue(_)
+            // `alphanumeric` options select a character set; checking a value
+            // against it is pure.
+            | Constraint::Options(_)
             | Constraint::Pattern(_)
             | Constraint::MinLen(_)
             | Constraint::MaxLen(_)

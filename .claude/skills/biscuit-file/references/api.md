@@ -251,17 +251,21 @@ found.attempts();    // &[Attempt { strategy, outcome, rejected }], one per pref
 found.findings();    // &[Finding] about the returned reference
 ```
 
-- Default: `AuthoredIntent(ALL)`, `SameDirRelative`, `ChildDir`, `PeerDir`,
+- Default: `AuthoredIntent(ALL)`, `TreeRootRelative`, `SameDirRelative`, `ChildDir`, `PeerDir`,
   `ImmediateParentDir`, `RepoRoot(None)`, `EnvRootedPath`, `HomeDir`,
   `AbsolutePath`. Opt-in: `ParentDir`, `ExternalRelativePath` (verified with
   `allow_external_relative()`), `RepoMultiPath(filter)` (`^`), `MagicPath(filter)`
   (`@`; a filter must name an `@` root and spellings come from it).
+- `TreeRootRelative` writes a bare path from `base_dir` (repository root inside
+  a repository), verified against existing lookup order. A local shadow rejects
+  it. Directory links use the first non-file candidate if no file matched;
+  missing multi-root bare spellings fall through. No resolver roots change.
 - Filters are eligibility only (`RepoRoot(Some("docs"))` still writes `&docs/x.md`);
   bad syntax is `InvalidConfiguration(InvalidFilter)` before any preference runs.
 - Reference inputs: intent forms (`~ @ ^ & vault:`, URL, `%`, leading portable
   `{{VAR}}`) are kept by `AuthoredIntent`; position forms are resolved
-  (`resolve_detailed`) and rewritten. Minimal churn keeps `./x.md` / bare `x.md`
-  already in the chosen form; results are fixed points. A multi-candidate miss,
+  (`resolve_detailed`) and rewritten. Bare tree-root spellings precede nearby
+  relative forms; results are fixed points. A multi-candidate miss,
   boundary escape, missing anchor, or probe failure is `UnresolvableInput`
   (caller keeps the link); URL/`%` without `AuthoredIntent` is
   `NormalizationUnsupported`.

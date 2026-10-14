@@ -1,6 +1,6 @@
 //! Compose-level coverage for Requirement 1 of the dasherized-identifiers spec
 //! (`darkmatter/features/2026-09-15-dasherized-identifiers`): a kebab-case
-//! frontmatter key is reachable bare, as `doc.<key>`, and as `doc['<key>']`,
+//! frontmatter key is reachable bare, as `fm.<key>`, and as `fm['<key>']`,
 //! while unspaced subtraction after a non-identifier operand still evaluates.
 
 use darkmatter::markdown::Markdown;
@@ -23,7 +23,7 @@ fn frontmatter_value(document: &Markdown, key: &str) -> Value {
 #[test]
 fn kebab_key_resolves_the_same_bare_dotted_and_bracketed() {
     let composed = compose(
-        "---\nspec-name: alpha\n---\nBare: [{{ spec-name }}] Doc: [{{ doc.spec-name }}] Bracket: [{{ doc['spec-name'] }}]\n",
+        "---\nspec-name: alpha\n---\nBare: [{{ spec-name }}] Doc: [{{ fm.spec-name }}] Bracket: [{{ fm['spec-name'] }}]\n",
     );
     assert!(
         composed.content().contains("Bare: [alpha] Doc: [alpha] Bracket: [alpha]"),
@@ -36,7 +36,7 @@ fn kebab_key_resolves_the_same_bare_dotted_and_bracketed() {
 fn native_and_quoted_yaml_keys_and_scalar_types_all_resolve() {
     let composed = compose(
         "---\n\"quoted-key\": 7\nis-draft: false\nnative-key: 'text'\n---\n\
-         Q: [{{ quoted-key }}|{{ doc.quoted-key }}|{{ doc[\"quoted-key\"] }}]\n\
+         Q: [{{ quoted-key }}|{{ fm.quoted-key }}|{{ fm[\"quoted-key\"] }}]\n\
          N: [{{ native-key }}] B: [{{ is-draft ? 'yes' : 'no' }}] Sum: [{{ quoted-key + 1 }}]\n",
     );
     let content = composed.content();
@@ -46,7 +46,7 @@ fn native_and_quoted_yaml_keys_and_scalar_types_all_resolve() {
 
 #[test]
 fn kebab_key_resolves_in_frontmatter_mixed_text_and_survives_a_round_trip() {
-    let source = "---\nspec-name: alpha\nlabel: \"v={{ spec-name }}/{{ doc.spec-name }}\"\n---\nLabel: {{ label }}\n";
+    let source = "---\nspec-name: alpha\nlabel: \"v={{ spec-name }}/{{ fm.spec-name }}\"\n---\nLabel: {{ label }}\n";
     let composed = compose(source);
     assert_eq!(frontmatter_value(&composed, "label"), json!("v=alpha/alpha"));
     assert!(composed.content().contains("Label: v=alpha/alpha"), "{}", composed.content());
@@ -74,8 +74,8 @@ fn kebab_key_drives_a_when_condition() {
 #[test]
 fn subtraction_still_evaluates_where_the_left_operand_cannot_continue_a_name() {
     let composed = compose(
-        "---\n_loop_count: 3\nphase: 5\nphase-2: two\nitems: [10, 20]\n---\n\
-         Arith: [{{ _loop_count - 1 }}|{{ 4-2 }}|{{ length(items)-1 }}|{{ items[0]-1 }}|{{ (phase)-1 }}|{{ phase - 2 }}|{{ phase-2 }}]\n",
+        "---\n_iter_count: 3\nphase: 5\nphase-2: two\nitems: [10, 20]\n---\n\
+         Arith: [{{ _iter_count - 1 }}|{{ 4-2 }}|{{ length(items)-1 }}|{{ items[0]-1 }}|{{ (phase)-1 }}|{{ phase - 2 }}|{{ phase-2 }}]\n",
     );
     assert!(
         composed.content().contains("Arith: [2|2|1|9|4|3|two]"),

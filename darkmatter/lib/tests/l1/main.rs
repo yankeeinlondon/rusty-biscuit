@@ -27,8 +27,21 @@ mod image_test_support;
 mod layout_matrix_support;
 #[path = "../request_support/mod.rs"]
 mod request_support;
+#[path = "../position_fixtures/mod.rs"]
+mod position_fixtures;
+#[path = "../union_fixtures/mod.rs"]
+mod union_fixtures;
+#[path = "../content_policy_fixtures/mod.rs"]
+mod content_policy_fixtures;
 
 mod absent_property_contract;
+mod fm_namespace_contract;
+mod host_globals_compose;
+mod shell_child_environment;
+mod schemas_effective_presence;
+mod schemas_core_type_values;
+mod schemas_runtime_parity;
+mod side_effect_partial;
 mod alias_lookup_once;
 mod ambient_ctx_capture;
 mod array_rendering_json;
@@ -47,11 +60,15 @@ mod clean_rules;
 mod code_link;
 mod compose_phase6;
 mod compose_reuse_phase5;
+mod content_policy_compose_contract;
+mod content_policy_disk_baseline;
+mod content_policy_embedded_baseline;
 mod content_policy_editor_schema;
 mod cutover_reference;
 mod debug_test;
 #[cfg(windows)]
 mod declined_path_transclusion;
+mod diagnostic_positions;
 mod disclosure_render_targets;
 mod disclosure_transclusion_integration;
 mod effects_integration;
@@ -101,15 +118,30 @@ mod request_context_epoch;
 mod schema_phase_validation;
 mod schema_quoting_safety;
 mod schema_roots;
+mod schema_yaml_spellings;
+mod schemas_conjunctive_lowering;
+mod schemas_constraints_block_matrix;
 mod schemas_convert_snapshots;
+mod schemas_core_type_grammar;
 mod schemas_detect_table;
 mod schemas_grammar_proptest;
 mod schemas_literal_expression;
+mod schemas_named_type_merge;
 mod schemas_required_count_matrix;
+mod schemas_union_fixture_controls;
+mod schemas_union_postfix;
+mod schemas_union_report;
+mod schemas_union_coerce;
+mod schemas_union_rewrite;
+mod schemas_union_clean;
+mod schemas_union_completion;
+mod schemas_union_typed_consumers;
+mod schemas_union_schema_matrix;
 mod schemas_source_projection;
 mod schemas_validate_table;
 mod semantic_results_never_persist;
 mod serialized_code_neighbors;
+mod shipped_schema_corpus;
 mod set_overlay_integration;
 mod shell_block_integration;
 mod shell_expansion_coordinates;

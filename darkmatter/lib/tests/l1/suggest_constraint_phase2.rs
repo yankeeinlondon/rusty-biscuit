@@ -183,5 +183,5 @@ fn import_suggestions_are_interpreted_after_exact_target_resolution() {
         &biscuit_file::FileResolutionContext::new(dir.path()),
     )
     .unwrap_err();
-    assert!(unsupported.to_string().contains("exact `string` or `number`"));
+    assert!(unsupported.to_string().contains("exact `string`, `number`, or `alphanumeric`"));
 }

@@ -291,8 +291,8 @@ subprocess wait, large sniff scan, TTS subprocess), guard it with
 `crate::output::user_interrupt_observed()` (CLI).
 
 Lifecycle audio no longer leaves playback in flight in the Claudine process.
-`say`, `say_first`, and `effect` durably reserve/publish to Playa's detached
-per-user scheduler and return. The interrupt check therefore prevents new
+`say`/`speak` and `effect` durably reserve/publish to Playa's detached
+per-user scheduler, in the order the stack lists them, and return. The interrupt check therefore prevents new
 handoffs after Ctrl+C; it does not cancel audio already owned by the scheduler.
 
 The remaining universal backstop is **second-press force-exit** (above), used when a
@@ -301,22 +301,22 @@ The remaining universal backstop is **second-press force-exit** (above), used wh
 ### Lifecycle short-circuit details
 
 The lifecycle short-circuit lives in
-[`LifecycleRunGuard::emit_signal`](../../lib/src/composition/lifecycle/mod.rs)
-and is the single most user-visible payoff of the interrupt flag. The
-`emit_signal` body runs in this order:
+[`LifecycleRunGuard::emit_signal`](../../lib/src/composition/lifecycle/mod.rs),
+the guard's drop safety net for a run that started but never emitted a
+terminal event. It has no execution context, so it emits only the signal
+stack's root-level, unguarded, literal communication (text with no `{{ … }}`
+span) and skips guarded items, templated text, and every other verb. It walks
+those actions in stack order (a root dictionary's canonical order), and for
+each one:
 
-1. Look up the configured notification for the signal (`Start`, `Success`,
-   `Blocked`, `Failure`). If absent, return.
-2. **Always** emit the configured `stderr` line. This is a cheap terminal
-   write that gives the user feedback that the terminal status was
-   reached, even when interrupted.
-3. **If the interrupt flag is set, return.**
-4. Otherwise:
-   - Dispatch the configured `message` through the resolved messaging
-     route (Discord webhook, Slack webhook, bot send, etc.).
-   - Fire the configured desktop `notify` title.
-   - Walk the audio phases: `say` / `say_first` (TTS) and `effect`
-     (sound) in the configured order.
+1. A `stderr` line is **always** emitted. This is a cheap terminal write that
+   gives the user feedback that the terminal status was reached, even when
+   interrupted.
+2. **If the interrupt flag is set, any other action is skipped.**
+3. Otherwise `message` dispatches through the resolved messaging route
+   (Discord webhook, Slack webhook, bot send, etc.), `notify` fires a desktop
+   notification, `say`/`speak` publishes TTS, and `effect` publishes a sound,
+   each in its stack position.
 
 | Side effect | Normal run | After Ctrl+C |
 |---|---|---|
@@ -326,9 +326,8 @@ and is the single most user-visible payoff of the interrupt flag. The
 | TTS speech | ✓ | ✗ skipped |
 | Sound effect | ✓ | ✗ skipped |
 
-The audio loop also re-checks the flag between phases so a Ctrl+C
-landing during a multi-second TTS subprocess can still skip a queued
-sound effect.
+The flag is re-checked before each action, so a Ctrl+C that lands partway
+through the stack still skips every later non-`stderr` action.
 
 Two regression tests pin this contract:
 

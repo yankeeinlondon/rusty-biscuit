@@ -37,7 +37,7 @@ fn stage_workspace() -> TestWorkspace {
     fs::write(ws.path().join("notes.md"), "# Notes\n").unwrap();
     fs::write(
         ws.path().join("plan.md"),
-        "---\n$schema:\n  cover: 'file(required)'\n---\ncover: {{ doc.cover }}\n",
+        "---\n$schema:\n  cover: 'file(required)'\n---\ncover: {{ fm.cover }}\n",
     )
     .unwrap();
 

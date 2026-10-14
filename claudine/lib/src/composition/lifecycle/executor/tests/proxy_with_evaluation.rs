@@ -38,22 +38,14 @@ fn proxy_of(outcome: &LifecycleEventOutcome) -> (&str, &IndexMap<String, Value>,
             target,
             overlay,
             location,
-        }) => (target, overlay, *location),
+        }) => (target, overlay, location.clone()),
         other => panic!("expected a proxy handoff, got: {other:?}\n{outcome:?}"),
     }
 }
 
 /// A `failure` stack with one proxy action carrying `with`.
 fn proxy_stack(with: Value) -> Value {
-    json!({
-        "failure": {
-            "stack": [{"action": {
-                "action": "proxy",
-                "target": "@next.md",
-                "with": with
-            }}]
-        }
-    })
+    json!({ "failure": [{ "proxy": { "target": "@next.md", "with": with } }] })
 }
 
 // ---------------------------------------------------------------------------
@@ -164,7 +156,7 @@ fn nested_strings_follow_the_same_interpolation_rule() {
 #[test]
 fn empty_and_omitted_with_both_yield_an_empty_overlay() {
     let omitted = run_failure(
-        json!({"failure": {"stack": [{"action": {"action": "proxy", "target": "@next.md"}}]}}),
+        json!({ "failure": [{ "proxy": { "target": "@next.md" } }] }),
         json!({}),
         None,
     );
@@ -185,12 +177,10 @@ fn with_sees_a_preceding_set_frontmatter_in_the_same_stack() {
     // proxy fires, not a snapshot taken when the event started.
     let config = parse_lifecycle_config(
         &json!({
-            "failure": {
-                "stack": [{"action": [
-                    {"set_frontmatter": ["router.md", "phase", "two"]},
-                    {"action": "proxy", "target": "@next.md", "with": {"phase": "{{ phase }}"}}
-                ]}]
-            }
+            "failure": [
+                { "set_frontmatter": ["router.md", "phase", "two"] },
+                { "proxy": { "target": "@next.md", "with": { "phase": "{{ phase }}" } } },
+            ],
         }),
         Path::new("router.md"),
     )
@@ -249,11 +239,7 @@ fn out_of_scope_err_in_a_with_value_is_rejected_before_the_event_fires() {
         ("start", json!({"meta": {"reason": "{{ err.msg }}"}})),
         ("success", json!({"list": ["ok", "{{ err.variant }}"]})),
     ] {
-        let fm = json!({event: {"stack": [{"action": {
-            "action": "proxy",
-            "target": "@next.md",
-            "with": with
-        }}]}});
+        let fm = json!({event: [{"proxy": {"target": "@next.md", "with": with}}]});
         let config = parse_lifecycle_config(&fm, Path::new("router.md")).expect("config parses");
 
         let err = validate_no_err_in_no_error_events(&fm, &config, Path::new("router.md"))
@@ -266,7 +252,7 @@ fn out_of_scope_err_in_a_with_value_is_rejected_before_the_event_fires() {
             } => {
                 assert_eq!(got, event);
                 assert!(
-                    property.starts_with(&format!("{event}.stack[0].action[0].with.")),
+                    property.starts_with(&format!("{event}[0].proxy.with.")),
                     "diagnostic roots at the offending `with` value: {property}"
                 );
             }
@@ -330,7 +316,7 @@ fn run_time_template_text_cannot_become_the_targets_lifecycle_configuration() {
         let info = outcome
             .evaluation_error
             .unwrap_or_else(|| panic!("{key}: expected an evaluation error"));
-        assert_eq!(info.variant, "LifecycleProxyWithEvaluationFailed", "{key}");
+        assert_eq!(info.variant, "LifecycleWithEvaluationFailed", "{key}");
         assert!(info.msg.contains("{{ secret }}"), "{key}: {}", info.msg);
     }
 
@@ -359,9 +345,9 @@ fn failure_names_the_exact_nested_path_without_echoing_other_values() {
     );
     assert!(outcome.control.is_none());
     let info = outcome.evaluation_error.expect("an unknown function raises");
-    assert_eq!(info.variant, "LifecycleProxyWithEvaluationFailed");
+    assert_eq!(info.variant, "LifecycleWithEvaluationFailed");
     assert!(
-        info.msg.contains("failure.stack[0].action[0].with.metadata.area[1]"),
+        info.msg.contains("failure[0].proxy.with.metadata.area[1]"),
         "message roots at the exact nested path: {}",
         info.msg
     );
@@ -383,9 +369,6 @@ fn malformed_expression_and_unknown_function_raise() {
         // Unknown function, whole-value and mixed.
         json!({"x": "{{ nope(1) }}"}),
         json!({"x": "prefix {{ nope(1) }}"}),
-        // Malformed span inside a mixed string: parsing is deferred to DM2, so
-        // unlike a whole-value span this only fails at event time.
-        json!({"x": "prefix {{ 1 + }}"}),
     ] {
         let outcome = run_failure(proxy_stack(with.clone()), json!({}), None);
         assert!(outcome.control.is_none(), "{with}: no handoff");
@@ -394,10 +377,22 @@ fn malformed_expression_and_unknown_function_raise() {
                 .evaluation_error
                 .unwrap_or_else(|| panic!("{with}: expected a raise"))
                 .variant,
-            "LifecycleProxyWithEvaluationFailed",
+            "LifecycleWithEvaluationFailed",
             "{with}"
         );
     }
+}
+
+#[test]
+fn a_malformed_span_in_mixed_text_is_a_parse_error() {
+    // Like a whole-value span, a mixed string's spans are parsed when the
+    // stack is, so the typo never waits for the event to fire.
+    let error = parse_lifecycle_config(&proxy_stack(json!({"x": "prefix {{ 1 + }}"})), Path::new("router.md"))
+        .expect_err("malformed span rejected");
+    let CompositionError::LifecycleActionInvalidLongForm { message, .. } = &error else {
+        panic!("expected LifecycleActionInvalidLongForm, got {error:?}");
+    };
+    assert!(message.contains("failure[0].proxy.with.x"), "{message}");
 }
 
 #[test]
@@ -423,13 +418,11 @@ fn a_failing_target_never_evaluates_the_overlay() {
     // the mapping is touched — the diagnostic is the target's, not `with`'s.
     let outcome = run_failure(
         json!({
-            "failure": {
-                "stack": [{"action": {
-                    "action": "proxy",
-                    "target": "{{ absent_root() }}",
-                    "with": {"x": "{{ also_absent() }}"}
-                }}]
-            }
+            "failure": [
+                {
+                    "proxy": { "target": "{{ absent_root() }}", "with": { "x": "{{ also_absent() }}" } },
+                },
+            ],
         }),
         json!({}),
         None,
@@ -446,14 +439,15 @@ fn no_error_does_not_suppress_an_overlay_failure() {
     // overlay raise remains fatal.
     let outcome = run_failure(
         json!({
-            "failure": {
-                "stack": [{"action": {
-                    "action": "proxy",
-                    "target": "@next.md",
-                    "no_error": true,
-                    "with": {"x": "{{ absent_root() }}"}
-                }}]
-            }
+            "failure": [
+                {
+                    "proxy": {
+                        "target": "@next.md",
+                        "no_error": true,
+                        "with": { "x": "{{ absent_root() }}" },
+                    },
+                },
+            ],
         }),
         json!({}),
         None,
@@ -468,7 +462,7 @@ fn no_error_does_not_suppress_an_overlay_failure() {
             .evaluation_error
             .expect("still raises under no_error")
             .variant,
-        "LifecycleProxyWithEvaluationFailed"
+        "LifecycleWithEvaluationFailed"
     );
 }
 
@@ -480,24 +474,24 @@ fn no_error_does_not_suppress_an_overlay_failure() {
 fn location_identifies_the_authored_action() {
     let outcome = run_failure(
         json!({
-            "failure": {
-                "stack": [
-                    {"when": "false", "action": {"say": "skipped"}},
-                    {"action": [
-                        {"info": "noise"},
-                        {"action": "proxy", "target": "@next.md", "with": {"x": 1}}
-                    ]}
-                ]
-            }
+            "failure": [
+                { "info": "noise" },
+                {
+                    "when": "false",
+                    "then": [{ "say": "skipped" }],
+                    "else": [
+                        { "info": "noise" },
+                        { "proxy": { "target": "@next.md", "with": { "x": 1 } } },
+                    ],
+                },
+            ],
         }),
         json!({}),
         None,
     );
     let (_, _, location) = proxy_of(&outcome);
     assert_eq!(location.signal(), LifecycleSignal::Failure);
-    assert_eq!(location.stack_index(), 1);
-    assert_eq!(location.action_index(), 1);
-    assert_eq!(location.to_string(), "failure.stack[1].action[1]");
+    assert_eq!(location.to_string(), "failure[1].else[1].proxy");
 }
 
 #[test]

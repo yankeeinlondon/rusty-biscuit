@@ -133,7 +133,9 @@ fn make_guard<'a>(
 mod action_shape_control;
 mod audio_emission;
 mod diagnostics;
+mod grammar;
 mod guard_runtime;
+mod mixed_span;
 mod nested_span;
 mod parse_config;
 mod validation;

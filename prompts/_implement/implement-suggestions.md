@@ -22,37 +22,36 @@ yolo: true
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 
 initialize:
-    stack:
-        # Inside the review-loop sequence the step list is static; a repair
-        # whose review is ready opts out here instead of launching an agent to
-        # write one log line.
-        - when: "in_loop && ready == true"
-          action:
-              - message: "repair of review #{{iteration}} skipped: `{{parent_dir(spec)}}` is production ready"
-              - skip
-        - action:
-            - ensure_file: '{{log}}'
+    # Inside the review-loop sequence the step list is static; a repair
+    # whose review is ready opts out here instead of launching an agent to
+    # write one log line.
+    - when: "in_loop && ready == true"
+      then:
+          - message: "repair of review #{{iteration}} skipped: `{{parent_dir(spec)}}` is production ready"
+          - skip
+    - ensure_file: '{{log}}'
 
 start:
     message: "🏃 implementing _findings_ from review #{{ file_index(review) }} in `{{ parent_dir(review) }}` (_using_ {{ctx.agent}}/{{ctx.model}} _in_ {{ctx.area || ctx.repo}})"
 success:
-    stack:
-        - when: "ready == true"
-          action:
-              - message: "review #{{ file_index(review) }} of `{{ parent_dir(review) }}` is already production ready; no repair was needed"
-        - when: "ready != true && frontmatter(review, 'implemented') == true"
-          action:
-              - message: "✅  implemented all review findings from review **#{{ file_index(review) }}** of `{{ parent_dir(review) }}`; ready for independent verification (area: **{{ctx.area || ctx.repo }}**, wt: **{{ ctx.worktree }}**, branch: **{{ctx.branch}}**)"
-              - say: "the review findings in {{ without_date(parent_dir(review)) }} were implemented and are ready for review"
-              - effect: bong
-        - when: "ready != true && frontmatter(review, 'implemented') != true"
-          action:
-              - warn: "review #{{ file_index(review) }} repair of `{{ parent_dir(review) }}` ended with incomplete findings; see the disposition ledger in {{log}}"
+    - when: "ready == true"
+      then:
+          - message: "review #{{ file_index(review) }} of `{{ parent_dir(review) }}` is already production ready; no repair was needed"
+    - when: "ready != true && frontmatter(review, 'implemented') == true"
+      then:
+          - message: "✅  implemented all review findings from review **#{{ file_index(review) }}** of `{{ parent_dir(review) }}`; ready for independent verification (area: **{{ctx.area || ctx.repo }}**, wt: **{{ ctx.worktree }}**, branch: **{{ctx.branch}}**)"
+          - say: "the review findings in {{ without_date(parent_dir(review)) }} were implemented and are ready for review"
+          - effect: bong
+    - when: "ready != true && frontmatter(review, 'implemented') != true"
+      then:
+          - warn: "review #{{ file_index(review) }} repair of `{{ parent_dir(review) }}` ended with incomplete findings; see the disposition ledger in {{log}}"
 failure:
     message: "💥 implementation of the review #{{iteration}} suggestions from **{{ parent_dir(review) }}** failed to complete ({{err.msg}})!"
     effect: sad-trombone
 ---
 ::file "../_no_formatting.md"
+
+::file "../_frontmatter_edits.md"
 
 # Implement Review Suggestions for {{title_case(without_date(parent_dir(spec)))}}
 

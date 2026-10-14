@@ -4,14 +4,19 @@
 //! Supports multiple TTS backends, with focus on `vits` and `kokoro` engines.
 //!
 //! Echogarden is an npm package: <https://github.com/echogarden-project/echogarden>
+//!
+//! Audio is cached by engine, voice, and speed. When no voice resolves, the
+//! engine picks its own default, which can change outside this library, so
+//! that audio is synthesized fresh, never cached, and `prepare` does nothing.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use tracing::{debug, trace};
 
 use crate::audio_cache::CacheKey;
 use crate::errors::TtsError;
+use crate::prepared::{ResolvedSynthesis, dry_run_enabled, publish, staging_file};
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
 use crate::types::{Gender, Language, SpeakResult, SpeedLevel, TtsConfig, Voice, VoiceQuality};
 #[cfg(feature = "playa")]
@@ -20,7 +25,8 @@ use crate::types::{HostTtsProvider, TtsProvider};
 /// Echogarden TTS engine identifier.
 ///
 /// We focus on the high-quality local engines.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum EchogardenEngine {
     /// VITS - high-quality end-to-end neural speech synthesis.
     Vits,
@@ -116,27 +122,60 @@ impl EchogardenProvider {
         which::which("echogarden").is_ok()
     }
 
-    /// Resolve the voice to use based on config.
-    fn resolve_voice(&self, config: &TtsConfig) -> Option<String> {
-        // If a specific voice is requested, use it directly
+    /// The voice a request settles without asking echogarden: a requested
+    /// voice, or the Kokoro engine's English default for the gender.
+    fn known_voice(&self, config: &TtsConfig) -> Option<String> {
         if let Some(voice) = &config.requested_voice {
             return Some(voice.clone());
         }
+        (self.engine == EchogardenEngine::Kokoro && config.language == Language::English).then(|| {
+            match config.gender {
+                Gender::Male => "Michael",
+                Gender::Female | Gender::Any => "Heart",
+            }
+            .to_string()
+        })
+    }
 
-        // For Kokoro, provide gender-based defaults
-        if self.engine == EchogardenEngine::Kokoro {
-            return Some(
-                match config.gender {
-                    Gender::Male => "Michael",
-                    Gender::Female => "Heart",
-                    Gender::Any => "Heart", // Default to Heart for best quality
-                }
-                .to_string(),
-            );
+    /// Resolve the voice every entry point synthesizes with.
+    ///
+    /// Without a known voice, the engine's voice list supplies the best match
+    /// for the language and gender preferences. `None` means echogarden would
+    /// choose its own default, which this library cannot pin: that audio is
+    /// synthesized but never read from or published to the shared cache.
+    async fn resolve_voice(&self, config: &TtsConfig) -> Option<String> {
+        if let Some(voice) = self.known_voice(config) {
+            return Some(voice);
         }
+        let voices = match list_voices_for_engine(self.engine).await {
+            Ok(voices) if self.engine == EchogardenEngine::Vits => process_vits_voices(voices),
+            Ok(voices) => voices,
+            Err(error) => {
+                debug!(%error, "echogarden voice list unavailable; default voice is unresolved");
+                return None;
+            }
+        };
+        let candidates: Vec<&Voice> = voices.iter().collect();
+        Self::select_best_voice(&candidates, config).map(|voice| voice.name)
+    }
 
-        // For VITS, let echogarden pick the default
-        None
+    /// The shared-cache identity; speed is part of it because echogarden
+    /// bakes speed into the audio.
+    fn cache_key(&self, text: &str, voice: &str, speed: SpeedLevel) -> CacheKey {
+        let key = CacheKey::new("echogarden", format!("{}:{voice}", self.engine.as_str()), text, "wav");
+        if speed == SpeedLevel::Normal {
+            key
+        } else {
+            key.with_speed(speed.value())
+        }
+    }
+
+    /// Playback settings for echogarden audio, whose speed is already baked in.
+    #[cfg_attr(not(feature = "playa"), allow(dead_code))]
+    fn playback_config(config: &TtsConfig) -> TtsConfig {
+        let mut playback = config.clone();
+        playback.speed = SpeedLevel::Normal;
+        playback
     }
 
     /// Select the best voice from a list based on config constraints.
@@ -191,49 +230,69 @@ impl EchogardenProvider {
         candidates.first().cloned().cloned()
     }
 
-    /// Generate audio to the cache path, returning the path and whether it was a cache hit.
+    /// Synthesize with `voice`, through the shared cache when it is known.
     ///
-    /// Note: Speed IS included in the cache key because EchoGarden bakes speed via --speed flag.
-    async fn generate_to_cache(
+    /// A cache miss writes a staging file and publishes it atomically; a
+    /// failure or a dropped future kills the child and deletes the staging
+    /// file, so no partial entry is published.
+    async fn synthesize(
         &self,
         text: &str,
         voice: Option<&str>,
         speed: SpeedLevel,
-    ) -> Result<(PathBuf, bool), TtsError> {
-        // Build voice_id for cache key
-        let voice_id = format!("{}:{}", self.engine.as_str(), voice.unwrap_or("default"));
+    ) -> Result<Synthesized, TtsError> {
+        let Some(voice) = voice else {
+            let output = tempfile::Builder::new()
+                .prefix(".biscuit-speaks-uncached-")
+                .suffix(".wav")
+                .tempfile()
+                .map_err(|source| TtsError::TempFileError { source })?
+                .into_temp_path();
+            self.run_echogarden(text, &output, None, speed).await?;
+            return Ok(Synthesized::Uncached(output));
+        };
 
-        // Create cache key - speed IS included (echogarden bakes speed via --speed flag)
-        let mut cache_key = CacheKey::new("echogarden", &voice_id, text, "wav");
-        if speed != SpeedLevel::Normal {
-            cache_key = cache_key.with_speed(speed.value());
-        }
-
-        let cache_path = cache_key.cache_path();
-
-        // Check for cache hit
-        if cache_key.cache_exists() {
+        let cache_path = self.cache_key(text, voice, speed).cache_path();
+        if cache_path.exists() {
             debug!(
                 provider = Self::PROVIDER_NAME,
                 engine = self.engine.as_str(),
                 cache_path = %cache_path.display(),
                 "Cache hit for EchoGarden"
             );
-            return Ok((cache_path, true));
+            return Ok(Synthesized::Cached {
+                path: cache_path,
+                hit: true,
+            });
         }
 
-        // Cache miss - generate audio
         debug!(
             provider = Self::PROVIDER_NAME,
             engine = self.engine.as_str(),
             cache_path = %cache_path.display(),
             "Cache miss for EchoGarden, generating"
         );
+        let staged = staging_file(&cache_path)?;
+        self.run_echogarden(text, &staged, Some(voice), speed).await?;
+        publish(staged, &cache_path)?;
+        Ok(Synthesized::Cached {
+            path: cache_path,
+            hit: false,
+        })
+    }
 
+    /// Run `echogarden speak` into `output` and check it wrote audio.
+    async fn run_echogarden(
+        &self,
+        text: &str,
+        output_path: &Path,
+        voice: Option<&str>,
+        speed: SpeedLevel,
+    ) -> Result<(), TtsError> {
         let mut cmd = tokio::process::Command::new("echogarden");
         cmd.arg("speak");
         cmd.arg(text);
-        cmd.arg(&cache_path);
+        cmd.arg(output_path);
 
         // Engine selection
         cmd.arg(format!("--engine={}", self.engine.as_str()));
@@ -250,6 +309,7 @@ impl EchogardenProvider {
 
         cmd.stdout(Stdio::null());
         cmd.stderr(Stdio::piped());
+        cmd.kill_on_drop(true);
 
         debug!(
             engine = self.engine.as_str(),
@@ -273,7 +333,7 @@ impl EchogardenProvider {
         }
 
         // Verify the file was created and has content
-        let metadata = std::fs::metadata(&cache_path).map_err(|e| TtsError::TempFileError {
+        let metadata = std::fs::metadata(output_path).map_err(|e| TtsError::TempFileError {
             source: std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 format!("Echogarden output file not found: {}", e),
@@ -287,97 +347,89 @@ impl EchogardenProvider {
             });
         }
 
-        Ok((cache_path, false))
+        Ok(())
     }
-}
 
-impl TtsExecutor for EchogardenProvider {
-    async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
-        let voice = self.resolve_voice(config);
+    /// Prepare the cache entry and report the settings it was prepared with.
+    ///
+    /// `None` when there is nothing to prepare: dry run, or a default voice
+    /// that cannot be resolved.
+    pub(crate) async fn prepare_resolved(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<Option<ResolvedSynthesis>, TtsError> {
+        if dry_run_enabled() {
+            return Ok(None);
+        }
+        let Some(voice) = self.resolve_voice(config).await else {
+            return Ok(None);
+        };
+        self.synthesize(text, Some(&voice), config.speed).await?;
+        Ok(Some(ResolvedSynthesis::Echogarden {
+            engine: self.engine,
+            voice,
+            speed: config.speed,
+        }))
+    }
 
-        // Generate to cache (or get cached file)
-        let (audio_path, _cache_hit) = self
-            .generate_to_cache(text, voice.as_deref(), config.speed)
-            .await?;
+    /// Play `voice` synthesized at `speed`, at `config`'s volume.
+    ///
+    /// `None` is an unresolved default: echogarden picks the voice and the
+    /// audio bypasses the shared cache.
+    pub(crate) async fn speak_resolved(
+        &self,
+        text: &str,
+        voice: Option<&str>,
+        speed: SpeedLevel,
+        config: &TtsConfig,
+    ) -> Result<(), TtsError> {
+        let audio = self.synthesize(text, voice, speed).await?;
 
         debug!(
-            path = %audio_path.display(),
+            path = %audio.path().display(),
             "Echogarden synthesis complete, playing audio"
         );
 
-        // Play the audio file
         #[cfg(feature = "playa")]
         {
-            crate::playback::play_audio_file(&audio_path, crate::types::AudioFormat::Wav, config)
-                .await
+            crate::playback::play_audio_file(
+                audio.path(),
+                crate::types::AudioFormat::Wav,
+                &Self::playback_config(config),
+            )
+            .await
         }
         #[cfg(not(feature = "playa"))]
         {
             // Playback requires the playa feature
-            let _ = audio_path;
+            let _ = (audio, config);
             Err(TtsError::NoAudioPlayer)
         }
     }
 
-    async fn is_ready(&self) -> bool {
-        Self::echogarden_binary_exists().await
-    }
-
-    fn info(&self) -> &str {
-        "Echogarden - Speech processing engine with multiple high-quality TTS backends (VITS, Kokoro)"
-    }
-
-    async fn speak_with_result(
+    /// [`Self::speak_resolved`], reporting the voice and cache entry played.
+    pub(crate) async fn speak_resolved_with_result(
         &self,
         text: &str,
+        resolved: Option<&str>,
+        speed: SpeedLevel,
         config: &TtsConfig,
     ) -> Result<SpeakResult, TtsError> {
-        // Determine the voice to use
-        let voice_name = if let Some(voice) = &config.requested_voice {
-            voice.clone()
-        } else {
-            // No specific voice requested - select from voice list
-            let voices = self.list_voices().await?;
+        let audio = self.synthesize(text, resolved, speed).await?;
+        let voice_name = resolved.unwrap_or("default").to_string();
 
-            // Filter voices by engine
-            let engine_prefix = format!("{}:", self.engine.as_str());
-            let engine_voices: Vec<&Voice> = voices
-                .iter()
-                .filter(|v| {
-                    v.identifier
-                        .as_ref()
-                        .map(|i| i.starts_with(&engine_prefix))
-                        .unwrap_or(false)
-                })
-                .collect();
-
-            // Select best voice based on constraints (gender, language, quality)
-            let selected = Self::select_best_voice(&engine_voices, config).ok_or_else(|| {
-                TtsError::VoiceEnumerationFailed {
-                    provider: Self::PROVIDER_NAME.into(),
-                    message: "No matching voice found for the given constraints".into(),
-                }
-            })?;
-            selected.name
-        };
-
-        // Generate to cache (or get cached file)
-        let (audio_path, cache_hit) = self
-            .generate_to_cache(text, Some(&voice_name), config.speed)
-            .await?;
-
-        // Play the audio file (requires playa feature)
         #[cfg(feature = "playa")]
         let playback = crate::playback::play_audio_file_with_report(
-            &audio_path,
+            audio.path(),
             crate::types::AudioFormat::Wav,
-            config,
+            &Self::playback_config(config),
         )
         .await?;
 
         #[cfg(not(feature = "playa"))]
         {
-            let _ = (&audio_path, cache_hit, voice_name);
+            let _ = (audio, voice_name, config);
             Err(TtsError::NoAudioPlayer)
         }
 
@@ -404,14 +456,102 @@ impl TtsExecutor for EchogardenProvider {
                     .with_identifier(format!("{}:{}", self.engine.as_str(), voice_name))
             };
 
-            Ok(
-                SpeakResult::new(TtsProvider::Host(HostTtsProvider::EchoGarden), voice)
-                    .with_audio_file(audio_path)
-                    .with_codec("wav")
-                    .with_cache_hit(cache_hit)
-                    .with_playback(playback),
-            )
+            let result = SpeakResult::new(TtsProvider::Host(HostTtsProvider::EchoGarden), voice)
+                .with_codec("wav")
+                .with_playback(playback);
+            Ok(match audio {
+                Synthesized::Cached { path, hit } => result.with_audio_file(path).with_cache_hit(hit),
+                Synthesized::Uncached(_) => result,
+            })
         }
+    }
+
+    /// A ready detached job for `voice` at `speed`, synthesizing it first on
+    /// a miss.
+    #[cfg(feature = "playa")]
+    pub(crate) async fn resolved_job(
+        &self,
+        text: &str,
+        voice: Option<&str>,
+        speed: SpeedLevel,
+        config: &TtsConfig,
+    ) -> Result<playa::detached::SpoolJob, TtsError> {
+        let path = match self.synthesize(text, voice, speed).await? {
+            Synthesized::Cached { path, .. } => path,
+            // Playa may delete only spool-owned files, so this uncached audio
+            // outlives the job, as Say's unresolved detached audio does.
+            Synthesized::Uncached(path) => path.keep().map_err(|error| TtsError::TempFileError {
+                source: error.error,
+            })?,
+        };
+        Ok(crate::playa_bridge::file_job(path, &Self::playback_config(config)))
+    }
+
+    /// A ready detached job for `voice` at `speed` when its file is already
+    /// cached.
+    #[cfg(feature = "playa")]
+    pub(crate) fn cached_resolved_job(
+        &self,
+        text: &str,
+        voice: &str,
+        speed: SpeedLevel,
+        config: &TtsConfig,
+    ) -> Option<playa::detached::SpoolJob> {
+        let path = self.cache_key(text, voice, speed).cache_path();
+        path.is_file()
+            .then(|| crate::playa_bridge::file_job(path, &Self::playback_config(config)))
+    }
+}
+
+/// Audio an echogarden entry point plays.
+enum Synthesized {
+    /// A shared cache entry, and whether it already existed.
+    Cached {
+        path: PathBuf,
+        #[cfg_attr(not(feature = "playa"), allow(dead_code))]
+        hit: bool,
+    },
+    /// Audio for an unresolved default, deleted when dropped.
+    Uncached(tempfile::TempPath),
+}
+
+impl Synthesized {
+    #[cfg_attr(not(feature = "playa"), allow(dead_code))]
+    fn path(&self) -> &Path {
+        match self {
+            Self::Cached { path, .. } => path,
+            Self::Uncached(path) => path,
+        }
+    }
+}
+
+impl TtsExecutor for EchogardenProvider {
+    async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
+        let voice = self.resolve_voice(config).await;
+        self.speak_resolved(text, voice.as_deref(), config.speed, config)
+            .await
+    }
+
+    async fn prepare(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
+        self.prepare_resolved(text, config).await.map(|_| ())
+    }
+
+    async fn is_ready(&self) -> bool {
+        Self::echogarden_binary_exists().await
+    }
+
+    fn info(&self) -> &str {
+        "Echogarden - Speech processing engine with multiple high-quality TTS backends (VITS, Kokoro)"
+    }
+
+    async fn speak_with_result(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<SpeakResult, TtsError> {
+        let voice = self.resolve_voice(config).await;
+        self.speak_resolved_with_result(text, voice.as_deref(), config.speed, config)
+            .await
     }
 
     #[cfg(feature = "playa")]
@@ -420,11 +560,9 @@ impl TtsExecutor for EchogardenProvider {
         text: &str,
         config: &TtsConfig,
     ) -> Result<playa::detached::SpoolJob, TtsError> {
-        let voice = self.resolve_voice(config);
-        let (path, _) = self
-            .generate_to_cache(text, voice.as_deref(), config.speed)
-            .await?;
-        Ok(crate::playa_bridge::file_job(path, config))
+        let voice = self.resolve_voice(config).await;
+        self.resolved_job(text, voice.as_deref(), config.speed, config)
+            .await
     }
 
     #[cfg(feature = "playa")]
@@ -433,16 +571,10 @@ impl TtsExecutor for EchogardenProvider {
         text: &str,
         config: &TtsConfig,
     ) -> Result<Option<playa::detached::SpoolJob>, TtsError> {
-        let voice = self.resolve_voice(config);
-        let voice_id = format!("{}:{}", self.engine.as_str(), voice.as_deref().unwrap_or("default"));
-        let mut key = CacheKey::new("echogarden", voice_id, text, "wav");
-        if config.speed != SpeedLevel::Normal {
-            key = key.with_speed(config.speed.value());
-        }
-        let path = key.cache_path();
-        Ok(path
-            .is_file()
-            .then(|| crate::playa_bridge::file_job(path, config)))
+        let Some(voice) = self.resolve_voice(config).await else {
+            return Ok(None);
+        };
+        Ok(self.cached_resolved_job(text, &voice, config.speed, config))
     }
 }
 
@@ -762,7 +894,7 @@ fn parse_languages(langs_str: &str) -> Vec<Language> {
 mod tests {
     use super::*;
     #[cfg(feature = "playa")]
-    use crate::test_support::dry_run_enabled;
+    use crate::prepared::dry_run_enabled;
     use crate::test_support::{ECHOGARDEN, skip_or_require};
 
     // ========================================================================
@@ -853,35 +985,76 @@ mod tests {
     fn test_resolve_voice_explicit() {
         let provider = EchogardenProvider::new();
         let config = TtsConfig::new().with_voice("CustomVoice");
-        assert_eq!(provider.resolve_voice(&config), Some("CustomVoice".into()));
+        assert_eq!(provider.known_voice(&config), Some("CustomVoice".into()));
     }
 
     #[test]
     fn test_resolve_voice_kokoro_male() {
         let provider = EchogardenProvider::with_engine(EchogardenEngine::Kokoro);
         let config = TtsConfig::new().with_gender(Gender::Male);
-        assert_eq!(provider.resolve_voice(&config), Some("Michael".into()));
+        assert_eq!(provider.known_voice(&config), Some("Michael".into()));
     }
 
     #[test]
     fn test_resolve_voice_kokoro_female() {
         let provider = EchogardenProvider::with_engine(EchogardenEngine::Kokoro);
         let config = TtsConfig::new().with_gender(Gender::Female);
-        assert_eq!(provider.resolve_voice(&config), Some("Heart".into()));
+        assert_eq!(provider.known_voice(&config), Some("Heart".into()));
     }
 
     #[test]
     fn test_resolve_voice_kokoro_any() {
         let provider = EchogardenProvider::with_engine(EchogardenEngine::Kokoro);
         let config = TtsConfig::new();
-        assert_eq!(provider.resolve_voice(&config), Some("Heart".into()));
+        assert_eq!(provider.known_voice(&config), Some("Heart".into()));
     }
 
     #[test]
     fn test_resolve_voice_vits_default() {
         let provider = EchogardenProvider::with_engine(EchogardenEngine::Vits);
         let config = TtsConfig::new();
-        assert_eq!(provider.resolve_voice(&config), None);
+        assert_eq!(provider.known_voice(&config), None);
+    }
+
+    #[test]
+    fn a_non_english_kokoro_request_is_left_to_the_voice_list() {
+        let provider = EchogardenProvider::with_engine(EchogardenEngine::Kokoro);
+        let config = TtsConfig::new().with_language(Language::Custom("ja".into()));
+        assert_eq!(provider.known_voice(&config), None);
+        assert_eq!(
+            provider.known_voice(&config.with_voice("Alpha")),
+            Some("Alpha".into())
+        );
+    }
+
+    #[test]
+    fn the_cache_key_keeps_its_existing_spelling_and_bakes_in_speed() {
+        let provider = EchogardenProvider::new();
+        let golden = CacheKey::new("echogarden", "kokoro:Heart", "Hello", "wav").cache_path();
+        assert_eq!(
+            provider.cache_key("Hello", "Heart", SpeedLevel::Normal).cache_path(),
+            golden
+        );
+        let fast = CacheKey::new("echogarden", "kokoro:Heart", "Hello", "wav")
+            .with_speed(1.25)
+            .cache_path();
+        assert_eq!(provider.cache_key("Hello", "Heart", SpeedLevel::Fast).cache_path(), fast);
+        assert_ne!(
+            EchogardenProvider::with_engine(EchogardenEngine::Vits)
+                .cache_key("Hello", "Heart", SpeedLevel::Normal)
+                .cache_path(),
+            golden
+        );
+    }
+
+    #[test]
+    fn playback_does_not_apply_baked_speed_again() {
+        let config = TtsConfig::new()
+            .with_speed(SpeedLevel::Fast)
+            .with_volume(crate::types::VolumeLevel::Soft);
+        let playback = EchogardenProvider::playback_config(&config);
+        assert_eq!(playback.speed, SpeedLevel::Normal);
+        assert_eq!(playback.volume, crate::types::VolumeLevel::Soft);
     }
 
     // ========================================================================

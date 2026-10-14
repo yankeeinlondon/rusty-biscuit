@@ -75,7 +75,7 @@ fn sequence_preflight_rejects_blacklisted_lifecycle_shell_before_launch() {
     let compose_file = fixture.cwd().join("compose.md");
     fs::write(
         &compose_file,
-        "---\nsequence:\n  - step_one\nsuccess:\n  stack:\n    - action:\n        - action: shell\n          command: cargo metadata\n---\nSEQUENCE_BODY\n",
+        "---\nsequence:\n  - step_one\nsuccess:\n  - shell: { command: cargo metadata }\n---\nSEQUENCE_BODY\n",
     )
     .unwrap();
 
@@ -112,7 +112,7 @@ fn sequence_yolo_approves_lifecycle_shell_during_preflight() {
     fs::write(
         &compose_file,
         format!(
-            "---\nsequence:\n  - step_one\nsuccess:\n  stack:\n    - action:\n        - action: shell\n          command: touch '{}'\n---\nSEQUENCE_BODY\n",
+            "---\nsequence:\n  - step_one\nsuccess:\n  - shell: touch '{}'\n---\nSEQUENCE_BODY\n",
             lifecycle_marker.display()
         ),
     )

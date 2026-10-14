@@ -150,12 +150,15 @@ Frontmatter interpolation resolves against these sources:
 | Prefix | Source | Example |
 |---|---|---|
 | *(none)* | Non-templated frontmatter seed values (plus already-resolved keys) | `{{ base }}` |
-| `doc` / `doc.` | The current document's frontmatter object / a property of it | `{{ doc.base }}` |
+| `fm` / `fm.` | The current document's frontmatter object / a property of it | `{{ fm.base }}` |
 | `ctx.` | Runtime context (demand-driven) | `{{ ctx.today }}` |
 | `env.` | Environment variables | `{{ env.HOME }}` |
 
-Bare `doc` is the whole frontmatter object; `doc.<path>` reads a property, and a
-property literally named `doc` is reached as `doc.doc`. See
+Bare `fm` is the whole frontmatter object resolved so far; `fm.<path>` reads a
+property, and a property literally named `fm` is reached as `fm.fm`. A key named
+after a reserved root (`env`, `ctx`, …) is read only through `fm.`: `{{ env }}`
+is the environment, `{{ fm.env }}` the property. `doc` is an ordinary property
+name. See
 [Namespaces](../topics/darkmatter-expressions.md#namespaces).
 
 ### Read-Side Functions
@@ -363,7 +366,10 @@ plan: "{{spec}}.plan.md"
 Here `plan` is `/root/spec.md.plan.md`. A reference cycle terminates rather
 than hanging: its keys resolve in map order, and the first reads the other as
 missing. With `a: "{{b}}x"` and `b: "{{a}}y"`, `a` is `x` and `b` is `xy`. Both
-names are frontmatter keys, so neither read warns.
+names are frontmatter keys, so neither read warns. A key that reads itself is
+not an error either: with `a: "x{{ a }}/tail"` the inner read is missing and `a`
+is `x/tail`, and `{{ fm.a }}` or `{{ fm['a'] }}` in place of `{{ a }}` gives
+the same result.
 
 ## Downstream Effects
 

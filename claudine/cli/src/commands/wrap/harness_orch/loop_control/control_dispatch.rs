@@ -35,7 +35,8 @@ pub(super) enum TerminalControlAction {
 /// signal.
 ///
 /// A retry replaces the active document's provider-attempt slice with a fresh
-/// one (new attempt number, no session) and `continue`s; a resume replaces it
+/// one (new attempt number, no session), stages its evaluated `with:` overlay
+/// for that attempt's fresh read, and `continue`s; a resume replaces it
 /// too but retains the live session and records the follow-up message as the
 /// next provider input — both mutate the single [`DocumentIteration`] passed in
 /// rather than a parallel prompt-state field. A proxy returns a request for the
@@ -130,6 +131,14 @@ pub(super) fn dispatch_terminal_control(
                 std::thread::sleep(delay);
             }
             prompt_state.entry = claudine::composition::DocumentEntryReason::Retry;
+            // This retry's `with:` overlay, for the retried attempt's fresh read
+            // only. Replaced, never merged, so a retry without `with:` clears
+            // whatever an earlier retry left unconsumed.
+            let StackControl::Retry { overlay, .. } = control else {
+                unreachable!("only a retry control produces a retry re-entry");
+            };
+            prompt_state.pending_retry_overlay =
+                (!overlay.is_empty()).then(|| overlay.clone());
             // The next canonical read starts a new document epoch. Clearing
             // here lets its shell preflight construct the epoch snapshot once;
             // materialization then reuses that same snapshot.
@@ -162,6 +171,9 @@ pub(super) fn dispatch_terminal_control(
                 return TerminalControlAction::Abort(e);
             }
             prompt_state.entry = claudine::composition::DocumentEntryReason::Resume;
+            // `resume` takes no `with:`, and an earlier retry's overlay is not
+            // retained for it.
+            prompt_state.pending_retry_overlay = None;
             prompt_state.epoch_context = None;
             prompt_state.document_epoch = None;
             prompt_state.prompt_tail.clear();
@@ -210,7 +222,7 @@ pub(super) fn dispatch_terminal_control(
                 overlay.clone(),
                 ProxyProvenance::new(
                     prompt_state.source_path.clone(),
-                    *location,
+                    location.clone(),
                     ledger.chain().to_vec(),
                 ),
             ))

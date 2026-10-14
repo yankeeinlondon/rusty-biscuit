@@ -342,6 +342,21 @@ matrix, supported token shapes, and the open-questions list.
 
 Direct composition takes a Markdown file, composes it through Darkmatter, and sends the composed content as a prompt to an agentic CLI. Composition does not rewrite the source; lifecycle actions and the provider may mutate files.
 
+Prepared direct and inline prompts use plain Markdown. Generated components
+such as `::file-links` retain their Markdown lists and portable links; internal
+render-tree metadata is removed before dry-run output or provider delivery.
+For example, two directives produce two independent listings:
+
+```markdown
+### Modes
+
+::file-links ./modes/*.md
+
+### OSC
+
+::file-links ./osc/*.md
+```
+
 ```sh
 claudine compose @commit.md
 claudine compose --codex @commit.md
@@ -357,7 +372,7 @@ Steps:
 
 The composed prompt is sent to the provider. Output streams to the terminal with Markdown-to-terminal rendering in non-interactive mode.
 
-> **Deferred lifecycle keys.** The Prepare stage composes every frontmatter key *except* the seven lifecycle event keys (`initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, `loop`). Those keep their authored `{{ … }}` spans raw in `effective_frontmatter`; Claudine interpolates them through Darkmatter a **second time, at event-time**, so they can read the runtime globals (`err`, `timing`, `current`, `current_env`) and the live document state. See [lifecycle.md — When Lifecycle Properties Interpolate](flow-control/lifecycle.md#when-lifecycle-properties-interpolate). The single exception is `shell` commands (positional `shell: "…"` or key/value `command:`), resolved against early-binding surfaces at pre-flight so the approved command is byte-identical to the executed one.
+> **Deferred lifecycle keys.** The Prepare stage composes every frontmatter key *except* the seven lifecycle event keys (`initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, `loop`). Those keep their authored `{{ … }}` spans raw in `effective_frontmatter`; Claudine interpolates them through Darkmatter a **second time, at event-time**, so they can read the runtime globals (`err`, `timing`, `current`) and the live document state. See [lifecycle.md — When Lifecycle Properties Interpolate](flow-control/lifecycle.md#when-lifecycle-properties-interpolate). The single exception is `shell` commands (positional `shell: "…"` or key/value `command:`), resolved against early-binding surfaces at pre-flight so the approved command is byte-identical to the executed one.
 
 ## Inline Composition
 
@@ -365,8 +380,7 @@ Inline composition uses the `prompt` frontmatter property as the request and
 launches the agent **on the document itself**: the agent is told the file's
 native absolute path, writes the requested body (and any requested frontmatter)
 into that file, and returns a short summary as its final response. This restores
-the 2026-03-17 file-aware flow
-(`fixes/2026-09-05-inline-flow-and-validations/spec.md`, D3).
+the 2026-03-17 file-aware flow.
 
 ```sh
 claudine inline-compose @research.md
@@ -736,7 +750,7 @@ What each error focuses on:
 
 | Error | Focus |
 |---|---|
-| Lifecycle guards, `proxy.with`/`set` shape errors, `InvalidFileReference`, the prompt/agent/model/interactive/hash type errors, `SchemaLoad` | the named property path (sequence indexes such as `initialize.stack[0].action[1].set` resolve; a sequence task's `tasks[0].…` path matches its unique authored suffix) |
+| Lifecycle guards, `proxy.with`/`set` shape errors, `InvalidFileReference`, the prompt/agent/model/interactive/hash type errors, `SchemaLoad` | the named property path (authored lifecycle paths such as `initialize[0].then[1].set` resolve; a sequence task's `tasks[0].…` path matches its unique authored suffix) |
 | `SchemaValidation`, `MissingProperties`, `UnresolvedFileReference`, `UnsupportedInteractiveSchema` | every named property, both where the frontmatter sets it and where `$schema` declares it: under an inline `$schema` mapping, or in **every** arm of a `$schema` union |
 | `SchemaParse` | the offending `$schema.<property>` line (a grammar span advances into a multi-line value), else the `$schema:` line |
 | `FrontmatterParse` | the line the YAML parser reported; for a near-miss `----` fence, the fence line |
@@ -903,7 +917,7 @@ Turning dry run into lifecycle simulation is an explicit non-goal. The one cavea
 
 Dry-run output follows Unix stream conventions so `claudine compose --dry-run doc.md > body.md` captures only the body:
 
-- **stdout** — the composed document body (the data product).
+- **stdout** — the composed document body as plain Markdown, matching the prompt sent to the provider.
 - **stderr** — the finalized YAML frontmatter (syntax-highlighted) followed by a metadata table.
 
 The metadata table rows, in order: **Document** (frontmatter `name`, or the relative path, rendered as a blue OSC8 link), **Description** (italic + dim, only when set, and shown exactly as authored: Markdown such as `**bold**` or `_emphasis_` in it is not interpreted, so a file name like `_pr/open.md` keeps every character), **Agent** (the resolved provider name when one is selected, or a classified resolution breakdown — no-agent, invalid frontmatter hint, not-installed hint, multi-suggestion list, auto-selected single suggestion, or zero-installed list — rendered as a multi-line cell), **Model** (the resolved model, or `default`), **YOLO** (`true`/`false`), **Session** (`interactive` or `non-interactive` with the resolved source in parentheses, e.g. `interactive (frontmatter)` or `non-interactive (--no-interactive)`), **Area** (the focused monorepo area, only when inside a monorepo), and **Deferred** (the lifecycle event keys left raw in the YAML block above because they interpolate at event-time, only when at least one such key is present — so a raw `{{err.code}}` span there reads as intentional, not as an unresolved-variable bug).
@@ -987,13 +1001,13 @@ initialize → start → (success | blocked | failure) → finalize → loop
 - **`finalize`** fires once per iteration, immediately after the terminal event.
 - **`loop`** is the post-`finalize` gate. Lifecycle concerns authored inside the `loop:` block run first, then the `while`/`until` condition is evaluated, then per-iteration mutations are applied only when continuing. The gate follows every iteration, including the first, so a loop always runs at least once.
 
-Legacy prompts that only declare `start`, `success`, `blocked`, and `failure` continue to behave the same way. See [lifecycle.md](flow-control/lifecycle.md) for the full lifecycle reference, including stacks, control actions, the `err`/`timing`/`current`/`current_env` globals, and examples.
+Legacy prompts that only declare `start`, `success`, `blocked`, and `failure` continue to behave the same way. See [lifecycle.md](flow-control/lifecycle.md) for the full lifecycle reference, including stacks, control actions, the `err`/`timing`/`current` globals, and examples.
 
 Each lifecycle property interpolates **when its event fires**, not during the initial compose — Darkmatter defers the seven lifecycle keys from compose-time resolution (so their `{{ … }}` spans survive raw in `effective_frontmatter`) and Claudine re-interpolates each property/action string through Darkmatter just-in-time, against the live document state plus the in-scope late-binding globals. Resolution fails closed before any side effect dispatches. See [lifecycle.md — Binding Time: Early vs Late](flow-control/lifecycle.md#binding-time-early-vs-late).
 
 ### Loop vs lifecycle interpolation
 
-Claudine renders `{{ … }}` templates on two frontmatter surfaces: **loop action values** (`set`/`append`/`prepend`/`merge`, via `looping::actions::render_action_value`) and **lifecycle event text** (via the Darkmatter DM2 substrate `SubtreeCompose`). The loop/capability API keeps the positional spelling `set(key, value)`; Claudine lifecycle YAML uses only `set: {property: value}`. Both consume the *same* Darkmatter expression core — `parse` / `evaluate` / `ExpressionFinder` / `scalar_string` over an `EvaluationLookup` — so the loop renderer is **not** a second expression engine; it is a loop-specific value renderer sharing that core. A [shared conformance matrix](../../lib/src/composition/interpolation_conformance.rs) pins the overlap: literal/mixed strings, whole-value typed expansion, arrays/objects, the `doc` namespace, functions, string-literal escaping, and malformed-expression fail-closed behavior all resolve **identically** from the same input and state.
+Claudine renders `{{ … }}` templates on two frontmatter surfaces: **loop action values** (`set`/`append`/`prepend`/`merge`, via `looping::actions::render_action_value`) and **lifecycle event text** (via the Darkmatter DM2 substrate `SubtreeCompose`). The loop/capability API keeps the positional spelling `set(key, value)`; Claudine lifecycle YAML uses only `set: {property: value}`. Both consume the *same* Darkmatter expression core — `parse` / `evaluate` / `ExpressionFinder` / `scalar_string` over an `EvaluationLookup` — so the loop renderer is **not** a second expression engine; it is a loop-specific value renderer sharing that core. A [shared conformance matrix](../../lib/src/composition/interpolation_conformance.rs) pins the overlap: literal/mixed strings, whole-value typed expansion, arrays/objects, the `fm` namespace, functions, string-literal escaping, and malformed-expression fail-closed behavior all resolve **identically** from the same input and state.
 
 Two differences remain between the renderers:
 
@@ -1044,6 +1058,15 @@ For each property declared in `$schema`, claudine routes the validation outcome 
 
 The drop-and-retry for invalid optionals is automatic; users see the discarded value via the `dropping optional schema property with invalid value` log line.
 
+`Missing` means a top-level property is absent. A field missing *inside* a
+value is that value's problem, routed by the property's own row: with
+`config: '{ name: string(required) }(required)'` and `config: {}`, `config` is
+present but invalid, never a `name` property to collect. Every report keeps
+the problem's JSON Pointer: that `SchemaValidation` message reads
+`/config: "name" is a required property`, and a dropped optional's reason
+leads with the pointer when the problem lies inside the value
+(`/content_policy/1: "Duration(3mo)" is not valid under any of the schemas …`).
+
 The `Missing` row above is the **launch** view, and it splits by mode and by
 constraint. `eager` means "validate at launch when present"; `required` means
 "the value must be present by the time the composition completes".
@@ -1086,7 +1109,8 @@ When Interactive Mode is allowed, claudine first prints a per-property status re
 | `boolean` / `boolish`                          | boolean switch                          |
 | `number` / `numberlike`                        | text input with parse-and-retry         |
 | `string` / `date` / `datetime` / `time` / `url` / `email` / `file` | text input with format hint |
-| `object`, `any`, property-level union, root-level union without projection | `UnsupportedInteractiveSchema` |
+| `alphanumeric` / `shell`                       | plain text input                        |
+| `object`, `unknown` (`any`), property-level union, root-level union without projection | `UnsupportedInteractiveSchema` |
 
 Each widget renders inline, directly below the status report, in a viewport sized to its label, rows, and help hint (choosers show at most 8 terminal rows and scroll beyond that). None switches to the alternate screen, so earlier output stays in scrollback. Numeric inputs reprompt with an inline error on parse failure instead of aborting. Collected values feed back into the override set; composition re-runs with the new overrides before any provider session starts.
 
@@ -1130,7 +1154,7 @@ In a root union, an **existing** file outside a simplified arm's declared `match
 
 A partial such as `cli` names no file yet, so it rules no arm out; a settled `kind: fix` still offers only the `fixes` tree. Paths are compared in `/` spelling relative to the launch directory, the same anchor the chooser walks, so every file the chooser offers is one its arm accepts. When the late verdict reports an unresolved value on a union whose literal discriminant is settled, the chooser searches only that arm's glob.
 
-Every report of an unresolved caller value names the directory that value was resolved from, which is the launch directory for `key=value`, not the prompt's directory. This holds for the verdict reached after `initialize` as well as for the early pass. When Interactive Mode is denied (not both stdin and stderr TTYs, `--silent`, etc.), the original error is preserved byte-for-byte so scripts and CI output are unaffected. The directory walk lives in `claudine-cli`, and the glob comparison is Darkmatter's `FileMatchGlobs`, the one validation uses; the library only classifies the failure into the typed `UnresolvedFileReference { property, provided, patterns }` signal and never gains a `globset`/`ignore` dependency.
+Every report of an unresolved caller value names the directory that value was resolved from, which is the launch directory for `key=value`, not the prompt's directory. This holds for the verdict reached after `initialize` as well as for the early pass. When Interactive Mode is denied (not both stdin and stderr TTYs, `--silent`, etc.), the original error is preserved byte-for-byte so scripts and CI output are unaffected. The directory walk lives in `claudine-cli`, and the glob comparison is Darkmatter's `FileMatchGlobs`, the one validation uses; the library only classifies the failure into the typed `UnresolvedFileReference { property, provided, alternatives, .. }` signal and never gains a `globset`/`ignore` dependency. `alternatives` (`Vec<Vec<Vec<String>>>`) is an OR over root-union arms of an AND over one property's `match(...)` groups: a file qualifies when it satisfies every group of some alternative. A single schema gives one alternative holding every group, including groups a reused named type inherits; an undecided root union gives one alternative per contending arm, so one arm's exclusions never apply to another. `InteractiveShape::File` carries the same `alternatives` field, with one alternative, or none for a bare `file`.
 
 Supplied eager file inputs are resolved **before `initialize` consumes them**,
 including on a proxy target that first declares their file schema. Candidate
@@ -1221,19 +1245,17 @@ The composition completion engine consults `$schema` when the cursor sits on a s
 
 Plain `ctx.*` in a composed document describes the caller's **launch context** — the directory Claudine was invoked from and the repository/package-area facts projected from it — never the prompt document's storage location and never the mutable process CWD (which the wrapper deliberately moves to the repo root).
 
-- **One owner.** The launch anchor and the launch repository/topology/environment/host evidence are paired as a single operation on `InvocationContext` (`capture_launch_context` for a fresh document epoch, `extend_launch_context` for a same-epoch reread). A caller cannot combine a launch directory with prompt-derived evidence, so moving a prompt, task, group, overlay, or system-prompt file cannot change launch-facing `ctx.*` values (`ctx.area`, `ctx.repo_root`, `ctx.current_packages`, …). A source stored in another repository never substitutes that repository for the launch repository.
+- **One owner.** The launch anchor and the launch repository/topology/host evidence are paired as a single operation on `InvocationContext` (`capture_launch_context` for a fresh document epoch, `extend_launch_context` for a same-epoch reread), together with the environment of the document that context is a view of (see [One Environment per Document](#one-environment-per-document)). A caller cannot combine a launch directory with prompt-derived evidence, so moving a prompt, task, group, overlay, or system-prompt file cannot change launch-facing `ctx.*` values (`ctx.area`, `ctx.repo_root`, `ctx.current_packages`, …). A source stored in another repository never substitutes that repository for the launch repository.
 - **`ctx.cwd` is invocation state.** Darkmatter exposes the absolute, portable launch directory through its no-I/O `Invocation` context group. Supplied invocation evidence never rediscovers the process CWD; ambient compatibility capture reports `null` with a partial-capture diagnostic if its one boundary read fails.
 - **Caller file parameters retain their authoring anchor.** Darkmatter materializes only overrides whose selected effective schema arm is `file` or `file(eager)`. Lazy local values retain the first unprobed candidate, eager values select the first existing file, recursive lazy values are rejected, and remote lazy values remain URLs. The raw override stays in the input layer while effective frontmatter and expressions receive the anchored absolute value, so later document handoffs cannot reinterpret the caller's relative text.
 - **`ctx` is evaluated once for each composition run.** A composition run is one document being composed and executed: a document invoked directly or adopted through `proxy`, each sequence step (each task of a serial group; a parallel group shares one capture until a sibling re-enters), each loop iteration, and each retry or resume attempt. Transclusion does not start a run: a document and every file it includes share one `ctx`. `current` is observed once per lifecycle event. Each run prepares one target-adjusted early-binding snapshot after provider/model resolution — a new document epoch — and reuses that exact snapshot through shell preflight, body and effective-frontmatter composition, schema evaluation, loop conditions, and every lifecycle event of the run. Only the groups the run's composed tree names are captured, so a run that names no Git fact observes no Git state.
-- **Git working state belongs to the run; everything else to the invocation.** Git working state — `branch`, `worktree`, `merge_conflicts`, the staged, dirty, and untracked file keys, and `recent_commits` — can change between runs, including by another process, so each run observes it once, on the run's first request for it, and holds it for the rest of the run. Which run first mentioned a property has no effect on what a later run sees. The launch directory, repository identity, package topology, area, host facts, languages, documents, and the environment are observed once per invocation and never rediscovered, so a hop cannot move `ctx.cwd` or `ctx.repo_root`.
+- **Git working state belongs to the run; everything else to the invocation.** Git working state — `branch`, `worktree`, `merge_conflicts`, the staged, dirty, and untracked file keys, and `recent_commits` — can change between runs, including by another process, so each run observes it once, on the run's first request for it, and holds it for the rest of the run. Which run first mentioned a property has no effect on what a later run sees. The launch directory, repository identity, package topology, area, host facts, languages, and documents are observed once per invocation and never rediscovered, so a hop cannot move `ctx.cwd` or `ctx.repo_root`. The environment sits between the two: each document captures it once and every run of that document reuses it (see [One Environment per Document](#one-environment-per-document)).
 
   ```md
   ---
   start:
-      stack:
-          - action:
-                - shell: "git add notes.md"
-                - proxy: ./commit.md
+      - shell: "git add notes.md"
+      - proxy: ./commit.md
   ---
   ```
 
@@ -1242,11 +1264,128 @@ Plain `ctx.*` in a composed document describes the caller's **launch context** �
 - **A staged document reads its root before `initialize`.** A document that declares `initialize` captures what its root page names — text, frontmatter, lifecycle blocks, and body — before `initialize` runs, and follows no include until afterwards. The post-`initialize` reread stays in the same run: a group already observed is reused, never observed again. **The one exception is an include.** An included file cannot be read before `initialize`, which may be what creates it, so a group that an include is the first to name is captured on first demand, after `initialize`, and held for the rest of the run.
 - **Parallel groups share at launch and refresh on re-entry.** Before any sibling starts, a parallel group captures the union of what its tasks and their prompt documents name, once, and every sibling's first run starts from that view of the working tree. A sibling that retries, resumes, proxies, or begins another loop iteration is a new run and observes the working tree as it is then, including what its siblings changed. Sharing covers Git evidence only: each task layers its own resolved `ctx.agent`, `ctx.model`, `env.AGENT`, and `env.MODEL` over it.
 - **Reuse is observable and attributable.** Every canonical preparation carries a Claudine-local document-epoch token whose recorder owns that epoch's launch construction, same-epoch extensions, ambient fallbacks, and populated-context observations under the stable consumer names `preflight`, `body`, `effective-frontmatter`, `loop-condition`, and `lifecycle`. The recorder is separate from Darkmatter's `ComposeContext`; overlapping parallel sequence workers therefore cannot contribute to one another's exact maps. Performance reports project both invocation totals and each sorted epoch map. Git working-state observations are counted apart from stable discovery, per group, and the `--perf` note lists them as `volatile observations [...]`: one per requesting run, never more. Canonical preparation records a fallback on the owning epoch if its prepared context is absent, so dropping the snapshot cannot pass a zero-fallback assertion invisibly.
-- **Target identity is layered, not captured.** `ctx.agent`, `ctx.model`, `env.AGENT`, and `env.MODEL` reflect the resolved target's environment overrides applied on top of the launch snapshot, preserving target-identity precedence on every route.
+- **Target identity is layered, not captured.** `ctx.agent`, `ctx.model`, `env.AGENT`, and `env.MODEL` reflect the resolved target's environment overrides applied on top of the document's captured environment, preserving target-identity precedence on every route.
 - **The source context stays source-relative.** The active document's `SourceContext` (its authoring base, repository identity, and `FileResolutionContext`) remains authoritative for document-authored file references, transclusion, `$schema` discovery, and provenance. Source-relative resolution is unchanged by this contract.
-- **`current.*` and `current_env.*` are the lazy roots.** They are Darkmatter reserved roots, not a fallback for a missing prepared `ctx.*`: `current.<key>` observes a fact through the invocation's refresh capability once per lifecycle event — every read in one event's notification fields and stack sees the same value, and the next event observes afresh — and `current_env.<KEY>` rereads the live process environment. A key the invocation cannot observe renders `null` with a `PartialRuntimeCapture` diagnostic — never an ambient probe. Lazy is bounded by the request: Repository metadata and topology (`repo`, `repo_root`, `packages`, `area`, and the rest of the repository keys) are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does; only mutable Git and filesystem facts (`branch`, `recent_commits`, `dirty_files`) and `current_env.*` refresh. See [Context Variables — Binding time](state-management/context-variables.md#binding-time-eager-ctx-lazy-current).
+- **`current.*` is the lazy root.** It is a Darkmatter reserved root, not a fallback for a missing prepared `ctx.*`: `current.<key>` observes a fact through the invocation's refresh capability once per lifecycle event — every read in one event's stack sees the same value, and the next event observes afresh. A key the invocation cannot observe renders `null` with a `PartialRuntimeCapture` diagnostic — never an ambient probe. Lazy is bounded by the request: Repository metadata and topology (`repo`, `repo_root`, `packages`, `area`, and the rest of the repository keys) are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does; only mutable Git and filesystem facts (`branch`, `recent_commits`, `dirty_files`) refresh. `current_env` is an ordinary frontmatter property, not a root. See [Context Variables — Binding time](state-management/context-variables.md#binding-time-eager-ctx-lazy-current).
 
 In sequences, the graph phase runs before per-task target selection, so graph-resolved shell bytes cannot legally reference target identity: a command referencing `ctx.agent`, `ctx.model`, `env.AGENT`, or `env.MODEL` fails graph preflight with a typed target-identity rejection directing the author to the task that owns the target. Static bracket access such as `ctx["agent"]` is canonicalized to the same identity path. A computed index rooted at `ctx` or `env` also fails closed because its dynamic key could select a target-dependent leaf; computed indexes under other namespaces are unaffected. Per-task and just-in-time audits — where the selected target's environment is available — continue to expand those roots. The capture-owner drift guard in `cli/tests/l1/composition_seams.rs` rejects any new direct prepared-context capture outside the invocation owner and its allowlisted compatibility sites.
+
+## One Environment per Document
+
+Every document Claudine runs reads **one environment map**, captured once when
+that document starts and kept for its whole lifecycle. Within a document,
+`{{ env.X }}`, a `{{X}}/file.md` reference, and `echo $X` in a shell command
+always agree. Two documents in one invocation may see different values, because
+each captured its own.
+
+These are documents, and each captures its own map before its `initialize`:
+
+| Document | Captures |
+| --- | --- |
+| The launched document (`claudine compose`, `inline-compose`, `sequence`) | once, at launch |
+| Each sequence step and its task | when the step starts |
+| Each serial group leg | when the leg starts |
+| Each parallel group leg | before any leg of the group starts, in declaration order |
+| Each `proxy` target | after the target is resolved, before it is prepared |
+
+These are not new documents, so they reuse the map of the document they belong
+to: transcluded files, loop iterations, `retry` and `resume` attempts, lifecycle
+events and their handlers, and `finalize`.
+
+```md
+---
+notes: "{{ env.NOTES_DIR }}/today.md"
+start:
+    - shell: "ls $NOTES_DIR"
+    - proxy: ./summarize.md
+---
+::file {{NOTES_DIR}}/index.md
+```
+
+The `notes` value, the transcluded `index.md`, and the `ls` in the `start`
+stack all read the router's `NOTES_DIR`, on every retry and loop iteration of
+the router. `summarize.md` captures its own map when the `proxy` fires, and its
+`{{ env.NOTES_DIR }}` reads that map. In an ordinary run Claudine's environment
+does not change between documents, so successive maps hold the same values; the
+contract is what keeps each document self-consistent when they do differ.
+
+Every consumer in a document reads its map:
+
+- `env.*`, the environment values in `ctx` (`ctx.agent`, `ctx.model`), and the
+  lazy `current.*` evidence;
+- env-expanded file references, schema roots (`SCHEMAS_DIR`), and transclusion;
+- model selection, loop settings, and shell approval;
+- shell children: `::shell`, `::shell-block`, frontmatter `$( … )`, lifecycle
+  `shell` actions, and a task's `shell:`, `setup:`, and `teardown:` commands.
+  A child starts from the document's map, not from Claudine's process, and only
+  the variables the document's map changes relative to the launch map are
+  rewritten; the home variables are never rewritten.
+
+A child shell's `export` changes nothing outside that child, so it cannot move
+a later document's environment. Claudine itself rewrites `PWD` when it switches
+a child's working directory, so a captured map keeps the launch value of `PWD`;
+that bookkeeping is never read as a changed environment.
+
+```mermaid
+flowchart TD
+    L["launch: capture map L"] --> P["sequence preflight<br/>approves shell text under L<br/>plans models under L"]
+    P --> S1["step 1: capture map A"]
+    S1 --> C1{"approved text resolves<br/>the same under A?"}
+    C1 -->|yes| R1["run step 1<br/>(env, files, shells, model read A)"]
+    C1 -->|no| X1["refuse before anything runs"]
+    R1 -.->|"proxy fires"| T["target: capture map T<br/>before its initialize"]
+    R1 --> S2["step 2 is a parallel group"]
+    S2 --> G1["leg 1: capture map B1"]
+    S2 --> G2["leg 2: capture map B2"]
+    G1 --> C2["each leg re-checks its approved text,<br/>then runs under its own map"]
+    G2 --> C2
+```
+
+### Approval under a later document's map
+
+Sequence preflight approves every `shell:`, `setup:`, and `teardown:` command
+before any step runs, so it resolves them under the launch map. When a later
+task captures its own map, it resolves each approved command again under that
+map, before any of its stages runs:
+
+- identical text runs as approved;
+- changed text is refused with `CompositionError::SequenceShellApprovalChanged`,
+  which names the command, the approved and resolved text, and the variables
+  that changed. Nothing in the task runs.
+
+```text
+preflight (launch map TARGET=staging):  shell: deploy {{ env.TARGET }}  approved as "deploy staging"
+step 2 (its map TARGET=prod):           resolves to "deploy prod"  refused: changed TARGET
+```
+
+A preflight approval covers only the exact text it approved. **Planned:**
+approval of the command template, so that a later task's changed text can run
+without a refusal. Prompt and step documents are unaffected: they already
+approve the exact text they are about to run when they run it.
+
+### Model selection under a later document's map
+
+Preflight plans every step's model under the launch map, because the review
+screen and `--dry-run` need the plan before any step runs. When a step or group
+leg starts, an environment-derived model is selected again from its own map,
+and that model is the one that runs. A model given with `--model` or confirmed
+on the review screen stands. The provider is never selected again, because no
+environment variable chooses it. A `proxy` target selects under its own map as
+part of its preparation. See [Sequences — Phase 1](flow-control/sequences.md#phase-1--static-preflight).
+
+### In code
+
+`InvocationContext` is a view of one document. `enter_document(DocumentEnvironment)`
+returns a view whose environment-dependent state (the request snapshot map, the
+launch `FileResolutionContext` map and the tree root it selects, and the child
+baseline) all come from the new map; home, launch CWD, repository and host
+evidence, caches, and the launch `@` scope stay shared. `capture_document()`
+captures a map from the installed `EnvironmentSource`
+(`with_environment_source`); with none installed it re-enters the launch map,
+so the library never reads the process. `document_environment()` and
+`DocumentEpoch::environment()` expose the map, `shell_runner()` gives the
+document's shell runner, and `InvocationWorkSnapshot::document_environment_captures`
+counts one capture for the launch document plus one per entered document.
 
 ## Document Handoffs and the Equivalence Contract
 
@@ -1297,7 +1436,17 @@ The table describes live entry. Direct documents with an authored `initialize` k
 
 ### Retry and resume re-entry
 
-Retry and resume replace only the **provider-attempt slice** of the active document. They refresh the document canonically (a fresh read, full validation), keep the document's overlay and proxy provenance, and retain and decrement their own budgets — a retry cannot reset its budget by replacing the attempt. Retry drops any live session and starts a fresh attempt; resume keeps the session and delivers its follow-up message. Proxy and the next loop iteration are the two transitions that grant *fresh* budgets, because both are new active-document scope; retry, resume, proxy, and loop counters each have their own labeled home rather than sharing one counter.
+Retry and resume replace only the **provider-attempt slice** of the active document. They refresh the document canonically (a fresh read, full validation), keep the document's retained proxy overlay and proxy provenance, and retain and decrement their own budgets — a retry cannot reset its budget by replacing the attempt. Retry drops any live session and starts a fresh attempt; resume keeps the session and delivers its follow-up message. Proxy and the next loop iteration are the two transitions that grant *fresh* budgets, because both are new active-document scope; retry, resume, proxy, and loop counters each have their own labeled home rather than sharing one counter.
+
+**A retry can carry a one-read overlay.** `retry: { with: { … } }` evaluates its mapping once when the directive fires (the same evaluation as `proxy.with`) and applies the result to the retried attempt's fresh read only. It is layered over the retained proxy overlay, so a key both name takes the retry's value. The overlay is never written to disk, and nothing after that one transition sees it: a later `retry` without `with`, a `resume`, or a `proxy` adoption reads the document without it. An overlay that fails to evaluate takes no transition and spends no retry budget. See [Flow Control Reference](flow-control/flow-control-reference.md).
+
+```yaml
+failure:
+    - retry:
+        max_attempts: 2
+        with:
+            reason: "{{ err.msg }}"
+```
 
 **Launch identity is rebuilt at the fresh-read boundary, not snapshotted at adoption.** Every retry/resume re-materializes the active document from disk and recomputes the whole launch bundle against *that* read — provider, the profile and binary it selects, the resume protocol that profile supports, model, interactivity, the permission mode `--yolo` actually achieves for that pair, the structured-output shape it implies, the MCP tag set lexed from the refreshed body, the provider argv, and the environment overlay (`harness_orch/loop_control/target_launch.rs::rebuild_launch_identity`, called at every fresh-read boundary). An attempt therefore launches with the identity the document it is about to run resolves to now, not with an adoption-time snapshot. What the document does not name falls back to the invocation's plan: a document with no `agent:` keeps the planned provider, and one with no `model:` (and no `--model`) keeps the planned model while it keeps that provider. A sequence step's plan is its reviewed or planned target; elsewhere the planned model is the invocation's own, minus a model the launched document's frontmatter chose, so a retry after `model:` is removed launches without it.
 
@@ -1317,7 +1466,7 @@ Retry and resume want opposite things from that rebuild. A **retry** opens a fre
 
 The target's stabilized frontmatter is the basis for the target's decisions. What is rebuilt per target today:
 
-- **Context** — the prepared document stores the exact `ComposeContext` it composed against, captured once per document epoch from the invocation's launch context (see [Launch-Anchored Prepared Context](#launch-anchored-prepared-context)) with the resolved target's identity overrides applied. Body interpolation, effective frontmatter, lifecycle DM2 lookup, schema and file evaluation, and shell preflight all read that one stored snapshot; nothing recaptures ambient context at runtime, which matters because the wrapper deliberately moves the process CWD to the repo root. `current.<key>` and `current_env.<KEY>` remain the late-binding surfaces, served by the invocation's refresh capability, and are explicitly *not* a fallback for a missing prepared `ctx.*`.
+- **Context** — the prepared document stores the exact `ComposeContext` it composed against, captured once per document epoch from the invocation's launch context (see [Launch-Anchored Prepared Context](#launch-anchored-prepared-context)) with the resolved target's identity overrides applied. Body interpolation, effective frontmatter, lifecycle DM2 lookup, schema and file evaluation, and shell preflight all read that one stored snapshot; nothing recaptures ambient context at runtime, which matters because the wrapper deliberately moves the process CWD to the repo root. `current.<key>` remains the late-binding surface, served by the invocation's refresh capability, and is explicitly *not* a fallback for a missing prepared `ctx.*`.
 - **`initialize` and shell** — the target runs shell-free `initialize`, rereads the stabilized target so initialization mutations are visible, and then audits the remaining lifecycle and template shell surfaces. Shell actions in initialization and shell expansion in bootstrap frontmatter are forbidden regardless of approvals. Early failure/finalize handlers remain shell-free until successful preflight reaches `start`. An `initialize` proxy may chain another proxy; the chain stabilizes before any launch.
 - **Schema and diagnostics** — the target's `$schema` validates the target's effective frontmatter (including any `with:` overlay), and a given failure has one typed identity whichever route reached it.
 - **Launch identity** — when the handoff surfaces to the command-owned coordinator, `compose/prep.rs::prepare_and_run_active_document` re-prepares the target as a fresh document and re-enters the production selection/MCP/argv pipeline, rebuilding from the target's own frontmatter under explicit-CLI precedence: provider selection, profile/binary sub-selection, the argv entrypoint and flags, MCP runtime injection, the effective child environment, interactivity and structured-output mode, dispatch/correlation configuration, model selection, document-loop ownership/recognition, child CWD, and system-prompt delivery. A proxied target therefore selects its authored `agent:`/`model:`, gets its own provider binary and MCP server set, and acquires its own `loop:`, matching a direct invocation. Verified by L2 equivalence rows including a provider *switch* (`level2_lifecycle_equivalence_target_launch_bundle_matches_direct_run`, router `goose` → target `codex`; `level2_lifecycle_equivalence_target_mcp_injection_matches_direct_run`, router `codex` → target `gemini`).
@@ -1348,7 +1497,7 @@ The coordinator is nested **inside** the command's own ownership — a handoff c
 
 ### Backward compatibility
 
-The authoring surface is additive: positional `proxy: target.md` is unchanged, key/value `{ action: proxy, target: target.md }` is unchanged, caller overrides continue to survive every handoff, cycle protection and hop limits are unchanged, and action parameters other than `proxy.with` still reject direct mapping values.
+The authoring surface is additive: short-form `proxy: target.md` and long-form `proxy: { target: target.md }` both hand off, caller overrides continue to survive every handoff, cycle protection and hop limits are unchanged, and action parameters other than `proxy.with` and `retry.with` still reject direct mapping values.
 
 > Reader note: the runtime refactor intentionally corrects behavior that
 > depended on the router path. A proxied target may now execute additional loop
@@ -1357,7 +1506,7 @@ The authoring surface is additive: positional `proxy: target.md` is unchanged, k
 > invocation. Those are compatibility fixes required by the equivalence
 > contract, not preserved route quirks.
 
-All four fixes named in that note are live today: a proxied target may execute additional loop iterations, select its authored provider/model, request approval for its own shell actions, and surface the same typed error direct invocation produces. Each is a compatibility fix required by the equivalence contract, not a preserved route quirk; see [`notes/acceptance-map.md`](../../features/2026-07-13-proxy-with/notes/acceptance-map.md) for the named criteria and their passing L2 rows.
+All four fixes named in that note are live today: a proxied target may execute additional loop iterations, select its authored provider/model, request approval for its own shell actions, and surface the same typed error direct invocation produces. Each is a compatibility fix required by the equivalence contract, not a preserved route quirk.
 
 ## Migrating from the Retired Harness DSL
 
@@ -1554,8 +1703,8 @@ Sequences use one unified step/task model. A task declares exactly one executabl
 
 Execution has two phases:
 
-1. **Static preflight** walks the complete task graph before any task runs. Dynamic sources resolve once, referenced documents load transitively with cycle detection, schemas collect into one validation pass, and every reachable shell command is resolved and approved byte-for-byte.
-2. **Just-in-time execution** re-reads and composes each task when its turn begins, so prior inline writes and runtime mutations are visible.
+1. **Static preflight** walks the complete task graph before any task runs. Dynamic sources resolve once, referenced documents load transitively with cycle detection, schemas collect into one validation pass, and every reachable shell command is resolved under the launch environment and approved byte-for-byte.
+2. **Just-in-time execution** captures each step's (or group leg's) own environment, then re-reads and composes each task when its turn begins, so prior inline writes and runtime mutations are visible. A task whose approved command resolves to different text under its own environment is refused before it runs (see [One Environment per Document](#one-environment-per-document)).
 
 `outputs` is the sole task-output accumulator. Groups may run serially or in parallel with bounded `max_parallel`, snapshot isolation, declaration-ordered mutation merge, and all-siblings-complete failure handling. Parallel groups reject write-back collisions during preflight; group-level loops remain unsupported until commit semantics are defined.
 
@@ -1600,7 +1749,7 @@ The original six-stage summary (`Resolve → Pre-Flight → Prepare → Select P
 
 ### Request-Owned Context
 
-The `claudine` binary reads its process exactly once, when it dispatches a command: Darkmatter's `RequestSnapshot::from_process()` records the launch directory, HOME, and environment, and every later step works from that snapshot. Canonical wrappers and composition commands create one `InvocationContext` from it before resolving the first source. It freezes the launch CWD, HOME, environment, launch repository evidence, and launch `FileResolutionContext`, then projects the existing launch, workspace, and event context types from those facts. Once a file reference resolves, a `SourceContext` carries that document's base directory, repository/package roots, repository observation, and source-derived `FileResolutionContext` through preparation, preflight, lifecycle evaluation, sequences, system prompts, and harness materialization.
+The `claudine` binary reads its process exactly once, when it dispatches a command: Darkmatter's `RequestSnapshot::from_process()` records the launch directory, HOME, and the launched document's environment, and every later step works from that snapshot; a later document captures only its own environment (see [One Environment per Document](#one-environment-per-document)). Canonical wrappers and composition commands create one `InvocationContext` from it before resolving the first source. It freezes the launch CWD, HOME, launch repository evidence, and launch `FileResolutionContext`, holds the current document's environment, then projects the existing launch, workspace, and event context types from those facts. Once a file reference resolves, a `SourceContext` carries that document's base directory, repository/package roots, repository observation, and source-derived `FileResolutionContext` through preparation, preflight, lifecycle evaluation, sequences, system prompts, and harness materialization.
 
 Every file-resolution context comes from Darkmatter's builder or is derived from one built context. Claudine registers its prompt conventions (`prompts/`, `.claudine/`, and the user-tier `~/.claudine` rows) as extra `@` roots on the snapshot, so the builder adds them to every context:
 
@@ -1617,7 +1766,7 @@ flowchart LR
 
 A context is never optional. Preparation, preflight, lifecycle and loop expressions, sequence sources, hook `when` conditions, completion, and system prompts all take one, and a compose runs on a `ComposeRequest` that pairs the options with it. The variables a run layers onto `ctx` (`AGENT`, `MODEL`, `YOLO`) are added to that request's environment, so an expression, `env.*`, and a `{{VAR}}` file reference read the same values. No step falls back to the process directory, HOME, or environment.
 
-Darkmatter scans each document for its required `ctx.*` groups and receives the matching evidence from the invocation owner. Canonical paths therefore reuse the same environment and repository facts instead of recapturing ambient CWD, HOME, Git, or topology downstream; evidence the owner could not supply remains a partial-capture diagnostic rather than an ambient probe. Content is still reread at retry, resume, and sequence JIT boundaries; only immutable request and repository evidence is reused.
+Darkmatter scans each document for its required `ctx.*` groups and receives the matching evidence from the invocation owner. Canonical paths therefore reuse the document's environment and the invocation's repository facts instead of recapturing ambient CWD, HOME, Git, or topology downstream; evidence the owner could not supply remains a partial-capture diagnostic rather than an ambient probe. Content is still reread at retry, resume, and sequence JIT boundaries; only immutable request and repository evidence is reused.
 
 Repository observations are request-local, not a process-global cache, and are keyed per worktree identity — the worktree root plus its worktree-specific Git directory, so linked worktrees stay distinct — with topology initialized once per distinct repository even when parallel sequence tasks enter it together. Same-repository sources reuse launch topology; multiple sources in one sibling worktree share one additional observation and topology probe; exact non-repository directories cache explicit absence, and a typed discovery failure is likewise retained rather than retried. Retained `RepoInfo` reaches file-reference scopes only through Darkmatter's `repository_scope_catalog` adapter, never by copying Sniff's package paths or rebuilding topology inside Claudine. File resolution remains source-aware because every compose receives the selected source's retained `FileResolutionContext`.
 

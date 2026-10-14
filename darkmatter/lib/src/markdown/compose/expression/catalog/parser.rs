@@ -171,7 +171,10 @@ pub(crate) fn parse_expression_function_catalog(
         .map_err(|err| error(None, None, Some("$schema"), CatalogErrorKind::SchemaDeclaration(err.to_string())))?;
     let json_schema = to_json_schema(&schema)
         .map_err(|err| error(None, None, Some("$schema"), CatalogErrorKind::SchemaDeclaration(err.to_string())))?;
-    let validator = jsonschema::validator_for(&json_schema)
+    // The structural builder registers every Darkmatter format and keyword
+    // (`darkmatter-shell`, `darkmatter-expression`, …) and asserts formats,
+    // which a bare `jsonschema::validator_for` would ignore.
+    let validator = crate::markdown::schemas::validate::build_structural_validator(&json_schema)
         .map_err(|err| error(None, None, Some("$schema"), CatalogErrorKind::SchemaDeclaration(err.to_string())))?;
     let instance = serde_json::to_value(&value)
         .map_err(|err| error(None, None, None, CatalogErrorKind::InvalidYaml(err.to_string())))?;

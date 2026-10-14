@@ -9,23 +9,29 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+mod content_policy_baseline;
 mod context_construction_guard;
+mod core_schema_types;
 mod entry_point_parity;
 mod formatting_transaction;
 mod level1_graph_index;
 mod level1_wiki;
 mod lsp_session;
 mod mapping_only_corpus;
+mod named_type_references;
 mod no_side_effects;
 mod packaging_contract;
 mod repository_contexts;
 mod schema_roots_parity;
+mod schema_yaml_spellings;
 mod shell_suffixes;
+mod standalone_stdio;
 mod stdio_subprocess;
 mod strict_mode_recovery_spike;
 mod style_markdown_parity;
 mod suggest_constraint_phase1;
 mod test_layout;
 mod undeclared_property;
+mod union_item_editor;
 mod workspace_formatting_settings;
 mod zed_extension_contract;

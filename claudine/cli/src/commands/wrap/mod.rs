@@ -466,6 +466,7 @@ fn run_provider_wrapper_inner(
             args.model.as_deref(),
             non_interactive_requested,
             has_model_env,
+            invocation.document_environment(),
             &mut |key, value| env_overrides.push((key, value)),
             &mut |warn| deferred_warnings.push(warn),
         ) {

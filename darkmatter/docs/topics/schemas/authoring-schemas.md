@@ -81,7 +81,7 @@ $schema:
 
 A **constraint** is the a way to further _constrain_ a base type. There are some constraints that are available to _all_ types and others which can only be used with a subset of types:
 
-- `required` -  can be used for any property and indicates that the property is a required property (aka, can not have a `null` value)
+- `required` -  can be used for any property and indicates that the property is a required property (aka, can not have a `null` value); the exception is a type that itself admits `null` (`null`, `unknown`, or a union with such an arm), which stays optional (see [Null-Admitting Properties](./definition.md#null-admitting-properties))
 - `length` - can be used with _some_ types like `string` or any array type but would not be allowed with a type like `boolean`
 
 For a full list of the _constraints_ available (and what _types_ can use them), you can read: [`SimplifiedSchema` Constraints](./schema-constraints.md) but here's an update of our example that takes advantage of constraints:
@@ -89,7 +89,7 @@ For a full list of the _constraints_ available (and what _types_ can use them), 
 ```yaml
 $schema:
     name: string(required)
-    age: number(min(1),max(150))
+    age: number(min(1); max(150))
     registered: boolean(required)
 ```
 
@@ -115,7 +115,7 @@ Schema's -- _by their very nature_ -- describe a data structure but by allowing 
 ```yaml
 $schema:
     name: string(required) -> An employees name
-    age: number(min(1),max(150)) -> the employee's age, remember to check legal requirements before hiring 1 year olds
+    age: number(min(1); max(150)) -> the employee's age, remember to check legal requirements before hiring 1 year olds
     registered: boolean(required) -> Flag indicating whether this person is presently employed
 ```
 
@@ -136,8 +136,7 @@ In the example above:
 - the format of an external schema file might look something like this:
     
   ```yaml
-  kind: schema
-  $schema: 
+  $schema:
       name: string(required)
       category: enum(good food, yuck, bad before expiry)
   ```
@@ -146,32 +145,18 @@ In a moment of "recursive truth" the external schema definition is defined as a 
 
 ::code ^darkmatter/docs/schemas/schema-definition.yaml
 
-A schema document has two distinct payloads:
+A schema file holds one payload, in either of two equivalent envelopes:
 
-- `$schema` is the exported schema applied to a consuming document.
-- `types` holds reusable named type definitions. Helper names do not become properties of the consuming document merely because they are declared here.
+- **pure**: `$schema` is the file's only top-level key, as in the example above
+- **tagged**: the file has exactly two keys, `kind: schema` and a `types` mapping
 
-For example, a schema can export document properties while keeping its helper types separate:
+A tagged file accepts no other keys: adding `$schema`, `description`, or
+anything else is a schema-document error. Whichever envelope you use, every
+top-level entry of the payload plays two roles. It is a property of the schema
+when a document references the whole file (`$schema: ./address-types.yaml`),
+and it is a **named type** that other definitions can reuse by name.
 
-```yaml
-kind: schema
-$schema:
-    recipient: address
-types:
-    address:
-        street: string(required)
-        city: string(required)
-```
-
-The `address` type comes from the `types` section in the same file. You can also write `address@this` if you prefer to make that explicit; both forms mean the same thing. A reference to another file still needs its source, such as `address@./address-types.yaml`.
-
-A named type also brings its constraints with it. If you define `code: string(required)` under `types`, using `code` elsewhere keeps it required; you don't need to write `code(required)` again. The same rule applies to `@this` and references to another file. See [Inheriting Constraints](./local-type-references.md#inheriting-constraints) for examples and the current implementation limitation.
-
-Built-in names such as `string` keep their normal meaning. If you give a local type the same name as a built-in, use `string@this` to select your definition. A misspelled or missing local type is an error, not a new type created automatically.
-
-> **Implementation status:** Bare local type names are not supported by the current parser yet. Until that support lands, use the explicit `@this` form. See [Local Type References](./local-type-references.md) for resolution and constraint details.
-
-A types-only library omits `$schema`:
+Inside the same file, refer to a named type by its bare name:
 
 ```yaml
 kind: schema
@@ -179,9 +164,70 @@ types:
     address:
         street: string(required)
         city: string(required)
+    letter: "{ recipient: address, sender: address }"
 ```
 
-Other schemas can import `address` by name, for example with `address@./address-types.yaml`. A whole-file schema reference to this types-only file fails with a structured **no exported schema** error. It does not turn the helper names into document properties. Discovering or importing a type library does not automatically activate a document schema or lifecycle binding scope.
+You can also write `address@this` if you prefer to make that explicit; both
+forms mean the same thing. A type from another file needs its source:
+`address@./address-types.yaml`.
+
+Because every entry is also a property, keep helper types that should not
+become document properties in a separate file and import them by name. A
+document that uses `recipient: address@./address-types.yaml` gains a
+`recipient` property, not an `address` one.
+
+Built-in names such as `string` keep their normal meaning. If you give a local
+type the same name as a built-in, use `string@this` to select your definition.
+A misspelled or missing type is an error at the reference, not a new type
+created automatically. See [Local Type References](./local-type-references.md)
+for where local names live and how they resolve.
+
+#### Presence travels with the type
+
+A named type brings **all** of its constraints with it, including `required`
+and `generated`. If you define `code: string(required)`, every property that
+uses `code`, `code@this`, or `code@./types.yaml` is required; you don't need to
+write `code(required)` again. Use-site constraints add to the inherited ones
+and never remove them. See
+[Inheriting Constraints](./local-type-references.md#inheriting-constraints)
+for how they combine.
+
+Presence belongs to the value it is declared on. Requiring a field inside an
+object type does not require the property that holds the object:
+
+```yaml
+# people.yaml
+kind: schema
+types:
+    person: "{ name: string(required), email: email }"
+```
+
+A property declared as `author: person@./people.yaml` is optional. When
+`author` is supplied, it must have a `name`.
+
+There is no use-site syntax to make an inherited `required` optional again.
+When you need both a required and an optional version of a type, declare the
+optional one directly:
+
+```yaml
+# people.yaml
+kind: schema
+types:
+    owner: "{ name: string(required), email: email }(required)"
+    draft_owner: "{ name: string(required), email: email }"   # the optional variant
+```
+
+Do not define the variant as `draft_owner: owner`: an alias inherits
+`required` again. A union with `null` does make it optional:
+`draft_owner: [owner, null]` accepts `null`, an omitted value, or a valid
+`owner` (see [Null-Admitting Properties](./definition.md#null-admitting-properties)).
+
+An inherited `generated` keeps its usual meaning. It does not create a value
+provider. Checking an authored document, as `md schema validate` and DMLS do,
+accepts a missing generated property even when it is required, because the host
+supplies the value later. Validation of the effective values at run time
+enforces `required` and checks supplied values as usual (see
+[Universal Constraints](./definition.md#universal-constraints)).
 
 To make an exported schema apply automatically, place its definition in one of the five [schema roots](./definition.md#schema-roots), searched in this order:
 
@@ -270,23 +316,23 @@ For the matching model and its implementation status, read [Schema Triggers in D
 
 ### Schemas for Global Variables
 
-Every global variable has a schema, including `doc`, `ctx`, `current`, `env`,
+Every global variable has a schema, including `fm`, `ctx`, `current`, `env`,
 `err`, and `tracking`. Darkmatter's built-in definitions start in
 [`darkmatter.yaml`](../../../schemas/darkmatter.yaml), which imports reusable
 named types from its `partials` directory. `ctx` and `current` share the same
 context type, so both expose properties such as `cwd` directly.
 
-Frontmatter is the value of `doc`. Most expressions can omit that namespace:
-`title` and `doc.title` refer to the same property. This shorthand does not change
+Frontmatter is the value of `fm`. Most expressions can omit that namespace:
+`title` and `fm.title` refer to the same property. This shorthand does not change
 how its schema is defined. A frontmatter property named `ctx`, accessed as
-`doc.ctx`, is separate from the `ctx` global.
+`fm.ctx`, is separate from the `ctx` global.
 
 The schema describes what a value can contain. The application supplies the value
 and determines when it is available. Knowing the fields of `err`, for example,
 does not make an error available during initialization. Editor assistance uses
 the schema and availability declarations without running value providers.
 
-The layering rules below apply to the properties of `doc`. Authored document
+The layering rules below apply to the properties of `fm`. Authored document
 schemas cannot redefine the other globals. The registered built-in global schema
 is not automatically applied as a collection of frontmatter properties.
 
@@ -392,15 +438,13 @@ There are two primary types of grammar files which are distinguished by their `k
 
 - Schema Definition Files (`kind: schema`)
     
-    An optional `$schema` exports the document schema. Optional `types` contains reusable named helpers. A types-only library has no exported document schema and does not automatically apply to discovered documents.
-    
-    This file type must follow the following schema definition:
+    A tagged schema file has exactly two keys, `kind: schema` and a `types` mapping; any other key is a schema-document error. Its `types` entries are both the schema's properties and its named types, exactly like the entries of a pure `$schema` file (see [External Schemas](#external-schemas)):
     
   ```yaml
-  kind: "const(schema,required)"
-  $schema: "schema -> optional exported document schema; absent in a types-only library"
-  description: "string -> a way to be more explicit about this schema's intended usage"
-  types: "schema -> you may optionally define types in this area which then become accessible as _types_ in the `$schema` property."
+  kind: schema
+  types:
+      name: string(required)
+      category: enum(good food, yuck, bad before expiry)
   ```
 
 - Schema Trigger Files (`kind: schema-trigger`)
@@ -421,7 +465,7 @@ There are two primary types of grammar files which are distinguished by their `k
       string -> allows you to describe the intent of this trigger in prose
   ```
 
-An applying standalone schema or conditional trigger supplies `$schema`. A types-only `kind: schema` library omits it. The trigger predicate catalog and complete envelope validation rules are still being finalized; these sketches do not establish additional required fields.
+A conditional trigger supplies its schema under `$schema`; a `kind: schema` file supplies it under `types`. The trigger predicate catalog and complete envelope validation rules are still being finalized; these sketches do not establish additional required fields.
 
 #### Schema Definition Files
 

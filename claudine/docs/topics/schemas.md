@@ -54,8 +54,8 @@ $schema: ./path/to/schema.md
 - [DMLS Support for Schemas]()
 - Schemas
     - Darkmatter ([all global namespaces](^darkmatter/schemas/darkmatter.yaml))
-        - [Frontmatter Base Schema (`doc` namespace)](^darkmatter/schemas/partials/doc.yaml)
-            - [Style Schema (for the `style` property in `doc` namespace)](^darkmatter/schemas/partials/tracking.yaml)
+        - [Frontmatter Base Schema (`fm` namespace)](^darkmatter/schemas/partials/fm.yaml)
+            - [Style Schema (for the `style` property in `fm` namespace)](^darkmatter/schemas/partials/tracking.yaml)
         - [Context Variables Schema (`ctx` and `current` namespaces)](^darkmatter/schemas/partials/context-variables.yaml)
         - [Error Schema (`err` namespace)](^darkmatter/schemas/partials/error.yaml)
         - [Tracking Schema (`tracking` namespace)](^darkmatter/schemas/partials/tracking.yaml)

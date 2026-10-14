@@ -55,7 +55,9 @@ use super::super::super::lifecycle::context::LifecycleErrorInfo;
 use super::super::super::lifecycle::executor::StackExecutionContext;
 use super::super::super::runtime_state::{OUTPUTS_KEY, RuntimeSnapshot, RuntimeState};
 use super::super::preflight::{GroupExecution, PreflightGroup, PreflightTask};
-use super::{PrimaryOutcome, TaskDiagnostic, TaskExecution, TaskOutcome, TaskStage, TaskStatus};
+use super::{
+    PrimaryOutcome, TaskDiagnostic, TaskExecution, TaskOutcome, TaskRun, TaskStage, TaskStatus,
+};
 use crate::render::{TaskBar, TaskLiveOutput, TaskStream};
 
 /// A poisoned result slot means a member task panicked; the group's result is
@@ -164,8 +166,9 @@ impl TaskExecution<'_> {
                     break;
                 }
             };
-            // Each serial member is a composition run of its own, so its
-            // fields and its document see what earlier members changed.
+            // Each serial member is a composition run and a document of its
+            // own, so its fields and its document see what earlier members
+            // changed, under the environment it captures here.
             let member_run = self.prompt.open_member_run(task);
             let member_stack = StackExecutionContext {
                 source_path: &task.diagnostic.source_path,
@@ -182,6 +185,10 @@ impl TaskExecution<'_> {
                 overlay: Some(scope_overlay),
                 live: stream.as_ref(),
                 run_evidence: member_run.as_ref().map(|opened| &opened.run),
+                document: member_run
+                    .as_ref()
+                    .and_then(|opened| opened.document.as_ref())
+                    .or(self.document),
                 ..*self
             };
             let outcome = member.run();
@@ -282,6 +289,15 @@ impl TaskExecution<'_> {
             .as_ref()
             .map(|opened| &opened.run)
             .or(self.run_evidence);
+        // Each leg is a document of its own and captures its own environment,
+        // in declaration order and before any leg starts, so which leg holds
+        // which capture does not depend on scheduling. The legs share the
+        // group's run, not one another's document.
+        let leg_runs: Vec<Option<TaskRun>> = group
+            .tasks
+            .iter()
+            .map(|task| self.prompt.open_leg_run(task, group_run.as_ref()))
+            .collect();
 
         let workers = group
             .max_parallel
@@ -310,9 +326,12 @@ impl TaskExecution<'_> {
                         // The stack's cells must be the member's too: a lifecycle
                         // `set` inside the task accumulates through the stack,
                         // not through `TaskExecution::runtime`.
+                        let leg_run = leg_runs[index].as_ref();
                         let task_stack = StackExecutionContext {
                             source_path: &task.diagnostic.source_path,
-                            prepared_context: group_context,
+                            prepared_context: leg_run
+                                .map(|opened| &opened.context)
+                                .or(group_context),
                             ..scope_stack.with_signal(scope_stack.signal)
                         };
                         let member_stack = task_stack
@@ -324,7 +343,12 @@ impl TaskExecution<'_> {
                             overlay: Some(scope_overlay),
                             runtime: Some(&buffers[index]),
                             live: stream.as_ref(),
-                            run_evidence: group_evidence,
+                            run_evidence: leg_run
+                                .map(|opened| &opened.run)
+                                .or(group_evidence),
+                            document: leg_run
+                                .and_then(|opened| opened.document.as_ref())
+                                .or(self.document),
                             ..*self
                         };
                         // A sibling's failure never cancels in-flight work:

@@ -691,10 +691,10 @@ fn inherited_scrub_keys() -> Vec<OsString> {
 /// inherits the wrapper's own launch identity. The production reads:
 ///
 /// - `MODEL` outranks a document's `model:` in the shared precedence chain
-///   (`lib/src/composition/select.rs:490`, reached from
-///   `resolve_model_with_hints` at `select.rs:453`), so an ambient value
-///   re-pins the model of every launch plan the suite builds and every
-///   rebuild it compares against one.
+///   (`lib/src/composition/select.rs`, reached from the CLI's
+///   `resolve_document_model` with the document environment captured from
+///   the process), so an ambient value re-pins the model of every launch plan
+///   the suite builds and every rebuild it compares against one.
 /// - `AGENT` (and its `Agent` spelling, which Unix treats as a distinct name)
 ///   selects the provider for `claudine handle`
 ///   (`cli/src/commands/handle.rs:334-335`).

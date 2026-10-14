@@ -17,6 +17,19 @@ the context's environment. Magic roots enter only through
 public context setter. Only binaries call `RequestSnapshot::from_process()`. DMLS builds one
 context per repository (`dmls/src/context.rs`, see
 [dmls.md](dmls.md#file-resolution-contexts)).
+A request's environment is the environment of the one document it composes
+(and everything that document transcludes). A host that runs several documents
+in one process gives each its own request from its own captured snapshot
+(Claudine: one per sequence step, group leg, and `proxy` target). Shell
+children inherit the composing process unless the request sets
+`ComposeOptions::with_shell_child_environment(ShellChildEnvironment)`
+(`shell_expansion::types`): the supplied raw map replaces the inherited
+environment, the executable is looked up on its `PATH` (`which::which_in`), and
+`PWD` is the command's directory. It reaches `run_action` through
+`execute_directive_outcome` (`::shell`, `::shell-block`, frontmatter `$( … )`),
+is part of the options' graph identity, and is left out of the compose-cache
+fingerprint, like `shell_working_directory`. See
+`darkmatter/docs/topics/compose-requests.md` ("One environment per document").
 A file source (root or child) outside the request's tree is admitted
 trusted-external when only that derivation validates (`source_derivation_for`,
 applied to the root in `ComposeRequest::assemble`). The schema stage validates

@@ -19,11 +19,10 @@ ground_truth: |-
 plan: "{{ dirname(spec || review) + '/plan.md' }}"
 yolo: true
 initialize:
-    stack:
-        - when: "!spec && !review"
-          action:
-              - message: "The **plan.md** planning prompt was run in the {{ctx.repo}} repo but no `spec` or `review` was provided! One -- _not both_ -- are required to use this prompt correctly!"
-              - error: "The **plan.md** planning prompt was run in the {{ctx.repo}} repo but no `spec` or `review` was provided! One -- _not both_ -- are required to use this prompt correctly!"
+    - when: "!spec && !review"
+      then:
+          - message: "The **plan.md** planning prompt was run in the {{ctx.repo}} repo but no `spec` or `review` was provided! One -- _not both_ -- are required to use this prompt correctly!"
+          - error: "The **plan.md** planning prompt was run in the {{ctx.repo}} repo but no `spec` or `review` was provided! One -- _not both_ -- are required to use this prompt correctly!"
 start:
     message: "🖊️ creating a plan for the `{{ parent_dir(underlying) }}` (**repo:** {{ctx.repo}}, {{ctx.area ? '**area:** ' + ctx.area : ''}}, **when:** {{current.time}})"
 success:

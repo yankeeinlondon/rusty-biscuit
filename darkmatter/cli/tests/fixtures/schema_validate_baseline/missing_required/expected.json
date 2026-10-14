@@ -1,1 +1,1 @@
-{"file":"doc.md","problems":[{"arm_index":null,"column":null,"description":null,"kind":"missing","line":null,"message":"\"title\" is a required property","path":"","property":"title"}],"schema":"./schema.yaml","valid":false}
+{"file":"doc.md","problems":[{"arm_index":null,"column":1,"description":null,"kind":"missing","line":2,"message":"\"title\" is a required property","path":"","property":"title"}],"schema":"./schema.yaml","valid":false}

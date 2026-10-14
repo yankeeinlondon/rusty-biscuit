@@ -24,7 +24,7 @@ parses or evaluates validation rules or handler tables.
 A composed document that still declares any retired key fails preparation with a
 typed `CompositionError::RemovedValidationKey` that names the offending key and its
 replacement surface. The scan (`scan_removed_validation_keys` in
-`composition/lifecycle.rs`) runs **before** lifecycle event blocks are parsed, so
+`composition/lifecycle/parse.rs`) runs **before** lifecycle event blocks are parsed, so
 the diagnostic is specific rather than a generic unknown-field error.
 
 | Removed key | Replacement surface |
@@ -46,6 +46,19 @@ the diagnostic is specific rather than a generic unknown-field error.
   `Proxy` lifecycle actions in the `failure`/`blocked` stack.
 - **Side-effect recovery** (the old `deviate`) → a lifecycle `shell` action followed by a
   recovery action.
+
+```yaml
+success:
+    - when: "!file_exists('target/report.md')"
+      then:
+          - error: "the agent did not write target/report.md"
+failure:
+    - when: "err.category == 'cap'"
+      then:
+          - proxy: "./fallback.md"
+      else:
+          - retry: 2
+```
 
 Timeouts (`timeout`/`step_timeout` and their `*_warn` partners) are unchanged and
 remain frontmatter properties; a timeout now routes to the `failure` lifecycle event,

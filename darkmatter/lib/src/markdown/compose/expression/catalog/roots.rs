@@ -1,12 +1,11 @@
 //! Descriptors for the reserved expression roots.
 //!
 //! A reserved root is a top-level name no frontmatter key or injected global
-//! may shadow. `current` and `current_env` are lazy mirrors of `ctx` and `env`
-//! (spec R30–R32): same keys and value types, observed when a reference is
-//! evaluated instead of at launch. The evaluator resolves them through the
-//! request's refresh authority
+//! may shadow. `current` is the lazy mirror of `ctx` (spec R30–R32): same keys
+//! and value types, observed when a reference is evaluated instead of at
+//! launch. The evaluator resolves it through the request's refresh authority
 //! ([`CurrentAuthority`](crate::markdown::compose::CurrentAuthority)); this
-//! catalog is the descriptor projection those roots publish, and enumerating it
+//! catalog is the descriptor projection the roots publish, and enumerating it
 //! observes nothing.
 
 use crate::markdown::compose::context::{ContextVariableDescriptor, context_variable_descriptors};
@@ -62,7 +61,7 @@ impl ReservedRootDescriptor {
 
 const RESERVED_ROOTS: &[ReservedRootDescriptor] = &[
     ReservedRootDescriptor {
-        name: "doc",
+        name: super::super::FRONTMATTER_ROOT,
         evaluation: RootEvaluation::Eager,
         mirrors: None,
         members: RootMembers::DocumentFrontmatter,
@@ -90,13 +89,6 @@ const RESERVED_ROOTS: &[ReservedRootDescriptor] = &[
         description: "The ctx keys, each observed when referenced. Request-owned identity, \
             source path, and resolution anchors stay fixed; mutable facts such as the branch refresh.",
     },
-    ReservedRootDescriptor {
-        name: "current_env",
-        evaluation: RootEvaluation::Lazy,
-        mirrors: Some("env"),
-        members: RootMembers::EnvironmentVariables,
-        description: "The env keys, each read from the live process environment when referenced.",
-    },
 ];
 
 /// All reserved expression roots, in display order.
@@ -109,9 +101,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn roots_are_unique_and_include_both_lazy_mirrors() {
+    fn the_reserved_roots_are_exactly_fm_ctx_env_current() {
         let names: Vec<&str> = reserved_root_descriptors().iter().map(|root| root.name).collect();
-        assert_eq!(names, ["doc", "ctx", "env", "current", "current_env"]);
+        assert_eq!(names, ["fm", "ctx", "env", "current"]);
     }
 
     /// A lazy root mirrors an eager root with the identical member set, so

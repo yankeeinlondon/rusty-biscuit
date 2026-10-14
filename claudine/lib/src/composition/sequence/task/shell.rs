@@ -58,6 +58,7 @@ use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::invocation_context::EnvBaseline;
 use crate::render::TaskLiveOutput;
 use crate::runaway::{CaptureVolumeCap, Trip};
 
@@ -243,6 +244,18 @@ pub trait TaskShellRunner: Sync {
         interrupt: Option<&AtomicBool>,
         live: Option<&Arc<TaskLiveOutput>>,
     ) -> Result<ShellCommandOutput, TaskShellError>;
+
+    /// This runner, starting its commands from `environment` instead of this
+    /// process's: the `shell:` route of a document entered under its own map.
+    ///
+    /// `None` keeps `self`, which is right for a runner that starts no process
+    /// of its own.
+    fn for_child_environment(
+        &self,
+        _environment: &EnvBaseline,
+    ) -> Option<Box<dyn TaskShellRunner>> {
+        None
+    }
 }
 
 /// Production [`TaskShellRunner`]: the platform's system shell, both pipes
@@ -280,6 +293,9 @@ pub struct SystemTaskShell {
     /// fixtures deterministic — so their commands must write to stdout.
     #[cfg(test)]
     fail_wait: bool,
+    /// The complete environment every command starts from; `None` inherits
+    /// this process's.
+    environment: Option<EnvBaseline>,
 }
 
 impl SystemTaskShell {
@@ -291,6 +307,16 @@ impl SystemTaskShell {
             fail_isolation: false,
             #[cfg(test)]
             fail_wait: false,
+            environment: None,
+        }
+    }
+
+    /// This runner, starting every command from exactly `environment`.
+    #[must_use]
+    pub fn in_environment(self, environment: EnvBaseline) -> Self {
+        Self {
+            environment: Some(environment),
+            ..self
         }
     }
 }
@@ -316,6 +342,13 @@ impl SystemTaskShell {
 }
 
 impl TaskShellRunner for SystemTaskShell {
+    fn for_child_environment(
+        &self,
+        environment: &EnvBaseline,
+    ) -> Option<Box<dyn TaskShellRunner>> {
+        Some(Box::new(self.clone().in_environment(environment.clone())))
+    }
+
     fn run(
         &self,
         command: &str,
@@ -323,7 +356,7 @@ impl TaskShellRunner for SystemTaskShell {
         interrupt: Option<&AtomicBool>,
         live: Option<&Arc<TaskLiveOutput>>,
     ) -> Result<ShellCommandOutput, TaskShellError> {
-        let mut builder = system_shell_command(command)
+        let mut builder = system_shell_command(command, self.environment.as_ref())
             .map_err(|error| TaskShellError::Io(std::io::Error::other(error)))?;
         builder
             .stdout(Stdio::piped())
@@ -907,14 +940,29 @@ fn isolate_process_tree(command: &mut Command) {
     command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_SUSPENDED);
 }
 
+/// `program` as a child starting from `environment`, or inheriting this
+/// process's when there is none.
+fn shell_program(
+    program: &str,
+    environment: Option<&EnvBaseline>,
+) -> Result<Command, crate::child_environment::ChildEnvironmentError> {
+    match environment {
+        Some(environment) => {
+            crate::child_environment::command_with_environment(program, &environment.to_child_map())
+        }
+        None => crate::child_environment::command(program),
+    }
+}
+
 /// Build the platform `Command` that runs `command` through the system shell.
 #[cfg(windows)]
 fn system_shell_command(
     command: &str,
+    environment: Option<&EnvBaseline>,
 ) -> Result<Command, crate::child_environment::ChildEnvironmentError> {
     use std::os::windows::process::CommandExt;
 
-    let mut cmd = crate::child_environment::command("cmd")?;
+    let mut cmd = shell_program("cmd", environment)?;
     // `cmd.exe` parses the command tail itself rather than with the Windows
     // argv rules `Command::arg` targets. Passing the tail as a normal argument
     // escapes its nested quotes, changing the command before the shell sees it.
@@ -926,8 +974,9 @@ fn system_shell_command(
 #[cfg(not(windows))]
 fn system_shell_command(
     command: &str,
+    environment: Option<&EnvBaseline>,
 ) -> Result<Command, crate::child_environment::ChildEnvironmentError> {
-    let mut cmd = crate::child_environment::command("sh")?;
+    let mut cmd = shell_program("sh", environment)?;
     cmd.arg("-c").arg(command);
     Ok(cmd)
 }

@@ -39,6 +39,12 @@ const ALLOWLIST: &[Allowance] = &[
     },
     ambient("argv/mod.rs", "std::env::var_os", 1, "`COMPLETE` selects clap's dynamic completion mode"),
     ambient(
+        "request.rs",
+        "biscuit_file::capture_env",
+        1,
+        "the CLI boundary's per-document capture: a sequence task, group leg, or `proxy` target enters its own environment",
+    ),
+    ambient(
         "cli_utils.rs",
         "std::env::current_dir",
         1,
@@ -54,12 +60,6 @@ const ALLOWLIST: &[Allowance] = &[
     ambient("commands/compose/mod.rs", "std::env::var_os", 1, FORCE_COLOR),
     ambient("commands/compose/prep.rs", "std::env::var_os", 4, FORCE_COLOR),
     ambient("commands/config_tui/mod.rs", "std::env::current_dir", 1, COMMAND_REPOSITORY),
-    ambient(
-        "commands/exec_prep/mod.rs",
-        "std::env::var",
-        1,
-        "a provider's model variables select the model a non-interactive launch needs",
-    ),
     ambient(
         "commands/handle.rs",
         "std::env::current_dir",

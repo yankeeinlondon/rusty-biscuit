@@ -7,6 +7,10 @@
 >   properties. They are owned by the caller and will be restored if changed.
 > - If the document declares a `$schema`, every property you set must match
 >   its declared type.
+> - A frontmatter value you write is kept exactly as text, including any `#`
+>   and everything after it. If you mean `#` to start a YAML comment, quote
+>   the value (`note: "see issue"  # why`) or put the comment on its own
+>   line.
 > - Your final response is a summary of what you did (two or three short
 >   paragraphs), not the document content. Do not repeat the body in your
 >   response.

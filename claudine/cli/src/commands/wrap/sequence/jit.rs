@@ -44,10 +44,14 @@ pub(super) struct StepComposeContext<'a> {
     /// `true` when the sequence document carries a string `prompt:`, making
     /// every step an inline composition that rewrites the body on disk.
     pub(super) inline_mode: bool,
-    /// Immutable request-scoped file-resolution snapshot.
+    /// File-resolution context of the document being composed, under that
+    /// document's environment: the launch document's during validation, a
+    /// step's own at its turn.
     pub(super) file_resolution_context: &'a biscuit_file::FileResolutionContext,
     /// Immutable CLI caller values, kept separate from task and runtime layers.
     pub(super) caller_input_records: &'a darkmatter::markdown::compose::CallerInputRecords,
+    /// The view of the document being composed; its environment is the one
+    /// every epoch opened from it reads.
     pub(super) invocation: &'a claudine::invocation_context::InvocationContext,
     /// The composition run a step's documents join: the sequence document
     /// composed for the step, its task, and the task's prompt document are

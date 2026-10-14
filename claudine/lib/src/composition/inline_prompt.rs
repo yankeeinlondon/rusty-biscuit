@@ -10,7 +10,7 @@ use std::path::Path;
 
 use darkmatter::markdown::schemas::simplified::serialize_property_atom;
 use darkmatter::markdown::schemas::{
-    Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema,
+    PropertyDef, SchemaShape, SimplifiedSchema,
 };
 
 use super::guardrails::document_path_span;
@@ -75,23 +75,15 @@ fn type_expression(def: &PropertyDef) -> String {
     }
 }
 
-/// Completion requires a property that any arm marks `required`.
+/// Completion requires a property that Darkmatter's shared presence
+/// calculation requires: some arm marks it `required` and its whole value does
+/// not admit null.
 ///
 /// Presence and eager validation are independent axes: `eager` only makes a
 /// supplied value launch-critical, so an eager-only property may still be
-/// absent when the run completes. The any-arm rule and the item / postfix
-/// array constraint pairing mirror Darkmatter's own `required` hoisting.
+/// absent when the run completes.
 fn def_is_required_at_completion(def: &PropertyDef) -> bool {
-    let atoms: Vec<&PropertyAtom> = match def {
-        PropertyDef::Single(atom) => vec![atom],
-        PropertyDef::Union(atoms) => atoms.iter().collect(),
-    };
-    atoms.iter().any(|atom| {
-        atom.constraints
-            .iter()
-            .chain(atom.array_constraints.iter())
-            .any(|constraint| matches!(constraint, Constraint::Required))
-    })
+    def.is_required()
 }
 
 #[cfg(test)]
@@ -188,6 +180,23 @@ mod tests {
             "array_required",
             "union_required",
         ] {
+            assert_eq!(completion_cell(&header, required), "required", "{required}");
+        }
+    }
+
+    #[test]
+    fn null_admitting_whole_values_are_optional_at_completion() {
+        // Darkmatter's shared presence: a `required` on `null`, `unknown`, or
+        // a union with a `null` arm has no effect; a list of nulls and an
+        // object with a nullable child stay required.
+        let schema = launch_schema(
+            "---\n$schema:\n  nothing: null(required)\n  anything: unknown(eager; required)\n  alias: any(required)\n  maybe:\n    - string(required)\n    - 'null'\n  nulls: null[](required)\n  holder: '{ c: null }(required)'\nprompt: p\n---\n",
+        );
+        let header = build_inline_prompt_header(Path::new("/tmp/d.md"), Some(&schema), &json!({}));
+        for optional in ["nothing", "anything", "alias", "maybe"] {
+            assert_eq!(completion_cell(&header, optional), "optional", "{optional}");
+        }
+        for required in ["nulls", "holder"] {
             assert_eq!(completion_cell(&header, required), "required", "{required}");
         }
     }

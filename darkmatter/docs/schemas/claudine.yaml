@@ -15,7 +15,7 @@ $schema:
         - "file -> File reference to external sequence state."
         - "any[] -> Inline sequence steps. Each step may be a scalar or object state value."
 
-    loop: "loop-event@./claudine-types.yaml -> Repeated-execution controls and post-finalize lifecycle concerns."
+    loop: "loop-event@./claudine-types.yaml -> Repeated-execution controls and the lifecycle concerns run on every gate pass."
 
     operation: "string -> You can add an operation label/name so that it will be tagged in logs and so that memory can be gathered for that operation."
     yolo: "boolean -> Explicitly allow high-trust execution mode when the caller has opted into it."
@@ -61,16 +61,10 @@ $schema:
     verbosity: "enum(silent, quiet, verbose) -> Prompt-reporting verbosity for system-prompt documents."
     mode: "enum(append, replace) -> Delivery mode for automatically discovered system-prompt documents."
 
-    state: "any(generated; required) -> Current sequence step state injected as a reserved frontmatter override."
+    state: "object(generated; required) -> Current sequence step state injected as a reserved frontmatter override."
     previous_state: "any(generated) -> Previous sequence step state, or null for the first step."
     next_state: "any(generated) -> Next sequence step state, or null for the last step."
     is_first: "boolean(generated; required) -> true when the current sequence step is first."
     is_last: "boolean(generated; required) -> true when the current sequence step is last."
     step: "number(integer; min(1); generated; required) -> 1-based sequence step index."
     total_steps: "number(integer; min(1); generated; required) -> Total number of sequence steps."
-
-    _loop_count: "number(integer; min(1); generated; required) -> 1-based loop iteration counter."
-    _loop_is_first: "boolean(generated; required) -> true on the first loop iteration."
-    _loop_is_last: "boolean(generated; required) -> true when the current loop iteration is expected to be final."
-    _loop_last_output: "string(generated; required) -> Captured output from the previous loop iteration. Empty on the first iteration."
-    _loop_last_exit_code: "number(integer; generated; required) -> Exit code from the previous loop iteration. 0 on the first iteration."
