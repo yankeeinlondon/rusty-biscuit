@@ -418,44 +418,7 @@ pub fn parse_pipeline(
                 actions.push(action);
                 operator = ChainOperator::Or;
             }
-            ShellToken::RedirectStdoutNull => {
-                // Shell-style dup resolution: if stderr was previously duped
-                // to stdout via `2>&1`, it captured stdout's prior target —
-                // changing stdout now must not retroactively change stderr.
-                if redirection.stderr == StderrTarget::ToStdout {
-                    redirection.stderr = match redirection.stdout {
-                        StdoutTarget::Capture => StderrTarget::Capture,
-                        StdoutTarget::Null => StderrTarget::Null,
-                        StdoutTarget::ToStderr => StderrTarget::Capture,
-                    };
-                }
-                redirection.stdout = StdoutTarget::Null;
-            }
-            ShellToken::RedirectStderrNull => {
-                if redirection.stdout == StdoutTarget::ToStderr {
-                    redirection.stdout = match redirection.stderr {
-                        StderrTarget::Capture => StdoutTarget::Capture,
-                        StderrTarget::Null => StdoutTarget::Null,
-                        StderrTarget::ToStdout => StdoutTarget::Capture,
-                    };
-                }
-                redirection.stderr = StderrTarget::Null;
-            }
-            ShellToken::RedirectStderrToStdout => {
-                // `2>&1` snapshots stdout's CURRENT target into stderr.
-                redirection.stderr = match redirection.stdout {
-                    StdoutTarget::Capture => StderrTarget::ToStdout,
-                    StdoutTarget::Null => StderrTarget::Null,
-                    StdoutTarget::ToStderr => StderrTarget::Capture,
-                };
-            }
-            ShellToken::RedirectStdoutToStderr => {
-                redirection.stdout = match redirection.stderr {
-                    StderrTarget::Capture => StdoutTarget::ToStderr,
-                    StderrTarget::Null => StdoutTarget::Null,
-                    StderrTarget::ToStdout => StdoutTarget::Capture,
-                };
-            }
+            redirect => apply_redirection(&mut redirection, redirect),
         }
     }
 
@@ -484,6 +447,53 @@ pub fn parse_pipeline(
     }
 
     Ok(ShellPipeline { actions })
+}
+
+/// Applies one redirection token to `redirection` with shell-style
+/// left-to-right dup semantics (see [`parse_pipeline`]). Word and chain tokens
+/// leave it unchanged.
+pub(crate) fn apply_redirection(redirection: &mut RedirectionConfig, token: &ShellToken) {
+    match token {
+        ShellToken::RedirectStdoutNull => {
+            // Shell-style dup resolution: if stderr was previously duped
+            // to stdout via `2>&1`, it captured stdout's prior target —
+            // changing stdout now must not retroactively change stderr.
+            if redirection.stderr == StderrTarget::ToStdout {
+                redirection.stderr = match redirection.stdout {
+                    StdoutTarget::Capture => StderrTarget::Capture,
+                    StdoutTarget::Null => StderrTarget::Null,
+                    StdoutTarget::ToStderr => StderrTarget::Capture,
+                };
+            }
+            redirection.stdout = StdoutTarget::Null;
+        }
+        ShellToken::RedirectStderrNull => {
+            if redirection.stdout == StdoutTarget::ToStderr {
+                redirection.stdout = match redirection.stderr {
+                    StderrTarget::Capture => StdoutTarget::Capture,
+                    StderrTarget::Null => StdoutTarget::Null,
+                    StderrTarget::ToStdout => StdoutTarget::Capture,
+                };
+            }
+            redirection.stderr = StderrTarget::Null;
+        }
+        ShellToken::RedirectStderrToStdout => {
+            // `2>&1` snapshots stdout's CURRENT target into stderr.
+            redirection.stderr = match redirection.stdout {
+                StdoutTarget::Capture => StderrTarget::ToStdout,
+                StdoutTarget::Null => StderrTarget::Null,
+                StdoutTarget::ToStderr => StderrTarget::Capture,
+            };
+        }
+        ShellToken::RedirectStdoutToStderr => {
+            redirection.stdout = match redirection.stderr {
+                StderrTarget::Capture => StdoutTarget::ToStderr,
+                StderrTarget::Null => StdoutTarget::Null,
+                StderrTarget::ToStdout => StdoutTarget::Capture,
+            };
+        }
+        ShellToken::Word(_) | ShellToken::And | ShellToken::Or => {}
+    }
 }
 
 fn build_action(

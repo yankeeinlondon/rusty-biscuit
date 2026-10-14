@@ -471,6 +471,31 @@ impl MarkdownError {
         None
     }
 
+    /// The shell authorization or input failure in this error's cause chain,
+    /// if any: a missing value, or a command that must run as a template and
+    /// is not a valid one.
+    ///
+    /// These are not command failures, so no tolerance a stage offers for
+    /// ordinary failures (`when_error`, a transclusion notice, a nested
+    /// composition reported as an expression failure) may absorb them.
+    pub fn shell_input_violation(&self) -> Option<&crate::markdown::compose::ShellExpansionError> {
+        use crate::markdown::compose::ShellExpansionError;
+        let mut current: Option<&(dyn std::error::Error + 'static)> = Some(self);
+        while let Some(error) = current {
+            let shell = error
+                .downcast_ref::<ShellExpansionError>()
+                .or_else(|| error.downcast_ref::<Box<ShellExpansionError>>().map(AsRef::as_ref));
+            if let Some(
+                shell @ (ShellExpansionError::MissingValue { .. } | ShellExpansionError::TemplateGrammar { .. }),
+            ) = shell
+            {
+                return Some(shell);
+            }
+            current = error.source();
+        }
+        None
+    }
+
     /// Whether a shell span (`::shell`, `::shell-block`, or a frontmatter
     /// `$( … )`) failed somewhere in this error's cause chain.
     ///

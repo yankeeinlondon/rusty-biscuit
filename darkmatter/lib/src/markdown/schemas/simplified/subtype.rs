@@ -52,6 +52,25 @@ pub fn is_subtype(a: &PropertyAtom, b: &PropertyAtom) -> bool {
     }
 }
 
+/// Whether `atom` is a single string-like type: not an array, and every value
+/// it accepts is a JSON string (the left column of the `string` row of
+/// [`is_subtype`]'s table).
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::schemas::simplified::grammar::parse_type_expr;
+/// use darkmatter::markdown::schemas::is_string_like;
+///
+/// let atom = |text| parse_type_expr("p", text).unwrap();
+/// assert!(is_string_like(&atom("alphanumeric(allow-slashes)")));
+/// assert!(!is_string_like(&atom("number")));
+/// assert!(!is_string_like(&atom("string[]")));
+/// ```
+pub fn is_string_like(atom: &PropertyAtom) -> bool {
+    !atom.is_array && is_always_text(atom)
+}
+
 fn alphanumeric_subset(x: AlphanumericOptions, y: AlphanumericOptions) -> bool {
     x.allowed_characters().is_subset(y.allowed_characters())
         && x.first_characters().is_subset(y.first_characters())

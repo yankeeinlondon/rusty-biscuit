@@ -211,6 +211,8 @@ mod tests {
             blacklist_path: PathBuf::from("/tmp/.darkmatter-shell-blacklist"),
             alias_name: None,
             chain_executables: Vec::new(),
+            offered: darkmatter::markdown::compose::shell_expansion::template::OfferedChoices::resolved_bytes(),
+            template: None,
         }
     }
 

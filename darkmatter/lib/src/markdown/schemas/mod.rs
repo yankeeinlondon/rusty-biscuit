@@ -124,7 +124,7 @@ pub use simplified::{
     SimplifiedSchema,
     SimplifiedType, SourceAware, SuggestionItem,
     SuggestionLintProblem, SuggestionLintReason, SuggestionQuery, TypeExpr, decode_alias_definition,
-    decode_scalar, decode_partial_scalar_at, decode_scalar_at, decode_scalar_node, flow_collection_end, is_subtype, is_union_arm_path, lint_suggestions, mapping_separator,
+    decode_scalar, decode_partial_scalar_at, decode_scalar_at, decode_scalar_node, flow_collection_end, is_string_like, is_subtype, is_union_arm_path, lint_suggestions, mapping_separator,
     locate_schema_declaration_cursor, locate_schema_value, locate_type_definition_cursor,
     parse_property_definition,
     parse_property_definition_with_source, parse_schema_declaration,

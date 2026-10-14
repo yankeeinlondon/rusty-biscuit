@@ -446,6 +446,31 @@ fn parse_shell_suffixes(
     Ok(parsed)
 }
 
+/// The authored command inside a whole-value `$( … )` frontmatter value,
+/// parsed as a template, or `None` when `value` is not such a value.
+///
+/// A conditional (`$( cond ? a : b )`) is never a template.
+pub(crate) fn authored_shell_template(
+    value: &str,
+    key: &str,
+    ctx: &SourceContext,
+) -> Option<(
+    String,
+    Result<crate::markdown::compose::shell_expansion::template::CommandTemplate,
+        crate::markdown::compose::shell_expansion::template::TemplateGrammarError>,
+)> {
+    use crate::markdown::compose::shell_expansion::template::{TemplateGrammarError, parse_authored};
+    let rest = value.trim().strip_prefix("$(")?;
+    let close = find_unquoted_closing_paren(rest, key, ctx).ok()?;
+    let inner = rest[..close].trim();
+    let template = if split_top_level_ternary(inner).is_some() {
+        Err(TemplateGrammarError::Conditional)
+    } else {
+        parse_authored(inner)
+    };
+    Some((inner.to_string(), template))
+}
+
 /// Parses a single frontmatter string value for shell expression.
 ///
 /// Returns `Some` if the value matches `$(cmd)` followed by any valid suffixes

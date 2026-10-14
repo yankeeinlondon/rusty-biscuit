@@ -322,13 +322,16 @@ pub struct ComposeOptions {
     ///
     /// When set, the shell expansion stage skips the entire approval flow
     /// (no whitelist check, no blacklist check, no approval handler).
-    /// Each directive's normalized command is checked against this set:
-    /// - Found: execute immediately (still subject to timeout)
-    /// - Not found: immediate Denied error
+    /// Each directive must prove membership: its resolved bytes in the exact
+    /// set, or its authored shape in the template set (see
+    /// [`ShellPreApprovals`](crate::markdown::compose::shell_expansion::template::ShellPreApprovals)).
+    /// - Found: execute (still subject to timeout)
+    /// - Not found: immediate `NotPreApproved` error
     ///
     /// Mutually exclusive with `shell_approval_handler`. When this field
     /// is `Some`, the approval handler is ignored.
-    pub(crate) pre_approved_commands: Option<std::collections::HashSet<String>>,
+    pub(crate) pre_approved_commands:
+        Option<crate::markdown::compose::shell_expansion::template::ShellPreApprovals>,
 
     /// Whether to strip ANSI escape codes and set `NO_COLOR=1` for shell commands.
     /// Default: true.
@@ -541,6 +544,11 @@ pub struct ComposeOptions {
     /// child. Default: `None` (no globals; every root outside the reserved
     /// namespaces is a document property).
     pub(crate) host_globals: Option<crate::markdown::compose::expression::HostGlobals>,
+
+    /// Roots the host declares late for shell approval: a placeholder reading
+    /// one is not evaluated by discovery and its command can be approved only
+    /// as a template. Default: empty.
+    pub(crate) deferred_shell_roots: crate::markdown::compose::shell_expansion::template::DeferredShellRoots,
 
     // ── Named-object string coercion (Sequence Plus) ───────────────
     /// Frontmatter keys whose OBJECT values render their `name` string field
@@ -949,6 +957,7 @@ impl ComposeOptions {
             remote_fetch: None,
             exclude_keys: std::collections::HashSet::new(),
             host_globals: None,
+            deferred_shell_roots: Default::default(),
             name_coercion_keys: Vec::new(),
             file_ref_fallback_dir: None,
         }
@@ -1440,14 +1449,38 @@ impl ComposeOptions {
         self
     }
 
-    /// Sets the pre-approved shell commands.
+    /// Sets the pre-approved shell commands: resolved-byte and template
+    /// approvals. A `HashSet<String>` of normalized commands converts to
+    /// resolved-byte approvals only.
     #[must_use]
     pub fn with_pre_approved_commands(
         mut self,
-        commands: std::collections::HashSet<String>,
+        commands: impl Into<crate::markdown::compose::shell_expansion::template::ShellPreApprovals>,
     ) -> Self {
-        self.pre_approved_commands = Some(commands);
+        self.pre_approved_commands = Some(commands.into());
         self
+    }
+
+    /// Declares roots whose values the run produces after shell approval.
+    ///
+    /// Discovery leaves a placeholder that reads one (directly or through a
+    /// frontmatter value derived from one) unevaluated and requires its
+    /// command to be approved as a template. This does not make the root
+    /// readable: availability stays with [`Self::with_host_globals`].
+    ///
+    /// Default: none.
+    #[must_use]
+    pub fn with_deferred_shell_roots(
+        mut self,
+        roots: crate::markdown::compose::shell_expansion::template::DeferredShellRoots,
+    ) -> Self {
+        self.deferred_shell_roots = roots;
+        self
+    }
+
+    /// The roots declared by [`Self::with_deferred_shell_roots`].
+    pub fn deferred_shell_roots(&self) -> &crate::markdown::compose::shell_expansion::template::DeferredShellRoots {
+        &self.deferred_shell_roots
     }
 
     /// Sets whether remote transclusion is allowed.
@@ -2727,6 +2760,7 @@ impl ComposeOptions {
             schema_phase,
             exclude_keys,
             host_globals,
+            deferred_shell_roots,
             name_coercion_keys,
             portable_env,
             absolute_fallback_warning,
@@ -2918,11 +2952,22 @@ impl ComposeOptions {
         match pre_approved_commands {
             Some(set) => {
                 enc.tag(1);
-                let mut entries: Vec<&str> = set.iter().map(String::as_str).collect();
+                let mut entries: Vec<&str> = set.exact().map(String::as_str).collect();
                 entries.sort_unstable();
                 enc.count(entries.len());
                 for entry in entries {
                     enc.str(entry);
+                }
+                // Encoded only when present, so a resolved-byte-only set keeps
+                // its historical fingerprint.
+                let mut shapes: Vec<String> = set.templates().map(|shape| shape.canonical_text()).collect();
+                if !shapes.is_empty() {
+                    shapes.sort_unstable();
+                    enc.field("pre_approved_templates");
+                    enc.count(shapes.len());
+                    for shape in &shapes {
+                        enc.str(shape);
+                    }
                 }
             }
             None => enc.tag(0),
@@ -3102,6 +3147,14 @@ impl ComposeOptions {
             enc.field("host_globals");
             enc.str(&globals.identity());
         }
+        if !deferred_shell_roots.is_empty() {
+            enc.field("deferred_shell_roots");
+            let roots: Vec<&str> = deferred_shell_roots.iter().collect();
+            enc.count(roots.len());
+            for root in roots {
+                enc.str(root);
+            }
+        }
         // Ordered vector: preserve the caller's coercion precedence.
         enc.field("name_coercion_keys");
         enc.count(name_coercion_keys.len());
@@ -3252,6 +3305,14 @@ impl ComposeOptions {
         if let Some(globals) = host_globals {
             cenc.field("host_globals");
             cenc.str(&globals.identity());
+        }
+        if !deferred_shell_roots.is_empty() {
+            cenc.field("deferred_shell_roots");
+            let roots: Vec<&str> = deferred_shell_roots.iter().collect();
+            cenc.count(roots.len());
+            for root in roots {
+                cenc.str(root);
+            }
         }
         cenc.field("name_coercion_keys");
         cenc.count(name_coercion_keys.len());
@@ -3688,12 +3749,12 @@ mod tests {
         let a = fixed_opts()
             .with_exclude_keys(["alpha", "beta", "gamma"])
             .with_pre_approved_commands(
-                ["ls", "cat", "echo"].iter().map(|s| s.to_string()).collect(),
+                ["ls", "cat", "echo"].iter().map(|s| s.to_string()).collect::<crate::markdown::compose::shell_expansion::template::ShellPreApprovals>(),
             );
         let b = fixed_opts()
             .with_exclude_keys(["gamma", "alpha", "beta"])
             .with_pre_approved_commands(
-                ["echo", "ls", "cat"].iter().map(|s| s.to_string()).collect(),
+                ["echo", "ls", "cat"].iter().map(|s| s.to_string()).collect::<crate::markdown::compose::shell_expansion::template::ShellPreApprovals>(),
             );
         assert_eq!(id(&a), id(&b));
 
@@ -3938,9 +3999,9 @@ mod tests {
     #[test]
     fn options_identity_pre_approved_commands_element_boundaries_are_injective() {
         let merged = fixed_opts()
-            .with_pre_approved_commands(["a,b"].iter().map(|s| s.to_string()).collect());
+            .with_pre_approved_commands(["a,b"].iter().map(|s| s.to_string()).collect::<crate::markdown::compose::shell_expansion::template::ShellPreApprovals>());
         let split = fixed_opts()
-            .with_pre_approved_commands(["a", "b"].iter().map(|s| s.to_string()).collect());
+            .with_pre_approved_commands(["a", "b"].iter().map(|s| s.to_string()).collect::<crate::markdown::compose::shell_expansion::template::ShellPreApprovals>());
         assert_ne!(id(&merged), id(&split));
     }
 

@@ -1559,7 +1559,7 @@ mod schema_validation_integration {
                     .with_source_file(&prompt)
                     .with_file_ref_fallback_dir(&launch)
                     .with_set_overrides(serde_json::json!({ "spec": "spec.md" }))
-                    .with_pre_approved_commands(["echo text".to_string()].into_iter().collect())
+                    .with_pre_approved_commands(["echo text".to_string()].into_iter().collect::<crate::markdown::compose::shell_expansion::template::ShellPreApprovals>())
                     .only(&[
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::FrontmatterShellExpansion,

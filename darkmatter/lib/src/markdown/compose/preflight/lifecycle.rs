@@ -9,27 +9,34 @@
 //!
 //! 1. Collect every command the document *could* run (condition-blind).
 //! 2. Validate the set against the built-in blacklist, the user
-//!    blacklist, and the whitelist.
-//! 3. For the remainder, prompt the supplied approval handler.
-//! 4. Return the approved set.
+//!    blacklist, and the whitelist. Each command site is decided once: a
+//!    site whose value is late by its shape; any other by an `exact` rule,
+//!    then a `template` rule, then a `prefix` rule.
+//! 3. For the remainder, prompt the supplied approval handler, offering only
+//!    the choices the site is eligible for, and persist the chosen row.
+//! 4. Return the approved set: resolved bytes and template shapes.
 //!
 //! Darkmatter never prompts directly; the caller (CLI, Claudine, …) owns
 //! the handler. When no handler is supplied and the set contains a
 //! command the policy does not cover, the function surfaces
 //! [`ShellExpansionError::ApprovalRequired`] for the offending command.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::markdown::Markdown;
 use crate::markdown::compose::shell_expansion::policy::{
-    check_builtin_blacklist, check_user_blacklist, check_whitelist,
+    check_builtin_blacklist, check_template_blacklist, check_user_blacklist, check_whitelist,
 };
 use crate::markdown::compose::shell_expansion::store::{
-    load_ruleset, resolve_policy_paths,
+    self, load_ruleset, resolve_policy_paths,
+};
+use crate::markdown::compose::shell_expansion::template::{
+    ModeRequirement, OfferedChoices, ShellCandidate, ShellPreApprovals,
 };
 use crate::markdown::compose::shell_expansion::types::{
-    ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
+    ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellCommandEntry,
+    ShellCommandOrigin, ShellExpansionError, ShellPolicyPaths, ShellRuleSet,
 };
 
 /// Counts from a single pre-flight approval run.
@@ -57,7 +64,7 @@ pub struct PreflightApprovalStats {
 /// design's "reuse the collection walk" goal on the primary user-facing path.
 #[derive(Debug, Clone, Default)]
 pub struct ComposePreflightApprovals {
-    pub pre_approved_commands: HashSet<String>,
+    pub pre_approved_commands: ShellPreApprovals,
     pub stats: PreflightApprovalStats,
     pub preflight_graph: super::PreflightGraphNode,
 }
@@ -107,97 +114,320 @@ impl Markdown {
         let user_blacklist = load_ruleset(&policy_paths.blacklist)?;
 
         let ctx = self.source_context_for_errors();
-        let mut pre_approved: HashSet<String> = HashSet::new();
-        let mut already_whitelisted = 0usize;
-        let mut user_approved = 0usize;
+        let mut policy = SitePolicy {
+            source: &options.source,
+            ctx: &ctx,
+            paths: &policy_paths,
+            whitelist,
+            user_blacklist,
+            handler: approval_handler.as_deref(),
+            approved: ShellPreApprovals::new(),
+            already_whitelisted: 0,
+            user_approved: 0,
+        };
+        let entries_by_key: HashMap<&str, &ShellCommandEntry> =
+            report.entries.iter().map(|entry| (entry.normalized.as_str(), entry)).collect();
 
+        // Blacklists first, for every resolved-byte command.
         for entry in &report.entries {
-            if let Some(reason) = check_builtin_blacklist(&entry.executable, &entry.args) {
-                return Err(ShellExpansionError::Blacklisted {
-                    ctx: Box::new(ctx.clone()),
-                    command: entry.normalized.clone(),
-                    reason,
-                    origin: entry.origin.clone(),
-                });
+            policy.check_blacklists(entry)?;
+        }
+
+        // Then one decision per command site: template-required sites by
+        // their shape, resolved-byte sites by exact rule, template rule, then
+        // prefix rule, before any prompt.
+        let mut site_keys = HashSet::new();
+        for candidate in &report.candidates {
+            if let Some(keys) = &candidate.resolved {
+                site_keys.extend(keys.iter().map(String::as_str));
             }
+            policy.decide_site(candidate, &entries_by_key)?;
+        }
 
-            if check_user_blacklist(
-                &user_blacklist,
-                &entry.executable,
-                &entry.args,
-                &entry.normalized,
-            ) {
-                return Err(ShellExpansionError::Blacklisted {
-                    ctx: Box::new(ctx.clone()),
-                    command: entry.normalized.clone(),
-                    reason: "user blacklist".to_string(),
-                    origin: entry.origin.clone(),
-                });
-            }
-
-            if check_whitelist(&whitelist, &entry.executable, &entry.normalized) {
-                pre_approved.insert(entry.normalized.clone());
-                already_whitelisted += 1;
-                continue;
-            }
-
-            let Some(ref handler) = approval_handler else {
-                return Err(ShellExpansionError::ApprovalRequired {
-                    ctx: Box::new(ctx.clone()),
-                    command: entry.normalized.clone(),
-                    whitelist_path: Box::new(policy_paths.whitelist.clone()),
-                    blacklist_path: Box::new(policy_paths.blacklist.clone()),
-                    origin: entry.origin.clone(),
-                });
-            };
-
-            let request = ShellApprovalRequest {
-                source: options.source.clone(),
-                origin: entry.origin.clone(),
-                raw_command: entry.raw_command.clone(),
-                executable: entry.executable.clone(),
-                args: entry.args.clone(),
-                normalized_exact: entry.normalized.clone(),
-                whitelist_path: policy_paths.whitelist.clone(),
-                blacklist_path: policy_paths.blacklist.clone(),
-                alias_name: None,
-                chain_executables: Vec::new(),
-            };
-
-            match handler.approve(request)? {
-                ShellApprovalDecision::AllowExactPersist
-                | ShellApprovalDecision::AllowCommandPersist
-                | ShellApprovalDecision::AllowOnce => {
-                    pre_approved.insert(entry.normalized.clone());
-                    user_approved += 1;
-                }
-                ShellApprovalDecision::Deny => {
-                    return Err(ShellExpansionError::Denied {
-                        ctx: Box::new(ctx.clone()),
-                        command: entry.normalized.clone(),
-                        origin: entry.origin.clone(),
-                    });
-                }
-                ShellApprovalDecision::BlacklistPersist => {
-                    return Err(ShellExpansionError::Blacklisted {
-                        ctx: Box::new(ctx.clone()),
-                        command: entry.normalized.clone(),
-                        reason: "user blacklisted".to_string(),
-                        origin: entry.origin.clone(),
-                    });
-                }
+        // A command no site claims (its site could not be matched to its
+        // authored form) is decided on its bytes alone.
+        for entry in &report.entries {
+            if !site_keys.contains(entry.normalized.as_str()) {
+                policy.decide_entry(entry)?;
             }
         }
 
+        let template_sites = report
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.requirement == ModeRequirement::TemplateRequired)
+            .count();
         Ok(ComposePreflightApprovals {
-            pre_approved_commands: pre_approved,
+            pre_approved_commands: policy.approved,
             stats: PreflightApprovalStats {
-                total_discovered: report.entries.len(),
-                already_whitelisted,
-                user_approved,
+                total_discovered: report.entries.len() + template_sites,
+                already_whitelisted: policy.already_whitelisted,
+                user_approved: policy.user_approved,
             },
             preflight_graph: report.preflight_graph,
         })
+    }
+}
+
+/// The policy one preflight approval run judges every site against, and the
+/// approvals it has granted so far.
+struct SitePolicy<'a> {
+    source: &'a crate::markdown::compose::ComposeSource,
+    ctx: &'a biscuit_terminal::errors::SourceContext,
+    paths: &'a ShellPolicyPaths,
+    whitelist: ShellRuleSet,
+    user_blacklist: ShellRuleSet,
+    handler: Option<&'a dyn ShellApprovalHandler>,
+    approved: ShellPreApprovals,
+    already_whitelisted: usize,
+    user_approved: usize,
+}
+
+impl SitePolicy<'_> {
+    fn blacklisted(&self, command: &str, reason: String, origin: &ShellCommandOrigin) -> ShellExpansionError {
+        ShellExpansionError::Blacklisted {
+            ctx: Box::new(self.ctx.clone()),
+            command: command.to_string(),
+            reason,
+            origin: origin.clone(),
+        }
+    }
+
+    fn approval_required(&self, command: &str, origin: &ShellCommandOrigin) -> ShellExpansionError {
+        ShellExpansionError::ApprovalRequired {
+            ctx: Box::new(self.ctx.clone()),
+            command: command.to_string(),
+            whitelist_path: Box::new(self.paths.whitelist.clone()),
+            blacklist_path: Box::new(self.paths.blacklist.clone()),
+            origin: origin.clone(),
+        }
+    }
+
+    fn denied(&self, command: &str, origin: &ShellCommandOrigin) -> ShellExpansionError {
+        ShellExpansionError::Denied {
+            ctx: Box::new(self.ctx.clone()),
+            command: command.to_string(),
+            origin: origin.clone(),
+        }
+    }
+
+    fn check_blacklists(&self, entry: &ShellCommandEntry) -> Result<(), ShellExpansionError> {
+        if let Some(reason) = check_builtin_blacklist(&entry.executable, &entry.args) {
+            return Err(self.blacklisted(&entry.normalized, reason, &entry.origin));
+        }
+        if check_user_blacklist(&self.user_blacklist, &entry.executable, &entry.args, &entry.normalized) {
+            return Err(self.blacklisted(&entry.normalized, "user blacklist".to_string(), &entry.origin));
+        }
+        Ok(())
+    }
+
+    /// Decides one command site.
+    fn decide_site(
+        &mut self,
+        candidate: &ShellCandidate,
+        entries: &HashMap<&str, &ShellCommandEntry>,
+    ) -> Result<(), ShellExpansionError> {
+        let shape = candidate.shape();
+        let command = candidate.display_command();
+        let origin = &candidate.site.origin;
+        if let Some(shape) = &shape
+            && let Some(reason) = check_template_blacklist(shape, &self.user_blacklist)
+        {
+            return Err(self.blacklisted(&command, reason, origin));
+        }
+
+        let resolved = match (&candidate.resolved, candidate.requirement) {
+            (Some(keys), ModeRequirement::AnyMode) => Some(keys),
+            (_, ModeRequirement::TemplateRequired) => None,
+            // Not matched to its resolved form: its bytes are decided as
+            // entries of their own.
+            (None, ModeRequirement::AnyMode) => return Ok(()),
+        };
+        if let Some(keys) = resolved {
+            if keys.iter().all(|key| self.approved.contains_exact(key)) {
+                return Ok(());
+            }
+            if keys.iter().all(|key| self.whitelist.matches_exact(key)) {
+                self.approved.extend_exact(keys.iter().cloned());
+                self.already_whitelisted += 1;
+                return Ok(());
+            }
+        }
+        if let Some(shape) = &shape {
+            if self.approved.contains_template(shape) {
+                return Ok(());
+            }
+            if self.whitelist.template_covers(shape) {
+                self.approved.insert_template(shape.clone());
+                self.already_whitelisted += 1;
+                return Ok(());
+            }
+        }
+        let executables = site_executables(candidate, entries);
+        if let Some(keys) = resolved
+            && keys
+                .iter()
+                .zip(&executables)
+                .all(|(key, executable)| check_whitelist(&self.whitelist, executable, key))
+        {
+            self.approved.extend_exact(keys.iter().cloned());
+            self.already_whitelisted += 1;
+            return Ok(());
+        }
+        if resolved.is_none()
+            && !executables.is_empty()
+            && executables.iter().all(|executable| self.whitelist.matches_prefix(executable))
+        {
+            // A prefix rule covers a template-required site's fixed programs.
+            if let Some(shape) = shape {
+                self.approved.insert_template(shape);
+                self.already_whitelisted += 1;
+                return Ok(());
+            }
+        }
+
+        let Some(handler) = self.handler else {
+            return Err(self.approval_required(&command, origin));
+        };
+        let first = resolved
+            .and_then(|keys| keys.first())
+            .and_then(|key| entries.get(key.as_str()).copied());
+        let mut distinct = HashSet::new();
+        let chain_executables: Vec<String> = executables
+            .iter()
+            .filter(|executable| distinct.insert(executable.as_str()))
+            .cloned()
+            .collect();
+        let offered = candidate.offered();
+        let request = ShellApprovalRequest {
+            source: self.source.clone(),
+            origin: origin.clone(),
+            raw_command: command.clone(),
+            executable: executables.first().cloned().unwrap_or_default(),
+            args: first.map(|entry| entry.args.clone()).unwrap_or_default(),
+            normalized_exact: resolved.map(|keys| keys.join(" && ")).unwrap_or_default(),
+            whitelist_path: self.paths.whitelist.clone(),
+            blacklist_path: self.paths.blacklist.clone(),
+            alias_name: None,
+            chain_executables: if chain_executables.len() > 1 { chain_executables } else { Vec::new() },
+            offered,
+            template: candidate.approval_view(),
+        };
+
+        let decision = handler.approve(request)?;
+        match (decision, resolved, shape) {
+            (ShellApprovalDecision::AllowExactPersist, Some(keys), _) if offered.exact => {
+                for key in keys {
+                    store::append_whitelist_exact(self.paths, key)?;
+                }
+                self.approved.extend_exact(keys.iter().cloned());
+            }
+            (ShellApprovalDecision::AllowTemplatePersist, _, Some(shape)) if offered.shape => {
+                store::append_whitelist_template(self.paths, &shape)?;
+                self.approved.insert_template(shape);
+            }
+            (ShellApprovalDecision::AllowCommandPersist, resolved, shape) if offered.prefix => {
+                let mut persisted = HashSet::new();
+                for executable in &executables {
+                    if persisted.insert(executable.as_str()) {
+                        store::append_whitelist_prefix(self.paths, executable)?;
+                    }
+                }
+                match (resolved, shape) {
+                    (Some(keys), _) => self.approved.extend_exact(keys.iter().cloned()),
+                    (None, Some(shape)) => {
+                        self.approved.insert_template(shape);
+                    }
+                    (None, None) => return Err(self.denied(&command, origin)),
+                }
+            }
+            (ShellApprovalDecision::AllowOnce, Some(keys), _) => self.approved.extend_exact(keys.iter().cloned()),
+            (ShellApprovalDecision::AllowOnce, None, Some(shape)) => {
+                self.approved.insert_template(shape);
+            }
+            (ShellApprovalDecision::BlacklistPersist, resolved, shape) => {
+                match (resolved, shape) {
+                    (Some(keys), _) => {
+                        for key in keys {
+                            store::append_blacklist_exact(self.paths, key)?;
+                        }
+                    }
+                    (None, Some(shape)) => store::append_blacklist_template(self.paths, &shape)?,
+                    (None, None) => {}
+                }
+                return Err(self.blacklisted(&command, "user blacklisted".to_string(), origin));
+            }
+            // Deny, or a choice the request did not offer.
+            _ => return Err(self.denied(&command, origin)),
+        }
+        self.user_approved += 1;
+        Ok(())
+    }
+
+    /// Decides a resolved-byte command no site claims.
+    fn decide_entry(&mut self, entry: &ShellCommandEntry) -> Result<(), ShellExpansionError> {
+        if self.approved.contains_exact(&entry.normalized) {
+            return Ok(());
+        }
+        if check_whitelist(&self.whitelist, &entry.executable, &entry.normalized) {
+            self.approved.insert_exact(entry.normalized.clone());
+            self.already_whitelisted += 1;
+            return Ok(());
+        }
+        let Some(handler) = self.handler else {
+            return Err(self.approval_required(&entry.normalized, &entry.origin));
+        };
+        let request = ShellApprovalRequest {
+            source: self.source.clone(),
+            origin: entry.origin.clone(),
+            raw_command: entry.raw_command.clone(),
+            executable: entry.executable.clone(),
+            args: entry.args.clone(),
+            normalized_exact: entry.normalized.clone(),
+            whitelist_path: self.paths.whitelist.clone(),
+            blacklist_path: self.paths.blacklist.clone(),
+            alias_name: None,
+            chain_executables: Vec::new(),
+            offered: OfferedChoices::resolved_bytes(),
+            template: None,
+        };
+        match handler.approve(request)? {
+            ShellApprovalDecision::AllowExactPersist => {
+                store::append_whitelist_exact(self.paths, &entry.normalized)?;
+            }
+            ShellApprovalDecision::AllowCommandPersist => {
+                store::append_whitelist_prefix(self.paths, &entry.executable)?;
+            }
+            ShellApprovalDecision::AllowOnce => {}
+            ShellApprovalDecision::BlacklistPersist => {
+                store::append_blacklist_exact(self.paths, &entry.normalized)?;
+                return Err(self.blacklisted(&entry.normalized, "user blacklisted".to_string(), &entry.origin));
+            }
+            ShellApprovalDecision::Deny | ShellApprovalDecision::AllowTemplatePersist => {
+                return Err(self.denied(&entry.normalized, &entry.origin));
+            }
+        }
+        self.approved.insert_exact(entry.normalized.clone());
+        self.user_approved += 1;
+        Ok(())
+    }
+}
+
+/// The program of each segment of `candidate`: its resolved executables
+/// when it has resolved bytes, otherwise its template's fixed programs.
+fn site_executables(candidate: &ShellCandidate, entries: &HashMap<&str, &ShellCommandEntry>) -> Vec<String> {
+    match (&candidate.resolved, &candidate.template) {
+        (Some(keys), _) => keys
+            .iter()
+            .map(|key| {
+                entries
+                    .get(key.as_str())
+                    .map(|entry| entry.executable.clone())
+                    .unwrap_or_else(|| key.split(' ').next().unwrap_or_default().to_string())
+            })
+            .collect(),
+        (None, Ok(template)) => template.segments.iter().map(|segment| segment.program.clone()).collect(),
+        (None, Err(_)) => Vec::new(),
     }
 }
 
@@ -367,8 +597,8 @@ mod lifecycle_tests {
         assert_eq!(approvals.stats.total_discovered, 2);
         assert_eq!(approvals.stats.user_approved, 2);
         assert_eq!(approvals.stats.already_whitelisted, 0);
-        assert!(approvals.pre_approved_commands.contains("echo first"));
-        assert!(approvals.pre_approved_commands.contains("echo second"));
+        assert!(approvals.pre_approved_commands.contains_exact("echo first"));
+        assert!(approvals.pre_approved_commands.contains_exact("echo second"));
 
         // Compose with the pre-approved set — the in-stage approval flow
         // is a pure membership check, so no handler call is made.
@@ -403,7 +633,7 @@ mod lifecycle_tests {
         assert_eq!(approvals.stats.already_whitelisted, 1);
         assert_eq!(approvals.stats.user_approved, 0);
         assert!(handler.calls().is_empty(), "whitelisted commands must not prompt");
-        assert!(approvals.pre_approved_commands.contains("echo whitelisted"));
+        assert!(approvals.pre_approved_commands.contains_exact("echo whitelisted"));
     }
 
     /// No approval handler and no whitelist coverage: the first
@@ -504,7 +734,7 @@ mod lifecycle_tests {
         let approvals = md
             .compose_preflight_approvals(&crate::markdown::compose::test_request(options.clone()), Some(handler.clone()))
             .unwrap();
-        assert!(approvals.pre_approved_commands.contains("echo accept-me"));
+        assert!(approvals.pre_approved_commands.contains_exact("echo accept-me"));
     }
 
     /// The CLI's "single batched approval" invariant: a doc with

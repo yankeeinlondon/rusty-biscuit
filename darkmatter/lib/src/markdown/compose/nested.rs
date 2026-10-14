@@ -255,7 +255,7 @@ fn is_structural(error: &MarkdownError) -> bool {
                     | transclusion::TransclusionError::MaxDepthExceeded { .. }
             )
     );
-    transclusion_limit || error.pre_approval_violation().is_some()
+    transclusion_limit || error.pre_approval_violation().is_some() || error.shell_input_violation().is_some()
 }
 
 fn violation(message: String) -> ExpressionError {

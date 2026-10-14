@@ -550,6 +550,7 @@ fn transclusion_failure_is_fatal(error: &MarkdownError) -> bool {
     ) || error.missing_runtime_context().is_some()
         || error.unavailable_binding().is_some()
         || error.pre_approval_violation().is_some()
+        || error.shell_input_violation().is_some()
         || error.shell_span_failure()
 }
 

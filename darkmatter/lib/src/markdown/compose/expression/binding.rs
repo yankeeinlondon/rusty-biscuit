@@ -762,6 +762,11 @@ impl HostGlobals {
         identity
     }
 
+    /// Every declared global root.
+    pub(crate) fn roots(&self) -> impl Iterator<Item = &str> {
+        self.runtime.keys().map(String::as_str)
+    }
+
     /// Whether `root` is a declared global (never a reserved namespace).
     pub(crate) fn declares(&self, root: &str) -> bool {
         self.runtime.contains_key(root)

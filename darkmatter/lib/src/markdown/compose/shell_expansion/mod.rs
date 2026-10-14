@@ -33,6 +33,7 @@ pub mod parser;
 pub mod policy;
 pub(crate) mod probe;
 pub mod store;
+pub mod template;
 pub mod tokenize;
 pub mod types;
 
@@ -41,7 +42,8 @@ pub use discovery::collect_shell_commands;
 pub use executor::{execute_command, resolve_working_directory};
 pub use parser::parse_directives;
 pub use policy::{
-    check_builtin_blacklist, check_user_blacklist, check_whitelist, normalize_command,
+    check_builtin_blacklist, check_filled_chain, check_template_blacklist, check_user_blacklist,
+    check_whitelist, normalize_command,
 };
 pub use store::resolve_policy_paths;
 pub use types::{
@@ -66,7 +68,7 @@ use crate::markdown::compose::ComposeWarning;
 /// releases only what is genuinely still held.
 struct ReservationGuard<'a> {
     runtime: &'a mut ShellExpansionRuntime,
-    held: Vec<String>,
+    held: Vec<template::ApprovalKey>,
 }
 
 impl<'a> ReservationGuard<'a> {
@@ -77,10 +79,10 @@ impl<'a> ReservationGuard<'a> {
         }
     }
 
-    fn reserve(&mut self, normalized: &str, may_wait: bool) -> types::ReserveOutcome {
-        let outcome = self.runtime.reserve_allow_once(normalized, may_wait);
+    fn reserve(&mut self, key: &template::ApprovalKey, may_wait: bool) -> types::ReserveOutcome {
+        let outcome = self.runtime.reserve_allow_once(key, may_wait);
         if outcome == types::ReserveOutcome::Reserved {
-            self.held.push(normalized.to_string());
+            self.held.push(key.clone());
         }
         outcome
     }
@@ -94,18 +96,18 @@ impl<'a> ReservationGuard<'a> {
     /// A command this guard never reserved is already authorized — by the
     /// whitelist or by a peer's completed allow-once — so it is left alone
     /// rather than released out from under whoever does own it.
-    fn release(&mut self, normalized: &str, approved: bool) {
-        if let Some(index) = self.held.iter().position(|held| held == normalized) {
+    fn release(&mut self, key: &template::ApprovalKey, approved: bool) {
+        if let Some(index) = self.held.iter().position(|held| held == key) {
             self.held.swap_remove(index);
-            self.runtime.complete_allow_once(normalized, approved);
+            self.runtime.complete_allow_once(key, approved);
         }
     }
 }
 
 impl Drop for ReservationGuard<'_> {
     fn drop(&mut self) {
-        for normalized in std::mem::take(&mut self.held) {
-            self.runtime.complete_allow_once(&normalized, false);
+        for key in std::mem::take(&mut self.held) {
+            self.runtime.complete_allow_once(&key, false);
         }
     }
 }
@@ -241,9 +243,12 @@ pub(crate) fn prepare_directive(
     let normalized_commands = collect_normalized_commands(&effective);
 
     // ── Pre-approved fast path ───────────────────────────────────────
+    // Resolved-byte membership only: every segment's freshly resolved bytes
+    // must be in the exact set. A site approved by its shape alone is not a
+    // member here, and nothing here adds the bytes it resolved to.
     if let Some(ref approved) = options.pre_approved_commands {
         for normalized in &normalized_commands {
-            if !approved.contains(normalized) {
+            if !approved.contains_exact(normalized) {
                 return Err(ShellExpansionError::NotPreApproved {
                     ctx: Box::new(directive.ctx.clone()),
                     command: display_command.clone(),
@@ -290,6 +295,14 @@ pub(crate) fn prepare_directive(
         }
     }
 
+    // Session approvals are keyed by mode and policy root: these are
+    // resolved-byte keys, which a template approval never matches.
+    let policy_root = template::ApprovalKey::policy_root_of(policy_paths);
+    let approval_keys: Vec<template::ApprovalKey> = normalized_commands
+        .iter()
+        .map(|normalized| template::ApprovalKey::exact(policy_root, normalized.clone()))
+        .collect();
+
     // 3. Check whitelist for all commands
     let all_whitelisted = normalized_commands
         .iter()
@@ -297,7 +310,7 @@ pub(crate) fn prepare_directive(
         .all(|(i, normalized)| {
             let (exe, _) = executable_and_args_at(&effective, i);
             check_whitelist(&runtime_snapshot.whitelist, &exe, normalized)
-                || runtime_snapshot.allow_once.contains(normalized)
+                || runtime_snapshot.allow_once.contains(&approval_keys[i])
         });
 
     if all_whitelisted {
@@ -326,7 +339,7 @@ pub(crate) fn prepare_directive(
             // reservations of our own; otherwise a hold-and-wait cycle across
             // cross-ordered chains could deadlock.
             let may_wait = guard.holds_none();
-            match guard.reserve(normalized, may_wait) {
+            match guard.reserve(&approval_keys[i], may_wait) {
                 types::ReserveOutcome::Reserved | types::ReserveOutcome::AlreadyAllowed => {}
                 types::ReserveOutcome::Pending => {
                     pending_conflict = true;
@@ -382,12 +395,14 @@ pub(crate) fn prepare_directive(
             blacklist_path: policy_paths.blacklist.clone(),
             alias_name: alias_name.clone(),
             chain_executables,
+            offered: template::OfferedChoices::resolved_bytes(),
+            template: None,
         };
 
         match handler.approve(request)? {
             ShellApprovalDecision::AllowExactPersist => {
-                for normalized in &normalized_commands {
-                    guard.release(normalized, false);
+                for (normalized, key) in normalized_commands.iter().zip(&approval_keys) {
+                    guard.release(key, false);
                     store::append_whitelist_exact(policy_paths, normalized)?;
                     guard.runtime.persist_whitelist_exact(normalized.clone());
                 }
@@ -397,8 +412,8 @@ pub(crate) fn prepare_directive(
                 })
             }
             ShellApprovalDecision::AllowCommandPersist => {
-                for normalized in &normalized_commands {
-                    guard.release(normalized, false);
+                for key in &approval_keys {
+                    guard.release(key, false);
                 }
                 // Persist a prefix entry for every unique executable in the
                 // chain so the next run does not re-prompt for later actions.
@@ -415,8 +430,8 @@ pub(crate) fn prepare_directive(
                 })
             }
             ShellApprovalDecision::AllowOnce => {
-                for normalized in &normalized_commands {
-                    guard.release(normalized, true);
+                for key in &approval_keys {
+                    guard.release(key, true);
                 }
                 guard.runtime.approvals_used += 1;
                 Ok(PreparedShellDirective {
@@ -424,9 +439,11 @@ pub(crate) fn prepare_directive(
                     display_command,
                 })
             }
-            ShellApprovalDecision::Deny => {
-                for normalized in &normalized_commands {
-                    guard.release(normalized, false);
+            // The shape choice was not offered: this request is for resolved
+            // bytes, so a template decision cannot authorize it.
+            ShellApprovalDecision::Deny | ShellApprovalDecision::AllowTemplatePersist => {
+                for key in &approval_keys {
+                    guard.release(key, false);
                 }
                 Err(ShellExpansionError::Denied {
                     ctx: Box::new(directive.ctx.clone()),
@@ -435,8 +452,8 @@ pub(crate) fn prepare_directive(
                 })
             }
             ShellApprovalDecision::BlacklistPersist => {
-                for normalized in &normalized_commands {
-                    guard.release(normalized, false);
+                for (normalized, key) in normalized_commands.iter().zip(&approval_keys) {
+                    guard.release(key, false);
                     store::append_blacklist_exact(policy_paths, normalized)?;
                     guard.runtime.persist_blacklist_exact(normalized.clone());
                 }

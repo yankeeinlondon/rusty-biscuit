@@ -171,6 +171,82 @@ pub(crate) fn parse_directives_in(
     Ok(directives)
 }
 
+/// The authored command text of every `::shell` directive in `content`, with
+/// its 1-based file line, in document order.
+///
+/// Uses the same line, prefix, and code-region rules as
+/// [`parse_directives_in`] but parses nothing, so a placeholder's own spaces,
+/// quotes, and operators survive for [`authored_template`].
+pub(crate) fn authored_directive_commands(content: &str, line_offset: usize) -> Vec<(String, usize)> {
+    let structural = structural_view(content, None);
+    let code_regions = find_code_regions(&structural);
+    let mut commands = Vec::new();
+    let mut byte_offset = 0;
+    for (line_num, line_slice) in (1..).zip(content.split_inclusive('\n')) {
+        let line_start = byte_offset;
+        byte_offset += line_slice.len();
+        if is_in_code_region(line_start, &code_regions) {
+            continue;
+        }
+        let line = line_slice
+            .strip_suffix('\n')
+            .and_then(|line| line.strip_suffix('\r').or(Some(line)))
+            .unwrap_or(line_slice);
+        let after = line[directive_prefix_len(line)..].trim_end();
+        if let Some(command_text) = after.strip_prefix("::shell ") {
+            commands.push((command_text.to_string(), line_num + line_offset));
+        }
+    }
+    commands
+}
+
+/// Parses an authored `::shell` command as a template and removes the
+/// directive's own options (`--when-error`, `--no-cache`, `::timeout:<N>`, …),
+/// which are not command arguments, exactly as [`parse_directives_in`]
+/// removes them from the token stream.
+pub(crate) fn authored_template(
+    command_text: &str,
+) -> Result<super::template::CommandTemplate, super::template::TemplateGrammarError> {
+    use super::template::{ArgPart, TemplateArg, TemplateGrammarError};
+
+    let mut template = super::template::parse_authored(command_text)?;
+    for segment in &mut template.segments {
+        let mut words: Vec<TemplateArg> = std::iter::once(TemplateArg::normalized(vec![ArgPart::Literal(
+            std::mem::take(&mut segment.program),
+        )]))
+        .chain(std::mem::take(&mut segment.args))
+        .collect();
+        let mut kept = Vec::with_capacity(words.len());
+        let mut index = 0;
+        while index < words.len() {
+            let literal = match words[index].parts.as_slice() {
+                [ArgPart::Literal(text)] => Some(text.as_str()),
+                _ => None,
+            };
+            match literal {
+                Some(option) if ERROR_HANDLING_OPTIONS.contains(&option) => {
+                    index += 1 + option_arg_count(option);
+                }
+                Some("--no-cache") => index += 1,
+                Some(word) if word.starts_with("::timeout:") => index += 1,
+                _ => {
+                    kept.push(std::mem::replace(&mut words[index], TemplateArg { parts: Vec::new() }));
+                    index += 1;
+                }
+            }
+        }
+        let mut kept = kept.into_iter();
+        let program = kept.next().ok_or(TemplateGrammarError::Empty)?;
+        segment.program = match program.parts.as_slice() {
+            [ArgPart::Literal(text)] if !text.is_empty() => text.clone(),
+            [ArgPart::Literal(_)] => return Err(TemplateGrammarError::Empty),
+            _ => return Err(TemplateGrammarError::ProgramWordHole),
+        };
+        segment.args = kept.collect();
+    }
+    Ok(template)
+}
+
 /// How inserted data changed a command's shape, if it did.
 ///
 /// `masked` is the command text with every data byte masked (see
