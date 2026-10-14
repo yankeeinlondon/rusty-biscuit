@@ -13,8 +13,37 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - claudine/lib/src/config/tts.rs
+    - claudine/lib/src/config/claudine_config/tests.rs
+    - claudine/lib/src/events/config.rs
+    - claudine/lib/src/dispatch/loader.rs
+    - claudine/lib/src/dispatch/loader/tests.rs
+    - claudine/lib/src/dispatch/runner/speak.rs
+    - claudine/lib/src/dispatch/runner/tests.rs
+    - claudine/lib/src/dispatch/tests.rs
+    - claudine/lib/src/composition/lifecycle/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/tests/tts_settings.rs
+    - claudine/cli/src/commands/config_tui/reducers.rs
+    - claudine/cli/src/commands/config_tui/tabs/tts.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 packages:
     - claudine
+source_files_during_phase_3:
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/mod.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/collect.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/collect/tests.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/classify.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/classify/tests.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/key.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/key/tests.rs
+    - claudine/cli/tests/l1/composition_seams.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 # Plan: TTS Pre-warm
 
@@ -178,24 +207,24 @@ in the touched files before declaring done.
 
 **Wave 2.1 (sequential: type first)**
 
-- [ ] **Type change.** In `lib/src/config/tts.rs`, make `provider` optional and
+- [x] **Type change.** In `lib/src/config/tts.rs`, make `provider` optional and
   add `prewarm`, keep `deny_unknown_fields`, update docs on `TtsValue`.
-- [ ] **Bridge.** In `dispatch/loader.rs`, add `tts_prewarm` to `GlobalSettings`
+- [x] **Bridge.** In `dispatch/loader.rs`, add `tts_prewarm` to `GlobalSettings`
   per R1 and compute it from every shape per the spec's shape table; map absent
   provider to `None`.
 
 **Wave 2.2 (parallel after 2.1)**
 
-- [ ] **Hook speak.** Update `dispatch/runner/speak.rs` and
+- [x] **Hook speak.** Update `dispatch/runner/speak.rs` and
   `dispatch/runner/tests.rs`/`dispatch/tests.rs` so a provider-less object
   behaves as `true` (no assertion edits to existing tests).
-- [ ] **Other consumers.** Fix compile fallout in `cli/src/commands/init_wizard.rs`,
+- [x] **Other consumers.** Fix compile fallout in `cli/src/commands/init_wizard.rs`,
   `cli/src/commands/init/mod.rs`, `runaway/config.rs`, `config/mod.rs`.
-- [ ] **TUI tab.** `cli/src/commands/config_tui/tabs/tts.rs`: preserve `prewarm`
+- [x] **TUI tab.** `cli/src/commands/config_tui/tabs/tts.rs`: preserve `prewarm`
   in every object reconstruction path (provider, voice, gender edits); switching
   to a boolean drops the object; add the explanatory text that the hook toggle
   does not disable lifecycle speech or warming. No new toggle.
-- [ ] **Config tests.** Add the matrix test and one test per shape-table row in
+- [x] **Config tests.** Add the matrix test and one test per shape-table row in
   `config/claudine_config/tests.rs` / `tts.rs`. Existing tts tests must pass
   unedited. Reject `{ enabled: true }`.
 
@@ -211,13 +240,13 @@ absent.
 
 **Wave 3.1 (parallel)**
 
-- [ ] **Action walker.** New module `composition/lifecycle/prewarm/collect.rs`:
+- [x] **Action walker.** New module `composition/lifecycle/prewarm/collect.rs`:
   walk the parsed lifecycle (all stacks except `initialize`, `loop:` loose keys
   and `gate:`, sequence `setup:`/`teardown:`) yielding raw phrase expressions
   with their origin. Cover `speak` aliases, root dictionary bundles, positional
   and named speech arguments, and `then`/`else` to arbitrary depth. Never
   evaluate guards, never scan arbitrary frontmatter for `say`.
-- [ ] **Classifier.** New `prewarm/classify.rs`: given a phrase and
+- [x] **Classifier.** New `prewarm/classify.rs`: given a phrase and
   `PrewarmInputs` (R4), return `Early(resolved_text)` or `Skip(reason)`.
   - roots from `static_variable_reads`; early = `fm`/implicit frontmatter bare
     name, `ctx`, `env`; any other declared global is late, decided from the
@@ -229,11 +258,11 @@ absent.
   - resolve with playback's interpolation, typed-value handling, text
     conversion, and empty suppression; produced strings are never re-evaluated;
     a resolution failure is a silent skip.
-- [ ] **Dedup key.** `prewarm/key.rs` per R6.
+- [x] **Dedup key.** `prewarm/key.rs` per R6.
 
 **Wave 3.2 (after 3.1)**
 
-- [ ] **Unit tests (criteria 1, 2, 3).** Table-driven: every eligibility rule,
+- [x] **Unit tests (criteria 1, 2, 3).** Table-driven: every eligibility rule,
   including zero-arg call, shell-probing function, call in an untaken branch,
   operators/indexing/fallback/ternary over early values, empty results not
   submitted, and brace text returned by an interpolation not re-evaluated.
