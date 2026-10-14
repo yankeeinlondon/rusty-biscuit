@@ -54,13 +54,6 @@ skills_files_updated_during_phase_2:
     - .claude/skills/darkmatter/schema.md
     - .claude/skills/claudine/cli-commands.md
 human_review: false
-message_to_agent: |-
-    Phase 3 is done; read "## Phase 3" in this log first. What Phase 4 needs:
-    - Launch validation now loads trigger schemas (`claudine/lib/src/composition/schema/mod.rs::load_effective_schema`; embedded bundle in `schema/bundle.rs`). Docs still describe the old authored-only verdict and must change: `claudine/docs/topics/composition.md` launch-validation section (AC11), `frontmatter-properties.md:17` and `execution-flow.md:519` ("invalid optionals are dropped"), plus the R8 drift list from Phase 1. Describe the strict policy: an invalid Claudine control fails the launch; authored application optionals keep drop-and-warn; token ownership and supplied eager files still read the authored `$schema` only.
-    - DMLS gap (found, not fixed): completion and hover read only the authored SimplifiedSchema (`effective.simplified`), so a document with no `$schema` gets validation from a trigger payload but no completion or hover from it. `darkmatter/docs/topics/schemas/dmls-schema-support.md` says the effective schema drives completion and hover; when you update that page (AC8), state the actual behavior (validation only for trigger payloads) unless the author rules the gap must be fixed first.
-    - Consumers still loading the retiring Darkmatter copies, to migrate before deleting them: `darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs::with_ctx` (schema extension), `dmls/tests/l1/mapping_only_corpus.rs`, `dmls/src/providers/frontmatter/sequence_tests.rs`, `dmls/src/overlay/mod.rs` (~line 1501), `darkmatter/cli/tests/l1/schema_validate.rs::schema_validate_shipped_claudine_schema_rejects_an_empty_lifecycle_item`, and the module docs of `dmls/src/diagnostics/nested_span.rs`. Both inventory guards already read `claudine/schemas/`.
-    - Size: the resolved payload is ~2.5 MB. Darkmatter now memoizes embedded payloads, merges, phase schemas and root-union arms, shares context-free validators, and the workspace `profile.test` optimizes jsonschema/regex/serde_json; see the darkmatter skill `schema.md`. A Claudine spawn still costs ~0.5 s more in debug; root-union + `file(match)` documents ~1 s more. Do not add per-call clones/compiles of an effective schema.
-    - Diagnostic quality (found, not changed): a misspelled long-form key reports `/start/0/shell: {"cmd":…} is not valid under any of the schemas listed in the 'anyOf' keyword` plus an `is not of type "string"` line; `cmd` appears only in the echoed value. A Darkmatter union-narrowing fix changed 15 content-policy/DMLS diagnostics, so it was reverted; it needs its own change.
 source_files_during_phase_3: 
     - Cargo.toml
     - claudine/lib/src/composition/schema/bundle.rs
@@ -94,6 +87,127 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: 
     - .claude/skills/claudine/cli-commands.md
     - .claude/skills/darkmatter/schema.md
+source_files_during_phase_4: 
+    - claudine/lib/src/composition/lifecycle/tests/grammar.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/l1/schema_validate_shipped_artifacts.rs
+    - darkmatter/dmls/src/config/mod.rs
+    - darkmatter/dmls/src/context.rs
+    - darkmatter/dmls/src/diagnostics/nested_span.rs
+    - darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/tests/l1/mapping_only_corpus.rs
+    - darkmatter/docs/schemas/claudine.yaml
+    - darkmatter/docs/schemas/claudine-types.yaml
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase1.rs
+    - darkmatter/lib/tests/l1/schema_phase_validation.rs
+    - darkmatter/lib/tests/l1/schemas_constraints_block_matrix.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/prompts/dasherized_identifier_corpus.rs
+docs_updated_during_phase_4: 
+    - claudine/README.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/frontmatter-properties.md
+    - claudine/docs/topics/schemas.md
+    - claudine/schemas/README.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/dmls/docs/editors/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: 
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/schema.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: 
+    - .claude/skills/os/build-hosts.md
+source_code: 
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - claudine/schemas/action.yaml
+    - claudine/schemas/lifecycle.yaml
+    - claudine/schemas/linking.yaml
+    - claudine/schemas/claudine.yaml
+    - claudine/schemas/inline-compose.yaml
+    - claudine/schemas/partials/lifecycle.yaml
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/lib/tests/l1/claudine_schemas_matrix.rs
+    - claudine/lib/tests/fixtures/claudine-schemas/
+    - darkmatter/lib/src/markdown/schemas/embedded.rs
+    - darkmatter/lib/src/markdown/schemas/errors.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/tests/mod.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/envelope.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/mod.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schema_embedded_trigger_bundles.rs
+    - darkmatter/lib/tests/l1/meta_schema_reference_graph.rs
+    - darkmatter/lib/tests/l1/schema_roots.rs
+    - darkmatter/lib/tests/l1/schemas_constraints_block_matrix.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase4.rs
+    - darkmatter/cli/src/commands/schema/triggers.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - Cargo.toml
+    - claudine/lib/src/composition/schema/bundle.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/translate.rs
+    - claudine/lib/src/composition/schema/supplied.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/tests.rs
+    - claudine/lib/src/composition/error/render/schema.rs
+    - claudine/lib/src/composition/lifecycle/tests/nested_span.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - claudine/cli/src/commands/schema_interactive/mod.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/launch_trigger_schemas.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+    - claudine/lib/src/composition/lifecycle/tests/grammar.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/l1/schema_validate_shipped_artifacts.rs
+    - darkmatter/dmls/src/config/mod.rs
+    - darkmatter/dmls/src/context.rs
+    - darkmatter/dmls/src/diagnostics/nested_span.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/tests/l1/mapping_only_corpus.rs
+    - darkmatter/docs/schemas/claudine.yaml
+    - darkmatter/docs/schemas/claudine-types.yaml
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase1.rs
+    - darkmatter/lib/tests/l1/schema_phase_validation.rs
+    - darkmatter/lib/tests/prompts/dasherized_identifier_corpus.rs
+documentation: 
+    - darkmatter/docs/topics/schemas/definition.md
+    - claudine/schemas/README.md
+    - claudine/README.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/frontmatter-properties.md
+    - claudine/docs/topics/schemas.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/dmls/docs/editors/README.md
+completed_phase: 5
+implemented: true
 ---
 # Implementation Log for 2026-10-21-claudine-schemas (5 phases)
 
@@ -979,3 +1093,308 @@ hover from a trigger payload (F2).
   left to the normal CI schedule, with no identified OS-specific risk. The
   `profile.test` change applies to every OS.
 - No `cargo fmt`, commit, or CI change.
+
+## Phase 4
+
+Phase 4 retired Darkmatter's duplicate Claudine schemas and brought the
+current guidance in line with Phases 2–3. Wave 7 ran as two parallel owners on
+disjoint files: a migration owner (Rust tests, config tests, the deletion) and
+a documentation owner (Markdown docs, READMEs, skills).
+
+### What landed
+
+**Consumer migration and deletion.** Both retiring files,
+`darkmatter/docs/schemas/claudine.yaml` and `claudine-types.yaml`, are deleted
+(working-tree `rm`, nothing staged). That was the final step, after every
+consumer passed against its replacement. Per consumer:
+
+| Consumer | Now reads | Why |
+| --- | --- | --- |
+| `dmls/tests/l1/mapping_only_corpus.rs` | `DmlsConfig::default()` (the Claudine extension is removed) | The corpus is about mapping-only diagnostics, not Claudine. Diagnostic delta is **zero**: the baseline passes unchanged, so it was **not re-blessed**. The payload extension would have cost ~300 ms per document (~8 s). |
+| `dmls/src/config/mod.rs` (config-parsing test) | a neutral `[schema.extensions.prompts]`, `path = "schemas/prompts.yaml"` | The test only parses config; it never reads the file. |
+| `dmls/src/diagnostics/nested_span/nested_span_tests.rs` | a payload extension built from `include_str!` of `claudine/schemas/{claudine,lifecycle,action,linking}.yaml` (new helper `context.rs::test_support::claudine_payload_extension`) | Three tests depend on Claudine's typing. The six-iteration escape-parity test now checks all cases in one document (2.25 s → 0.56 s). |
+| `dmls/src/providers/frontmatter/sequence_tests.rs` | the same payload; one test uses a test-owned schema | Four tests were rewritten for the new shape: an index reaches the `communicate` arm and a bare key the `bundle` arm; `fails_closed…` uses a test-owned schema because no list-only object property is left in Claudine's catalog; `transparent_crossing…` uses `then`; the predicates test uses the context-aware walk and covers `bundle.when`. |
+| `dmls/src/overlay/mod.rs` | — | The two old names were removed from the classification list. |
+| `dmls/src/diagnostics/nested_span.rs` module docs | `claudine/schemas/` | The comment named the old files. |
+| `darkmatter/cli/tests/l1/schema_validate.rs` | a git-repository fixture with the five-file bundle in `schemas/`, no `$schema`, triggers discovered normally (new `validate_triggered_json` helper) | `md` discovers triggers only inside a repository. See finding P1 for the renamed test. |
+| `darkmatter/cli/tests/l1/schema_validate_shipped_artifacts.rs` | an inline `sequence-state.yaml` | The "`state` is a required object" rule exists nowhere now (`state` is `unknown`, R8). The test is now `generated_required_object_state_stays_an_object`. |
+| `darkmatter/lib/tests/l1/base_schema_end_to_end.rs` | the five files registered as an embedded bundle; discovery runs in an empty temp dir | The four Claudine tests read the new `claudine.yaml`. The exact `mode` description became a `starts_with("enum(append, replace) ->")` check. |
+| `darkmatter/lib/tests/l1/schemas_constraints_block_matrix.rs` | a test-owned `FIXTURE` defining the same `lifecycle-action` object (`"<string>": any`, `$constraints: {min-keys: 1}`) | The block check, the positive-control row, and every column and probe are unchanged. No type in `claudine/schemas/` matches: each adds `max-keys: 1` and fixed keys. |
+| `darkmatter/lib/tests/l1/meta_schema_phase1.rs` | — | Artifact count 7 → 5. |
+| `darkmatter/lib/tests/l1/shipped_schema_corpus.rs` | `claudine/schemas/claudine.yaml` for the presence test | The two old entries were removed. |
+| `darkmatter/lib/tests/l1/schema_phase_validation.rs` | adds `claudine/schemas`; a trigger's `$schema` payload counts (`match` accepted) | Missed by the path search because it walks directories. Without the payload, the corpus fell to 78, below its floor of 80. |
+| `darkmatter/lib/tests/prompts/dasherized_identifier_corpus.rs` (opt-in) | `lifecycle.yaml` (`conditional-1/2/3.when`, `loop.while`, `loop.until`) and `action.yaml` (`bundle.when`), each required to be `expression` | The old comment said `string` and was stale; it is fixed. Ran with `cargo nextest run -p darkmatter --features prompt-tests --test prompts`: 10 passed, before and after the deletion. |
+
+Not consumers, so left alone (R9): the synthetic `claudine.yaml` temp-dir
+fixtures in `triggers/assemble.rs`, `markdown/schemas/mod.rs`,
+`schema_roots_parity.rs`, `overlay/schema.rs`, and `lsp_session.rs`, plus
+`darkmatter/tests/fixtures/schema-triggers/schemas/claudine.yaml`.
+
+**Documentation (AC8, AC11).** Code is taken as correct throughout.
+
+- `claudine/docs/topics/schemas.md` (existing page; `bundle.rs` already links
+  it) now covers: the five files and their kinds; non-null trigger selection
+  (nested `any:` arms, R1); which events allow which action types; bundles vs
+  long forms; three typed levels and the parser-only rules; generated and
+  planned verbs; optional inputs and open application data. It also covers the
+  disk locations and shadowing, the embedded fallback, the unsupported routes,
+  and DMLS's disk-only, diagnostics-only use. A Mermaid flowchart shows the
+  whole path. Every YAML example was checked with `md schema validate` against
+  a copy of the bundle.
+- `composition.md` gains "Claudine's Trigger Schemas in the Launch Verdict"
+  (AC11): the strict policy, authored ownership, authored-only token
+  ownership and supplied eager files, initialize before the verdict, no
+  `start` or provider on failure, and frozen completion. The "Required vs
+  Optional" text now limits drop-and-retry to authored optional non-eager
+  properties.
+- `frontmatter-properties.md`: the `$schema` wording is corrected and the R8
+  drift list applied (a new Run Controls section; `initialize`/`finalize`;
+  `argument-hint`/`max_turns`; overlay keys `state`, `previous`, `next`,
+  `outputs`, `sequence_id`; the `hash` object form; `verbosity` per D2;
+  `operation`/`yolo` documented as not document controls).
+- `execution-flow.md` steps 4b and 6b and future-improvement item 9;
+  `flow-control/lifecycle.md` (the completion verdict names the trigger
+  schemas); `claudine/schemas/README.md` (library vs trigger classification);
+  `claudine/README.md` (topic link).
+- `darkmatter/docs/topics/schemas/dmls-schema-support.md`: a new "Claudine
+  documents" section, the extension example replaced, and the diagram and
+  bullets corrected. F2 is stated as current behavior: trigger payloads drive
+  DMLS diagnostics only, and completion and hover read the authored schema.
+  The author did not rule that the gap be fixed first, so it is documented
+  rather than fixed.
+- `darkmatter/dmls/docs/editors/README.md`: the extension example is neutral,
+  and a note says Claudine's schemas need no extension entry (they are
+  discovered as triggers).
+
+### Drift detected and resolved (docs corrected to the code)
+
+1. `composition.md`, `execution-flow.md`, and `frontmatter-properties.md`
+   described an authored-`$schema`-only verdict that dropped every invalid
+   optional.
+2. `frontmatter-properties.md` listed the retired overlay keys
+   (`previous_state`, `next_state`, `is_first`, `is_last`, `step`,
+   `total_steps`).
+3. `schemas.md` showed a `kind: schema` file with a root `$schema:` key, which
+   `md` rejects.
+4. `dmls-schema-support.md` claimed that the effective schema drives completion
+   and hover, and that Claudine gets completion through an extension baseline.
+   Its coverage matrix said `kind: schema-trigger`.
+5. `.claude/skills/darkmatter/schema.md` said `kind: schema-trigger`; the code
+   accepts `trigger-schema`.
+6. `execution-flow.md` future item 9 said lifecycle config had no schema
+   validation.
+
+**Left as found (outside this feature):**
+- `darkmatter/docs/topics/schemas/authoring-schemas.md` (lines ~250–457),
+  `index.md:34`, and `schema-targeting.md:40` still spell the kind
+  `schema-trigger`. That is the later rename Rule 2 says not to adopt here.
+  The current loader accepts only `trigger-schema`, so a reader copying those
+  examples gets a load error. This needs its own Darkmatter docs change.
+- Two existing links into feature snapshots were left as found:
+  `darkmatter/dmls/docs/editors/README.md` → `features/2026-07-04-dmls/spec.md`,
+  and the module doc of `claudine/lib/src/composition/schema/mod.rs` →
+  `features/2026-05-15-schemas/plan.md`.
+- `execution-flow.md` Phase 1a.5 still says sequence steps are validated
+  "against its `$schema`". Not traced in this phase.
+
+### Findings
+
+- **P1 — the schema no longer rejects an empty stack item.** The old
+  `lifecycle-stack-item` had `min-keys: 1`. In the new bundle a stack item may
+  be a `bundle` / `initialize-bundle` mapping, which has no minimum, so
+  `start: [{}]` and `initialize: [{}]` are schema-valid. The parser still
+  rejects them (`parse.rs`: "a stack item cannot be empty"), but no test
+  covered that. Two changes follow:
+  - The CLI test `schema_validate_shipped_claudine_schema_rejects_an_empty_lifecycle_item`
+    is renamed `…_rejects_an_unknown_lifecycle_verb` and uses `- bogus: 1`
+    (still fails at `/initialize/0`).
+  - New parser test
+    `claudine::composition::lifecycle::tests::grammar::an_empty_stack_item_is_a_typed_error_naming_its_path`
+    covers `start[0]`, `initialize[0]`, and a nested `failure[0].then[0]`.
+
+  If the editor should flag `{}`, add `min-keys: 1` to the bundle types in
+  `claudine/schemas/action.yaml` in a later change. AC4 does not require it.
+- **P2 — an extension cannot point at a trigger file.** A `.dmls.toml`
+  extension whose `path` is `claudine/schemas/claudine.yaml` applies nothing
+  (tested by the migration owner). The docs therefore say Claudine needs no
+  extension entry, and the DMLS unit tests use the trigger's payload saved as
+  a plain schema.
+- **P3 — two active features name the deleted paths.** The plans or statements of
+  `2026-10-24-sequence-containers` and `2026-10-27-darkmatter-lifecycle-ownership`
+  name the old files. They are snapshots under R10 and were not edited, but
+  whoever picks them up should read `claudine/schemas/` instead.
+
+### AC14 final reference search
+
+`grep -rln --exclude-dir=target --exclude-dir=.git --exclude-dir=.gitnexus "docs/schemas/claudine\|claudine-types" .`
+finds no live file. Every remaining hit is exempt under R10:
+
+- feature and fix directories (spec, plan, log, review, baseline, and spike
+  files): `features/_completed/2026-09-22-consolidated-test-binaries-wave-2/{baseline/test-input-probe-before.json, spikes/s2-scan-output.txt}`
+  and folders under `claudine/features/`, `claudine/fixes/`, and
+  `darkmatter/features/` (including this feature's own spec and plan, and the
+  active `2026-10-20-lifecycle-grammar`, `2026-10-24-sequence-containers`, and
+  `2026-10-27-darkmatter-lifecycle-ownership`);
+- the dated research note `darkmatter/dmls/design/research/r3-yaml-parser-bakeoff.md`.
+
+### Requirement-to-test map
+
+| Requirement | Evidence |
+| --- | --- |
+| AC14: old files deleted, no live references | Working-tree deletion; the search above |
+| AC14: `mapping_only_corpus` passes | `dmls::l1 mapping_only_corpus` passes without bless mode; zero delta, no re-bless |
+| AC7: inventory guard survives the deletion | `dmls … nested_span_tests::lifecycle_inventory_matches_the_authored_claudine_schema` and `claudine … nested_span::single_pass_inventory_matches_the_authored_claudine_schema` read `claudine/schemas/` and pass |
+| Constraint-block input matrix keeps its controls | `schemas_constraints_block_matrix` (all rows, including the positive control) on the test-owned `FIXTURE` |
+| Claudine-specific consumers use the real bundle | `base_schema_end_to_end` (embedded registration), `schema_validate` (trigger-discovered, git fixture), `nested_span_tests` and `sequence_tests` (payload extension) |
+| Generic consumers own their schema | `config::…` parsing test, `schema_validate_shipped_artifacts::generated_required_object_state_stays_an_object`, `sequence_tests::fails_closed…` |
+| Shipped-artifact corpora follow the move | `shipped_schema_corpus`, `meta_schema_phase1`, `schema_phase_validation` (corpus ≥ 80 with trigger payloads) |
+| Empty stack item still rejected after the schema loosened (P1) | `grammar::an_empty_stack_item_is_a_typed_error_naming_its_path` (new) |
+| Opt-in prompt corpus follows the move | `dasherized_identifier_corpus` via `--features prompt-tests --test prompts`: 10 passed |
+| AC8/AC11 docs | The pages listed above; YAML examples checked with `md schema validate` |
+
+### Phase 4 verification
+
+- `cd claudine && just test`: 9062 passed, 9 skipped, 0 failed (83.6 s). This
+  run preceded the new parser test, which then passed on its own
+  (`cargo nextest run -p claudine --lib an_empty_stack_item`).
+- `cd claudine && just lint`: exit 0, before and after the new test. The only
+  warning is the known macOS linker `__eh_frame` note.
+- `cd darkmatter && just test` (lib, CLI, DMLS), run by the migration owner
+  after the deletion and the docs edits: 9987 passed, 10 skipped, 0 failed,
+  no SLOW. The slowest changed test is
+  `nested_span_tests::quick_fix_encodes_quoted_replacements_for_their_style`
+  at 1.6 s (was ~0.1 s; the payload is larger).
+- `cd darkmatter && just lint`: exit 0 (re-run by the orchestrator).
+- OS: test-only and docs-only changes with no `cfg` or path-comparison code.
+  The `schema_validate.rs` fixture uses the existing
+  `initialize_repository()` helper (an established cross-OS fixture seam).
+  Evidence is from macOS only. Linux, Windows, and WSL2 are left to the
+  normal CI schedule.
+- No `cargo fmt`, commit, staging, or CI change.
+
+## Phase 5
+
+Phase 5 verified the work and prepared the review handoff. No production
+code, schema, or test changed. The only edit outside this feature's files is
+an OS-skill note on `cross-check` argument quoting, learned during this phase.
+
+### Wave 8: scoped validation
+
+| Command | Result |
+| --- | --- |
+| `cd claudine && just test` (run twice; the second run's output was saved to check for SLOW) | 9063 passed, 9 skipped, 0 failed (82.8 s, 97.1 s); no SLOW or TIMEOUT. The count includes Phase 4's `grammar::an_empty_stack_item_is_a_typed_error_naming_its_path` (passes). |
+| `cd claudine && just lint` | exit 0 |
+| `cd darkmatter && just test` (lib, CLI, DMLS) | 9987 passed, 10 skipped, 0 failed (30.9 s); no SLOW |
+| `cd darkmatter && just lint` (including the zed-dmls wasm check) | exit 0 |
+| `mapping_only_corpus` (inside the run above, no `DMLS_BLESS*` variable set) | both tests pass; not re-blessed |
+| `cargo nextest run -p darkmatter --features prompt-tests --test prompts` (opt-in) | 10 passed, including `dasherized_identifier_corpus::condition_keys_match_the_shipped_claudine_schema` |
+
+Slowest feature tests in the Claudine run, under full parallel load on macOS:
+`claudine_schemas_embedded::embedded_{json,yaml}_trigger_combinator` at about
+3.0 s, `disk_bundle_resolves_its_relative_imports_from_disk` 2.3 s, and
+`claudine_schemas_matrix::{json,yaml}_action_shell` 2.1 s. All are under the
+5 s budget, but they are the first to watch on a 2-core runner.
+
+Embedded and CLI tests use fixture-owned contexts. CE and EB discover from
+empty temp dirs. CLI tests spawn through `CliProcessFixture` with fake
+providers, so no live agent, audio, or window focus is involved. No L2/L3 suite
+was run, and none is needed for YAML or launch behavior.
+
+### Wave 9: acceptance audit
+
+| AC | Status | Evidence |
+| --- | --- | --- |
+| 1 | met | Five files in `claudine/schemas/`, plus `review.yaml`, which the spec leaves untouched and this feature never edited. `partials/` is gone. CS `every_file_loads_and_every_export_resolves`, DC `claudine_bundle_loads_and_both_triggers_are_discovered`, `shipped_schema_corpus` |
+| 2 | met | CS `hand_verbs_equal_the_parser_inventory_plus_the_planned_verbs` (planned = `{break, prep}`), `generated_verb_keys_equal_the_darkmatter_catalogs`, `bare_verb_enum_equals_what_the_parser_accepts_as_a_bare_item` |
+| 3 | met | CS `event_stacks_are_typed_three_levels_deep_and_loose_below`, `initialize_stacks_are_typed_three_levels_deep_without_shell`, `loop_gate_is_typed_three_levels_deep_and_loose_below` |
+| 4 | met | CS `bundle_keys_are_the_union_of_their_categories_plus_when_and_no_error`, `bundle_values_are_the_category_short_forms`, `action_objects_are_closed_and_data_maps_stay_open`. Search: the only `<string>` key in the bundle is `lifecycle.yaml`'s `loose-body` (below the typed levels, AC3), never an action type or bundle. P1 (Phase 4) is not an AC4 failure: an empty item `{}` is schema-valid and parser-rejected (`grammar::an_empty_stack_item_is_a_typed_error_naming_its_path`) |
+| 5 | met | CS `ac5_*` groups and guard `ac5_groups_name_every_fixture_once`; DC `lifecycle_defects_are_reported_at_their_event_and_key`, `malformed_identifying_values_select_the_trigger_and_unrelated_data_does_not`, `parser_only_defects_pass_schema_validation`; the renamed `schema_validate_shipped_claudine_schema_rejects_an_unknown_lifecycle_verb` |
+| 6 | met | `bundle.rs` is `include_str!` of the five files; CE `embedded_files_are_the_repository_files_byte_for_byte`, `embedded_*_exports_resolve_without_disk_schemas`, `embedded_payloads_apply_without_disk_schemas` |
+| 7 | met (validation) | `nested_span_tests::lifecycle_inventory_matches_the_authored_claudine_schema`; DD `claudine_schema_discovery::*`, `dmls_has_no_claudine_dependency`. F2 (completion and hover ignore trigger payloads) is documented current behavior and outside AC7's validation claim |
+| 8 | met | `claudine/docs/topics/schemas.md`, `claudine/schemas/README.md`, `dmls-schema-support.md`, DMLS editor README (Phase 4) |
+| 9 | met | One sample, Phase 2: resolved_bytes=2,497,899; resolve_ms=48.7 (Apple M4 Max, release). No timing test |
+| 10 | met, with F1 | LT suite (see the Phase 3 map) passes in both runs above and on Linux. "Naming the key" holds only through the echoed value (F1) |
+| 11 | met | `composition.md` "Claudine's Trigger Schemas in the Launch Verdict" |
+| 12 | met | Wave 8 table |
+| 13 | met | CE AC13 (a)–(k) tests, Phase 3 map |
+| 14 | met | Both files absent; search below; `mapping_only_corpus` passes without bless mode (zero delta, never re-blessed) |
+
+Input-matrix completeness: the changed load-bearing reader fields are the
+library envelope (`kind`, `types`, `types.<export>`), the trigger envelope,
+and the 18 nested columns. All are walked for disk (CM, 36 tests plus guard)
+and embedded (CE 36 plus guard; EB 29 cells × 2 syntaxes) origins, in block
+YAML and JSON syntax, each with a control row. No cell outcome differs between
+origins (Phase 3). No reader code changed in Phase 4 or 5.
+
+**Audit searches** (all clean):
+
+- Old schema references:
+  `grep -rln --exclude-dir={target,.git,.gitnexus} "docs/schemas/claudine\|claudine-types" .`
+  outside `features/` and `fixes/` finds only the R10-exempt snapshots
+  `features/_completed/2026-09-22-consolidated-test-binaries-wave-2/{baseline/test-input-probe-before.json, spikes/s2-scan-output.txt}`
+  and the dated research note `darkmatter/dmls/design/research/r3-yaml-parser-bakeoff.md`.
+- Shell-capable initialize arms: `initialize-bundle` (`action.yaml`) and
+  `initialize-item-1..3` (`lifecycle.yaml`) carry no `shell` key or arm.
+- Catch-all action keys: none (see AC4).
+- Required execution inputs in trigger payloads: neither payload declares a
+  required property. `required` appears only in `match` selection conditions.
+- Duplicate runtime schema definitions or temporary extraction: none. Claudine
+  has one registration site
+  (`composition/schema/mod.rs`: `with_embedded_trigger_bundle(bundle::claudine_schema_bundle())`
+  then `with_trigger_discovery`) and no temp-dir writes outside tests.
+- Per-action resolution: none. Nothing in `composition/lifecycle/` resolves
+  schemas.
+- Scope: nothing under `.github/` or `scripts/ci` changed, so no new CI cell.
+  The feature's only Cargo change is the Phase 3 `profile.test` opt-level
+  block. There is no live-provider test, benchmark, or action feature. The
+  only pre-existing assertion edit is D8 (Phase 3).
+
+### Cross-OS evidence
+
+Portability requirement: macOS, Linux, native Windows, and WSL2. Targeted
+runs went through `./scripts/cross-check.sh` with name-substring filters, on
+the working tree as a throwaway commit. The script published no CI observation
+for them, because the tested tree is not a committed head. They are
+behavioral evidence for this tree, not receipts.
+
+| Environment | Package / filter | Result |
+| --- | --- | --- |
+| macOS (local) | full `just test` claudine and darkmatter | pass (above) |
+| native Windows (`build-win-native`) | `claudine`: `claudine_schemas`, `composition::schema` | 256 passed |
+| native Windows | `darkmatter`: `schema`, `trigger` | 1786 passed |
+| native Windows | `dmls`: `claudine`, `nested_span`, `mapping_only`, `sequence_tests`, `config` | 63 passed |
+| native Windows | `darkmatter-cli`: `schema_validate`, `claudine_schema_bundle` | 134 passed |
+| Linux (`build-linux`) | `claudine` (same filter) | 260 passed (adds the unix-only symlink cases) |
+| Linux | `darkmatter`: `schema`, `trigger` | 1793 passed |
+| Linux | `claudine-cli`: `launch_trigger_schemas`, `compose_removed_grammar` | 57 passed (`#[cfg(unix)]`, so not run on Windows) |
+| WSL2 (`build-win`, archive mode) | `claudine` (same filter) | 260 passed |
+
+Not run: full-package L1 off macOS. That is left to the normal schedule (PR:
+Linux and macOS; nightly: native Windows and WSL2). No environment is reported
+as passed beyond the rows above.
+
+OS-skill fact learned: a filterset with parentheses cannot pass through
+`cross-check` (the local `just` drops the quotes, and the Windows leg's
+recipes re-split it). Added to `.claude/skills/os/build-hosts.md`.
+
+### Open items for the reviewer (not AC failures)
+
+- **F1:** a misspelled long-form key names the key only in the echoed value
+  (`anyOf` wording). The fix changes 15 established diagnostics, so it belongs
+  in its own Darkmatter change.
+- **F2:** DMLS completion and hover do not read trigger payloads. This is
+  documented as current behavior.
+- **P1:** to make the editor flag `start: [{}]`, add `min-keys: 1` to the
+  bundle types in a later change.
+- **P3:** `2026-10-24-sequence-containers` and
+  `2026-10-27-darkmatter-lifecycle-ownership` name the deleted paths.
+- Darkmatter docs `authoring-schemas.md`, `index.md`, and `schema-targeting.md`
+  still spell `kind: schema-trigger`; the loader accepts only
+  `trigger-schema`.
+- D9: a non-Claudine trigger's property that is absent from the authored shape
+  is classified hard, not dropped.
+
+### Phase 5 verification
+
+Implementation complete, ready for review. All 14 acceptance criteria have
+passing evidence. There was no `cargo fmt`, commit, staging, or CI change.
