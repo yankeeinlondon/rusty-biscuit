@@ -2512,7 +2512,7 @@ let detected = api.detect(&refs, DetectOptions { merge: true });
 | Type                  | Purpose                                                                                                             |
 |-----------------------|---------------------------------------------------------------------------------------------------------------------|
 | `DarkmatterSchemas`   | Top-level entry point. Holds the request's file-resolution context, an optional baseline, and the LRU validator cache. |
-| `EffectiveSchema`     | The fully-resolved schema for a document. Carries the SimplifiedSchema projection (when available), the compiled JSON Schema, the validator, and `origins: SchemaOriginMap` (each top-level property's provenance: document, baseline, or referenced file). |
+| `EffectiveSchema`     | The fully-resolved schema for a document. Carries the SimplifiedSchema projection (when available), the compiled JSON Schema, the validator, and `origins: SchemaOriginMap` (each top-level property's winning declaration: document, referenced file, trigger, or baseline; see [Embedded trigger bundles](#embedded-trigger-bundles) for reading a trigger's source). |
 | `ValidationReport`    | `valid: bool` + `problems: Vec<ValidationProblem>` + `pending: Vec<PendingValue>` (populated only by `validate_with_options`). |
 | `ValidationProblem`   | `path` (JSON pointer), `message`, `kind`, `property`, optional `line` / `column` (see [Problem Locations](#problem-locations)), optional `arm_index` for root-union failures, optional `description`; plus the span-aware fields `code: ValidationProblemCode`, `instance_path: JsonPointer`, optional `schema_path`, `offending_property`, and `file_reference: Option<FileReferenceDiagnostic>`. |
 | `PositionMap`         | Opaque source positions for one frontmatter snapshot, passed to `validate_with_positions`. `PositionMap::new()` (also `Default`) is empty and source-free; `is_empty()` reports whether any position can be given; `validate::build_position_map(yaml)` builds one from bare YAML. |
@@ -2938,7 +2938,10 @@ The match grammar supports freely nested `all`, `any`, `none`, and
 OR of independent arms. `$path` is case-sensitive on every OS (see
 [Matching a path with `$path`](#matching-a-path-with-path)). Every arm must
 contain a satisfiable presence gate or `$path`; otherwise the vacuous arm is a
-load error.
+load error. An empty condition mapping (`{}`) is a load error wherever it
+appears, including as a child of a combinator: `none: [{}]` would otherwise
+make the trigger unmatchable, and `all: [{}, …]` would hide a dropped
+condition.
 
 Effective precedence is caller baseline, matching trigger payloads (schema
 root order and then filename order), then the document's own `$schema`. Trigger
@@ -2959,4 +2962,74 @@ Schema roots (search order):
 3. file tree root: /repo/schemas
 4. SCHEMAS_DIR: unset
 5. home: /home/me/schemas (absent)
+```
+
+#### Embedded trigger bundles
+
+A program that uses Darkmatter as a library can ship trigger schemas inside
+its own binary, so they apply even where no schema file is installed. It
+hands Darkmatter an `EmbeddedSchemaBundle`: a bundle name plus
+`(file name, text)` pairs, usually from `include_str!`. Darkmatter ships no
+bundle of its own; the `md` CLI and DMLS register none.
+
+```rust
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EmbeddedSchemaBundle};
+
+const BUNDLE: EmbeddedSchemaBundle = EmbeddedSchemaBundle::new(
+    "my-tool",
+    &[
+        ("my-tool.yaml", include_str!("../schemas/my-tool.yaml")), // kind: trigger-schema
+        ("steps.yaml", include_str!("../schemas/steps.yaml")),     // kind: schema
+    ],
+);
+
+let schemas = DarkmatterSchemas::new(document_context)
+    .with_trigger_discovery()?
+    .with_embedded_trigger_bundle(BUNDLE)?;
+let report = schemas.validate(&markdown)?;
+```
+
+The bundle is the **last** place triggers are looked for:
+
+```mermaid
+flowchart LR
+    R["the five schema roots"] --> Q{"does any root hold a file<br/>named like the bundle file?"}
+    Q -- yes --> D["the disk file decides;<br/>the bundle file is ignored"]
+    Q -- no --> E{"does the bundle file claim<br/>kind: trigger-schema?"}
+    E -- yes --> T["embedded trigger, layered<br/>after every disk trigger"]
+    E -- no --> L["library: an import target only"]
+```
+
+- A file of the same name in any schema root replaces the bundle's file,
+  whatever that disk file holds: a matching trigger, a trigger that does not
+  match the document, a plain schema, or a broken trigger. A broken disk
+  trigger stays an error; the bundle never stands in for it.
+- An embedded trigger's `$schema` and every import in it
+  (`steps: step[]@./steps.yaml`, imports inside the imported library, and
+  `@this`) resolve among the bundle's own files, by name, without touching
+  the disk. `../` cannot leave the bundle, and a name the bundle lacks is an
+  error. A disk trigger never imports a bundle file: its `./steps.yaml` must
+  exist on disk.
+- A malformed embedded trigger, or one whose payload does not resolve, fails
+  trigger discovery with an error naming `{bundle}/{file name}`. A bundle
+  whose name is not one plain folder name, or whose file names are not
+  distinct plain `.yaml`/`.yml` names, is rejected when registered.
+- Embedded triggers add no dependency edges: they cannot change while the
+  program runs.
+- The trigger trace (`trace_registry`, which `md schema triggers` prints for
+  disk triggers) shows an embedded trigger as `embedded:{bundle}/{file name}`.
+
+`EffectiveSchema.origins` names the winning declaration of each top-level
+property. The rule is the same for disk and embedded triggers: the document's
+own `$schema` wins, otherwise the last matching trigger that declares the
+property, otherwise the baseline. For a trigger origin,
+`SchemaOrigin::trigger_source()` returns `TriggerSource::File(path)` for a
+schema-root file or `TriggerSource::Embedded { bundle, name }` for a bundle
+file; `SchemaOrigin::file()` returns a path only for a real file, so an
+embedded origin is never shown as one:
+
+```rust
+if let Some(TriggerSource::Embedded { bundle, name }) = effective.origins["model"].trigger_source() {
+    assert_eq!((bundle.as_str(), name.as_str()), ("my-tool", "my-tool.yaml"));
+}
 ```
