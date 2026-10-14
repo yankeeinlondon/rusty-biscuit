@@ -35,8 +35,8 @@ use crate::file_reference::{
 /// let portable = PortablePath::from_path("/opt/coding/repo/apps/web/README.md")
 ///     .with_ctx(&ctx)
 ///     .file_reference()?;
-/// assert_eq!(portable.reference().raw(), "&apps/web/README.md");
-/// assert_eq!(portable.strategy(), &PortabilityPreference::RepoRoot(None));
+/// assert_eq!(portable.reference().raw(), "apps/web/README.md");
+/// assert_eq!(portable.strategy(), &PortabilityPreference::TreeRootRelative);
 /// # Ok::<(), biscuit_file::PortablePathError>(())
 /// ```
 #[derive(Debug, Clone)]
@@ -600,6 +600,7 @@ impl Evaluation<'_> {
     /// names its candidate even when it is missing; a multi-candidate form
     /// with no match, and any failure other than absence, is
     /// [`PortablePathError::UnresolvableInput`].
+    /// Directory links use the first non-file candidate when no file matched.
     fn reference_target(&mut self, reference: &FileReference) -> Result<Target, PortablePathError> {
         let detailed = reference.resolve_detailed(&self.ctx);
         let candidates = detailed.candidates();
@@ -620,7 +621,14 @@ impl Evaluation<'_> {
                     let path = resolve::normalize_components(only.candidate().path());
                     Ok((path, state, Some(only.candidate().provenance())))
                 }
-                _ => Err(Finding::TargetMissing),
+                _ => candidates.iter()
+                    .find(|candidate| candidate.disposition() == ProbeDisposition::NonFile)
+                    .map(|candidate| (
+                        resolve::normalize_components(candidate.candidate().path()),
+                        TargetState::NotFile,
+                        Some(candidate.candidate().provenance()),
+                    ))
+                    .ok_or(Finding::TargetMissing),
             },
             DetailedOutcome::Failed(_) => Err(Finding::ResolutionFailed(resolution_problem(&detailed))),
         };
@@ -649,6 +657,7 @@ impl Evaluation<'_> {
         match preference {
             // Decided in `run` without a target.
             PortabilityPreference::AuthoredIntent(_) => not_applicable(NotApplicable::NoCandidate),
+            PortabilityPreference::TreeRootRelative => self.tree_root_relative(target),
             PortabilityPreference::SameDirRelative
             | PortabilityPreference::ChildDir
             | PortabilityPreference::ImmediateParentDir
@@ -663,6 +672,16 @@ impl Evaluation<'_> {
             PortabilityPreference::EnvRootedPath => self.env_rooted(target),
             PortabilityPreference::HomeDir => self.home(target),
             PortabilityPreference::AbsolutePath => self.absolute(target),
+        }
+    }
+
+    fn tree_root_relative(&self, target: &Target) -> Outcomes {
+        let Some(rest) = target.identity.strip_prefix(&PathIdentity::new(self.ctx.base_dir())) else {
+            return not_applicable(NotApplicable::OutsideBaseDir);
+        };
+        match text::render_reference(Lead::Bare, rest) {
+            Ok(text) => vec![verify(&text, target, Form::Implicit, &self.ctx).into_outcome()],
+            Err(rejection) => not_applicable(NotApplicable::UnsafeSpelling(rejection.into())),
         }
     }
 
@@ -940,6 +959,9 @@ enum Form {
     /// One location (`./`, `../`, `&`, `~`, absolute, an absolute `{{VAR}}`),
     /// which may name a file not yet created.
     Single,
+    /// A bare tree-root path: lookup must disambiguate its candidates. For a
+    /// directory link, the first non-file candidate determines its identity.
+    Implicit,
     /// A search (`@`, `^`), usable only when the lookup finds the target.
     Search,
 }
@@ -966,7 +988,15 @@ fn verify(text: &str, target: &Target, form: Form, ctx: &FileResolutionContext) 
     let landed = match detailed.outcome() {
         DetailedOutcome::Matched(path) => path.clone(),
         DetailedOutcome::Failed(ResolutionFailure::NoMatch) => match (form, detailed.candidates()) {
-            (Form::Single, [only]) => resolve::normalize_components(only.candidate().path()),
+            (Form::Single | Form::Implicit, [only]) => resolve::normalize_components(only.candidate().path()),
+            (Form::Implicit, candidates) if target.state == TargetState::NotFile => {
+                let Some(first) = candidates.iter().find(|candidate| {
+                    candidate.disposition() == ProbeDisposition::NonFile
+                }) else {
+                    return Check::Rejected(AttemptOutcome::NotApplicable(NotApplicable::TargetNotFile));
+                };
+                resolve::normalize_components(first.candidate().path())
+            }
             _ => {
                 return Check::Rejected(AttemptOutcome::NotApplicable(NotApplicable::TargetMissing));
             }
