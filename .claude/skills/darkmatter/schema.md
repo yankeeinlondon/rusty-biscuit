@@ -42,7 +42,8 @@ interpretation. Remedy it by wrapping the properties under the sole root
 `$schema:` key or under `kind: schema` plus `types:`. Classification is passive:
 it uses the already-parsed YAML value and performs no additional I/O.
 
-Schema-trigger documents use `kind: schema-trigger`. Preserve the kinded root
+Schema-trigger documents use `kind: trigger-schema` (the envelope kind the
+parser accepts, `triggers/envelope.rs::ENVELOPE_KIND`). Preserve the kinded root
 declaration so Darkmatter and Claudine can select the right schema formally.
 
 ## Composition and validation

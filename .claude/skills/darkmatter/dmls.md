@@ -125,6 +125,12 @@ DMLS projects Darkmatter's typed surfaces into LSP:
 - Expression completion, hover, and parse diagnostics inside
   expression-typed frontmatter.
 - Hover/documentation from typed descriptor catalogs.
+- Trigger payloads feed diagnostics only: completion and hover build their
+  shape from the base baseline, extension baselines, and the authored
+  `$schema` (`providers/frontmatter.rs::known_shape`), so a document typed
+  only by a trigger (Claudine's, with no `$schema`) gets no completion or
+  hover from it. DMLS reads triggers from disk only; it registers no
+  embedded bundle.
 - Workspace dependency tracking for referenced schemas and documents.
 
 Completion and validation must call the same schema-arm selection and parser
