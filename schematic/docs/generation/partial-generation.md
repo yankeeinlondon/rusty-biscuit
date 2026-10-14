@@ -154,7 +154,7 @@ it, or run full generation, to bring it up to date.
 
 Kept modules call code they were not generated with, from two places: the
 hand-written `schematic-runtime` crate, and the generated helper files
-`shared.rs` (cookie encoding, `FormFile`, the `Paginated` marker) and
+`shared.rs` (cookie encoding and `FormFile`) and
 `ws_shared.rs` (the WebSocket error, options, reconnect, and codec types),
 which every run rewrites. A partial run therefore answers two separate
 questions before it keeps anything:

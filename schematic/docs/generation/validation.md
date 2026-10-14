@@ -135,6 +135,9 @@ The same fields are available to code as
 | `api-key-param`: a query API-key parameter name is empty, or a cookie API-key name is not a cookie name | ✓ | | | error |
 | `header-parameter`, `cookie-parameter`: the name is not an HTTP token | ✓ | | | error |
 | `query-parameter`, `header-parameter`, `cookie-parameter`: the type is an array of arrays | ✓ | | | error |
+| `pagination-strategy`: a pagination strategy is malformed, alone or on its endpoint (see below) | ✓ | | | error |
+| `pagination-exception`: an exceptions row names no endpoint or one already named, or its list shape is unusable: item selector, item type, item location, alternates | ✓ | | | error |
+| `pagination-parameter`: a strategy input collides with a declared parameter it cannot adopt, adopts one without the knob that replaces it, or manages a required one without a value to send | ✓ | | | error |
 
 The Rust client sends text and binary bodies, header and cookie parameters,
 and API keys in a query parameter or cookie, so its rules for those features
@@ -173,6 +176,45 @@ produces a valid OpenAPI document and Postman collection:
 // Fails the Rust client only; OpenAPI and Postman are still written.
 response: ApiResponse::json_type("Vec<Model"),
 ```
+
+### Pagination rules
+
+Pagination changes only the Rust client, so only its validator checks it.
+Each message starts with the rule's id, then says what is wrong:
+
+```text
+severity=error api=GitHub endpoint=ListReleaze feature=pagination-exception output=rust: unknown-exception-id: exception names `ListReleaze`, which is not an endpoint of this API; did you mean `ListReleases`?
+```
+
+The rules, by feature id:
+
+- `pagination-strategy`: `cursor-without-end-signal`,
+  `full-page-on-cursor`, `full-page-without-page-size`,
+  `page-count-on-non-page-number`, `invalid-page-size`, `duplicate-input`
+  (two parts of a strategy write one query name, header, or body path),
+  `empty-value`, `empty-cursor-leg`, `inclusive-boundary-needs-item-key`,
+  `adjustable-page-size-on-page-number`, `adjustable-link-size-not-query`,
+  `next-link-with-follow-up-path`, `next-link-method-unspecified`,
+  `body-input-on-get`, `unknown-carry-param`, `unknown-path-param`,
+  `session-handle-unreachable`, `session-handle-not-sent`,
+  `session-step-needs-handle`, `keep-alive-without-input`,
+  `invalid-partition-max`.
+- `pagination-exception`: `unknown-exception-id` (with the nearest endpoint id
+  when one is a likely typo), `duplicate-exception-id`,
+  `invalid-item-selector`, `not-an-array-location`, `missing-item-type`,
+  `invalid-item-type`, `unknown-item-type`, `alternates-without-primary`,
+  `alternates-on-unpaginated`, `duplicate-label`, `invalid-label`.
+- `pagination-parameter`: `collides-with-endpoint-param`,
+  `adoption-without-knob`, `pager-managed-required-without-default`.
+
+An API default's own shape is reported once, with `endpoint=<none>`; each
+endpoint that inherits it is checked only for what depends on the endpoint.
+An item type named by an exceptions row must be valid Rust type syntax, and a
+single identifier other than a primitive must be a schema of the API's
+registry (nested schemas count). An item location is checked against the
+response type's registered schema when there is one; when the registry cannot
+describe the type, the generated client checks the location at run time
+instead, and nothing is reported.
 
 ### Routes and the uniqueness key
 
@@ -230,7 +272,9 @@ endpoint id in snake case (`ListReleases` becomes `list_releases`), and that
 method returns a call type named after the request type (`ListReleasesCall`
 beside `ListReleasesRequest`). Each optional parameter becomes a setter on the
 call type, named like its request field (`per_page`, matching
-`with_per_page`).
+`with_per_page`). A parameter that the endpoint's pagination strategy adopts
+has no setter: its pager control (`.page_size(..)`, `.page(..)`, ...)
+replaces it.
 
 Some of those names are taken by methods that every API struct or every call
 type has. The generator renames the endpoint's name, never the shared one, so
@@ -239,7 +283,8 @@ type has. The generator renames the endpoint's name, never the shared one, so
 | The generated name would be | Because | It becomes |
 | --- | --- | --- |
 | an endpoint method named like an API-struct method (`new`, `send`, `base_url`, `clone`, …) | the API struct has that method | `new_endpoint` |
-| a setter named like a call-type method (`full`, `build`, `anonymous`, `credential`, `deadline`, the reserved `pages`, `fetch_page`, `collect_all`, or a trait method such as `clone`) | every call type has that method | `full_param` |
+| a setter named like a call-type method (`full`, `build`, `anonymous`, `credential`, `deadline`, the pager entry points `pager`, `pages`, `fetch_page`, `collect_all`, or a trait method such as `clone`) | every call type has that method | `full_param` |
+| a setter named like a pager control the endpoint's strategy authors (`page`, `offset`, `after`, `before`, `page_size`) | the endpoint's pager has a method of that name | `page_param` |
 | an endpoint method whose snake-case id is a Rust keyword | it is not an identifier | `type_`, the same rule request fields use |
 
 Each rename is reported as an `endpoint-method-rename` **warning** and never
