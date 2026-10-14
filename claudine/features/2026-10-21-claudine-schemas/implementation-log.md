@@ -10,17 +10,90 @@ docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
 packages: 
     - darkmatter
+    - darkmatter-cli
+    - dmls
+    - claudine
+    - claudine-cli
+source_files_during_phase_2: 
+    - claudine/schemas/action.yaml
+    - claudine/schemas/lifecycle.yaml
+    - claudine/schemas/linking.yaml
+    - claudine/schemas/claudine.yaml
+    - claudine/schemas/inline-compose.yaml
+    - claudine/schemas/partials/lifecycle.yaml
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/lib/tests/l1/claudine_schemas_matrix.rs
+    - claudine/lib/tests/fixtures/claudine-schemas/
+    - darkmatter/lib/src/markdown/schemas/embedded.rs
+    - darkmatter/lib/src/markdown/schemas/errors.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/tests/mod.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/envelope.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/mod.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schema_embedded_trigger_bundles.rs
+    - darkmatter/lib/tests/l1/meta_schema_reference_graph.rs
+    - darkmatter/lib/tests/l1/schema_roots.rs
+    - darkmatter/lib/tests/l1/schemas_constraints_block_matrix.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase4.rs
+    - darkmatter/cli/src/commands/schema/triggers.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+docs_updated_during_phase_2: 
+    - darkmatter/docs/topics/schemas/definition.md
+docs_created_during_phase_2: 
+    - claudine/schemas/README.md
+skills_files_updated_during_phase_2: 
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/claudine/cli-commands.md
 human_review: false
 message_to_agent: |-
-    Phase 1 (contracts) is done; read "## Phase 1" in this log before authoring any YAML. Key rulings you must apply:
-    - R1: Darkmatter's trigger `match:` grammar rejects property-level unions. Write each identifying property as five single-type `(required)` conditions under `any:` (string, number, boolean, object, "unknown[]"); the inline trigger is `all: [any: <prompt arms>, none: <sequence arms>]`. Verified with `md schema triggers`.
-    - R3: fix `darkmatter/lib/src/markdown/schemas/triggers/envelope.rs:69` (non-string top-level keys silently accepted) in the "Prepare origin support" task, with a matrix cell.
-    - R5: Darkmatter validation coerces scalars to strings (`model: 42` passes `string`); use list/mapping values as negative probes.
-    - R6: type `agent` as `[string, string[](min(1))]` so `agent: []` is rejected (AC5).
-    - R7: derive the bare-verb enum from the parser (zero-arity verbs include `and`, `or`, `branch_exists_on_remote`, `ipv4`, `ipv6`, `remote_vendor` besides stop/skip/error/retry); test it against `all_lifecycle_verbs()`.
-    - R8: payload follows the code, not the drifted frontmatter-properties page; sequence overlay keys (`state`, `previous`, `next`, `outputs`, `sequence_id`) are declared `unknown` with descriptions; check whether any prompt uses non-lowercase `verbosity` before typing it as an enum.
-    - R9: replacing `claudine/schemas/claudine.yaml` and deleting `partials/lifecycle.yaml` requires updating the exception entries in `darkmatter/lib/tests/l1/shipped_schema_corpus.rs:154-166`, and `claudine/lib/src/composition/lifecycle/tests/nested_span.rs::single_pass_inventory_matches_the_authored_claudine_schema` is an extra consumer of the retiring Darkmatter copies.
-    - The loader seam builds on Darkmatter's existing embedded baseline source (`schemas/embedded.rs`, `SchemaSourceId::Embedded`); see "Agreed loader seam".
+    Phase 3 is done; read "## Phase 3" in this log first. What Phase 4 needs:
+    - Launch validation now loads trigger schemas (`claudine/lib/src/composition/schema/mod.rs::load_effective_schema`; embedded bundle in `schema/bundle.rs`). Docs still describe the old authored-only verdict and must change: `claudine/docs/topics/composition.md` launch-validation section (AC11), `frontmatter-properties.md:17` and `execution-flow.md:519` ("invalid optionals are dropped"), plus the R8 drift list from Phase 1. Describe the strict policy: an invalid Claudine control fails the launch; authored application optionals keep drop-and-warn; token ownership and supplied eager files still read the authored `$schema` only.
+    - DMLS gap (found, not fixed): completion and hover read only the authored SimplifiedSchema (`effective.simplified`), so a document with no `$schema` gets validation from a trigger payload but no completion or hover from it. `darkmatter/docs/topics/schemas/dmls-schema-support.md` says the effective schema drives completion and hover; when you update that page (AC8), state the actual behavior (validation only for trigger payloads) unless the author rules the gap must be fixed first.
+    - Consumers still loading the retiring Darkmatter copies, to migrate before deleting them: `darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs::with_ctx` (schema extension), `dmls/tests/l1/mapping_only_corpus.rs`, `dmls/src/providers/frontmatter/sequence_tests.rs`, `dmls/src/overlay/mod.rs` (~line 1501), `darkmatter/cli/tests/l1/schema_validate.rs::schema_validate_shipped_claudine_schema_rejects_an_empty_lifecycle_item`, and the module docs of `dmls/src/diagnostics/nested_span.rs`. Both inventory guards already read `claudine/schemas/`.
+    - Size: the resolved payload is ~2.5 MB. Darkmatter now memoizes embedded payloads, merges, phase schemas and root-union arms, shares context-free validators, and the workspace `profile.test` optimizes jsonschema/regex/serde_json; see the darkmatter skill `schema.md`. A Claudine spawn still costs ~0.5 s more in debug; root-union + `file(match)` documents ~1 s more. Do not add per-call clones/compiles of an effective schema.
+    - Diagnostic quality (found, not changed): a misspelled long-form key reports `/start/0/shell: {"cmd":…} is not valid under any of the schemas listed in the 'anyOf' keyword` plus an `is not of type "string"` line; `cmd` appears only in the echoed value. A Darkmatter union-narrowing fix changed 15 content-policy/DMLS diagnostics, so it was reverted; it needs its own change.
+source_files_during_phase_3: 
+    - Cargo.toml
+    - claudine/lib/src/composition/schema/bundle.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/translate.rs
+    - claudine/lib/src/composition/schema/supplied.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/tests.rs
+    - claudine/lib/src/composition/error/render/schema.rs
+    - claudine/lib/src/composition/lifecycle/tests/nested_span.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/lib/tests/l1/claudine_schemas_matrix.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - claudine/cli/src/commands/schema_interactive/mod.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/launch_trigger_schemas.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/tests/l1/schema_embedded_trigger_bundles.rs
+    - darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: 
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/darkmatter/schema.md
 ---
 # Implementation Log for 2026-10-21-claudine-schemas (5 phases)
 
@@ -487,3 +560,422 @@ New tests register in the existing consolidated binaries (`claudine` lib
   comparison, symlinks, or process spawns. macOS evidence only; Linux,
   Windows, and WSL2 are left to the normal CI schedule, with no identified
   OS risk.
+
+## Phase 2
+
+Phase 2 authored the five-file disk bundle, proved it against the parser and
+Darkmatter's catalogs, added Darkmatter's generic embedded trigger bundle
+seam, and took the one AC9 measurement. Claudine's launch verdict does not
+load the bundle yet; that is Phase 3. Work was split into two parallel owners
+(the Darkmatter resolver seam; the YAML bundle and its tests) with disjoint
+files, then integrated and verified here.
+
+### What landed
+
+- **Bundle** (`claudine/schemas/`): `action.yaml`, `lifecycle.yaml`, and
+  `linking.yaml` (`kind: schema`); `claudine.yaml` (replaced) and
+  `inline-compose.yaml` (`kind: trigger-schema`); `README.md` with the file
+  classification. `partials/lifecycle.yaml` and `partials/` are deleted;
+  `review.yaml` is untouched. A repository-wide search for `partials/lifecycle`
+  finds no live reference. The unrelated `claudine/docs/schemas/partials/lifecycle.yaml`
+  exception in the shipped corpus is a different file.
+- **Category types** are closed objects of their verbs with
+  `min-keys: 1; max-keys: 1`, so a single-verb item matches its category and a
+  multi-verb mapping must match the short-form bundle. Bundles have no
+  `min-keys`, so `start: {}` (an empty stack to the parser) stays valid.
+  The generated verbs are listed as `unknown` literal keys: 12 side effects (set
+  dedupes to the hand verb) and 113 expression functions. The bare-verb enum
+  is `stop, skip, error, retry, and, or, branch_exists_on_remote, ipv4, ipv6,
+  remote_vendor`, derived by the parity test from the parser (R7 confirmed).
+  Two helper exports: `interpolation` (a whole-value `{{ … }}` string) and
+  `count` (`[number(integer; min(0)), interpolation]`).
+- **Lifecycle**: `stack`/`item-N`/`conditional-N` for N = 1..3, the
+  `initialize-*` family with no `shell` arm or bundle key, `loose-body`
+  (`[unknown[], "{ <string>: unknown }"]`) inside level-3 conditionals, and
+  `loop` (controls, `gate: stack`, loose short-form verb keys, `no_error`, no
+  `when`; `max` declared once as the loop control).
+- **Trigger selection** follows R1: 50 single-type `(required)` arms under
+  `any:` in `claudine.yaml`, and `all: [any: <prompt arms>, none: <sequence
+  arms>]` in `inline-compose.yaml`.
+- **Darkmatter seam (generic, no Claudine text)**:
+  - The API: `EmbeddedSchemaBundle`, `DarkmatterSchemas::with_embedded_trigger_bundle`,
+    `triggers::scan_with_embedded`, and `TriggerRegistry::append_embedded_bundle`.
+    `TriggerSource::{File, Embedded { bundle, name }}` is the identity on
+    loaded triggers and traces. `SchemaOrigin { kind, source: Option<SchemaSourceId> }`
+    replaces `uri`, read through `file()` (real files only) and
+    `trigger_source()`.
+  - Errors: `SchemaError::EmbeddedTriggerLoad` and `EmbeddedBundle`.
+  - DMLS still links only `ReferencedFile` origins. `md schema triggers` lists
+    an embedded trigger as `embedded:{bundle}/{name}`.
+  - Bundle files load in file-name byte order after every disk trigger, and
+    are skipped when any root listed a same-name file. That skipping is not
+    recorded in `ShadowedFile`: recording it would mean reading files left
+    unread on purpose.
+- **R3 fixed** (`envelope.rs`): a non-string top-level key is an unknown-key
+  error that shows the key's YAML text.
+- **R4 done**: a syntax-invalid imported library now reports `not valid YAML:
+  …`, on disk and embedded, instead of `AmbiguousReferenced`.
+  `schemas_constraints_block_matrix` was updated to recognize syntax errors by
+  the new wording.
+- **Empty match condition** (new finding, fixed): `{}` inside a combinator
+  parsed as `all([])`, which is always true, so `none: [{}]` made a trigger
+  unmatchable and `all: [{}, …]` hid a dropped condition. `grammar.rs::parse_match_expr`
+  now rejects an empty condition mapping at every level. The top-level
+  `match: {}` previously failed as vacuous and now fails with this message
+  (`schema_roots::path_field_input_matrix` fragment updated). Documented in
+  `definition.md`.
+
+### Departures and rulings in this phase
+
+- **D1: payload types that differ from the Phase 1 table.**
+  - `last_updated: date` replaces `string`. A trigger declaration replaces the
+    baseline's declaration of the same name, so `string` would have weakened
+    the baseline's `date`.
+  - `hash` mirrors the baseline's longhand union, which already covers the
+    detailed object form.
+  - `$schema` is declared as `schema`, matching the baseline. Darkmatter
+    strips `$schema` before validating (`frontmatter_as_json`), so this only
+    affects hover and completion.
+- **D2: the R8 `verbosity` flag is resolved to `string(suggest(silent, quiet,
+  verbose))`.** The reader is trimmed and case-insensitive, and its unit tests
+  use `Quiet` and `SILENT`; an enum would turn those into launch failures.
+- **D3: `proxy`/`prep` targets are `string`, not `file`.** `file` rejects
+  `{{ ctx.next }}`; checked with `md`. Retry/resume counts use `count`, because
+  the docs show `max_attempts: "{{ retries }}"`.
+- **D4: the schema is stricter than the parser in these places.**
+  - A single long-form verb with a sibling `no_error`.
+  - A single-verb long form as a root, `then`/`else`, or loop dictionary. The
+    spec decides this.
+  - One-argument verbs written as one-element lists (`say: [hi]`).
+  - Non-integer or negative counts.
+  - `agent: []` (R6).
+
+  Each becomes a launch failure once Phase 3 applies the strict policy. A
+  `md schema validate` sweep of 66 real prompts (claudine docs, prompts, and
+  test fixtures; the repository root, `darkmatter/prompts`, and
+  `.claude/commands` through `SCHEMAS_DIR`) hit none of them. The only payload
+  rejection was `prompts/fix.md`, which uses the removed `action:` grammar the
+  parser also refuses.
+- **D5: the schema is looser than the parser in these places, and the parser
+  stays authoritative.**
+  - Everything below level 3.
+  - `say: null`/`proxy: null`, because optional properties accept null.
+  - `when` on a root dictionary; a `when` item with only `no_error`; `- {}`
+    and empty bodies.
+  - `set` with a sibling `no_error`.
+  - Ordering, cardinality, and `say` beside `speak`.
+  - `skip` outside `initialize`; `gate` beside loose keys.
+  - Unknown effect names and generated-verb values.
+  - Numeric timeouts, because scalars are coerced (R5).
+- **D6: spike fixture corrections.** The fixtures now live in
+  `claudine/lib/tests/fixtures/claudine-schemas/`, 32 files.
+  - In `root-dictionary`, `effect: success` became `crowd-applause`; in
+    `loop-gate`, `tick` became `click`. Both original names fail the parser's
+    effect catalog.
+  - In `long-forms`, `retry` moved last, as a directive must be, and a `shell`
+    long form was added.
+  - `wrong-verb.md` is now `misspelled-verb-in-then.md`.
+  - The malformed-sequence probe uses a mapping, because `sequence: 42`
+    coerces (R5).
+- **D7: JSON-syntax bundles load only on one line.** A pretty-printed JSON
+  document inside a `.yaml` file fails with "could not project
+  SimplifiedSchema expression spans through YAML source". This is the strict
+  span locator's existing multi-line flow-collection boundary, so the JSON
+  rows of both matrices use single-line JSON. This is a bounded finding, not
+  changed here.
+
+### Requirement-to-test map
+
+The test files are `claudine/lib/tests/l1/claudine_schemas.rs` (CS),
+`claudine/lib/tests/l1/claudine_schemas_matrix.rs` (CM),
+`darkmatter/cli/tests/l1/claudine_schema_bundle.rs` (DC), and
+`darkmatter/lib/tests/l1/schema_embedded_trigger_bundles.rs` (EB). All are
+registered in the existing consolidated `l1` binaries.
+
+| Requirement | Tests |
+| --- | --- |
+| AC1: five files load; `partials/` gone | CS `every_file_loads_and_every_export_resolves`; DC `claudine_bundle_loads_and_both_triggers_are_discovered`; `shipped_schema_corpus` (new `Class::Trigger` entries for both triggers; four files added to `CORE_TYPE_USERS`) |
+| AC2: hand verbs = parser + exactly `{break, prep}`; generated keys = both catalogs; bare-verb enum | CS `hand_verbs_equal_the_parser_inventory_plus_the_planned_verbs`, `generated_verb_keys_equal_the_darkmatter_catalogs`, `bare_verb_enum_equals_what_the_parser_accepts_as_a_bare_item` |
+| AC3: three typed levels, loose below | CS `event_stacks_are_typed_three_levels_deep_and_loose_below`, `initialize_stacks_are_typed_three_levels_deep_without_shell`, `loop_gate_is_typed_three_levels_deep_and_loose_below` |
+| AC4: bundle keys and values; closure; no catch-all; required through references | CS `bundle_keys_are_the_union_of_their_categories_plus_when_and_no_error`, `bundle_values_are_the_category_short_forms`, `action_objects_are_closed_and_data_maps_stay_open`, `required_long_form_fields_survive_every_reference` |
+| AC5: every table row, through `with_trigger_discovery` → `effective_for` → `validate`, with selection asserted separately and instance path plus key asserted; parser-only rows also run through `parse_lifecycle_config` | CS `ac5_depths_and_stack_shapes`, `ac5_shell_placement`, `ac5_malformed_actions`, `ac5_trigger_selection`, `ac5_groups_name_every_fixture_once` (guard), `linked_prompt_declares_every_linking_key_and_keeps_the_root_open` |
+| AC5 through `md schema validate` | DC `lifecycle_defects_are_reported_at_their_event_and_key`, `malformed_identifying_values_select_the_trigger_and_unrelated_data_does_not`, `parser_only_defects_pass_schema_validation` |
+| Shared payload types equal; linking reader forms accepted | CS `shared_payload_properties_have_identical_types`, `linking_types_accept_every_reader_form` |
+| Disk-origin input matrix: 18 columns × 8 shapes plus a control, block YAML and one-line JSON | CM `matrix_tests!` (36 tests), `matrix_tests_cover_the_table` (guard), `json_syntax_bundle_is_the_shipped_bundle`, `a_non_string_top_level_trigger_key_is_an_error` (R3 disk cell) |
+| Embedded seam: import anchoring, suppression, errors, origins, dependencies, trace | EB: 15 behavior tests (see below) |
+| Embedded-origin trigger envelope matrix, both syntaxes, plus the R3 cell | EB `the_trigger_envelope_matrix_holds_for_block_yaml`, `the_trigger_envelope_matrix_holds_for_json_syntax` (29 cells each) |
+| R3 unit | `triggers::envelope::tests::rejects_non_string_top_level_keys_by_their_yaml_text` |
+| Empty match condition | `triggers::grammar::tests::rejects_an_empty_condition_mapping_at_every_level`; CM `*_trigger_combinator` Absent cell |
+| Bundle name and path rules | `embedded::tests::{bundle_paths_resolve_inside_the_bundle_only, bundle_checks_reject_unusable_names, bundle_debug_names_files_but_not_their_text}` |
+
+The EB behavior tests:
+
+- `an_embedded_trigger_applies_with_its_imports_resolved_inside_the_bundle`
+- `registering_the_bundle_before_discovery_gives_the_same_registry`
+- `a_string_payload_names_a_bundle_document`
+- `a_payload_naming_a_trigger_is_rejected_inside_the_bundle`
+- `a_same_name_matching_disk_trigger_replaces_the_embedded_one`
+- `a_same_name_disk_trigger_that_does_not_match_still_suppresses_the_embedded_one`
+- `a_same_name_disk_file_that_is_not_a_trigger_suppresses_the_embedded_one`
+- `a_same_name_malformed_disk_trigger_is_an_error_with_no_embedded_fallback`
+- `a_disk_trigger_never_imports_from_the_bundle`
+- `embedded_imports_that_miss_or_leave_the_bundle_are_errors`
+- `a_syntax_invalid_embedded_library_reports_its_yaml_error`
+- `an_unusable_bundle_shape_is_rejected_when_registered`
+- `origins_name_the_embedded_or_disk_trigger_that_declared_each_property`
+- `an_embedded_trigger_adds_no_dependencies`
+- `the_trigger_trace_lists_an_embedded_trigger_distinctly`
+
+### Input matrix outcomes
+
+- **Embedded origin** (EB, synthetic text): every cell matches the plan's
+  trigger table in both syntaxes. Empty `match` (`{}` or `[]`) is an error;
+  `$schema: {}` applies with no constraints; `""`/`[]` payloads are errors;
+  the non-string key is an error.
+- **Disk origin** (CM, shipped bundle): every cell is asserted. Where a cell
+  departs from the plan's generic outcome, the reason is one of these:
+  - **R2:** a null export defines the `null` type and rejects both probes. For
+    `initialize-stack: null`, only the violating `initialize` probe uses it,
+    so the control verdicts hold.
+  - **Empty export map:** `{}` defines an empty closed object, so the probes
+    pass through the other union arms.
+  - **Payload property:** removing a property removes only its constraint.
+  - **`kind`:** a wrong or missing `kind` leaves the file unclassified, so it
+    contributes nothing.
+  - **Combinator:** the Absent cell is now `Error`, after the empty-condition
+    fix.
+
+### AC9 measurement (single sample)
+
+- Harness: a scratch crate outside the repository,
+  `/tmp/claudine-schema-measure`, path-depending on `darkmatter` and
+  `biscuit-file`, built `--release`. It parses `claudine.yaml`, takes its
+  `$schema` payload, calls `darkmatter::markdown::schemas::resolve::resolve_schema(&payload,
+  schemas_dir, &FileResolutionContext::new(schemas_dir))` once, and
+  serializes `json_schema`. The spike's `size` mode was not used, because it
+  builds synthetic event properties.
+- Command: `target/release/claudine-schema-measure $PWD/claudine/schemas`.
+- Host: Apple M4 Max, macOS 27.2.
+- Revision: HEAD `816cdff3a` plus this phase's working tree (bundle files as
+  above; `claudine.yaml` sha1 `55e7c1cc`).
+- Scope: the full `claudine.yaml` payload with every action, lifecycle, and
+  linking import resolved, plus serialization of the resolved JSON Schema.
+  Validation and trigger discovery are not included.
+- Result: **resolved_bytes=2,497,899; resolve_ms=48.7**.
+- Finding (bounded): the resolved size is about 1.8× the spike's 1.4 MB
+  catch-all figure, because of the closed literal keys repeated per typed
+  level. Resolution is faster than the spike's 82 ms. The decided shape is
+  kept. No timing test or benchmark was added.
+
+### Phase 2 verification
+
+- `cd claudine && just test`: 8943 passed, 9 skipped, 0 failed.
+- `cd claudine && just lint`: exit 0. The only warning is the macOS linker's
+  `__eh_frame section too large` note, a toolchain note on the large
+  `claudine` binary.
+- `cd darkmatter && just test` (lib, CLI, DMLS): 9978 passed, 10 skipped, 0
+  failed. The first run failed only `schema_roots::path_field_input_matrix`,
+  whose fragment changed with the empty-condition fix; it was updated and the
+  rerun was green.
+- `cd darkmatter && just lint`: clean.
+- Slowest new L1 tests: about 1.7 s serially and 2.3 s at `-j4` on this Mac,
+  within the 5 s budget but worth watching on 2-core runners.
+- OS: embedded names are joined lexically with `/` and never canonicalized.
+  The tests use temp-dir fixtures and no `#[cfg]` gating, and introduce no
+  path comparisons. Evidence is from macOS only. Linux, Windows, and WSL2 are
+  left to the normal CI schedule; no OS-specific risk was identified.
+- No `cargo fmt`, commit, or CI change.
+
+## Phase 3
+
+Phase 3 embedded the bundle in Claudine and made the launch verdict load
+trigger schemas. Wave 5 (the loader, ordering, and verdict integration) was
+done by the integrator; Wave 6 and the Wave 5 fixture suites were written by
+three parallel test owners (Claudine lib, Claudine CLI, DMLS) on disjoint
+files, then integrated and verified here.
+
+### What landed
+
+- **Embedded bundle** (`claudine/lib/src/composition/schema/bundle.rs`):
+  `CLAUDINE_SCHEMA_FILES` is `include_str!` of the five files,
+  `claudine_schema_bundle()` the `EmbeddedSchemaBundle` named `claudine`, and
+  `is_claudine_owned(effective, property)` the ownership rule from the Phase 1
+  seam: origin kind `Trigger`, and the source is the embedded `claudine` bundle's
+  `claudine.yaml`/`inline-compose.yaml` or a disk file of one of those names.
+- **One effective-schema path** (`schema/mod.rs::load_effective_schema`): it
+  discovers from the document's context
+  (`file_resolution_context.for_source(resolved_path)`), registers the bundle,
+  then validates under the launch context (`with_file_resolution_context`), so
+  file values resolve exactly as before. Triggers match the snapshot being
+  judged (`matching_markdown`: the source's own `$schema` and file, carrying the
+  judged values): raw frontmatter plus overrides for pre-validation and the drop
+  pass, the composed `effective_frontmatter` for the retained launch schema.
+- **Gates removed**: `pre_validate_with_origin`, `drop_invalid_optionals_with_origin`,
+  and `prepare.rs::resolve_launch_schema` no longer return early without
+  `$schema`. `post_shell_validate` no longer skips a schema with no
+  SimplifiedSchema; for an authored raw JSON Schema it judges only
+  trigger-declared properties (Darkmatter's compose stage already applied the
+  raw schema).
+- **Kept authored-only** (`load_authored_schema`): `authored_schema_parameters`
+  (argument-token ownership) and `schema::supplied` (caller eager files). These
+  are about the author's own parameters, not the launch verdict. Including
+  triggers would have turned `model=x` argument tokens into setters, changing
+  valid launches.
+- **Strict policy**: `classify.rs::categorize_problems` treats a Claudine-owned
+  problem as hard at every phase, and `drop_invalid_optionals_with_origin` never
+  drops one. Undeclared-in-shape properties were already conservatively hard, so
+  this mostly makes the rule explicit. An authored redeclaration flips ownership
+  and restores the authored cleanup.
+- **Retired spellings** (`prefer_removed_grammar`): a schema verdict that fails
+  on a document whose lifecycle uses removed grammar reports the parser's
+  `RemovedGrammar` (with its replacement) instead. Without this, the 21
+  `compose_removed_grammar` CLI tests regressed to a bare schema mismatch.
+- **Completion rendering** (`error/render/schema.rs`): the completion block now
+  lists, under **Problems:**, every problem on a property absent from the
+  authored status table. For a document with no `$schema` it says "its schema"
+  and drops the "raw JSON Schema" placeholder, which previously named neither
+  the property nor the pointer (found by the CLI test owner). With an authored
+  `$schema` the existing wording and table are unchanged. The hint now covers
+  invalid present values too.
+- **Comments**: module docs of `schema/mod.rs`, `resolve_launch_schema`, and
+  `emit_dropped_optional_warnings` updated for the trigger layers and the
+  strict policy. No terminal component changed; the new list uses `Prose`.
+
+### Performance (bounded finding, fixed within scope)
+
+Wiring the bundle in first made CLI L1 tests 10–20× slower (for example
+`handoff_owners::a_chain_past_the_hop_limit…` 0.7 s → 13.4 s,
+`sequence_prompt_property::…` 0.3 s → 3.8 s), because the resolved payload is
+~2.5 MB and every verdict cloned, hashed, or recompiled it. A baseline was taken
+by temporarily routing `load_effective_schema` to the authored-only loader.
+Fixes, all generic Darkmatter changes with unchanged verdicts:
+
+- Embedded trigger loads are memoized per process
+  (`discovery.rs::load_embedded_trigger`), keyed by the identity of every text
+  in the bundle (a payload reads the libraries too; the first key, trigger text
+  only, was stale for an edited library, as the lib test owner noticed). Only
+  successes are kept.
+- `ResolvedPayload.json_schema` and `TriggerLayer.json_schema` are
+  `Arc<Value>`. A lone trigger layer is shared, and merges are memoized
+  (`mod.rs::merged_trigger_schema`, Arc identity plus authored-schema equality).
+- `ValidatorCache` compiles a schema that names no `darkmatter-file*` format
+  and no `x-darkmatter-match` once for all contexts (the structural slot)
+  (`validate.rs::SchemaDigest`). The test
+  `cache_keeps_contexts_sharing_a_key_without_recompiling` now uses a
+  file-format schema, since its subject is file-judging schemas.
+- `validate_for_phase` reuses a memoized phase schema (`phase_json_schema`) and
+  the shared validator cache, instead of an uncached compile per call. When
+  projection and `make_passive` change nothing, it shares the effective schema
+  itself.
+- A root union compiles only its arms (`CompiledValidators::RootUnion`; the
+  union root validator was never used to judge), via memoized wrapped arms.
+  `EffectiveSchema::validator()` now returns `Option` (no callers outside a
+  spike).
+- `coerce_property_union` skips validating arms when no arm changes the value.
+  Before, it serialized each 100 KB+ arm on every validate.
+- Workspace `Cargo.toml`: `profile.test` builds `jsonschema`, `referencing`,
+  `regex-automata`, `regex-syntax`, `fancy-regex`, `ahash`, and `serde_json`
+  at `opt-level = 3`, following the existing tree-sitter precedent. Measured
+  on the root-union CLI tests: 4.25 s → 2.7 s.
+
+The overhead left on this Mac (debug) is about 0.5 s per `claudine` spawn for a
+document with Claudine controls (once-per-process payload resolution ~180 ms,
+plus one or two compiles), and about 1 s for root-union `file(match)`
+documents, whose arms are file-judging and context-keyed. Under full parallel
+local load, four root-union/caller-file tests were flagged SLOW (>5 s) in one
+run and none in the next; serially they take 1.7–2.7 s. The real lever is the
+payload's size: Darkmatter inlines every named type, so `stack` appears about
+seven times. Emitting shared types once is an engine change outside this
+feature; it is recorded here, as AC9's bounded-finding rule asks, rather than
+changing the decided shape.
+
+### Departures and findings
+
+- **D8: a pre-existing assertion was updated.**
+  `prepare/tests.rs::inline_composition_uses_effective_frontmatter` asserted
+  `launch_schema.is_none()` for a document with no `$schema`. That is now
+  intentionally `Some` (the Claudine payload), so the assertion checks that
+  instead. No other existing assertion was edited. The completion-block test
+  `inline_completion_lifecycle::a_missing_completion_property…` passes
+  unchanged, because the authored-schema wording was kept.
+- **D9: non-Claudine disk triggers.** The launch verdict now loads every
+  matching trigger, as the spec requires. A property owned by a non-Claudine
+  trigger and absent from the authored shape is classified hard (the existing
+  conservative rule for properties the shape does not declare), not dropped.
+  The spec only defines the Claudine/authored split.
+- **F1: diagnostic wording.** A misspelled long-form key reports
+  `/start/0/shell: {"cmd":"git status"} is not valid under any of the schemas
+  listed in the 'anyOf' keyword` plus a `… is not of type "string"` line, so
+  `cmd` appears only in the echoed value. A Darkmatter change was tried: for an
+  object value, report the one object-shaped arm's own errors, which gives
+  "Additional properties are not allowed ('cmd' was unexpected)". It changed 15
+  established content-policy and DMLS diagnostics, so it was reverted; it
+  belongs in its own change. AC10's "naming the key" holds only through the
+  echoed value.
+- **F2: DMLS completion and hover do not use trigger payloads.** They read
+  `effective.simplified` (the authored schema only), so with no `$schema`, DMLS
+  validates from the Claudine trigger but offers no completion or hover from it.
+  This predates the feature and applies to any trigger. AC7 (validation) holds;
+  the docs claim must be corrected in Phase 4, or the gap fixed under a ruling.
+- **F3: parser-first failures.** A malformed lifecycle action (for example
+  `say: {txet: x}` in `start`) fails in the lifecycle parser, before
+  `initialize` runs, because the bootstrap parses every stack. The CLI test of
+  "initialize before the verdict" therefore uses a schema-only defect
+  (`agent: []`). Likewise `model: {x: 1}` with `initialize` present fails at
+  the hint reader ("frontmatter `model` must be a string or array of strings")
+  before the verdict. Both block the launch, as before.
+- **F4: index staged by a tool.** Mid-phase, the whole working tree appeared in
+  the index; nothing in this phase staged it. It was restored with `git reset`,
+  which leaves the working tree unchanged.
+
+### Requirement-to-test map
+
+The files are `claudine/lib/tests/l1/claudine_schemas_embedded.rs` (CE),
+`claudine/cli/tests/l1/launch_trigger_schemas.rs` (LT),
+`darkmatter/dmls/tests/l1/claudine_schema_discovery.rs` (DD), and
+`darkmatter/lib/tests/l1/schema_embedded_trigger_bundles.rs` (EB). All are
+registered in their package's existing `l1` binary. LT is `#[cfg(unix)]`, like
+`compose_removed_grammar`.
+
+| Requirement | Tests |
+| --- | --- |
+| AC6: byte identity, kinds, every export and both payloads resolve with no disk schemas, CWD unrelated, no temp writes, no dependencies | CE `embedded_files_are_the_repository_files_byte_for_byte`, `embedded_{action,lifecycle,linking}_exports_resolve_without_disk_schemas` (42 exports, valid and invalid probe each), `embedded_payloads_apply_without_disk_schemas` |
+| Embedded-origin input matrix, both syntaxes, plus R3 | CE `embedded_{yaml,json}_<column>` (36), guard `embedded_matrix_tests_cover_the_table`, `embedded_non_string_top_level_trigger_key_is_an_error`; the disk runner in `claudine_schemas_matrix.rs` is now parameterized by `Origin` |
+| AC13 (a)–(k) | CE `nearest_claudine_trigger_shadows_farther_ones` (all five roots), `symlinked_trigger_file_in_a_root_is_ignored` (unix), `disk_bundle_resolves_its_relative_imports_from_disk`, `schema_reference_to_a_trigger_envelope_fails`, `same_name_disk_trigger_wins_over_the_embedded_copy`, `embedded_trigger_applies_with_no_disk_bundle`, `authored_schema_override_applies_last_and_takes_ownership`, `malformed_disk_trigger_fails_without_embedded_fallback`, `disk_import_never_falls_back_to_an_embedded_file`, `non_matching_disk_trigger_still_shadows_the_embedded_one`, `disk_claudine_and_embedded_inline_compose_apply_together`, `disk_and_embedded_bundles_own_the_same_properties` |
+| Strict policy at the library boundary; retired grammar | CE `invalid_claudine_controls_fail_the_launch_and_are_not_dropped`, `authored_optional_is_dropped_while_a_claudine_control_fails`, `retired_spelling_reports_removed_grammar` |
+| AC10 passive CLI/editor parity on equal snapshots | CE `passive_parity_<fixture>` (32), guard `passive_parity_tests_cover_every_ac5_fixture` |
+| AC10 an invalid control blocks the launch with no provider, both commands | LT `misspelled_long_form_key`, `unknown_say_parameter`, `empty_agent_list`, `numeric_loop` (× compose/inline_compose), guard `every_table_row_generates_its_tests` |
+| AC10 authored required with the payload also applied | LT `compose_reports_an_omitted_authored_property_and_still_applies_the_payload`, `inline_compose_defers_a_required_non_eager_property`, `inline_compose_deferral_does_not_suspend_the_payload`, `inline_compose_rejects_a_missing_required_eager_property` |
+| AC10 valid launches unchanged | LT `compose_launches_a_valid_document_with_its_application_data`, `inline_compose_launches_a_valid_document_and_keeps_its_application_data`; the existing suites pass with no assertion edits except D8 |
+| AC10 controls are not scrubbed; application cleanup kept | LT `compose_does_not_scrub_a_malformed_optional_control`, `inline_compose_does_not_scrub_a_malformed_optional_control`, `an_invalid_authored_optional_application_value_is_still_dropped` |
+| AC10 initialize before the verdict; no `start` or provider | LT `compose_runs_initialize_before_the_verdict_and_never_start`, `inline_compose_runs_initialize_before_the_verdict_and_never_start` |
+| AC10 fresh-read boundaries | LT `a_proxy_target_with_an_invalid_control_fails_before_its_provider`, `a_sequence_step_document_with_an_invalid_control_fails_before_its_provider`, `a_retried_attempt_rereads_the_document_through_the_verdict` |
+| AC10 frozen completion schema; next run reloads | LT `inline_completion_rejects_an_invalid_control_the_agent_wrote`, `an_agent_written_disk_schema_takes_effect_on_the_next_run`, `inline_completion_lists_a_payload_problem_beside_the_authored_table` |
+| AC10 pending and literal values | LT `a_templated_control_is_judged_after_composition`, `a_templated_model_and_a_lifecycle_span_launch` |
+| AC7 inventory guards moved to `claudine/schemas/` | `dmls::diagnostics::nested_span::…::lifecycle_inventory_matches_the_authored_claudine_schema` (events, structural keys, loop keys, communication verbs); `claudine::composition::lifecycle::tests::nested_span::single_pass_inventory_matches_the_authored_claudine_schema` |
+| AC7 DMLS picks up the trigger under a fixture Claudine area, disk only | DD `a_misspelled_long_form_key_is_reported_under_start_without_a_schema_pointer`, `lifecycle_stacks_and_linking_keys_are_typed_by_the_discovered_trigger`, `the_effective_schema_under_the_claudine_area_is_the_disk_bundle`, `dmls_has_no_claudine_dependency` |
+| Darkmatter memo seams | EB `every_registration_of_a_bundle_shares_its_resolved_payload`, `a_merge_is_shared_only_by_equal_authored_schemas`, `a_failing_bundle_fails_on_every_registration`, `an_edited_library_under_the_same_trigger_text_is_resolved_again` (fails with the first, text-only memo key); `validate::tests::a_file_free_schema_shares_one_validator_across_contexts` |
+
+No disk/embedded cell outcome differs. Only the error identity does: an
+embedded failure is `SchemaError::EmbeddedTriggerLoad { bundle: "claudine", … }`,
+and for the action columns' duplicate and trailing cells it names
+`action.yaml`, the first file in byte order. Not covered: DMLS completion and
+hover from a trigger payload (F2).
+
+### Phase 3 verification
+
+- `cd claudine && just test`: 9062 passed, 9 skipped, 0 failed (87 s; no SLOW
+  test in the final run).
+- `cd claudine && just lint`: exit 0. The only warning is the known macOS
+  linker `__eh_frame` note.
+- `cd darkmatter && just test` (lib, CLI, DMLS): 9986 passed, 10 skipped, 0
+  failed. The DMLS discovery test that was SLOW under load was split in two
+  (now 0.5 s and 1.1 s alone).
+- `cd darkmatter && just lint`: exit 0.
+- OS: no new path comparison or `cfg` code in production. Embedded names are
+  lexical, and the validator-sharing rule is content-only. The CLI file is
+  `#[cfg(unix)]` (shell stubs), like its neighbors; the symlink case is
+  `#[cfg(unix)]`. Evidence is from macOS only; Linux, Windows, and WSL2 are
+  left to the normal CI schedule, with no identified OS-specific risk. The
+  `profile.test` change applies to every OS.
+- No `cargo fmt`, commit, or CI change.
