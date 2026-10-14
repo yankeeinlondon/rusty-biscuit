@@ -9,7 +9,9 @@ Make sure you describe:
 - the broad brand and character attributes that {{state.name}} make {{state.name}} stand out. How would someone describe the app in a sentence or two?
 - describe the functionality supported in detail:
     - what OSC standards are supported?
+        - create a table that shows the osc standard, short description, and a column indicating support level
     - what mode-based standards does the app support?
+        - same table convention used here too
     - what about ECMA-48?
     - how well are unicode characters handles? multi-code characters?
 - does the terminal support graphics rendering?
@@ -57,5 +59,39 @@ Write your research as prose to `biscuit-terminal/docs/research/terminals/{{stat
 
 After completing the prose search document you will add the following Frontmatter properties on your research doc (`biscuit-terminal/docs/research/terminals/{{state.file}}`):
 
+> **IMPORTANT:** never guess about the metadata values! If your initial research did not uncover some aspect of the metadata we need then take the time to research that detail.
+
 - set `latest_version` to the latest version of the app
-- set `update_freq` to
+- updates (note these are both estimates):
+    - set `update_freq` to the frequency that version updates are happening (e.g., 3mo, 5w, 1yr)
+    - set `update_freq_major` to the frequency that major versions are happening (e.g., 3mo, 5w, 1yr)
+- set the `os` frontmatter to the list of operating systems which {{state.name}} runs under
+- osc standards:
+    - set `osc-4` to boolean value; true indicates {{state.name}} supports the standard (both 4 and 104)
+    - set `osc-5` to boolean value; true indicates {{state.name}} supports the standard (both 5 and 105)
+    - set `osc-7` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-8` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-10` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-11` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-12` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-13` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-14` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-15` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-16` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-17` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-18` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-19` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-21` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-22` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-50` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-51` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-52` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-66` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-99` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-133` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-633` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-777` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-1337` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-3008` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-5113` to boolean value; true indicates {{state.name}} supports the standard
+    - set `osc-5522` to boolean value; true indicates {{state.name}} supports the standard
