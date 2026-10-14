@@ -48,91 +48,52 @@ pub fn scan_removed_validation_keys(
     None
 }
 
-/// Parses lifecycle configuration from composition frontmatter.
+/// What the lifecycle parser needs from its caller.
 ///
-/// Walks every event block (`initialize`, `start`, `success`, `blocked`,
-/// `failure`, `finalize`) and extracts the top-level communication
-/// properties into [`LifecycleConfig`]. Lifecycle concerns authored inside
-/// the `loop:` block (alongside the iteration controls parsed by
-/// [`super::looping::resolve_loop_config`]) are extracted into
-/// [`LifecycleConfig::loop_concerns`].
-///
-/// For each event the raw `stack:` is parsed into typed
-/// [`LifecycleStackItem`] values stored on [`LifecycleConfig::stacks`].
-/// Stack parsing enforces the spec's cardinality rule (at most one
-/// lifecycle control action per item; it must be last) and the per-event
-/// "Where valid" matrix for control actions. Shell actions are forbidden in
-/// `initialize`, including guarded actions that would not currently run.
-///
-/// Validates mutual exclusivity of `say` and `say_first` and validates sound
-/// effect names against the embedded `playa` catalog.
-///
-/// ## Returns
-///
-/// Returns `Ok(LifecycleConfig)` on success, or a `CompositionError` if
-/// validation fails.
-///
-/// ## Errors
-///
-/// - [`CompositionError::LifecycleSayConflict`]: Both `say` and `say_first`
-///   are present in the same event.
-/// - [`CompositionError::LifecycleUnknownEffect`]: An unknown sound effect
-///   name is referenced.
-/// - [`CompositionError::LifecycleInvalid`]: A property failed to
-///   deserialize (typically an unknown field).
-/// - [`CompositionError::LifecycleStackInvalidShape`]: A stack item is
-///   malformed (not an object, missing `action`, unknown key).
-/// - [`CompositionError::LifecycleWhenExpressionInvalid`]: A stack item's
-///   `when:` clause is not a valid condition expression.
-/// - [`CompositionError::LifecycleActionInvalidShortForm`] /
-///   [`CompositionError::LifecycleActionInvalidLongForm`]: An action could
-///   not be parsed.
-/// - [`CompositionError::LifecycleActionPlacement`]: A control action
-///   appears in an event where the spec's "Where valid" matrix forbids it.
-/// - [`CompositionError::LifecycleMultipleLifecycleActions`] /
-///   [`CompositionError::LifecycleActionOrder`]: Cardinality violation.
-///
-/// ## Examples
-///
-/// ```
-/// # use serde_json::json;
-/// # use claudine::composition::parse_lifecycle_config;
-/// let frontmatter = json!({
-///     "title": "My Composition",
-///     "start": {
-///         "message": "Starting..."
-///     }
-/// });
-/// let config = parse_lifecycle_config(&frontmatter, std::path::Path::new("test.md")).unwrap();
-/// assert!(config.start.is_some());
-/// ```
-pub fn parse_lifecycle_config(
-    frontmatter: &serde_json::Value,
-    source_file: &Path,
-) -> Result<LifecycleConfig, CompositionError> {
-    parse_lifecycle_config_with_orders(frontmatter, source_file, None)
+/// The parser is part of the lift-ready slice and names no Claudine runtime
+/// type, so the catalog it checks literal `effect` names against is supplied
+/// here. The check, its error ([`CompositionError::LifecycleUnknownEffect`]),
+/// and its timing (parse time, literal names only) are the caller's
+/// guarantee; a `{{ … }}` name is checked when the event resolves it.
+pub struct LifecycleParseOptions<'a> {
+    /// Whether a literal `effect` name is in the effect catalog.
+    pub is_known_effect: &'a dyn Fn(&str) -> bool,
+    /// The authored frontmatter, whose retained mapping order gives a `set:`
+    /// mapping its authored key order. `None` falls back to sorted order.
+    pub authored: Option<&'a darkmatter::markdown::Frontmatter>,
 }
 
-pub(crate) fn parse_lifecycle_config_with_orders(
+/// Conditionals nest at most this deep. The limit lives only in the parser.
+const MAX_CONDITIONAL_DEPTH: usize = 5;
+
+/// The `loop:` keys the looping parser owns. Every other key of a `loop:`
+/// block is a lifecycle concern.
+pub(crate) const LOOP_ITERATION_KEYS: &[&str] = &[
+    "while",
+    "until",
+    "action",
+    "actions",
+    "max",
+    "fail_fast",
+    "on_rate_limit",
+];
+
+/// Parse every lifecycle stack of `frontmatter`.
+///
+/// See [`super::parse_lifecycle_config`], which supplies the effect catalog.
+pub(crate) fn parse_lifecycle_config_with(
     frontmatter: &serde_json::Value,
     source_file: &Path,
-    authored: Option<&darkmatter::markdown::Frontmatter>,
+    options: &LifecycleParseOptions<'_>,
 ) -> Result<LifecycleConfig, CompositionError> {
-    // Non-object frontmatter returns default
     let Some(fm_obj) = frontmatter.as_object() else {
         return Ok(LifecycleConfig::default());
     };
-
-    let mut config = LifecycleConfig::default();
-    // Every event block lives at a top-level frontmatter key and holds its
-    // items under `stack:`, so item `n` of `start:` is `/start/stack/n`.
-    let document_order = authored.map_or_else(AuthoredOrder::default, |frontmatter| {
+    let document_order = options.authored.map_or_else(AuthoredOrder::default, |frontmatter| {
         AuthoredOrder::at_root(std::sync::Arc::new(frontmatter.mapping_orders().clone()))
     });
-    let event_stack_order = |property_name: &str| document_order.child(property_name).child("stack");
 
-    // Top-level event blocks. Loop concerns are handled separately below
-    // because they share the `loop:` block with iteration controls.
+    let mut config = LifecycleConfig::default();
     for signal in [
         LifecycleSignal::Initialize,
         LifecycleSignal::Start,
@@ -141,246 +102,89 @@ pub(crate) fn parse_lifecycle_config_with_orders(
         LifecycleSignal::Failure,
         LifecycleSignal::Finalize,
     ] {
-        let property_name = signal.property_name();
-        let Some(value) = fm_obj.get(property_name) else {
+        let event = signal.property_name();
+        let Some(value) = fm_obj.get(event) else {
             continue;
         };
-
-        // Skip null values
-        if value.is_null() {
-            continue;
-        }
-
-        let (notification, stack) = parse_event_block(
+        let parser = StackParser {
             signal,
-            value,
             source_file,
-            property_name,
-            &event_stack_order(property_name),
-        )?;
-
+            options,
+        };
+        let nodes = parser.parse_stack(value, &LifecyclePath::root(event), &document_order.child(event))?;
         if signal == LifecycleSignal::Initialize {
-            // Every item, guarded or not: initialization is shell-free, so a
-            // shell action and a `set` value that runs a command are both
-            // refused before anything runs.
-            for (index, item) in stack.iter().flatten().enumerate() {
-                if item.actions.iter().any(runs_a_shell) {
-                    return Err(CompositionError::LifecycleActionPlacement {
-                        source_path: source_file.to_path_buf(),
-                        property: format!("initialize.stack[{index}].action"),
-                        action: "shell".to_string(),
-                        event: "initialize".to_string(),
-                    });
-                }
-            }
+            refuse_initialize_shells(&nodes, source_file)?;
         }
-
-        *event_notification_field_mut(signal, &mut config) = Some(notification);
-        *event_stack_field_mut(signal, &mut config) = stack.filter(|s| !s.is_empty());
+        *config.stack_mut(signal) = nodes;
     }
 
-    // Loop concerns: extract lifecycle concern keys from inside `loop:`.
     if let Some(loop_value) = fm_obj.get("loop")
         && !loop_value.is_null()
     {
-        let property_name = LifecycleSignal::Loop.property_name();
         let Some(loop_obj) = loop_value.as_object() else {
             return Err(CompositionError::LifecycleInvalid {
-                property: property_name.to_string(),
-                message: format!(
-                    "`loop` must be an object, got {}",
-                    json_type_name(loop_value)
-                ),
+                property: "loop".to_string(),
+                message: format!("`loop` must be an object, got {}", json_type_name(loop_value)),
                 source_file: source_file.to_path_buf(),
                 unknown_field: None,
-                expected_fields: LIFECYCLE_NOTIFICATION_FIELDS
-                    .iter()
-                    .map(|s| (*s).to_string())
-                    .collect(),
+                expected_fields: Vec::new(),
             });
         };
-
-        let mut concerns_obj = serde_json::Map::new();
-        for key in LIFECYCLE_CONCERN_KEYS {
-            if let Some(value) = loop_obj.get(*key) {
-                concerns_obj.insert((*key).to_string(), value.clone());
-            }
-        }
-        if !concerns_obj.is_empty() {
-            let concerns_value = serde_json::Value::Object(concerns_obj);
-            let (notification, stack) = parse_event_block(
-                LifecycleSignal::Loop,
-                &concerns_value,
-                source_file,
-                property_name,
-                &event_stack_order(property_name),
-            )?;
-            config.loop_concerns = Some(notification);
-            config.stacks.loop_gate = stack.filter(|s| !s.is_empty());
-        }
+        let parser = StackParser {
+            signal: LifecycleSignal::Loop,
+            source_file,
+            options,
+        };
+        config.stacks.loop_gate = parser.parse_loop_concerns(loop_obj, &document_order.child("loop"))?;
     }
 
     Ok(config)
 }
 
-/// The lifecycle-concern keys accepted inside the `loop:` block (and on
-/// every top-level event block).
-///
-/// Kept distinct from [`LIFECYCLE_NOTIFICATION_FIELDS`] (the comm-field
-/// list used by serde-driven diagnostics) because this list also includes
-/// `stack`, which is a structured field rather than a string.
-pub(crate) const LIFECYCLE_CONCERN_KEYS: &[&str] = &[
-    "say",
-    "say_first",
-    "effect",
-    "message",
-    "stderr",
-    "notify",
-    "info",
-    "warn",
-    "success",
-    "stdout",
-    "stack",
-];
-
-/// Parse one event block into a (notification, stack) pair.
-///
-/// `signal` carries the event name needed for stack parsing (cardinality
-/// and "Where valid" enforcement). `property_name` is the frontmatter key
-/// used in diagnostics (it always matches `signal.property_name()` but is
-/// passed in to avoid repeated lookups).
-fn parse_event_block(
-    signal: LifecycleSignal,
-    value: &serde_json::Value,
-    source_file: &Path,
-    property_name: &str,
-    authored: &AuthoredOrder,
-) -> Result<(LifecycleNotification, Option<Vec<LifecycleStackItem>>), CompositionError> {
-    let mut notification: LifecycleNotification = serde_json::from_value(value.clone()).map_err(
-        |e| {
-            let (unknown_field, expected_fields) = parse_serde_unknown_field(&e);
-            CompositionError::LifecycleInvalid {
-                property: property_name.to_string(),
-                message: e.to_string(),
-                source_file: source_file.to_path_buf(),
-                unknown_field,
-                expected_fields,
-            }
-        },
-    )?;
-
-    // Normalize empty strings to None for every string field.
-    normalize_empty_string(&mut notification.say);
-    normalize_empty_string(&mut notification.say_first);
-    normalize_empty_string(&mut notification.effect);
-    normalize_empty_string(&mut notification.message);
-    normalize_empty_string(&mut notification.stderr);
-    normalize_empty_string(&mut notification.notify);
-    normalize_empty_string(&mut notification.info);
-    normalize_empty_string(&mut notification.warn);
-    normalize_empty_string(&mut notification.success);
-    normalize_empty_string(&mut notification.stdout);
-
-    // Validate mutual exclusivity of say and say_first.
-    if notification.say.is_some() && notification.say_first.is_some() {
-        return Err(CompositionError::LifecycleSayConflict(
-            property_name.to_string(),
-        ));
-    }
-
-    // Validate effect name if present and free of interpolation. An
-    // `effect: "{{name}}"` is deferred: its real name is only known after
-    // event-time interpolation, so it is validated then (see
-    // [`super::lifecycle_executor`]'s deferred effect validation), not here.
-    if let Some(effect_name) = &notification.effect
-        && !effect_name.contains("{{")
-        && playa::SoundEffect::from_name(effect_name).is_none()
-    {
-        return Err(CompositionError::LifecycleUnknownEffect(
-            property_name.to_string(),
-            effect_name.clone(),
-        ));
-    }
-
-    // Parse the raw stack into typed form, enforcing cardinality + "Where
-    // valid" matrix for this event.
-    let typed_stack = match notification.stack.take() {
-        Some(raw_stack) if !raw_stack.is_empty() => Some(parse_lifecycle_stack(
-            signal,
-            &raw_stack,
-            source_file,
-            authored,
-        )?),
-        _ => None,
-    };
-
-    Ok((notification, typed_stack))
-}
-
-/// Parse a task's `setup:` / `teardown:` value into a typed action stack.
-///
-/// A task stack is the same grammar as a lifecycle event's `stack:` — a list of
-/// `{when?, action, no_error?}` items — with no surrounding event block, so this
-/// is the entry point for callers that hold the bare list.
-///
-/// `property` is the source-rooted path of the stack value itself — the task's
-/// own property joined to `setup`/`teardown` (`tasks[0].setup`,
-/// `tasks[1].group.tasks[0].teardown`, or a bare `setup` in an external
-/// `kind: task` document). Because that value *is* the list, item `n` is
-/// `{property}[n]`; there is no `stack` segment the way an event block has one.
-///
-/// ## Errors
-///
-/// Returns the same [`CompositionError`] shape-violation family
-/// [`parse_lifecycle_config`] raises for an event stack, plus
-/// [`CompositionError::LifecycleStackInvalidShape`] when the value is not a
-/// list.
-pub fn parse_task_action_stack(
-    signal: LifecycleSignal,
-    raw: &serde_json::Value,
-    source_file: &Path,
-    property: &str,
-) -> Result<Vec<LifecycleStackItem>, CompositionError> {
-    parse_task_action_stack_with_order(signal, raw, source_file, property, &AuthoredOrder::default())
-}
-
-/// [`parse_task_action_stack`] against the stack's authored key order.
-///
-/// `authored` is positioned at the `setup:`/`teardown:` *list itself* — a task
-/// stack is the list, with no `stack:` key between it and the task — so item `n`
-/// is `authored.at(n)`. That is the one shape difference from an event stack,
-/// and it is why the pointer is supplied rather than rebuilt here.
-///
-/// ## Errors
-///
-/// As [`parse_task_action_stack`].
-pub fn parse_task_action_stack_with_order(
-    signal: LifecycleSignal,
-    raw: &serde_json::Value,
-    source_file: &Path,
-    property: &str,
-    authored: &AuthoredOrder,
-) -> Result<Vec<LifecycleStackItem>, CompositionError> {
-    let serde_json::Value::Array(items) = raw else {
-        return Err(CompositionError::LifecycleStackInvalidShape {
-            source_path: source_file.to_path_buf(),
-            property: property.to_string(),
-            message: format!(
-                "`{property}` must be a list of action-stack items, got {}",
-                json_type_name(raw)
-            ),
-        });
-    };
-    let mut parsed = Vec::with_capacity(items.len());
-    for (idx, raw_item) in items.iter().enumerate() {
-        let item = parse_lifecycle_stack_item(signal, raw_item, source_file, &authored.at(idx))
-            .map_err(|e| annotate_stack_error(e, property, idx))?;
-        for action in &item.actions {
-            refuse_task_set_shell(action, source_file, &format!("{property}[{idx}]"))?;
+/// Initialization is shell-free: a `shell` action, or a `set` value that runs
+/// a command, is refused in either branch of every conditional, before
+/// anything runs.
+fn refuse_initialize_shells(nodes: &[LifecycleNode], source_file: &Path) -> Result<(), CompositionError> {
+    let mut offending: Option<&LifecycleAction> = None;
+    for_each_action(nodes, &mut |action| {
+        if offending.is_none() && runs_a_shell(action) {
+            offending = Some(action);
         }
-        parsed.push(item);
+    });
+    match offending {
+        None => Ok(()),
+        Some(action) => Err(CompositionError::LifecycleActionPlacement {
+            source_path: source_file.to_path_buf(),
+            property: action.path.to_string(),
+            action: "shell".to_string(),
+            event: "initialize".to_string(),
+        }),
     }
-    Ok(parsed)
+}
+
+/// Parse a task's `setup:`/`teardown:` value into a typed stack rooted at
+/// `property`.
+pub(crate) fn parse_task_action_stack_with(
+    signal: LifecycleSignal,
+    raw: &serde_json::Value,
+    source_file: &Path,
+    property: &str,
+    authored: &AuthoredOrder,
+    options: &LifecycleParseOptions<'_>,
+) -> Result<Vec<LifecycleNode>, CompositionError> {
+    let parser = StackParser {
+        signal,
+        source_file,
+        options,
+    };
+    let nodes = parser.parse_stack(raw, &LifecyclePath::root(property), authored)?;
+    let mut refused = Ok(());
+    for_each_action(&nodes, &mut |action| {
+        if refused.is_ok() {
+            refused = refuse_task_set_shell(action, source_file);
+        }
+    });
+    refused.map(|()| nodes)
 }
 
 /// A sequence task's `set` stores data; it cannot run a command.
@@ -388,11 +192,7 @@ pub fn parse_task_action_stack_with_order(
 /// A task's actions are parsed when the task runs, after the sequence's
 /// preflight approved its commands, so a whole-value `$( … )` there would have
 /// no approved bytes. It is refused rather than stored as its own text.
-fn refuse_task_set_shell(
-    action: &LifecycleAction,
-    source_file: &Path,
-    property: &str,
-) -> Result<(), CompositionError> {
+fn refuse_task_set_shell(action: &LifecycleAction, source_file: &Path) -> Result<(), CompositionError> {
     let LifecycleActionKind::RuntimeSet(set) = &action.kind else {
         return Ok(());
     };
@@ -400,7 +200,7 @@ fn refuse_task_set_shell(
         None => Ok(()),
         Some((key, _)) => Err(CompositionError::LifecycleActionInvalidLongForm {
             source_path: source_file.to_path_buf(),
-            property: property.to_string(),
+            property: action.path.parent().to_string(),
             action: "set".to_string(),
             message: format!(
                 "`{key}` is a whole-value `$( … )`, and a sequence task's `set` cannot run a \
@@ -412,946 +212,793 @@ fn refuse_task_set_shell(
     }
 }
 
-/// Parse a single action written in the standard positional/key-value grammar.
+/// Parse a task's `side_effect:` value: one action, written as a one-verb
+/// dictionary in short or long form.
 ///
-/// A task's `side_effect:` value is one action rather than a stack, so it is
-/// parsed here instead of through [`parse_task_action_stack`]. `property` is
-/// the source-rooted path of the action value itself (`tasks[0].side_effect`,
-/// or a bare `side_effect` in an external `kind: task` document). Diagnostics
-/// hang directly off it — `tasks[0].side_effect.set` — with no `action[0]`
-/// segment, because the author wrote no action list to index into.
-///
-/// ## Errors
-///
-/// Returns [`CompositionError::LifecycleStackInvalidShape`] when the value is
-/// not an action object, and the standard unknown-verb / argument-shape
-/// rejections otherwise.
-pub fn parse_single_action(
-    signal: LifecycleSignal,
-    raw: &serde_json::Value,
-    source_file: &Path,
-    property: &str,
-) -> Result<LifecycleAction, CompositionError> {
-    parse_single_action_with_order(signal, raw, source_file, property, None)
-}
-
-pub(crate) fn parse_single_action_with_order(
+/// `property` is the source-rooted path of the value itself
+/// (`tasks[0].side_effect`); the action is `{property}.{verb}`.
+pub(crate) fn parse_single_action_with(
     signal: LifecycleSignal,
     raw: &serde_json::Value,
     source_file: &Path,
     property: &str,
     authored_set_order: Option<&[String]>,
+    options: &LifecycleParseOptions<'_>,
 ) -> Result<LifecycleAction, CompositionError> {
-    let serde_json::Value::Object(obj) = raw else {
-        return Err(CompositionError::LifecycleStackInvalidShape {
-            source_path: source_file.to_path_buf(),
-            property: property.to_string(),
-            message: format!(
-                "`{property}` must be an action object, got {}",
-                json_type_name(raw)
-            ),
-        });
+    let path = LifecyclePath::root(property);
+    let serde_json::Value::Object(map) = raw else {
+        return Err(shape_error(
+            source_file,
+            &path,
+            format!("`{property}` must be a one-verb dictionary, got {}", json_type_name(raw)),
+        ));
     };
-    let action = parse_stack_item_action_object(
+    let parser = StackParser {
         signal,
-        obj,
         source_file,
-        property,
-        0,
-        authored_set_order,
-    )
-    .map_err(|error| root_single_action_error(error, property))?;
-    refuse_task_set_shell(&action, source_file, property)?;
+        options,
+    };
+    parser.reject_removed_keys(map, &path)?;
+    let verbs = map.keys().filter(|key| key.as_str() != "no_error").count();
+    if verbs != 1 {
+        return Err(shape_error(
+            source_file,
+            &path,
+            format!("`{property}` holds exactly one action, got {verbs} verbs"),
+        ));
+    }
+    // The caller holds a `set:` mapping's authored key order directly; every
+    // other verb parses as a one-verb bundle.
+    let action = match map.get("set") {
+        Some(_) if map.contains_key("no_error") => {
+            return Err(shape_error(
+                source_file,
+                &path.field("no_error"),
+                "`no_error` does not apply to `set`; a `set` failure always stops the stack"
+                    .to_string(),
+            ));
+        }
+        Some(value) => parse_runtime_set(value, source_file, &path.field("set"), authored_set_order)?,
+        None => parser
+            .parse_bundle(map, &path, &AuthoredOrder::default())?
+            .pop()
+            .expect("one verb parses to one action"),
+    };
+    refuse_task_set_shell(&action, source_file)?;
     Ok(action)
 }
 
-/// Drop the `action[0]` segment the shared object parser prefixes onto a
-/// value path, re-rooting it at the single action's own `property`.
-fn root_single_action_error(err: CompositionError, property: &str) -> CompositionError {
-    const INDEXED: &str = "action[0].";
-    let unindex = |path: String| match path.strip_prefix(INDEXED) {
-        Some(rest) => rest.to_string(),
-        None => path,
-    };
-    match err {
-        CompositionError::LifecycleActionInvalidLongForm {
-            source_path,
-            property: owner,
-            action,
-            message,
-            source,
-        } => {
-            let message = match message.strip_prefix(&format!("`{INDEXED}")) {
-                Some(rest) if action == "set" => format!("`{property}.{rest}"),
-                _ => message,
-            };
-            CompositionError::LifecycleActionInvalidLongForm {
-                source_path,
-                property: owner,
-                action,
-                message,
-                source,
-            }
-        }
-        CompositionError::LifecycleProxyWithNotMapping {
-            source_path,
-            property,
-            path,
-            actual,
-        } => CompositionError::LifecycleProxyWithNotMapping {
-            source_path,
-            property,
-            path: unindex(path),
-            actual,
-        },
-        CompositionError::LifecycleProxyWithWholeMapping {
-            source_path,
-            property,
-            path,
-            raw,
-        } => CompositionError::LifecycleProxyWithWholeMapping {
-            source_path,
-            property,
-            path: unindex(path),
-            raw,
-        },
-        CompositionError::LifecycleProxyWithDynamicKey {
-            source_path,
-            property,
-            path,
-            key,
-        } => CompositionError::LifecycleProxyWithDynamicKey {
-            source_path,
-            property,
-            path: unindex(path),
-            key,
-        },
-        CompositionError::LifecycleSetPositionalRemoved {
-            source_path,
-            property,
-            path,
-        } => CompositionError::LifecycleSetPositionalRemoved {
-            source_path,
-            property,
-            path: unindex(path),
-        },
-        CompositionError::LifecycleSetLongFormRemoved {
-            source_path,
-            property,
-            path,
-        } => CompositionError::LifecycleSetLongFormRemoved {
-            source_path,
-            property,
-            path: unindex(path),
-        },
-        CompositionError::LifecycleSetNotMapping {
-            source_path,
-            property,
-            path,
-            actual,
-        } => CompositionError::LifecycleSetNotMapping {
-            source_path,
-            property,
-            path: unindex(path),
-            actual,
-        },
-        CompositionError::LifecycleSetInvalidKey {
-            source_path,
-            property,
-            path,
-            key,
-            message,
-        } => CompositionError::LifecycleSetInvalidKey {
-            source_path,
-            property,
-            path: unindex(path),
-            key,
-            message,
-        },
-        other => other,
-    }
-}
-
-/// Parse a raw stack (`Vec<Value>`) into typed form for the given event.
-fn parse_lifecycle_stack(
+/// Parses one stack's grammar for one event.
+struct StackParser<'a> {
     signal: LifecycleSignal,
-    raw_stack: &[serde_json::Value],
-    source_file: &Path,
-    authored: &AuthoredOrder,
-) -> Result<Vec<LifecycleStackItem>, CompositionError> {
-    let property_name = signal.property_name();
-    let mut items = Vec::with_capacity(raw_stack.len());
-    let container = format!("{property_name}.stack");
-    for (idx, raw_item) in raw_stack.iter().enumerate() {
-        let item = parse_lifecycle_stack_item(signal, raw_item, source_file, &authored.at(idx))
-            .map_err(|e| annotate_stack_error(e, &container, idx))?;
-        items.push(item);
-    }
-    Ok(items)
+    source_file: &'a Path,
+    options: &'a LifecycleParseOptions<'a>,
 }
 
-/// Attach the stack-item index to a parse error so the diagnostic can name
-/// `start.stack[2]` rather than just `start`.
-///
-/// `container` is the property of the indexed list itself, supplied by the
-/// caller rather than derived here: an event's items live under
-/// `{signal}.stack`, while a task's `setup:`/`teardown:` value *is* the list, so
-/// its items are `tasks[0].setup[2]` with no `stack` segment to insert.
-fn annotate_stack_error(err: CompositionError, container: &str, idx: usize) -> CompositionError {
-    let dotted = super::super::error::indexed_property(container, idx);
-    match err {
-        CompositionError::LifecycleStackInvalidShape {
-            source_path,
-            property: _,
-            message,
-        } => CompositionError::LifecycleStackInvalidShape {
-            source_path,
-            property: dotted,
-            message,
-        },
-        CompositionError::LifecycleActionInvalidShortForm {
-            source_path,
-            property: _,
-            raw,
-            message,
-        } => CompositionError::LifecycleActionInvalidShortForm {
-            source_path,
-            property: dotted,
-            raw,
-            message,
-        },
-        CompositionError::LifecycleActionInvalidLongForm {
-            source_path,
-            property: _,
-            action,
-            message,
-            source,
-        } => {
-            let message = if action == "set" && message.starts_with("`action[") {
-                format!("`{dotted}.{}", &message[1..])
-            } else {
-                message
-            };
-            CompositionError::LifecycleActionInvalidLongForm {
-                source_path,
-                property: dotted,
-                action,
-                message,
-                source,
-            }
-        }
-        CompositionError::LifecycleActionPlacement {
-            source_path,
-            property: _,
-            action,
-            event,
-        } => CompositionError::LifecycleActionPlacement {
-            source_path,
-            property: dotted,
-            action,
-            event,
-        },
-        CompositionError::LifecycleMultipleLifecycleActions {
-            source_path,
-            property: _,
-        } => CompositionError::LifecycleMultipleLifecycleActions {
-            source_path,
-            property: dotted,
-        },
-        CompositionError::LifecycleActionOrder {
-            source_path,
-            property: _,
-        } => CompositionError::LifecycleActionOrder {
-            source_path,
-            property: dotted,
-        },
-        CompositionError::LifecycleInvalidArgs {
-            source_path,
-            property: _,
-            action,
-            message,
-        } => CompositionError::LifecycleInvalidArgs {
-            source_path,
-            property: dotted,
-            action,
-            message,
-        },
-        // The `with`-rooted family keeps its own `path` suffix; only the
-        // stack-item prefix is filled in here.
-        CompositionError::LifecycleProxyWithNotMapping {
-            source_path,
-            property: _,
-            path,
-            actual,
-        } => CompositionError::LifecycleProxyWithNotMapping {
-            source_path,
-            property: dotted,
-            path,
-            actual,
-        },
-        CompositionError::LifecycleProxyWithWholeMapping {
-            source_path,
-            property: _,
-            path,
-            raw,
-        } => CompositionError::LifecycleProxyWithWholeMapping {
-            source_path,
-            property: dotted,
-            path,
-            raw,
-        },
-        CompositionError::LifecycleProxyWithDynamicKey {
-            source_path,
-            property: _,
-            path,
-            key,
-        } => CompositionError::LifecycleProxyWithDynamicKey {
-            source_path,
-            property: dotted,
-            path,
-            key,
-        },
-        CompositionError::LifecycleProxyOnlyParameter {
-            source_path,
-            property: _,
-            verb,
-            param,
-        } => CompositionError::LifecycleProxyOnlyParameter {
-            source_path,
-            property: dotted,
-            verb,
-            param,
-        },
-        CompositionError::LifecycleSetPositionalRemoved {
-            source_path,
-            property: _,
-            path,
-        } => CompositionError::LifecycleSetPositionalRemoved {
-            source_path,
-            property: dotted,
-            path,
-        },
-        CompositionError::LifecycleSetLongFormRemoved {
-            source_path,
-            property: _,
-            path,
-        } => CompositionError::LifecycleSetLongFormRemoved {
-            source_path,
-            property: dotted,
-            path,
-        },
-        CompositionError::LifecycleSetNotMapping {
-            source_path,
-            property: _,
-            path,
-            actual,
-        } => CompositionError::LifecycleSetNotMapping {
-            source_path,
-            property: dotted,
-            path,
-            actual,
-        },
-        CompositionError::LifecycleSetInvalidKey {
-            source_path,
-            property: _,
-            path,
-            key,
-            message,
-        } => CompositionError::LifecycleSetInvalidKey {
-            source_path,
-            property: dotted,
-            path,
-            key,
-            message,
-        },
-        other => other,
-    }
-}
-
-/// Parse a single stack item.
-///
-/// Stack item schema (per the lifecycle spec):
-///
-/// ```yaml
-/// - when: <optional condition>
-///   action: <scalar string | array of object>
-///   no_error: <optional boolean>
-///   # A scalar `action` value must be a bare verb name with zero arguments
-///   # (e.g. `stop`, `skip`). The universal `no_error` flag may appear as a
-///   # sibling key. Key/value parameters must live inside an explicit object:
-///   # `{ action: verb, ... }`. Array elements are self-contained positional
-///   # single-key objects (`{verb: value}`) or key/value objects.
-/// ```
-fn parse_lifecycle_stack_item(
-    signal: LifecycleSignal,
-    raw_item: &serde_json::Value,
-    source_file: &Path,
-    authored: &AuthoredOrder,
-) -> Result<LifecycleStackItem, CompositionError> {
-    let property_name = signal.property_name();
-    let authored_action = authored.child("action");
-
-    let obj = raw_item.as_object().ok_or_else(|| {
-        CompositionError::LifecycleStackInvalidShape {
-            source_path: source_file.to_path_buf(),
-            property: property_name.to_string(),
-            message: format!(
-                "stack item must be an object, got {}",
-                json_type_name(raw_item)
-            ),
-        }
-    })?;
-
-    // Parse `when:` as a Darkmatter condition expression.
-    //
-    // This is the intentional exception to the literal-default rule: `when`,
-    // `until`, and `while` are always boolean expressions and must never be
-    // routed through `action_value_to_expr`.
-    let when = match obj.get("when") {
-        Some(serde_json::Value::String(s)) => Some(parse_condition(s).map_err(|source| {
-            // The one stack-shape rejection that holds a typed cause. It renders
-            // and classifies exactly as `LifecycleStackInvalidShape` does — the
-            // sibling variant adds only the recoverable `ParseError`.
-            CompositionError::LifecycleWhenExpressionInvalid {
-                source_path: source_file.to_path_buf(),
-                property: property_name.to_string(),
-                message: format!("`when` is not a valid expression: {source}"),
-                source,
-            }
-        })?),
-        Some(other) => {
-            return Err(CompositionError::LifecycleStackInvalidShape {
-                source_path: source_file.to_path_buf(),
-                property: property_name.to_string(),
-                message: format!("`when` must be a string, got {}", json_type_name(other)),
-            });
-        }
-        None => None,
-    };
-
-    let raw_action = obj.get("action").ok_or_else(|| {
-        CompositionError::LifecycleStackInvalidShape {
-            source_path: source_file.to_path_buf(),
-            property: property_name.to_string(),
-            message: "stack item must have an `action` key".to_string(),
-        }
-    })?;
-
-    // Collect the universal `no_error` flag. Sibling parameter keys are no
-    // longer accepted at the stack-item level: a scalar `action: <verb>` must
-    // be a bare verb with zero arguments, and key/value parameters must live
-    // inside an explicit `{ action: verb, ... }` object.
-    let mut stack_no_error: Option<bool> = None;
-    let mut sibling_keys: Vec<&str> = Vec::new();
-    for (key, value) in obj {
-        if matches!(key.as_str(), "when" | "action") {
-            continue;
-        }
-        if key == "no_error" {
-            stack_no_error = Some(match value {
-                serde_json::Value::Bool(b) => *b,
-                other => {
-                    return Err(CompositionError::LifecycleStackInvalidShape {
-                        source_path: source_file.to_path_buf(),
-                        property: property_name.to_string(),
-                        message: format!(
-                            "`no_error` must be a boolean, got {}",
-                            json_type_name(other)
-                        ),
-                    });
-                }
-            });
-            continue;
-        }
-        sibling_keys.push(key.as_str());
-    }
-    if !sibling_keys.is_empty() {
-        sibling_keys.sort_unstable();
-        let message = if let serde_json::Value::String(verb) = raw_action {
-            format!(
-                "scalar `action` value `{verb}` cannot take sibling parameter(s) ({}); \
-                 use the explicit key/value form `{{{{ action: {verb}, ... }}}}``",
-                sibling_keys.join(", ")
-            )
-        } else {
-            format!(
-                "stack item with an {} `action` cannot carry sibling parameter(s) ({}); \
-                 move them into each array element",
-                json_type_name(raw_action),
-                sibling_keys.join(", ")
-            )
-        };
-        return Err(CompositionError::LifecycleStackInvalidShape {
-            source_path: source_file.to_path_buf(),
-            property: property_name.to_string(),
-            message,
-        });
-    }
-
-    let actions = match raw_action {
-        // Scalar string action: only bare verb-name zero-arg form is accepted.
-        // Any string containing `(` is the removed short-form grammar.
-        serde_json::Value::String(s) => {
-            let no_error = stack_no_error.unwrap_or(false);
-            let action = parse_scalar_action(signal, s, no_error, source_file, property_name)?;
-            vec![action]
-        }
-        // Array of actions, each self-contained.
-        serde_json::Value::Array(items) => {
-            if stack_no_error.is_some() {
-                return Err(CompositionError::LifecycleStackInvalidShape {
-                    source_path: source_file.to_path_buf(),
-                    property: property_name.to_string(),
-                    message: "stack item with an array `action` cannot carry a sibling `no_error`; \
-                        move `no_error` into each array element"
-                        .to_string(),
-                });
-            }
-            let mut actions = Vec::with_capacity(items.len());
-            for (action_index, item) in items.iter().enumerate() {
-                let action = match item {
-                    serde_json::Value::String(s) => {
-                        if s.contains('(') {
-                            if is_set_call(s) {
-                                return Err(CompositionError::LifecycleSetNotMapping {
-                                    source_path: source_file.to_path_buf(),
-                                    property: property_name.to_string(),
-                                    path: format!("action[{action_index}].set"),
-                                    actual: "call spelling".to_string(),
-                                });
-                            }
-                            return Err(CompositionError::LifecycleShortFormRemoved {
-                                source_path: source_file.to_path_buf(),
-                                property: property_name.to_string(),
-                                raw: s.clone(),
-                                rewrite: rewrite_to_positional(s),
-                            });
-                        }
-                        parse_bare_verb_string(signal, s, false, source_file, property_name)?
-                    }
-                    serde_json::Value::Object(inner) => {
-                        parse_stack_item_action_object(
-                            signal,
-                            inner,
-                            source_file,
-                            property_name,
-                            action_index,
-                            authored_action.at(action_index).child("set").key_order(),
-                        )?
-                    }
-                    other => {
-                        return Err(CompositionError::LifecycleStackInvalidShape {
-                            source_path: source_file.to_path_buf(),
-                            property: property_name.to_string(),
-                            message: format!(
-                                "array `action` element must be a string or object, got {}",
-                                json_type_name(other)
-                            ),
-                        });
-                    }
-                };
-                actions.push(action);
-            }
-            actions
-        }
-        // Object form: either a positional single-key object (`{success: "x"}`)
-        // or a nested key/value object (`{action: {action: verb, ...}}`).
-        serde_json::Value::Object(obj) => {
-            vec![parse_stack_item_action_object(
-                signal,
-                obj,
-                source_file,
-                property_name,
-                0,
-                authored_action.child("set").key_order(),
-            )?]
-        }
-        other => {
-            return Err(CompositionError::LifecycleStackInvalidShape {
-                source_path: source_file.to_path_buf(),
-                property: property_name.to_string(),
-                message: format!(
-                    "`action` must be a string or array, got {}",
+impl StackParser<'_> {
+    /// A stack root: omitted/`null`, a list, or a dictionary of verbs. `[]`
+    /// and `{}` are the empty stack.
+    fn parse_stack(
+        &self,
+        value: &serde_json::Value,
+        path: &LifecyclePath,
+        authored: &AuthoredOrder,
+    ) -> Result<Vec<LifecycleNode>, CompositionError> {
+        match value {
+            serde_json::Value::Null => Ok(Vec::new()),
+            serde_json::Value::Array(items) => self.parse_list(items, path, authored, 0),
+            serde_json::Value::Object(map) => self.parse_dictionary(map, path, authored),
+            other => Err(shape_error(
+                self.source_file,
+                path,
+                format!(
+                    "a lifecycle stack must be a list of actions or a dictionary of verbs, got {}",
                     json_type_name(other)
                 ),
+            )),
+        }
+    }
+
+    /// The `loop:` block's lifecycle concerns: loose verb keys (a root
+    /// dictionary) or a `gate:` stack, never both, and never `when`.
+    ///
+    /// Removed keys are rejected before the iteration controls are filtered
+    /// out, so an old `loop.stack` cannot disappear unnoticed.
+    fn parse_loop_concerns(
+        &self,
+        loop_obj: &serde_json::Map<String, serde_json::Value>,
+        authored: &AuthoredOrder,
+    ) -> Result<Vec<LifecycleNode>, CompositionError> {
+        let path = LifecyclePath::root("loop");
+        // `action`/`actions` at the loop root are iteration controls, so only
+        // the other removed keys are checked here, before filtering.
+        let without_iteration: serde_json::Map<String, serde_json::Value> = loop_obj
+            .iter()
+            .filter(|(key, _)| !matches!(key.as_str(), "action" | "actions"))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        self.reject_removed_keys(&without_iteration, &path)?;
+        if loop_obj.contains_key("when") {
+            return Err(shape_error(
+                self.source_file,
+                &path.field("when"),
+                "`when` cannot sit at the `loop:` root; put a guarded item in `gate:`".to_string(),
+            ));
+        }
+        let concerns: serde_json::Map<String, serde_json::Value> = loop_obj
+            .iter()
+            .filter(|(key, _)| !LOOP_ITERATION_KEYS.contains(&key.as_str()))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        if let Some(gate) = concerns.get("gate") {
+            if let Some(loose) = concerns.keys().find(|key| key.as_str() != "gate") {
+                return Err(shape_error(
+                    self.source_file,
+                    &path.field(loose.as_str()),
+                    format!(
+                        "`loop.{loose}` cannot sit beside `loop.gate`; a loop spells its lifecycle \
+                         concerns as loose verb keys or as a `gate:` list, not both"
+                    ),
+                ));
+            }
+            return self.parse_stack(gate, &path.field("gate"), &authored.child("gate"));
+        }
+        if concerns.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.parse_bundle(&concerns, &path, authored)
+            .map(|actions| actions.into_iter().map(LifecycleNode::Action).collect())
+    }
+
+    /// A list: a stack root, or a `then`/`else` body. `depth` is the number
+    /// of conditionals enclosing it.
+    ///
+    /// Within one list an unconditional directive must be the last item; a
+    /// guarded item never counts as unconditional.
+    fn parse_list(
+        &self,
+        items: &[serde_json::Value],
+        path: &LifecyclePath,
+        authored: &AuthoredOrder,
+        depth: usize,
+    ) -> Result<Vec<LifecycleNode>, CompositionError> {
+        let mut nodes = Vec::with_capacity(items.len());
+        let mut terminal: Option<LifecyclePath> = None;
+        for (index, item) in items.iter().enumerate() {
+            if let Some(directive) = terminal.take() {
+                return Err(CompositionError::LifecycleActionOrder {
+                    source_path: self.source_file.to_path_buf(),
+                    property: directive.to_string(),
+                });
+            }
+            for node in self.parse_item(item, &path.index(index), &authored.at(index), depth)? {
+                if let LifecycleNode::Action(action) = &node
+                    && action.is_lifecycle_control()
+                {
+                    terminal = Some(action.path.clone());
+                }
+                nodes.push(node);
+            }
+        }
+        Ok(nodes)
+    }
+
+    /// One list item: a bare zero-argument verb (`- stop`), a dictionary
+    /// bundle, or a `when` item.
+    fn parse_item(
+        &self,
+        value: &serde_json::Value,
+        path: &LifecyclePath,
+        authored: &AuthoredOrder,
+        depth: usize,
+    ) -> Result<Vec<LifecycleNode>, CompositionError> {
+        let map = match value {
+            serde_json::Value::String(raw) => {
+                return self.parse_bare_verb(raw, path).map(|action| vec![LifecycleNode::Action(action)]);
+            }
+            serde_json::Value::Object(map) => map,
+            other => {
+                return Err(shape_error(
+                    self.source_file,
+                    path,
+                    format!(
+                        "a stack item must be a verb name or a dictionary, got {}",
+                        json_type_name(other)
+                    ),
+                ));
+            }
+        };
+        self.reject_removed_keys(map, path)?;
+        if map.is_empty() {
+            return Err(shape_error(self.source_file, path, "a stack item cannot be empty".to_string()));
+        }
+        let Some(raw_when) = map.get("when") else {
+            for key in ["then", "else"] {
+                if map.contains_key(key) {
+                    return Err(shape_error(
+                        self.source_file,
+                        &path.field(key),
+                        format!("`{key}` requires `when` on the same item"),
+                    ));
+                }
+            }
+            return Ok(self
+                .parse_bundle(map, path, authored)?
+                .into_iter()
+                .map(LifecycleNode::Action)
+                .collect());
+        };
+
+        let level = depth + 1;
+        if level > MAX_CONDITIONAL_DEPTH {
+            return Err(shape_error(
+                self.source_file,
+                &path.field("when"),
+                format!(
+                    "conditionals nest at most {MAX_CONDITIONAL_DEPTH} levels deep; this `when` is \
+                     level {level}"
+                ),
+            ));
+        }
+        let when = self.parse_when(raw_when, &path.field("when"))?;
+
+        let (then, otherwise) = if let Some(raw_then) = map.get("then") {
+            if map.contains_key("no_error") {
+                return Err(shape_error(
+                    self.source_file,
+                    &path.field("no_error"),
+                    "`no_error` cannot sit beside `then`/`else`; put it on the actions in the body"
+                        .to_string(),
+                ));
+            }
+            if let Some(extra) = map
+                .keys()
+                .find(|key| !matches!(key.as_str(), "when" | "then" | "else"))
+            {
+                return Err(shape_error(
+                    self.source_file,
+                    &path.field(extra.as_str()),
+                    format!(
+                        "a `when` item with `then` cannot also carry the sibling `{extra}`; move it \
+                         into `then`"
+                    ),
+                ));
+            }
+            let then = self.parse_body(raw_then, &path.field("then"), &authored.child("then"), level)?;
+            let otherwise = match map.get("else") {
+                Some(raw_else) => {
+                    self.parse_body(raw_else, &path.field("else"), &authored.child("else"), level)?
+                }
+                None => Vec::new(),
+            };
+            (then, otherwise)
+        } else {
+            if map.contains_key("else") {
+                return Err(shape_error(
+                    self.source_file,
+                    &path.field("else"),
+                    "`else` requires `then`; write the true branch under `then`".to_string(),
+                ));
+            }
+            let mut bundle = map.clone();
+            bundle.remove("when");
+            if bundle.keys().all(|key| key == "no_error") {
+                return Err(shape_error(
+                    self.source_file,
+                    path,
+                    "a `when` item needs `then` or sibling actions".to_string(),
+                ));
+            }
+            let then = self
+                .parse_bundle(&bundle, path, authored)?
+                .into_iter()
+                .map(LifecycleNode::Action)
+                .collect();
+            (then, Vec::new())
+        };
+
+        Ok(vec![LifecycleNode::Conditional(LifecycleConditional {
+            when,
+            then,
+            otherwise,
+            path: path.clone(),
+        })])
+    }
+
+    /// An explicitly authored `then:`/`else:` body: a non-empty list or a
+    /// non-empty dictionary of verbs. `depth` is the enclosing conditional's
+    /// level.
+    fn parse_body(
+        &self,
+        value: &serde_json::Value,
+        path: &LifecyclePath,
+        authored: &AuthoredOrder,
+        depth: usize,
+    ) -> Result<Vec<LifecycleNode>, CompositionError> {
+        let branch = path.to_string();
+        let branch = branch.rsplit('.').next().unwrap_or("then");
+        match value {
+            serde_json::Value::Array(items) if !items.is_empty() => {
+                self.parse_list(items, path, authored, depth)
+            }
+            serde_json::Value::Object(map) if !map.is_empty() => self.parse_dictionary(map, path, authored),
+            serde_json::Value::Null | serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+                Err(shape_error(
+                    self.source_file,
+                    path,
+                    format!("an explicit `{branch}` must contain at least one action"),
+                ))
+            }
+            other => Err(shape_error(
+                self.source_file,
+                path,
+                format!(
+                    "`{branch}` must be a list of actions or a dictionary of verbs, got {}",
+                    json_type_name(other)
+                ),
+            )),
+        }
+    }
+
+    /// A dictionary of verbs standing for a whole stack or body. It expands
+    /// in canonical order and never carries `when`.
+    fn parse_dictionary(
+        &self,
+        map: &serde_json::Map<String, serde_json::Value>,
+        path: &LifecyclePath,
+        authored: &AuthoredOrder,
+    ) -> Result<Vec<LifecycleNode>, CompositionError> {
+        self.reject_removed_keys(map, path)?;
+        for key in ["when", "then", "else"] {
+            if map.contains_key(key) {
+                return Err(shape_error(
+                    self.source_file,
+                    &path.field(key),
+                    format!(
+                        "a dictionary of verbs never carries `{key}`; write a guarded list item \
+                         (`- when: …`) instead"
+                    ),
+                ));
+            }
+        }
+        if map.is_empty() {
+            return Ok(Vec::new());
+        }
+        Ok(self
+            .parse_bundle(map, path, authored)?
+            .into_iter()
+            .map(LifecycleNode::Action)
+            .collect())
+    }
+
+    /// Reject the removed spellings that can appear as keys: `stack`, the
+    /// `action:` aggregator and discriminator, and `say_first`.
+    fn reject_removed_keys(
+        &self,
+        map: &serde_json::Map<String, serde_json::Value>,
+        path: &LifecyclePath,
+    ) -> Result<(), CompositionError> {
+        let removed = if map.contains_key("stack") {
+            Some((
+                "stack",
+                "write the event as an ordered list of actions, e.g. `start: [ { info: \"…\" } ]`"
+                    .to_string(),
+            ))
+        } else if map.contains_key("action") {
+            let replacement = match map.get("action") {
+                Some(serde_json::Value::String(verb)) if !map.contains_key("when") => format!(
+                    "write the verb as the key, e.g. `- {verb}: …`, with named parameters as \
+                     `- {verb}: {{ … }}`"
+                ),
+                _ if map.contains_key("when") => {
+                    "put the guarded actions under `then:` (or beside `when` as sibling verbs)"
+                        .to_string()
+                }
+                _ => "list the actions directly, one verb per item, e.g. `- shell: \"…\"`"
+                    .to_string(),
+            };
+            Some(("action", replacement))
+        } else if map.contains_key("say_first") {
+            Some((
+                "say_first",
+                "use `say`, and order the list: items run in the order written".to_string(),
+            ))
+        } else {
+            None
+        };
+        match removed {
+            None => Ok(()),
+            Some((key, replacement)) => Err(CompositionError::RemovedGrammar {
+                source_path: self.source_file.to_path_buf(),
+                path: path.field(key).to_string(),
+                removed: key.to_string(),
+                replacement,
+            }),
+        }
+    }
+
+    fn parse_when(&self, value: &serde_json::Value, path: &LifecyclePath) -> Result<Expr, CompositionError> {
+        // `when` is always a boolean expression, never routed through the
+        // literal-default action-value rule.
+        match value {
+            serde_json::Value::String(text) => parse_condition(text).map_err(|source| {
+                CompositionError::LifecycleWhenExpressionInvalid {
+                    source_path: self.source_file.to_path_buf(),
+                    property: path.to_string(),
+                    message: format!("`when` is not a valid expression: {source}"),
+                    source,
+                }
+            }),
+            other => Err(shape_error(
+                self.source_file,
+                path,
+                format!("`when` must be a string, got {}", json_type_name(other)),
+            )),
+        }
+    }
+
+    /// A bare verb name as a list item: a zero-argument action such as
+    /// `- stop`.
+    fn parse_bare_verb(&self, raw: &str, item: &LifecyclePath) -> Result<LifecycleAction, CompositionError> {
+        let verb = raw.trim();
+        let property = item.to_string();
+        if verb.is_empty() {
+            return Err(CompositionError::LifecycleActionInvalidShortForm {
+                source_path: self.source_file.to_path_buf(),
+                property,
+                raw: raw.to_string(),
+                message: "action cannot be empty".to_string(),
             });
         }
-    };
-
-    // Cardinality: at most one lifecycle control action, and it must be last.
-    let lifecycle_indices: Vec<usize> = actions
-        .iter()
-        .enumerate()
-        .filter_map(|(i, a)| a.is_lifecycle_control().then_some(i))
-        .collect();
-    if lifecycle_indices.len() > 1 {
-        return Err(CompositionError::LifecycleMultipleLifecycleActions {
-            source_path: source_file.to_path_buf(),
-            property: property_name.to_string(),
-        });
+        if verb.contains('(') {
+            if is_set_call(verb) {
+                return Err(CompositionError::LifecycleSetNotMapping {
+                    source_path: self.source_file.to_path_buf(),
+                    property,
+                    path: "set".to_string(),
+                    actual: "call spelling".to_string(),
+                });
+            }
+            return Err(CompositionError::LifecycleShortFormRemoved {
+                source_path: self.source_file.to_path_buf(),
+                property,
+                raw: raw.to_string(),
+                rewrite: rewrite_to_positional(raw),
+            });
+        }
+        if verb == "set" {
+            return Err(CompositionError::LifecycleSetNotMapping {
+                source_path: self.source_file.to_path_buf(),
+                property,
+                path: "set".to_string(),
+                actual: "bare name".to_string(),
+            });
+        }
+        let path = item.field(verb);
+        let property = path.to_string();
+        if !is_known_lifecycle_verb(verb) {
+            return Err(unknown_verb(self.source_file, &property, verb));
+        }
+        let kind = validate_positional_arity_and_build(self.signal, verb, Vec::new(), self.source_file, &property)?;
+        let action = LifecycleAction {
+            kind,
+            no_error: false,
+            path,
+        };
+        self.check_placement(&action)?;
+        Ok(action)
     }
-    if let Some(idx) = lifecycle_indices.first()
-        && *idx != actions.len() - 1
-    {
-        return Err(CompositionError::LifecycleActionOrder {
-            source_path: source_file.to_path_buf(),
-            property: property_name.to_string(),
-        });
+
+    /// Expand a dictionary bundle into its actions, in canonical order:
+    /// `set`; the communication verbs; `shell`; side-effect and
+    /// expression-function verbs by ascending ASCII name; the one directive.
+    ///
+    /// `map` holds verbs plus an optional sibling `no_error`; a caller has
+    /// already removed `when`. Several verbs use short form only; one verb may
+    /// use long form.
+    fn parse_bundle(
+        &self,
+        map: &serde_json::Map<String, serde_json::Value>,
+        path: &LifecyclePath,
+        authored: &AuthoredOrder,
+    ) -> Result<Vec<LifecycleAction>, CompositionError> {
+        let sibling_no_error = match map.get("no_error") {
+            None => None,
+            Some(serde_json::Value::Bool(flag)) => Some(*flag),
+            Some(other) => {
+                return Err(shape_error(
+                    self.source_file,
+                    &path.field("no_error"),
+                    format!("`no_error` must be a boolean, got {}", json_type_name(other)),
+                ));
+            }
+        };
+        let verbs: Vec<(&String, &serde_json::Value)> =
+            map.iter().filter(|(key, _)| key.as_str() != "no_error").collect();
+        if verbs.is_empty() {
+            return Err(shape_error(
+                self.source_file,
+                path,
+                "`no_error` needs an action beside it".to_string(),
+            ));
+        }
+        for (verb, _) in &verbs {
+            if verb.as_str() != "set" && !is_known_lifecycle_verb(verb) {
+                return Err(unknown_verb(self.source_file, &path.field(verb.as_str()).to_string(), verb));
+            }
+        }
+        if map.contains_key("say") && map.contains_key("speak") {
+            return Err(CompositionError::LifecycleSayConflict(path.to_string()));
+        }
+        if sibling_no_error.is_some() && verbs.len() == 1 && verbs[0].0 == "set" {
+            return Err(shape_error(
+                self.source_file,
+                &path.field("no_error"),
+                "`no_error` does not apply to `set`; a `set` failure always stops the stack"
+                    .to_string(),
+            ));
+        }
+        if verbs.iter().filter(|(verb, _)| is_control_verb(verb)).count() > 1 {
+            return Err(CompositionError::LifecycleMultipleLifecycleActions {
+                source_path: self.source_file.to_path_buf(),
+                property: path.to_string(),
+            });
+        }
+
+        let several = verbs.len() > 1;
+        let mut ranked = Vec::with_capacity(verbs.len());
+        for (verb, value) in verbs {
+            let verb_path = path.field(verb.as_str());
+            let mut action = if verb == "set" {
+                self.parse_runtime_set(value, &verb_path, authored.child("set").key_order())?
+            } else if let serde_json::Value::Object(params) = value {
+                if several {
+                    return Err(shape_error(
+                        self.source_file,
+                        &verb_path,
+                        format!(
+                            "`{verb}` uses long form, which a dictionary allows only when it holds \
+                             one verb; use a list when several actions need named parameters"
+                        ),
+                    ));
+                }
+                let (action, inner_no_error) = self.parse_long_form(verb, params, &verb_path)?;
+                if inner_no_error && sibling_no_error.is_some() {
+                    return Err(shape_error(
+                        self.source_file,
+                        &verb_path.field("no_error"),
+                        format!(
+                            "`no_error` is set both beside `{verb}` and inside it; keep one"
+                        ),
+                    ));
+                }
+                action
+            } else {
+                let property = verb_path.to_string();
+                let kind = parse_short_form(self.signal, verb, value, self.source_file, &property)?;
+                LifecycleAction {
+                    kind,
+                    no_error: false,
+                    path: verb_path,
+                }
+            };
+            if let Some(flag) = sibling_no_error
+                && verb != "set"
+            {
+                action.no_error = flag;
+            }
+            self.check_placement(&action)?;
+            self.check_effect(&action)?;
+            ranked.push((canonical_rank(verb), action));
+        }
+        ranked.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(ranked.into_iter().map(|(_, action)| action).collect())
     }
 
-    // Per-event "Where valid" matrix for lifecycle control actions. Runs
-    // after cardinality so the structural violation is reported first.
-    for action in &actions {
+    /// A one-verb long form: `verb: { <params>, no_error? }`. Returns the
+    /// action and whether the map carried its own `no_error`.
+    fn parse_long_form(
+        &self,
+        verb: &str,
+        map: &serde_json::Map<String, serde_json::Value>,
+        path: &LifecyclePath,
+    ) -> Result<(LifecycleAction, bool), CompositionError> {
+        let property = path.to_string();
+        let communication = CommunicationChannel::from_verb(verb).is_some();
+        let mut no_error: Option<bool> = None;
+        let mut with: Option<WithOverlay> = None;
+        let mut params: Vec<(String, Expr)> = Vec::new();
+        for (key, value) in map {
+            if key == "no_error" {
+                no_error = Some(match value {
+                    serde_json::Value::Bool(flag) => *flag,
+                    other => {
+                        return Err(CompositionError::LifecycleActionInvalidLongForm {
+                            source_path: self.source_file.to_path_buf(),
+                            property,
+                            action: verb.to_string(),
+                            message: format!(
+                                "`no_error` must be a boolean, got {}",
+                                json_type_name(other)
+                            ),
+                            source: None,
+                        });
+                    }
+                });
+                continue;
+            }
+            if communication && matches!(key.as_str(), "message" | "sound" | "route") {
+                let replacement = if key == "route" {
+                    "remove `route`; it was never read, and messaging routes come from Claudine's \
+                     configuration"
+                        .to_string()
+                } else {
+                    format!("name the payload `text`: `{verb}: {{ text: … }}`")
+                };
+                return Err(CompositionError::RemovedGrammar {
+                    source_path: self.source_file.to_path_buf(),
+                    path: path.field(key.as_str()).to_string(),
+                    removed: format!("{verb}.{key}"),
+                    replacement,
+                });
+            }
+            // `with` is the one mapping-valued action parameter, and only the
+            // transitions that re-read a document take it.
+            if key == "with" {
+                if !matches!(verb, "proxy" | "retry") {
+                    return Err(CompositionError::LifecycleWithUnsupported {
+                        source_path: self.source_file.to_path_buf(),
+                        property,
+                        verb: verb.to_string(),
+                    });
+                }
+                with = Some(parse_with(value, self.source_file, path, verb)?);
+                continue;
+            }
+            // Direct YAML object literals are not parameter values; object
+            // data must be passed through a whole-value `{{ ... }}` span.
+            if let serde_json::Value::Object(_) = value {
+                return Err(CompositionError::LifecycleObjectDataThroughInterpolationParameter {
+                    source_path: self.source_file.to_path_buf(),
+                    property,
+                    verb: verb.to_string(),
+                    param: key.clone(),
+                });
+            }
+            let expr = action_value_to_expr(value).map_err(|source| {
+                CompositionError::LifecycleActionInvalidLongForm {
+                    source_path: self.source_file.to_path_buf(),
+                    property: property.clone(),
+                    action: verb.to_string(),
+                    message: format!("`{key}` is not a valid value: {source}"),
+                    source: Some(source),
+                }
+            })?;
+            params.push((key.clone(), expr));
+        }
+        let kind = build_action_from_params(self.signal, verb, params, with, self.source_file, &property)?;
+        Ok((
+            LifecycleAction {
+                kind,
+                no_error: no_error.unwrap_or(false),
+                path: path.clone(),
+            },
+            no_error.is_some(),
+        ))
+    }
+
+    /// Parse the only authored `set` form: a literal destination map.
+    /// `path` is the `set` verb's own path.
+    fn parse_runtime_set(
+        &self,
+        value: &serde_json::Value,
+        path: &LifecyclePath,
+        authored_order: Option<&[String]>,
+    ) -> Result<LifecycleAction, CompositionError> {
+        parse_runtime_set(value, self.source_file, path, authored_order)
+    }
+
+    /// The per-event "Where valid" matrix: only `skip` is placement-limited.
+    fn check_placement(&self, action: &LifecycleAction) -> Result<(), CompositionError> {
         if let LifecycleActionKind::LifecycleControl(control) = &action.kind
-            && !control.is_valid_for(signal)
+            && !control.is_valid_for(self.signal)
         {
             return Err(CompositionError::LifecycleActionPlacement {
-                source_path: source_file.to_path_buf(),
-                property: property_name.to_string(),
+                source_path: self.source_file.to_path_buf(),
+                property: action.path.to_string(),
                 action: control.verb().to_string(),
-                event: signal.property_name().to_string(),
+                event: self.signal.property_name().to_string(),
             });
         }
+        Ok(())
     }
 
-    Ok(LifecycleStackItem { when, actions })
-}
-
-/// Parse an action object that appears either as an array element or as the
-/// single value of a stack item's `action:` key.
-///
-/// Disambiguation (per the positional-and-key-value spec):
-/// - Object with an `action:` key → key/value long form.
-/// - Single-key object whose key is a known verb → positional form.
-/// - Single-key object whose key is not a known verb → unknown-verb error.
-/// - One verb plus sibling `no_error:` → the same positional action with its
-///   universal modifier.
-/// - Multi-key object without an `action:` key → ambiguous error.
-fn parse_stack_item_action_object(
-    signal: LifecycleSignal,
-    obj: &serde_json::Map<String, serde_json::Value>,
-    source_file: &Path,
-    property_name: &str,
-    action_index: usize,
-    authored_order: Option<&[String]>,
-) -> Result<LifecycleAction, CompositionError> {
-    if obj.contains_key("action") {
-        return parse_long_form_action_object(
-            signal,
-            obj,
-            source_file,
-            property_name,
-            action_index,
-        );
-    }
-
-    match obj.len() {
-        0 => Err(CompositionError::LifecycleStackInvalidShape {
-            source_path: source_file.to_path_buf(),
-            property: property_name.to_string(),
-            message: "action object cannot be empty".to_string(),
-        }),
-        1 => {
-            let (verb, value) = obj.iter().next().expect("single-key object");
-            parse_positional_action(
-                signal,
-                verb,
-                value,
-                source_file,
-                property_name,
-                action_index,
-                authored_order,
-            )
+    /// A literal `effect` name must be in the caller's catalog. A
+    /// `{{ … }}` name is checked when the event resolves it.
+    fn check_effect(&self, action: &LifecycleAction) -> Result<(), CompositionError> {
+        if let LifecycleActionKind::Communication(comm) = &action.kind
+            && comm.channel == CommunicationChannel::Effect
+            && let Expr::StringLiteral(name) = &comm.text
+            && !name.contains("{{")
+            && !(self.options.is_known_effect)(name)
+        {
+            return Err(CompositionError::LifecycleUnknownEffect(
+                action.path.to_string(),
+                name.clone(),
+            ));
         }
-        _ => {
-            if obj.len() == 2
-                && let Some(no_error_value) = obj.get("no_error")
-                && let Some((verb, value)) = obj.iter().find(|(key, _)| key.as_str() != "no_error")
-                && is_known_lifecycle_verb(verb)
-            {
-                let serde_json::Value::Bool(no_error) = no_error_value else {
-                    return Err(CompositionError::LifecycleActionInvalidLongForm {
-                        source_path: source_file.to_path_buf(),
-                        property: property_name.to_string(),
-                        action: verb.clone(),
-                        message: format!(
-                            "`no_error` must be a boolean, got {}",
-                            json_type_name(no_error_value)
-                        ),
-                        source: None,
-                    });
-                };
-                let mut action = parse_positional_action(
-                    signal,
-                    verb,
-                    value,
-                    source_file,
-                    property_name,
-                    action_index,
-                    authored_order,
-                )?;
-                action.no_error = *no_error;
-                return Ok(action);
-            }
-            let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
-            keys.sort_unstable();
-            let known_verb = keys.iter().copied().find(|k| is_known_lifecycle_verb(k));
-            let positional_rewrite = known_verb.map(|verb| format!("`{verb}: ...`"));
-            let kv_verb = known_verb.unwrap_or_else(|| keys.first().expect("multi-key object"));
-            let kv_rewrite = format!("`{{{{ action: {kv_verb}, ... }}}}``");
-            let mut rewrites: Vec<String> = Vec::new();
-            if let Some(rw) = positional_rewrite {
-                rewrites.push(rw);
-            }
-            rewrites.push(kv_rewrite);
-            Err(CompositionError::LifecycleStackAmbiguous {
-                source_path: source_file.to_path_buf(),
-                property: property_name.to_string(),
-                message: format!(
-                    "multi-key action object without an `action` key is ambiguous; \
-                     did you mean {}?",
-                    rewrites.join(" or ")
-                ),
-            })
-        }
+        Ok(())
     }
 }
 
-/// Parse a scalar string `action` value.
-///
-/// Only the bare verb-name zero-arg form is accepted. A string containing
-/// `(` is the removed short-form grammar and surfaces a typed
-/// [`CompositionError::LifecycleShortFormRemoved`] with a positional rewrite.
-fn parse_scalar_action(
-    signal: LifecycleSignal,
-    raw: &str,
-    no_error: bool,
-    source_file: &Path,
-    property_name: &str,
-) -> Result<LifecycleAction, CompositionError> {
-    let trimmed = raw.trim();
-
-    if trimmed.is_empty() {
-        return Err(CompositionError::LifecycleActionInvalidShortForm {
-            source_path: source_file.to_path_buf(),
-            property: property_name.to_string(),
-            raw: raw.to_string(),
-            message: "action cannot be empty".to_string(),
-        });
+/// Where a verb falls in a bundle's canonical order.
+fn canonical_rank(verb: &str) -> (u8, u8, String) {
+    const COMMUNICATION: &[&str] = &[
+        "stdout", "stderr", "info", "warn", "success", "message", "notify", "effect", "say",
+    ];
+    let communication_verb = if verb == "speak" { "say" } else { verb };
+    if verb == "set" {
+        (0, 0, String::new())
+    } else if let Some(position) = COMMUNICATION.iter().position(|c| *c == communication_verb) {
+        (1, position as u8, String::new())
+    } else if verb == "shell" {
+        (2, 0, String::new())
+    } else if is_control_verb(verb) {
+        (4, 0, String::new())
+    } else {
+        (3, 0, verb.to_string())
     }
+}
 
-    if trimmed.contains('(') {
-        if is_set_call(trimmed) {
-            return Err(CompositionError::LifecycleSetNotMapping {
-                source_path: source_file.to_path_buf(),
-                property: property_name.to_string(),
-                path: "action[0].set".to_string(),
-                actual: "call spelling".to_string(),
-            });
-        }
-        return Err(CompositionError::LifecycleShortFormRemoved {
-            source_path: source_file.to_path_buf(),
-            property: property_name.to_string(),
-            raw: raw.to_string(),
-            rewrite: rewrite_to_positional(raw),
-        });
+fn is_control_verb(verb: &str) -> bool {
+    matches!(
+        verb,
+        "stop" | "skip" | "error" | "proxy" | "retry" | "resume" | "defer"
+    )
+}
+
+fn shape_error(source_file: &Path, path: &LifecyclePath, message: String) -> CompositionError {
+    CompositionError::LifecycleStackInvalidShape {
+        source_path: source_file.to_path_buf(),
+        property: path.to_string(),
+        message,
     }
+}
 
-    parse_bare_verb_string(signal, trimmed, no_error, source_file, property_name)
+fn unknown_verb(source_file: &Path, property: &str, verb: &str) -> CompositionError {
+    let rewrite = did_you_mean_verb(verb)
+        .map(|suggestion| format!("; did you mean `{suggestion}`?"))
+        .unwrap_or_default();
+    CompositionError::LifecycleUnknownVerb {
+        source_path: source_file.to_path_buf(),
+        property: property.to_string(),
+        verb: verb.to_string(),
+        rewrite,
+    }
 }
 
 fn is_set_call(raw: &str) -> bool {
     raw.trim_start().strip_prefix("set").is_some_and(|rest| rest.trim_start().starts_with('('))
 }
 
-/// Parse a bare verb-name string as a zero-arg positional action.
-///
-/// Validates that the verb is known and that its zero-arg form is arity-legal
-/// (e.g. `stop` is accepted, `proxy` is rejected as wrong-arity).
-fn parse_bare_verb_string(
-    signal: LifecycleSignal,
-    raw: &str,
-    no_error: bool,
-    source_file: &Path,
-    property_name: &str,
-) -> Result<LifecycleAction, CompositionError> {
-    let trimmed = raw.trim();
-
-    if trimmed.is_empty() {
-        return Err(CompositionError::LifecycleActionInvalidShortForm {
-            source_path: source_file.to_path_buf(),
-            property: property_name.to_string(),
-            raw: raw.to_string(),
-            message: "action cannot be empty".to_string(),
-        });
-    }
-
-    if !is_known_lifecycle_verb(trimmed) {
-        let rewrite = did_you_mean_verb(trimmed)
-            .map(|suggestion| format!("; did you mean `{suggestion}`?"))
-            .unwrap_or_default();
-        return Err(CompositionError::LifecycleUnknownVerb {
-            source_path: source_file.to_path_buf(),
-            property: property_name.to_string(),
-            verb: trimmed.to_string(),
-            rewrite,
-        });
-    }
-
-    let mut action =
-        validate_positional_arity_and_build(signal, trimmed, Vec::new(), source_file, property_name)?;
-    action.no_error = no_error;
-    Ok(action)
-}
-
-/// Parse one long-form action object (used inside an `action:` array).
-///
-/// The object's keys are the action's parameters, including `action:` as
-/// the verb discriminator and the universal `no_error:` flag.
-///
-/// `action_index` is the action's 0-based position within its stack item. It
-/// roots `proxy.with` diagnostics at `action[{j}].with`; combined with the
-/// stack annotator's `{event}.stack[{i}]` prefix it yields the same dotted
-/// form the shell preflight resolver already uses.
-fn parse_long_form_action_object(
-    signal: LifecycleSignal,
-    obj: &serde_json::Map<String, serde_json::Value>,
-    source_file: &Path,
-    property_name: &str,
-    action_index: usize,
-) -> Result<LifecycleAction, CompositionError> {
-    let verb_value = obj.get("action").ok_or_else(|| {
-        CompositionError::LifecycleActionInvalidLongForm {
-            source_path: source_file.to_path_buf(),
-            property: property_name.to_string(),
-            action: "<missing>".to_string(),
-            message: "long-form action object must have an `action` key".to_string(),
-            source: None,
-        }
-    })?;
-    let verb = match verb_value {
-        serde_json::Value::String(s) => s.clone(),
-        other => {
-            return Err(CompositionError::LifecycleActionInvalidLongForm {
-                source_path: source_file.to_path_buf(),
-                property: property_name.to_string(),
-                action: "<invalid>".to_string(),
-                message: format!(
-                    "`action` must be a string, got {}",
-                    json_type_name(other)
-                ),
-                source: None,
-            });
-        }
-    };
-
-    if !is_known_lifecycle_verb(&verb) {
-        let rewrite = did_you_mean_verb(&verb)
-            .map(|suggestion| format!("; did you mean `{suggestion}`?"))
-            .unwrap_or_default();
-        return Err(CompositionError::LifecycleUnknownVerb {
-            source_path: source_file.to_path_buf(),
-            property: property_name.to_string(),
-            verb: verb.clone(),
-            rewrite,
-        });
-    }
-
-    if verb == "set" {
-        return Err(CompositionError::LifecycleSetLongFormRemoved {
-            source_path: source_file.to_path_buf(),
-            property: property_name.to_string(),
-            path: format!("action[{action_index}].set"),
-        });
-    }
-
-    let no_error = match obj.get("no_error") {
-        Some(serde_json::Value::Bool(b)) => *b,
-        Some(other) => {
-            return Err(CompositionError::LifecycleActionInvalidLongForm {
-                source_path: source_file.to_path_buf(),
-                property: property_name.to_string(),
-                action: verb,
-                message: format!(
-                    "`no_error` must be a boolean, got {}",
-                    json_type_name(other)
-                ),
-                source: None,
-            });
-        }
-        None => false,
-    };
-
-    let mut params: Vec<(String, Expr)> = Vec::new();
-    let mut proxy_with: Option<ProxyWith> = None;
-    for (key, value) in obj {
-        if matches!(key.as_str(), "action" | "no_error") {
-            continue;
-        }
-        // `with` is the one mapping-valued action field. The typed `proxy`
-        // descriptor claims it here, before the generic "direct parameter maps
-        // are unsupported" rule below. The exception is exact: it is scoped to
-        // this key on this verb, so no other proxy field and no other action
-        // gains a nested-map form.
-        if key == "with" {
-            if verb != "proxy" {
-                return Err(CompositionError::LifecycleProxyOnlyParameter {
-                    source_path: source_file.to_path_buf(),
-                    property: property_name.to_string(),
-                    verb: verb.clone(),
-                    param: key.clone(),
-                });
-            }
-            proxy_with = Some(parse_proxy_with(
-                value,
-                source_file,
-                property_name,
-                action_index,
-            )?);
-            continue;
-        }
-        // Direct YAML object literals are not accepted as parameter values;
-        // object data must be passed through a whole-value `{{ ... }}` span.
-        if let serde_json::Value::Object(_) = value {
-            return Err(CompositionError::LifecycleObjectDataThroughInterpolationParameter {
-                source_path: source_file.to_path_buf(),
-                property: property_name.to_string(),
-                verb: verb.clone(),
-                param: key.clone(),
-            });
-        }
-        let expr = action_value_to_expr(value).map_err(|source| {
-            CompositionError::LifecycleActionInvalidLongForm {
-                source_path: source_file.to_path_buf(),
-                property: property_name.to_string(),
-                action: verb.clone(),
-                message: format!("`{key}` is not a valid value: {source}"),
-                source: Some(source),
-            }
-        })?;
-        params.push((key.clone(), expr));
-    }
-
-    build_action_from_params(signal, &verb, params, no_error, proxy_with, source_file)
-}
-
 /// Parse the only authored lifecycle `set` form: a literal destination map.
-pub(super) fn parse_runtime_set(
+///
+/// `path` is the `set` verb's own path; diagnostics name it as
+/// `{parent}` plus a `set`-rooted suffix.
+fn parse_runtime_set(
     value: &serde_json::Value,
-    no_error: bool,
     source_file: &Path,
-    property_name: &str,
-    action_index: usize,
+    path: &LifecyclePath,
     authored_order: Option<&[String]>,
 ) -> Result<LifecycleAction, CompositionError> {
-    let path = format!("action[{action_index}].set");
+    let owner = path.parent().to_string();
     let Some(map) = value.as_object() else {
         let actual = match value {
             serde_json::Value::Array(_) => {
                 return Err(CompositionError::LifecycleSetPositionalRemoved {
                     source_path: source_file.to_path_buf(),
-                    property: property_name.to_string(),
-                    path,
+                    property: owner,
+                    path: "set".to_string(),
                 });
             }
             serde_json::Value::String(raw) => {
@@ -1371,8 +1018,8 @@ pub(super) fn parse_runtime_set(
         };
         return Err(CompositionError::LifecycleSetNotMapping {
             source_path: source_file.to_path_buf(),
-            property: property_name.to_string(),
-            path,
+            property: owner,
+            path: "set".to_string(),
             actual: actual.to_string(),
         });
     };
@@ -1384,18 +1031,18 @@ pub(super) fn parse_runtime_set(
     let set = RuntimeSet::new_with_order(authored, authored_order).map_err(|error| match error {
         RuntimeSetError::EmptyKey => CompositionError::LifecycleSetInvalidKey {
             source_path: source_file.to_path_buf(),
-            property: property_name.to_string(),
-            path: path.clone(),
+            property: owner.clone(),
+            path: "set".to_string(),
             key: String::new(),
             message: "destination keys must not be empty".to_string(),
         },
         RuntimeSetError::DynamicKey(key) => CompositionError::LifecycleSetInvalidKey {
             source_path: source_file.to_path_buf(),
-            property: property_name.to_string(),
+            property: owner.clone(),
             path: if is_safe_path_segment(&key) {
-                format!("{path}.{key}")
+                format!("set.{key}")
             } else {
-                path.clone()
+                "set".to_string()
             },
             key,
             message: "destination keys must be literal and are never interpolated".to_string(),
@@ -1405,7 +1052,7 @@ pub(super) fn parse_runtime_set(
             message,
         } => CompositionError::LifecycleActionInvalidLongForm {
             source_path: source_file.to_path_buf(),
-            property: property_name.to_string(),
+            property: owner.clone(),
             action: "set".to_string(),
             message: format!("`{path}.{value_path}` is not a valid value: {message}"),
             source: None,
@@ -1414,24 +1061,26 @@ pub(super) fn parse_runtime_set(
 
     Ok(LifecycleAction {
         kind: LifecycleActionKind::RuntimeSet(set),
-        no_error,
+        no_error: false,
+        path: path.clone(),
     })
 }
 
-/// Parse the `with:` value of a key/value `proxy` action into a [`ProxyWith`].
+/// Parse the `with:` value of a `proxy` or `retry` long form.
 ///
-/// Accepts only a mapping. `{}` parses to an empty overlay, which the handoff
-/// treats identically to an omitted `with:`.
-fn parse_proxy_with(
+/// Accepts only a mapping. `{}` parses to an empty overlay, which the
+/// transition treats identically to an omitted `with:`. `action` is the
+/// directive's own path; diagnostics hang the `with`-rooted suffix off it.
+fn parse_with(
     value: &serde_json::Value,
     source_file: &Path,
-    property_name: &str,
-    action_index: usize,
-) -> Result<ProxyWith, CompositionError> {
-    let path = format!("action[{action_index}].with");
+    action: &LifecyclePath,
+    verb: &str,
+) -> Result<WithOverlay, CompositionError> {
+    let property = action.to_string();
     let Some(map) = value.as_object() else {
         // A lone whole-value span reads as "supply the entire mapping from one
-        // expression". That is a named v1 non-goal rather than a type error, so
+        // expression". That is a named non-goal rather than a type error, so
         // it gets its own actionable diagnostic instead of the generic one.
         if let serde_json::Value::String(raw) = value {
             let trimmed = raw.trim();
@@ -1441,18 +1090,18 @@ fn parse_proxy_with(
                 && span.start == 0
                 && span.end == trimmed.len()
             {
-                return Err(CompositionError::LifecycleProxyWithWholeMapping {
+                return Err(CompositionError::LifecycleWithWholeMapping {
                     source_path: source_file.to_path_buf(),
-                    property: property_name.to_string(),
-                    path,
+                    property,
+                    path: "with".to_string(),
                     raw: raw.clone(),
                 });
             }
         }
-        return Err(CompositionError::LifecycleProxyWithNotMapping {
+        return Err(CompositionError::LifecycleWithNotMapping {
             source_path: source_file.to_path_buf(),
-            property: property_name.to_string(),
-            path,
+            property,
+            path: "with".to_string(),
             actual: json_type_name(value).to_string(),
         });
     };
@@ -1462,31 +1111,31 @@ fn parse_proxy_with(
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
 
-    ProxyWith::new(authored).map_err(|err| match err {
-        ProxyWithError::DynamicKey(key) => CompositionError::LifecycleProxyWithDynamicKey {
+    WithOverlay::new(authored).map_err(|err| match err {
+        WithOverlayError::DynamicKey(key) => CompositionError::LifecycleWithDynamicKey {
             source_path: source_file.to_path_buf(),
             // A dynamic key has no honest dotted representation — `with.{{ x }}`
-            // would name a property that does not exist — so the path stays rooted
-            // at `with` and the key travels in its own field.
+            // would name a property that does not exist — so the path stays
+            // rooted at `with` and the key travels in its own field.
             path: if is_safe_path_segment(&key) {
-                format!("{path}.{key}")
+                format!("with.{key}")
             } else {
-                path
+                "with".to_string()
             },
-            property: property_name.to_string(),
+            property: property.clone(),
             key,
         },
         // A value that fails the shared action-value rule is the same authoring
-        // fault as a bad value on any other key/value parameter, so it reuses
-        // that diagnostic rather than adding a `with`-specific variant.
-        ProxyWithError::Value {
+        // fault as a bad value on any other parameter, so it reuses that
+        // diagnostic rather than adding a `with`-specific variant.
+        WithOverlayError::Value {
             path: value_path,
             message,
         } => CompositionError::LifecycleActionInvalidLongForm {
             source_path: source_file.to_path_buf(),
-            property: property_name.to_string(),
-            action: "proxy".to_string(),
-            message: format!("`{path}.{value_path}` is not a valid value: {message}"),
+            property: property.clone(),
+            action: verb.to_string(),
+            message: format!("`{property}.with.{value_path}` is not a valid value: {message}"),
             source: None,
         },
     })
@@ -1501,111 +1150,10 @@ fn is_safe_path_segment(key: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
-/// Parse a positional action: `{verb: value}`.
-///
-/// The value is classified into arguments per the spec:
-/// - scalar (string/number/bool) → 1 argument
-/// - array → N arguments, each element converted independently
-/// - null or empty array → 0 arguments
-/// - direct object → rejected as object-data-through-interpolation
-///
-/// Arity is validated against the verb's signature (communication, shell,
-/// control, side-effect, or expression-function) and produces a typed
-/// [`CompositionError::LifecycleWrongArity`] when it does not match.
-fn parse_serde_unknown_field(err: &serde_json::Error) -> (Option<String>, Vec<String>) {
-    let msg = err.to_string();
-
-    if !msg.contains("unknown field") {
-        return (None, Vec::new());
-    }
-
-    // Extract unknown field name between first pair of backticks.
-    let unknown_field = extract_backtick_value(&msg, 0);
-
-    // Extract expected fields from "expected one of `A`, `B`, `C`"
-    // or "expected `A`" (single field).
-    let expected = if let Some(idx) = msg.find("expected") {
-        collect_backtick_values(&msg[idx..])
-    } else {
-        LIFECYCLE_NOTIFICATION_FIELDS
-            .iter()
-            .map(|s| (*s).to_string())
-            .collect()
-    };
-
-    (unknown_field, expected)
-}
-
-/// The canonical field names for [`LifecycleNotification`].
-/// The canonical communication-field names for [`LifecycleNotification`].
-///
-/// Excludes `stack` because `stack` is a structured (list) field rather
-/// than a string. Use [`LIFECYCLE_CONCERN_KEYS`] when the full set of
-/// lifecycle concern keys (including `stack`) is needed.
-pub(crate) const LIFECYCLE_NOTIFICATION_FIELDS: &[&str] = &[
-    "say",
-    "say_first",
-    "effect",
-    "message",
-    "stderr",
-    "notify",
-    "info",
-    "warn",
-    "success",
-    "stdout",
-];
-
-/// Extract the text inside the `n`th pair of backticks in `s`.
-fn extract_backtick_value(s: &str, nth: usize) -> Option<String> {
-    let mut start = 0;
-    for i in 0..=nth {
-        let open = s[start..].find('`')?;
-        let abs_open = start + open;
-        let close = s[abs_open + 1..].find('`')?;
-        if i == nth {
-            return Some(s[abs_open + 1..abs_open + 1 + close].to_string());
-        }
-        start = abs_open + 1 + close + 1;
-    }
-    None
-}
-
-/// Collect all backtick-delimited values from `s`.
-fn collect_backtick_values(s: &str) -> Vec<String> {
-    let mut vals = Vec::new();
-    let mut chars = s.char_indices().peekable();
-    while let Some(&(i, ch)) = chars.peek() {
-        if ch == '`' {
-            chars.next();
-            let start = i + 1;
-            let mut end = start;
-            for (j, c) in chars.by_ref() {
-                if c == '`' {
-                    end = j;
-                    break;
-                }
-            }
-            if end > start {
-                vals.push(s[start..end].to_string());
-            }
-        } else {
-            chars.next();
-        }
-    }
-    if vals.is_empty() {
-        LIFECYCLE_NOTIFICATION_FIELDS
-            .iter()
-            .map(|s| (*s).to_string())
-            .collect()
-    } else {
-        vals
-    }
-}
-
-/// Build a `TtsConfig` from global settings.
 use indexmap::IndexMap;
 
 use super::*;
+use super::actions::{LifecycleConditional, for_each_action};
 use super::super::authored_order::AuthoredOrder;
 use super::super::json_util::json_type_name;
 

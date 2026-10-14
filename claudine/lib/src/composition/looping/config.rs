@@ -145,7 +145,7 @@ pub fn resolve_loop_config(
 /// runtime rather than resolved from frontmatter: `fm.<head>` references
 /// lift `<head>` as a control variable (the `fm` namespace traverses the
 /// loop's frontmatter state), while bare `fm`, `env`, boolean literals,
-/// and any identifier starting with `_loop_` remain excluded.
+/// and the host-declared `loop` global remain excluded.
 pub fn extract_control_variables(config: &LoopConfig) -> Vec<String> {
     let mut names = BTreeSet::new();
 
@@ -253,64 +253,33 @@ fn collect_identifiers(expr: &Expr, names: &mut BTreeSet<String>) {
 
 fn is_reserved_identifier(name: &str) -> bool {
     super::super::reserved::EXPRESSION_RESERVED_ROOTS.contains(&name)
-        || name.starts_with("_loop_")
+        || name == super::super::reserved::LOOP_ROOT
 }
 
-/// Recognized iteration-control keys under the `loop:` frontmatter object.
+/// Iteration-control keys under the `loop:` frontmatter object.
 ///
 /// `action` is the canonical key for action mutators; `actions` is accepted
-/// as an alias for backwards compatibility. Any other iteration-control key
-/// is rejected at parse time so silent typos surface as a clear error rather
-/// than being ignored.
-///
-/// The lifecycle-concern keys (`say`, `say_first`, `effect`, `message`,
-/// `stderr`, `notify`, `info`, `warn`, `stack`) are also accepted but
-/// skipped by this parser — they are validated and stored by
-/// [`super::lifecycle::parse_lifecycle_config`], which extracts them as a
-/// `LifecycleNotification` on `LifecycleConfig::loop_concerns`. The two
-/// parsers operate on disjoint key sets inside the same `loop:` block.
-const KNOWN_LOOP_KEYS: &[&str] = &[
-    "while",
-    "until",
-    "action",
-    "actions",
-    "max",
-    "fail_fast",
-    "on_rate_limit",
-    // Lifecycle-concern keys — parsed by `parse_lifecycle_config` into
-    // `LifecycleConfig::loop_concerns`. Listed here so this parser does
-    // not reject them as unknown keys.
-    "say",
-    "say_first",
-    "effect",
-    "message",
-    "stderr",
-    "notify",
-    "info",
-    "warn",
-    "success",
-    "stdout",
-    "stack",
-];
+/// as an alias. Every other key of a `loop:` block must be a lifecycle concern
+/// (see [`is_lifecycle_concern_key`]); anything else is rejected at parse time
+/// so a typo surfaces as a clear error rather than being ignored.
+const ITERATION_CONTROL_KEYS: &[&str] = super::super::lifecycle::LOOP_ITERATION_KEYS;
 
-/// Iteration-control keys only, for diagnostic listings. The lifecycle
-/// concerns are valid keys too but are surfaced through a different error
-/// path (see [`super::lifecycle::parse_lifecycle_config`]).
-const ITERATION_CONTROL_KEYS: &[&str] = &[
-    "while",
-    "until",
-    "action",
-    "actions",
-    "max",
-    "fail_fast",
-    "on_rate_limit",
-];
+/// Whether `key` belongs to the lifecycle parser: a lifecycle verb, `gate:`,
+/// the sibling `no_error`, or a spelling the lifecycle parser rejects with a
+/// typed diagnostic (`when` at the loop root, the removed `stack` and
+/// `say_first`). The two parsers read disjoint key sets of one `loop:` block,
+/// and this parser leaves those keys to
+/// [`super::super::lifecycle::parse_lifecycle_config`].
+fn is_lifecycle_concern_key(key: &str) -> bool {
+    matches!(key, "gate" | "no_error" | "when" | "stack" | "say_first" | "set")
+        || super::super::lifecycle::actions::is_known_lifecycle_verb(key)
+}
 
 fn reject_unknown_loop_keys(
     loop_map: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<(), CompositionError> {
     for key in loop_map.keys() {
-        if !KNOWN_LOOP_KEYS.contains(&key.as_str()) {
+        if !ITERATION_CONTROL_KEYS.contains(&key.as_str()) && !is_lifecycle_concern_key(key) {
             let suggestion = suggest_loop_key(key);
             let suggestion_hint = suggestion
                 .map(|s| format!(" (did you mean `{s}`?)"))

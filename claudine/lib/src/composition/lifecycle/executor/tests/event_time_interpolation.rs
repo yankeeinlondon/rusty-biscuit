@@ -5,7 +5,7 @@ use super::*;
 #[test]
 fn message_interpolates_frontmatter_in_literal() {
     let config = parse_lifecycle_config(
-        &json!({"success": {"stack": [{"action": {"action": "info", "message": "done {{ name }}"}}]}}),
+        &json!({ "success": [{ "info": { "text": "done {{ name }}" } }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -77,7 +77,7 @@ fn top_level_message_interpolates_err_at_event_time() {
 #[test]
 fn stack_message_interpolates_err_at_event_time() {
     let config = parse_lifecycle_config(
-        &json!({"failure": {"stack": [{"action": {"message": "❌️ {{err.msg}}"}}]}}),
+        &json!({ "failure": [{ "message": "❌️ {{err.msg}}" }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -109,9 +109,7 @@ fn stack_message_interpolates_err_at_event_time() {
 #[test]
 fn mixed_body_resolves_both_spans_at_event_time() {
     let config = parse_lifecycle_config(
-        &json!({"failure": {"stack": [
-            {"action": {"message": "phase {{phase}} failed: {{err.msg}}"}}
-        ]}}),
+        &json!({ "failure": [{ "message": "phase {{phase}} failed: {{err.msg}}" }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -144,7 +142,7 @@ fn mixed_body_resolves_both_spans_at_event_time() {
 #[test]
 fn message_reflects_current_frontmatter_per_event() {
     let config = parse_lifecycle_config(
-        &json!({"success": {"stack": [{"action": {"message": "iter {{phase}}"}}]}}),
+        &json!({ "success": [{ "message": "iter {{phase}}" }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -181,7 +179,7 @@ fn event_time_rendering_matches_compose() {
 
     // Executor path.
     let config = parse_lifecycle_config(
-        &json!({"failure": {"stack": [{"action": {"message": template}}]}}),
+        &json!({ "failure": [{ "message": template }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -284,7 +282,7 @@ fn reproduction_failure_block_renders_real_error_at_event_time() {
 #[test]
 fn known_but_empty_reference_renders_empty() {
     let config = parse_lifecycle_config(
-        &json!({"success": {"stack": [{"action": {"message": "spec={{spec_file}}"}}]}}),
+        &json!({ "success": [{ "message": "spec={{spec_file}}" }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -314,7 +312,7 @@ fn known_but_empty_reference_renders_empty() {
 #[test]
 fn a_typo_in_a_stack_message_is_an_absent_property() {
     let config = parse_lifecycle_config(
-        &json!({"success": {"stack": [{"action": {"message": "{{spec_fil}}"}}]}}),
+        &json!({ "success": [{ "message": "{{spec_fil}}" }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -374,7 +372,7 @@ fn top_level_absent_property_renders_empty() {
 #[test]
 fn a_frontmatter_value_holding_template_text_is_sent_verbatim() {
     let config = parse_lifecycle_config(
-        &json!({"success": {"stack": [{"action": {"action": "info", "message": "{{tmpl}}"}}]}}),
+        &json!({ "success": [{ "info": { "text": "{{tmpl}}" } }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -471,10 +469,9 @@ fn expression_raise_keeps_the_missing_path_hint() {
     use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 
     let config = parse_lifecycle_config(
-        &json!({"success": {"stack": [
-            {"when": "false", "action": "stop"},
-            {"when": "missing_key() == 1", "action": "stop"}
-        ]}}),
+        &json!({
+            "success": [{ "when": "false", "then": ["stop"] }, { "when": "missing_key() == 1", "then": ["stop"] }],
+        }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -497,12 +494,12 @@ fn expression_raise_keeps_the_missing_path_hint() {
         .execute_event(&config)
         .evaluation_error
         .expect("an unknown function in a guard raises");
-    assert_eq!(info.property.as_deref(), Some("success.stack[1].when"));
+    assert_eq!(info.property.as_deref(), Some("success[1].when"));
     assert_eq!(info.reason, crate::composition::LifecycleEvaluationReason::Expression);
 
     let err = CompositionError::lifecycle_evaluation("success", "t.md", &info);
     let rendered = strip_escape_codes(err.report_block_error_optimistic(Some(200)));
-    assert!(rendered.contains("success.stack[1].when"), "{rendered}");
+    assert!(rendered.contains("success[1].when"), "{rendered}");
     assert!(rendered.contains("resolve the missing"), "{rendered}");
     assert!(!rendered.contains("concatenate with"), "{rendered}");
 }
@@ -522,7 +519,7 @@ fn expression_raise_keeps_the_missing_path_hint() {
 #[test]
 fn evaluation_raise_projects_typed_cause_without_moving_err_aliases() {
     let config = parse_lifecycle_config(
-        &json!({"success": {"stack": [{"action": {"message": "{{ no_such_function() }}"}}]}}),
+        &json!({ "success": [{ "message": "{{ no_such_function() }}" }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -631,12 +628,14 @@ fn current_resolves_in_every_lifecycle_event() {
             LifecycleSignal::Finalize => "finalize",
             LifecycleSignal::Loop => "loop",
         };
+        let stack = json!([{ "info": { "text": "on {{ current.branch }}" } }]);
+        let frontmatter = if signal == LifecycleSignal::Loop {
+            json!({ "loop": { "while": "true", "gate": stack } })
+        } else {
+            json!({ event_key: stack })
+        };
         let config = parse_lifecycle_config(
-            &json!({
-                event_key: {
-                    "stack": [{"action": {"action": "info", "message": "on {{ current.branch }}"}}]
-                }
-            }),
+            &frontmatter,
             Path::new("t.md"),
         )
         .unwrap();
@@ -678,8 +677,8 @@ fn a_later_event_observes_a_fact_that_changed_since_the_earlier_one() {
     let authority = provider.authority();
     let config = parse_lifecycle_config(
         &json!({
-            "start": {"stack": [{"action": {"action": "info", "message": "{{ current.branch }}"}}]},
-            "success": {"stack": [{"action": {"action": "info", "message": "{{ current.branch }}"}}]}
+            "start": [{ "info": { "text": "{{ current.branch }}" } }],
+            "success": [{ "info": { "text": "{{ current.branch }}" } }],
         }),
         Path::new("t.md"),
     )
@@ -723,7 +722,7 @@ fn a_later_event_observes_a_fact_that_changed_since_the_earlier_one() {
 #[test]
 fn an_event_without_a_refresh_capability_emits_empty_rather_than_probing() {
     let config = parse_lifecycle_config(
-        &json!({"success": {"stack": [{"action": {"action": "info", "message": "host=[{{ current.hostname }}]"}}]}}),
+        &json!({ "success": [{ "info": { "text": "host=[{{ current.hostname }}]" } }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -755,7 +754,7 @@ fn an_event_without_a_refresh_capability_emits_empty_rather_than_probing() {
 #[test]
 fn current_env_at_event_time_reads_the_frontmatter_property() {
     let config = parse_lifecycle_config(
-        &json!({"success": {"stack": [{"action": {"action": "info", "message": "v=[{{ current_env.HOME }}]"}}]}}),
+        &json!({ "success": [{ "info": { "text": "v=[{{ current_env.HOME }}]" } }] }),
         Path::new("t.md"),
     )
     .unwrap();

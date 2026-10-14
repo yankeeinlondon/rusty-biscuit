@@ -18,9 +18,10 @@ use crate::composition::lifecycle::{
     collect_lifecycle_shell_commands_for,
 };
 use crate::composition::lifecycle::bindings::{
-    LifecycleScope, LifecycleValues, approval_diagnostics, runtime_bindings, unavailable_root,
+    EnclosingLoop, LifecycleScope, LifecycleValues, approval_diagnostics, runtime_bindings_enclosed,
+    unavailable_root,
 };
-use crate::composition::lifecycle_actions::LifecycleActionKind;
+use crate::composition::lifecycle_actions::{LifecycleActionKind, for_each_action_mut};
 use crate::harness::shell::{ShellApprovalOptions, tokenize_words_strict};
 
 /// Result of pre-flight shell command approval.
@@ -49,6 +50,7 @@ pub struct PreFlightResult {
 ///
 /// - `ShellCommandDenied` if the user denies any command
 /// - `PreFlightDiscoveryFailed` if Darkmatter's document graph walk fails
+///   (`RemovedGrammar` when it failed on a retired `_loop_*` read)
 /// - `ShellApprovalUnavailable` for blacklisted commands or missing approval handler
 /// - `PreFlightShellAuditFailed` for a shell-audit failure outside the approval
 ///   family, carrying the raised `HarnessError` as its typed source
@@ -82,9 +84,13 @@ pub fn resolve_shell_approvals(
     // any document state (including dead branches). Claudine authorizes the
     // union of these plus lifecycle stack commands below.
     if let (Some(md), Some(opts)) = (markdown, compose_request) {
-        let preflight = md
-            .compose_preflight(opts)
-            .map_err(CompositionError::PreFlightDiscoveryFailed)?;
+        let preflight = md.compose_preflight(opts).map_err(|error| {
+            let source_path = match md.source() {
+                Some(darkmatter::markdown::compose::ComposeSource::File(path)) => path.as_path(),
+                _ => lifecycle_source_path.unwrap_or(Path::new("")),
+            };
+            discovery_failed(source_path, error)
+        })?;
         for entry in &preflight.entries {
             all_commands.push((
                 entry.normalized.clone(),
@@ -141,7 +147,7 @@ pub fn resolve_graph_shell_approvals(
         let preflight = document
             .markdown
             .compose_preflight(&options)
-            .map_err(CompositionError::PreFlightDiscoveryFailed)?;
+            .map_err(|error| discovery_failed(&document.path, error))?;
         for entry in &preflight.entries {
             all_commands.push((
                 entry.normalized.clone(),
@@ -297,7 +303,8 @@ pub(super) fn approve_discovered_commands(
 /// `shell` commands are approved at pre-flight, before any event fires, and so
 /// resolve in the lifecycle shell approval scope of the binding catalog
 /// ([`LifecycleScope::LifecycleShellApproval`]): `fm.*`, `ctx.*`, `env.*`,
-/// document properties, and read-side functions. A late-binding reference
+/// document properties, read-side functions, and `loop` as `enclosing_loop`
+/// supplies it. A late-binding reference
 /// (`err`, `timing`, `group`, `current`) is rejected with
 /// [`CompositionError::LifecycleShellResolution`], in any branch, because its
 /// value does not yet exist.
@@ -321,8 +328,9 @@ pub(super) fn approve_discovered_commands(
 /// Returns [`CompositionError::LifecycleShellResolution`] when a command's
 /// interpolation references a late-binding global, fails to parse, or calls an
 /// unknown function. The error names the
-/// dotted property path (e.g. `failure.stack[0].action[1].command`) and the
-/// raw command string.
+/// authored property path (e.g. `failure[0].else[1].shell.command`) and the
+/// raw command string. Commands in both branches of every conditional are
+/// resolved: approval never depends on which branch runs.
 pub fn resolve_lifecycle_shell_commands(
     lifecycle: &mut LifecycleConfig,
     effective_frontmatter: &serde_json::Value,
@@ -330,6 +338,7 @@ pub fn resolve_lifecycle_shell_commands(
     source_path: &Path,
     file_resolution_context: &biscuit_file::FileResolutionContext,
     file_ref_fallback_dir: Option<&Path>,
+    enclosing_loop: EnclosingLoop<'_>,
 ) -> Result<(), CompositionError> {
     let frontmatter: HashMap<String, serde_json::Value> = effective_frontmatter
         .as_object()
@@ -353,50 +362,55 @@ pub fn resolve_lifecycle_shell_commands(
     )?;
 
     for signal in LifecycleSignal::ALL {
-        let event_name = signal.property_name();
-        let Some(stack) = lifecycle.stack_mut(signal) else {
-            continue;
-        };
-        for (idx, item) in stack.iter_mut().enumerate() {
-            for (action_idx, action) in item.actions.iter_mut().enumerate() {
-                let prefix = format!("{event_name}.stack[{idx}].action[{action_idx}]");
-                if let LifecycleActionKind::RuntimeSet(set) = &mut action.kind {
-                    for (key, shell) in set.shell_values_mut() {
-                        resolve_set_shell_value(
-                            key,
-                            shell,
-                            &frontmatter,
-                            context,
-                            &state,
-                            &resolution_ctx,
-                            &format!("{prefix}.set.{key}"),
-                            source_path,
-                        )?;
-                    }
-                    continue;
-                }
-                let LifecycleActionKind::Shell(shell) = &mut action.kind else {
-                    continue;
-                };
-                resolve_shell_command_expr(
-                    &mut shell.command,
-                    &state,
-                    &resolution_ctx,
-                    &format!("{prefix}.command"),
-                    source_path,
-                )?;
-                if let Some(on_error) = &mut shell.on_error {
-                    resolve_shell_command_expr(
-                        on_error,
+        let mut result = Ok(());
+        for_each_action_mut(lifecycle.stack_mut(signal), &mut |action| {
+            if result.is_err() {
+                return;
+            }
+            let prefix = action.path.to_string();
+            result = match &mut action.kind {
+                LifecycleActionKind::RuntimeSet(set) => set.shell_values_mut().try_for_each(|(key, shell)| {
+                    resolve_set_shell_value(
+                        key,
+                        shell,
+                        &frontmatter,
+                        context,
                         &state,
                         &resolution_ctx,
-                        &format!("{prefix}.on_error"),
+                        &format!("{prefix}.{key}"),
                         source_path,
-                    )?;
+                        enclosing_loop,
+                    )
+                }),
+                LifecycleActionKind::Shell(shell) => {
+                    let resolved = resolve_shell_command_expr(
+                        &mut shell.command,
+                        &state,
+                        &resolution_ctx,
+                        &format!("{prefix}.command"),
+                        source_path,
+                        enclosing_loop,
+                    )
+                    .and_then(|()| match &mut shell.on_error {
+                        Some(on_error) => resolve_shell_command_expr(
+                            on_error,
+                            &state,
+                            &resolution_ctx,
+                            &format!("{prefix}.on_error"),
+                            source_path,
+                            enclosing_loop,
+                        ),
+                        None => Ok(()),
+                    });
+                    if resolved.is_ok() {
+                        shell.pre_resolved = true;
+                    }
+                    resolved
                 }
-                shell.pre_resolved = true;
-            }
-        }
+                _ => Ok(()),
+            };
+        });
+        result?;
     }
     Ok(())
 }
@@ -417,9 +431,17 @@ fn resolve_set_shell_value(
     resolution_ctx: &ResolutionContext,
     property: &str,
     source_path: &Path,
+    enclosing_loop: EnclosingLoop<'_>,
 ) -> Result<(), CompositionError> {
     let mut resolved = Expr::StringLiteral(shell.authored.clone());
-    resolve_shell_command_expr(&mut resolved, state, resolution_ctx, property, source_path)?;
+    resolve_shell_command_expr(
+        &mut resolved,
+        state,
+        resolution_ctx,
+        property,
+        source_path,
+        enclosing_loop,
+    )?;
     let Expr::StringLiteral(resolved) = resolved else {
         unreachable!("a string literal stays a string literal");
     };
@@ -450,13 +472,15 @@ fn resolve_set_shell_value(
 /// scope, in every branch, so a late global (`err`, `timing`, `group`) or a
 /// late namespace (`current`) is refused by name before
 /// anything is evaluated; the bytes are then resolved through a session in the
-/// same scope.
+/// same scope, where `loop` follows `enclosing_loop`: a shell's bytes are fixed
+/// per iteration, so an iteration's values are known.
 fn resolve_shell_command_expr(
     expr: &mut Expr,
     state: &darkmatter::markdown::compose::EffectiveState,
     resolution_ctx: &ResolutionContext,
     property: &str,
     source_path: &Path,
+    enclosing_loop: EnclosingLoop<'_>,
 ) -> Result<(), CompositionError> {
     let Expr::StringLiteral(raw) = expr else {
         return Ok(());
@@ -488,7 +512,7 @@ fn resolve_shell_command_expr(
         });
     }
 
-    let (view, globals) = runtime_bindings(scope, LifecycleValues::default());
+    let (view, globals) = runtime_bindings_enclosed(scope, LifecycleValues::default(), enclosing_loop);
     let value = serde_json::Value::String(raw.clone());
     let resolved = SubtreeCompose::new(&value, state)
         .with_resolution_context(resolution_ctx.clone())
@@ -509,6 +533,20 @@ fn resolve_shell_command_expr(
     };
     *expr = Expr::StringLiteral(resolved);
     Ok(())
+}
+
+/// A document-graph walk failure as the error the caller reports.
+///
+/// The walk composes transcluded documents, so it can be the first to meet a
+/// retired `_loop_*` read that only a transclusion introduces; that read is
+/// [`CompositionError::RemovedGrammar`], exactly as when the same read fails
+/// the document's composition.
+fn discovery_failed(
+    source_path: &Path,
+    error: darkmatter::markdown::MarkdownError,
+) -> CompositionError {
+    crate::composition::lifecycle::bindings::removed_loop_read_in_composition(source_path, &error)
+        .unwrap_or(CompositionError::PreFlightDiscoveryFailed(error))
 }
 
 /// A passive approval finding as the Darkmatter error composition would have

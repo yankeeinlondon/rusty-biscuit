@@ -8,34 +8,57 @@
 //! lifecycle global or a document property. Claudine never walks an expression
 //! to enforce it.
 //!
-//! | Scope | `err` | `timing` | `group` | `outputs` |
-//! | --- | --- | --- | --- | --- |
-//! | `initialize`, `start`, `success`, `loop`, task setup | unavailable: event-has-no-error | available | lexical | document |
-//! | `blocked`, `failure`, `finalize`, task teardown | available (`null` when no error) | available | lexical | document |
-//! | lifecycle shell approval | unavailable: preflight-unavailable | unavailable: preflight-unavailable | unavailable: preflight-unavailable | document |
-//! | sequence shell approval | unavailable: preflight-unavailable | unavailable: preflight-unavailable | unavailable: preflight-unavailable | unavailable: preflight-unavailable |
+//! | Scope | `err` | `timing` | `group` | `loop` | `outputs` |
+//! | --- | --- | --- | --- | --- | --- |
+//! | `initialize`, `start`, `success`, `loop`, task setup | unavailable: event-has-no-error | available | lexical | lexical | document |
+//! | `blocked`, `failure`, `finalize`, task teardown | available (`null` when no error) | available | lexical | lexical | document |
+//! | lifecycle shell approval | unavailable: preflight-unavailable | unavailable: preflight-unavailable | unavailable: preflight-unavailable | lexical (`null` before a loop document's first iteration) | document |
+//! | sequence shell approval | unavailable: preflight-unavailable | unavailable: preflight-unavailable | unavailable: preflight-unavailable | unavailable: preflight-unavailable | unavailable: preflight-unavailable |
 //!
 //! "Lexical" is the group rule: an established group supplies its variables
 //! (an empty object included); known absence is unavailable with
 //! `claudine.outside-group`; unknown membership is execution-dependent during
-//! passive checks. `fm.<name>` always reads the document.
+//! passive checks. `loop` follows the same rule with `claudine.outside-loop`:
+//! inside a loop (its gate, and the events and shell bytes of one iteration)
+//! it is the object `{count, is_first, is_last, last_output, last_exit_code}`
+//! ([`LoopAmbient::to_value`]). A lifecycle shell's bytes are fixed per
+//! iteration, so the iteration's values are known there; a sequence fixes
+//! every shell before any step runs, so they are not. `fm.<name>` always reads
+//! the document, so `fm.loop` is the `loop:` configuration block.
+//!
+//! A document's composition (its body and compose-time frontmatter values)
+//! declares `loop` to Darkmatter as a host global ([`composition_host_globals`]):
+//! the iteration's values, `null` for a loop document before its first
+//! iteration ([`EnclosingLoop::Pending`]), and unavailable outside any loop.
+//!
+//! The retired `_loop_*` names are not lifecycle globals: a read of one is
+//! removed grammar, found before launch ([`reject_removed_loop_reads_in_document`],
+//! [`reject_removed_loop_reads_in_lifecycle`]), or, when a later render
+//! introduces it, when composition evaluates it
+//! ([`removed_loop_read_in_composition`]).
 //!
 //! `current` is a Darkmatter reserved namespace, not a lifecycle global, so a
 //! view cannot declare it. The approval scopes refuse it separately
 //! ([`approval_diagnostics`]).
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use darkmatter::markdown::compose::expression::{
-    Availability, AuthoredMode, BindingView, ExpressionError, PreparationError, RuntimeBinding,
-    ScopeId, UnavailabilityReason, ValidationDiagnostic, prepare_value, static_variable_reads,
+    Availability, AuthoredMode, BindingView, Expr, ExpressionError, ExpressionFinder,
+    ExpressionLocation, HostGlobals, PreparationError, RuntimeBinding, ScopeId,
+    UnavailabilityReason,
+    ValidationDiagnostic, parse, parse_condition, prepare_value, static_variable_reads,
     validate_prepared,
 };
 use serde_json::{Map, Value};
 
 use super::LifecycleSignal;
 use super::context::{LifecycleErrorInfo, LifecycleTiming};
+use crate::composition::error::CompositionError;
+use crate::composition::looping::LoopAmbient;
+use crate::composition::reserved::{LOOP_ROOT, RETIRED_LOOP_NAMES};
 
 /// `err` read where no error can exist.
 pub const EVENT_HAS_NO_ERROR: &str = "claudine.event-has-no-error";
@@ -43,6 +66,14 @@ pub const EVENT_HAS_NO_ERROR: &str = "claudine.event-has-no-error";
 pub const PREFLIGHT_UNAVAILABLE: &str = "claudine.preflight-unavailable";
 /// `group` read outside any group.
 pub const OUTSIDE_GROUP: &str = "claudine.outside-group";
+/// `loop` read outside any loop.
+pub const OUTSIDE_LOOP: &str = "claudine.outside-loop";
+
+/// A retired `_loop_*` name read by an expression that composition evaluated.
+pub const REMOVED_LOOP_NAME: &str = "claudine.removed-loop-name";
+
+/// The scope of a document's composition (body and compose-time frontmatter).
+const COMPOSITION_SCOPE: &str = "claudine.composition";
 
 /// The reserved namespaces whose values exist only once an event fires.
 const LATE_NAMESPACES: [&str; 1] = ["current"];
@@ -119,13 +150,44 @@ pub enum GroupMembership {
     Unknown,
 }
 
+/// What is known about an enclosing loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoopMembership {
+    /// Inside a loop: its gate, or one iteration's events and shell bytes.
+    Member,
+    /// Known to be outside any loop.
+    Outside,
+    /// Not knowable yet: a document checked before it runs.
+    Unknown,
+}
+
 fn reason(code: &str) -> UnavailabilityReason {
     UnavailabilityReason::new(code)
 }
 
-/// The scope's declaration of every lifecycle global.
+/// The scope's declaration of every lifecycle global, with loop membership
+/// not yet known.
 pub fn binding_view(scope: LifecycleScope, group: GroupMembership) -> Arc<BindingView> {
+    binding_view_in(scope, group, LoopMembership::Unknown)
+}
+
+/// The scope's declaration of every lifecycle global.
+pub fn binding_view_in(
+    scope: LifecycleScope,
+    group: GroupMembership,
+    in_loop: LoopMembership,
+) -> Arc<BindingView> {
     let builder = BindingView::builder(ScopeId::new(scope.id()));
+    let loop_availability = if scope == LifecycleScope::SequenceShellApproval {
+        Availability::Unavailable(reason(PREFLIGHT_UNAVAILABLE))
+    } else {
+        match in_loop {
+            LoopMembership::Member => Availability::Available,
+            LoopMembership::Outside => Availability::Unavailable(reason(OUTSIDE_LOOP)),
+            LoopMembership::Unknown => Availability::ExecutionDependent,
+        }
+    };
+    let builder = builder.declare(LOOP_ROOT, "The enclosing loop's values.", loop_availability);
     let builder = if scope.is_approval() {
         let preflight = || Availability::Unavailable(reason(PREFLIGHT_UNAVAILABLE));
         let builder = builder
@@ -171,21 +233,87 @@ pub struct LifecycleValues<'a> {
     pub group: Option<&'a Map<String, Value>>,
 }
 
+/// The scope's view and one runtime entry per declared global, outside any
+/// loop: [`runtime_bindings_in_loop`] with no loop values.
+pub fn runtime_bindings(
+    scope: LifecycleScope,
+    values: LifecycleValues<'_>,
+) -> (Arc<BindingView>, HashMap<String, RuntimeBinding<'static>>) {
+    runtime_bindings_in_loop(scope, values, None)
+}
+
 /// The scope's view and one runtime entry per declared global.
 ///
 /// Every declared global gets an entry; unavailability is an explicit entry,
 /// never an omission. `err` in an error-carrying scope with no error, and
-/// `timing` when nothing was measured, are an explicit `null`.
-pub fn runtime_bindings(
+/// `timing` when nothing was measured, are an explicit `null`. `in_loop` is
+/// the enclosing loop iteration's values; `None` is known to be outside any
+/// loop.
+pub fn runtime_bindings_in_loop(
     scope: LifecycleScope,
     values: LifecycleValues<'_>,
+    in_loop: Option<&LoopAmbient>,
+) -> (Arc<BindingView>, HashMap<String, RuntimeBinding<'static>>) {
+    let enclosing = match in_loop {
+        Some(ambient) => EnclosingLoop::Iteration(ambient),
+        None => EnclosingLoop::Outside,
+    };
+    runtime_bindings_enclosed(scope, values, enclosing)
+}
+
+/// What an evaluation knows about its enclosing loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnclosingLoop<'a> {
+    /// Inside one loop iteration, or the gate that follows it.
+    Iteration(&'a LoopAmbient),
+    /// A loop document prepared before its first iteration (the loop seed,
+    /// the bootstrap read, the launch audit): the values are not known yet,
+    /// so `loop` is execution-dependent and reads `null`, as the retired
+    /// `_loop_*` names did before the loop seeded them.
+    Pending,
+    /// Known to be outside any loop.
+    Outside,
+}
+
+impl<'a> EnclosingLoop<'a> {
+    /// The iteration's values when there are some; otherwise pending for a
+    /// loop document and outside for any other.
+    pub fn of(values: Option<&'a LoopAmbient>, loop_document: bool) -> Self {
+        match (values, loop_document) {
+            (Some(ambient), _) => Self::Iteration(ambient),
+            (None, true) => Self::Pending,
+            (None, false) => Self::Outside,
+        }
+    }
+
+    fn membership(self) -> LoopMembership {
+        match self {
+            Self::Iteration(_) => LoopMembership::Member,
+            Self::Pending => LoopMembership::Unknown,
+            Self::Outside => LoopMembership::Outside,
+        }
+    }
+
+    fn value(self) -> Value {
+        match self {
+            Self::Iteration(ambient) => ambient.to_value(),
+            Self::Pending | Self::Outside => Value::Null,
+        }
+    }
+}
+
+/// [`runtime_bindings_in_loop`] for any [`EnclosingLoop`].
+pub fn runtime_bindings_enclosed(
+    scope: LifecycleScope,
+    values: LifecycleValues<'_>,
+    enclosing: EnclosingLoop<'_>,
 ) -> (Arc<BindingView>, HashMap<String, RuntimeBinding<'static>>) {
     let membership = if values.group.is_some() {
         GroupMembership::Member
     } else {
         GroupMembership::Outside
     };
-    let view = binding_view(scope, membership);
+    let view = binding_view_in(scope, membership, enclosing.membership());
     let entries = view
         .globals()
         .map(|global| {
@@ -198,6 +326,7 @@ pub fn runtime_bindings(
                         "group" => values
                             .group
                             .map_or(Value::Null, |group| Value::Object(group.clone())),
+                        LOOP_ROOT => enclosing.value(),
                         other => unreachable!("undeclared lifecycle global `{other}`"),
                     })
                 }
@@ -206,6 +335,77 @@ pub fn runtime_bindings(
         })
         .collect();
     (view, entries)
+}
+
+/// The globals a document's composition declares to Darkmatter: `loop`, and
+/// each retired `_loop_*` name as unavailable.
+///
+/// `loop` follows `enclosing`: the iteration's values, `null` for a loop
+/// document before its first iteration ([`EnclosingLoop::Pending`]), and
+/// unavailable with [`OUTSIDE_LOOP`] outside any loop. Either way `fm.loop`
+/// reads the `loop:` configuration.
+///
+/// The retired names are unavailable with [`REMOVED_LOOP_NAME`] and a
+/// `replacement` parameter, so an expression a later render introduces (a
+/// transcluded document) is rejected when it is evaluated; the authored
+/// document's own reads were rejected before it composed
+/// ([`reject_removed_loop_reads_in_document`]).
+pub(crate) fn composition_host_globals(enclosing: EnclosingLoop<'_>) -> HostGlobals {
+    let (availability, entry) = match enclosing {
+        EnclosingLoop::Outside => (
+            Availability::Unavailable(reason(OUTSIDE_LOOP)),
+            RuntimeBinding::unavailable(reason(OUTSIDE_LOOP)),
+        ),
+        EnclosingLoop::Iteration(_) => (Availability::Available, RuntimeBinding::eager(enclosing.value())),
+        EnclosingLoop::Pending => (Availability::ExecutionDependent, RuntimeBinding::eager(Value::Null)),
+    };
+    let retired_reason = |member: &str| {
+        reason(REMOVED_LOOP_NAME)
+            .with_parameter("replacement", Value::String(format!("{LOOP_ROOT}.{member}")))
+    };
+    let builder = RETIRED_LOOP_NAMES.iter().fold(
+        BindingView::builder(ScopeId::new(COMPOSITION_SCOPE)).declare(
+            LOOP_ROOT,
+            "The enclosing loop's values.",
+            availability,
+        ),
+        |builder, (removed, member)| {
+            builder.declare(
+                *removed,
+                "A retired loop name.",
+                Availability::Unavailable(retired_reason(member)),
+            )
+        },
+    );
+    let view = Arc::new(
+        builder
+            .build()
+            .expect("the composition catalog declares single, unreserved roots once each"),
+    );
+    let entries = std::iter::once((LOOP_ROOT.to_string(), entry)).chain(
+        RETIRED_LOOP_NAMES.iter().map(|(removed, member)| {
+            (removed.to_string(), RuntimeBinding::unavailable(retired_reason(member)))
+        }),
+    );
+    HostGlobals::associate(view, entries)
+        .expect("every declared composition global has an agreeing entry")
+}
+
+/// The removed-grammar error for a composition failure that read a retired
+/// `_loop_*` name ([`composition_host_globals`]), if it is one.
+///
+/// The read was introduced by a render after the document was checked, so it
+/// has no authored path in `source_path`; `path` names it as `render`.
+pub(crate) fn removed_loop_read_in_composition(
+    source_path: &Path,
+    error: &darkmatter::markdown::MarkdownError,
+) -> Option<CompositionError> {
+    let read = error.unavailable_binding()?;
+    if read.reason.code() != REMOVED_LOOP_NAME {
+        return None;
+    }
+    let retired = retired(&read.root)?;
+    Some(removed_loop_grammar(source_path, "render".to_string(), retired))
 }
 
 /// Every reason the authored shell text `raw` cannot have its bytes fixed in
@@ -262,6 +462,219 @@ pub fn unavailable_root(error: &ExpressionError) -> Option<&str> {
             _ => None,
         },
         _ => None,
+    }
+}
+
+/// A retired `_loop_*` name and the `loop` member that replaced it.
+pub(crate) type RetiredLoopName = (&'static str, &'static str);
+
+fn retired(name: &str) -> Option<RetiredLoopName> {
+    RETIRED_LOOP_NAMES.iter().copied().find(|(removed, _)| *removed == name)
+}
+
+/// The first retired `_loop_*` name `expr` reads, in source order.
+///
+/// A read is a variable whose root is a retired name (`_loop_count`,
+/// `_loop_count.x`), or an explicit frontmatter read of one (`fm._loop_count`,
+/// `fm['_loop_count']`). String literals are data, an unrelated property such
+/// as `_loop_notes` is not retired, and a dynamically computed key
+/// (`fm[name]`) keeps ordinary lookup semantics.
+pub(crate) fn removed_loop_read(expr: &Expr) -> Option<RetiredLoopName> {
+    use darkmatter::markdown::compose::expression::FRONTMATTER_ROOT;
+    let is_fm = |base: &Expr| matches!(base, Expr::Variable(root) if root == FRONTMATTER_ROOT);
+    match expr {
+        Expr::Variable(path) => {
+            let mut segments = path.split('.');
+            let root = segments.next()?;
+            if root == FRONTMATTER_ROOT {
+                segments.next().and_then(retired)
+            } else {
+                retired(root)
+            }
+        }
+        Expr::Index { base, index } => match index.as_ref() {
+            Expr::StringLiteral(key) if is_fm(base) => retired(key),
+            _ => None,
+        }
+        .or_else(|| removed_loop_read(base))
+        .or_else(|| removed_loop_read(index)),
+        Expr::MemberAccess { base, name } => is_fm(base)
+            .then(|| name.split('.').next().and_then(retired))
+            .flatten()
+            .or_else(|| removed_loop_read(base)),
+        Expr::UnaryNot(inner) | Expr::UnaryMinus(inner) | Expr::Paren(inner) => {
+            removed_loop_read(inner)
+        }
+        Expr::Binary { left, right, .. }
+        | Expr::Comparison { left, right, .. }
+        | Expr::Fallback {
+            primary: left,
+            fallback: right,
+        } => removed_loop_read(left).or_else(|| removed_loop_read(right)),
+        Expr::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+        } => removed_loop_read(condition)
+            .or_else(|| removed_loop_read(then_branch))
+            .or_else(|| removed_loop_read(else_branch)),
+        Expr::FunctionCall { args, .. } | Expr::ArrayLiteral(args) => {
+            args.iter().find_map(removed_loop_read)
+        }
+        Expr::ObjectLiteral(entries) => entries.iter().find_map(|(_, value)| removed_loop_read(value)),
+        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => None,
+    }
+}
+
+/// The first retired `_loop_*` read in the `{{ … }}` spans of authored text.
+///
+/// Text outside a span is data. A span that does not parse is left to the
+/// evaluation that reports it.
+pub(crate) fn removed_loop_read_in_text(text: &str) -> Option<RetiredLoopName> {
+    first_read_in_spans(&ExpressionFinder::find_all_plain(text)).map(|(_, retired)| retired)
+}
+
+fn first_read_in_spans(spans: &[ExpressionLocation]) -> Option<(usize, RetiredLoopName)> {
+    spans.iter().find_map(|span| {
+        let expr = parse(span.expression.trim()).ok()?;
+        removed_loop_read(&expr).map(|retired| (span.start, retired))
+    })
+}
+
+/// The removed-grammar error for a retired `_loop_*` read at `path`.
+pub(crate) fn removed_loop_grammar(
+    source_path: &Path,
+    path: String,
+    (removed, member): RetiredLoopName,
+) -> CompositionError {
+    CompositionError::RemovedGrammar {
+        source_path: source_path.to_path_buf(),
+        path,
+        removed: removed.to_string(),
+        replacement: format!("use `{LOOP_ROOT}.{member}`"),
+    }
+}
+
+/// The authored text of one document, as the retired `_loop_*` check reads
+/// it before it composes.
+#[derive(Debug, Clone, Copy)]
+pub struct AuthoredDocument<'a> {
+    /// The document's authored frontmatter, before composition.
+    pub frontmatter: &'a Value,
+    /// The document's authored body.
+    pub body: &'a str,
+    /// The number of file lines before the body's first line.
+    pub body_line_offset: usize,
+}
+
+/// Rejects a read of a retired `_loop_*` name in a document's authored
+/// frontmatter and body, before it composes.
+///
+/// Checked in order: the loop's `while`/`until` conditions and `action`
+/// value templates, every other frontmatter string's `{{ … }}` spans (paths
+/// such as `title` or `steps[0].prompt`), and the body's `{{ … }}` spans
+/// outside code blocks (path `body:{line}`, the span's line in the file).
+/// Lifecycle stacks are parsed first and checked by
+/// [`reject_removed_loop_reads_in_lifecycle`]. Only parsed expressions are
+/// inspected: plain text, quoted literals, code examples, and unrelated
+/// properties such as `_loop_notes` are data.
+///
+/// ## Errors
+///
+/// [`CompositionError::RemovedGrammar`] for the first read, naming the
+/// `loop` member that replaced it.
+pub fn reject_removed_loop_reads_in_document(
+    source_path: &Path,
+    document: AuthoredDocument<'_>,
+) -> Result<(), CompositionError> {
+    if let Some((path, retired)) = removed_loop_read_in_frontmatter(document.frontmatter) {
+        return Err(removed_loop_grammar(source_path, path, retired));
+    }
+    let interpolate_code_blocks = document
+        .frontmatter
+        .get("interpolate_code_blocks")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let spans = if interpolate_code_blocks {
+        ExpressionFinder::find_all_plain(document.body)
+    } else {
+        ExpressionFinder::new(document.body).find_all()
+    };
+    if let Some((offset, retired)) = first_read_in_spans(&spans) {
+        let line = document.body[..offset].matches('\n').count() + 1 + document.body_line_offset;
+        return Err(removed_loop_grammar(source_path, format!("body:{line}"), retired));
+    }
+    Ok(())
+}
+
+/// Rejects a read of a retired `_loop_*` name in any lifecycle stack, in
+/// [`LifecycleSignal::ALL`] order through both branches, at its authored path
+/// (`start[0].info.text`, `success[1].when`, `loop.gate[0].warn.text`).
+///
+/// ## Errors
+///
+/// [`CompositionError::RemovedGrammar`] for the first read.
+pub fn reject_removed_loop_reads_in_lifecycle(
+    source_path: &Path,
+    lifecycle: &super::LifecycleConfig,
+) -> Result<(), CompositionError> {
+    match super::validate::find_removed_loop_read(lifecycle) {
+        Some((path, retired)) => Err(removed_loop_grammar(source_path, path.to_string(), retired)),
+        None => Ok(()),
+    }
+}
+
+/// The first retired read in the frontmatter outside the lifecycle stacks,
+/// which [`super::validate::find_removed_loop_read`] covers.
+fn removed_loop_read_in_frontmatter(frontmatter: &Value) -> Option<(String, RetiredLoopName)> {
+    let Value::Object(map) = frontmatter else {
+        return None;
+    };
+    for (key, value) in map {
+        if key == LOOP_ROOT {
+            let Value::Object(loop_block) = value else {
+                continue;
+            };
+            for condition in ["while", "until"] {
+                let read = loop_block
+                    .get(condition)
+                    .and_then(Value::as_str)
+                    .and_then(|text| parse_condition(text).ok())
+                    .and_then(|expr| removed_loop_read(&expr));
+                if let Some(retired) = read {
+                    return Some((format!("{LOOP_ROOT}.{condition}"), retired));
+                }
+            }
+            for action_key in ["action", "actions"] {
+                if let Some(found) = loop_block
+                    .get(action_key)
+                    .and_then(|actions| read_in_strings(actions, format!("{LOOP_ROOT}.{action_key}")))
+                {
+                    return Some(found);
+                }
+            }
+        } else if !super::LIFECYCLE_EVENT_KEYS.contains(&key.as_str())
+            && let Some(found) = read_in_strings(value, key.clone())
+        {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// The first retired read in the `{{ … }}` spans of any string leaf of
+/// `value`, named by its path below `path`.
+fn read_in_strings(value: &Value, path: String) -> Option<(String, RetiredLoopName)> {
+    match value {
+        Value::String(text) => removed_loop_read_in_text(text).map(|retired| (path, retired)),
+        Value::Array(items) => items
+            .iter()
+            .enumerate()
+            .find_map(|(i, item)| read_in_strings(item, format!("{path}[{i}]"))),
+        Value::Object(map) => map
+            .iter()
+            .find_map(|(key, item)| read_in_strings(item, format!("{path}.{key}"))),
+        Value::Null | Value::Bool(_) | Value::Number(_) => None,
     }
 }
 

@@ -19,6 +19,11 @@ use super::json_util::json_type_name;
 /// so the top-level `as_block_error` walker can still produce a rich
 /// `BlockError` report.
 fn map_compose_error(source_path: &std::path::Path, err: MarkdownError) -> CompositionError {
+    if let Some(removed) =
+        super::lifecycle::bindings::removed_loop_read_in_composition(source_path, &err)
+    {
+        return removed;
+    }
     match err {
         MarkdownError::ShellExpansion(shell_err) => CompositionError::ShellExpansionFailed {
             source_path: source_path.to_path_buf(),
@@ -171,6 +176,13 @@ pub struct PrepareOptions {
     /// still coerced to the declared types; only the verdict is withheld, and
     /// the post-`initialize` stabilized reread reports it.
     pub defer_schema_verdict: bool,
+    /// The `loop` global of the loop iteration this preparation composes.
+    ///
+    /// Not frontmatter: composition declares it as a host global, so bare,
+    /// dotted, and bracket reads of `loop` in the body and in compose-time
+    /// frontmatter values read it, while `fm.loop` reads the `loop:`
+    /// configuration. `None` outside an iteration.
+    pub loop_values: Option<super::looping::LoopAmbient>,
 }
 
 impl PrepareOptions {
@@ -209,7 +221,18 @@ impl PrepareOptions {
             name_coercion_keys: Vec::new(),
             allow_empty_body: false,
             defer_schema_verdict: false,
+            loop_values: None,
         }
+    }
+
+    /// What this preparation knows about its enclosing loop: the iteration's
+    /// [`loop_values`](Self::loop_values), else pending for a loop document
+    /// and outside for any other.
+    pub(crate) fn enclosing_loop(
+        &self,
+        loop_document: bool,
+    ) -> super::lifecycle::bindings::EnclosingLoop<'_> {
+        super::lifecycle::bindings::EnclosingLoop::of(self.loop_values.as_ref(), loop_document)
     }
 
     /// The overrides with the origin of each key.
@@ -301,6 +324,15 @@ impl darkmatter::markdown::compose::CurrentProvider for UnsuppliedRefresh {
     }
 }
 
+/// Whether `source` authors a `loop:` block.
+fn is_loop_document(source: &ResolvedCompositionSource) -> bool {
+    source
+        .markdown
+        .frontmatter()
+        .as_map()
+        .contains_key(super::reserved::LOOP_ROOT)
+}
+
 /// The one `ComposeOptions` shape every canonical preparation stage composes
 /// with.
 ///
@@ -311,7 +343,7 @@ impl darkmatter::markdown::compose::CurrentProvider for UnsuppliedRefresh {
 /// separately, and the copies disagreed — the audit discovered commands
 /// against one option set while the compose that executed them used another.
 fn canonical_compose_options(
-    source_path: &Path,
+    source: &ResolvedCompositionSource,
     ctx: &ComposeContext,
     options: &PrepareOptions,
     schema_phase: Option<SchemaPhase>,
@@ -354,10 +386,15 @@ fn canonical_compose_options(
         (None, Some(invocation)) => Some(invocation.env_baseline()),
         (None, None) => None,
     };
+    let source_path = source.resolved_path.as_path();
+    let loop_document = is_loop_document(source);
     let mut compose_opts = bind_agent_workspace(
         ComposeOptions::new_with_context(ctx.clone())
             .with_context_authority(authority)
-            .with_current_provider(current_provider),
+            .with_current_provider(current_provider)
+            .with_host_globals(super::lifecycle::bindings::composition_host_globals(
+                options.enclosing_loop(loop_document),
+            )),
         source_path,
         options.shell_working_directory.as_deref(),
     );
@@ -510,9 +547,10 @@ pub fn preflight_document_shell(
 ///
 /// ## Errors
 ///
-/// A discovery-walk failure (`PreFlightDiscoveryFailed`), or any approval
-/// failure [`resolve_shell_approvals`](super::resolve_shell_approvals)
-/// returns.
+/// [`CompositionError::RemovedGrammar`] for a retired `_loop_*` read in the
+/// authored document, a discovery-walk failure (`PreFlightDiscoveryFailed`),
+/// or any approval failure
+/// [`resolve_shell_approvals`](super::resolve_shell_approvals) returns.
 pub fn approve_document_shell(
     source: &ResolvedCompositionSource,
     options: &PrepareOptions,
@@ -522,9 +560,12 @@ pub fn approve_document_shell(
         options,
         crate::invocation_context::PreparedContextConsumer::Preflight,
     );
+    // The audit composes the document, so a retired read is reported as
+    // removed grammar here, before composition would meet it.
+    reject_removed_loop_reads_in_source(source)?;
     let ctx = derive_compose_context(source, options);
     let compose_request = prepared_request(
-        canonical_compose_options(&source.resolved_path, &ctx, options, None),
+        canonical_compose_options(source, &ctx, options, None),
         options,
     )?;
     super::resolve_shell_approvals(
@@ -581,6 +622,7 @@ pub(super) fn prepare_direct_with_prompt(
             replacement: replacement.to_string(),
         });
     }
+    reject_removed_loop_reads_in_source(source)?;
     if matches!(&prompt_source, PromptSource::ComposedBody) {
         observe_prepared_context(
             &options,
@@ -599,7 +641,7 @@ pub(super) fn prepare_direct_with_prompt(
         ctx.env_mut().insert(key.clone(), value.clone());
     }
     let compose_request = prepared_request(
-        canonical_compose_options(&source.resolved_path, &ctx, &options, None),
+        canonical_compose_options(source, &ctx, &options, None),
         &options,
     )?;
     // Retain the caller's inputs so a later canonical preparation of this or a
@@ -685,6 +727,7 @@ pub fn prepare_inline(
             replacement: replacement.to_string(),
         });
     }
+    reject_removed_loop_reads_in_source(source)?;
 
     let prompt_text = inline_prompt_text(fm, options.set_overrides.as_ref())?;
 
@@ -707,7 +750,7 @@ pub fn prepare_inline(
     // Retain the composed context so pre-flight shell resolution (C3) can build
     // an early-binding lookup over the same `ctx.*`/`env.*` state main compose saw.
     let compose_request = prepared_request(
-        canonical_compose_options(&source.resolved_path, &ctx, &options, Some(SchemaPhase::Launch)),
+        canonical_compose_options(source, &ctx, &options, Some(SchemaPhase::Launch)),
         &options,
     )?;
     let input_layers = super::CallerInputLayers::from_options(&options);
@@ -840,6 +883,12 @@ fn effective_surface(
     // A nested span in a single-pass lifecycle literal can never interpolate;
     // reject it here, before any provider or lifecycle event runs.
     validate_no_nested_spans_in_literals(effective_frontmatter, &lifecycle, &source.resolved_path)?;
+    // A read of a retired `_loop_*` name is removed grammar. Checked before
+    // pre-flight stamps resolved shell bytes over the authored spans.
+    super::lifecycle::bindings::reject_removed_loop_reads_in_lifecycle(
+        &source.resolved_path,
+        &lifecycle,
+    )?;
     // Pre-flight shell resolution (C3): resolve each shell command in the
     // deferred lifecycle subtree via DM2 with an early-binding-only lookup
     // and stamp the resolved bytes back so the approved command equals the
@@ -852,6 +901,7 @@ fn effective_surface(
         &source.resolved_path,
         &options.file_resolution_context,
         options.file_ref_fallback_dir.as_deref(),
+        options.enclosing_loop(is_loop_document(source)),
     )?;
     // Lifecycle communication/action strings are deferred by design (C1): they
     // keep their `{{ }}` spans through prepare and resolve at event time, where
@@ -880,7 +930,7 @@ fn bootstrap_compose_options(
         CompositionMode::InlineFrontmatterPrompt => Some(SchemaPhase::Launch),
     };
     let compose_opts =
-        canonical_compose_options(&source.resolved_path, &ctx, options, schema_phase)
+        canonical_compose_options(source, &ctx, options, schema_phase)
             .with_deferred_schema_verdict(true)
             .only_frontmatter_surface()
             .with_pre_approved_commands(std::collections::HashSet::new());
@@ -944,6 +994,7 @@ pub(super) fn compose_bootstrap(
             replacement: replacement.to_string(),
         });
     }
+    reject_removed_loop_reads_in_source(source)?;
     // The bootstrap composes frontmatter only; recording `Body` would claim a
     // read this stage never performs.
     observe_prepared_context(
@@ -976,6 +1027,21 @@ pub(super) fn compose_bootstrap(
         compose_context: ctx,
         document_epoch: options.document_epoch,
     })
+}
+
+/// A read of a retired `_loop_*` name in the authored frontmatter or body is
+/// removed grammar, found before the document composes.
+fn reject_removed_loop_reads_in_source(
+    source: &ResolvedCompositionSource,
+) -> Result<(), CompositionError> {
+    super::lifecycle::bindings::reject_removed_loop_reads_in_document(
+        &source.resolved_path,
+        super::lifecycle::bindings::AuthoredDocument {
+            frontmatter: &frontmatter_to_value(source.markdown.frontmatter()),
+            body: source.markdown.content(),
+            body_line_offset: source.markdown.frontmatter_line_count(),
+        },
+    )
 }
 
 /// Convert a `Frontmatter` to a `serde_json::Value::Object`.

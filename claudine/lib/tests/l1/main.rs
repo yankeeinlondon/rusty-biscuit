@@ -15,6 +15,7 @@ mod deprecated_compatibility;
 mod diagnostic_detail_conformance;
 mod kimi_wire;
 mod lifecycle_control_flow_spike;
+mod lifecycle_lift_ready_guard;
 mod messaging_delivery;
 mod messaging_spawn_guard;
 mod model_catalog_integration;

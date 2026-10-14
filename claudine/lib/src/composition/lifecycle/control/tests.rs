@@ -22,6 +22,7 @@ fn retry(max: u32, backoff: RetryBackoff, delay: &str) -> StackControl {
         max_attempts: max,
         backoff,
         delay: delay.to_string(),
+        overlay: indexmap::IndexMap::new(),
     }
 }
 
@@ -181,7 +182,10 @@ fn proxy_dispatches_target() {
     let control = StackControl::Proxy {
         target: "@prompts/other.md".to_string(),
         overlay: IndexMap::new(),
-        location: ActionLocation::new(LifecycleSignal::Failure, 0, 0),
+        location: ActionLocation::new(
+            LifecycleSignal::Failure,
+            crate::composition::LifecyclePath::root("failure").index(0).field("proxy"),
+        ),
     };
     assert_eq!(
         decide_control(&control, 1, 0, false, true),
@@ -216,7 +220,10 @@ fn recovery_controls_dispatch_event_agnostically() {
     let proxy = StackControl::Proxy {
         target: "@x.md".to_string(),
         overlay: IndexMap::new(),
-        location: ActionLocation::new(LifecycleSignal::Failure, 0, 0),
+        location: ActionLocation::new(
+            LifecycleSignal::Failure,
+            crate::composition::LifecyclePath::root("failure").index(0).field("proxy"),
+        ),
     };
     assert!(matches!(
         decide_control(&proxy, 1, 0, false, true),

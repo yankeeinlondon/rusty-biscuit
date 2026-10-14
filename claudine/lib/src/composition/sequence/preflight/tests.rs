@@ -1332,11 +1332,13 @@ mod shell {
             "seq.md",
             &[(
                 "sequence",
-                json!([{
-                    "name": "one",
-                    "shell": "echo primary",
-                    "teardown": [ { "action": [ { "shell": "echo {{ env.AGENT }}" } ] } ],
-                }]),
+                json!([
+                    {
+                        "name": "one",
+                        "shell": "echo primary",
+                        "teardown": [{ "shell": "echo {{ env.AGENT }}" }],
+                    },
+                ]),
             )],
             "Body.\n",
         );
@@ -1389,12 +1391,14 @@ mod shell {
             "seq.md",
             &[(
                 "sequence",
-                json!([{
-                    "name": "one",
-                    "shell": "echo primary",
-                    "setup": [ { "when": "false", "action": [ { "shell": "echo setup" } ] } ],
-                    "teardown": [ { "action": [ { "shell": "echo teardown" } ] } ],
-                }]),
+                json!([
+                    {
+                        "name": "one",
+                        "shell": "echo primary",
+                        "setup": [{ "when": "false", "then": [{ "shell": "echo setup" }] }],
+                        "teardown": [{ "shell": "echo teardown" }],
+                    },
+                ]),
             )],
             "Body.\n",
         );
@@ -1421,17 +1425,13 @@ mod shell {
             "seq.md",
             &[(
                 "sequence",
-                json!([{
-                    "name": "one",
-                    "side_effect": { "set": {"ready": "{{ true }}"} },
-                    "setup": [ {
-                        "action": [ {
-                            "action": "shell",
-                            "command": "echo main",
-                            "on_error": "echo recover",
-                        } ],
-                    } ],
-                }]),
+                json!([
+                    {
+                        "name": "one",
+                        "side_effect": { "set": { "ready": "{{ true }}" } },
+                        "setup": [{ "shell": { "command": "echo main", "on_error": "echo recover" } }],
+                    },
+                ]),
             )],
             "Body.\n",
         );
@@ -1642,7 +1642,7 @@ mod lifecycle_literals {
                         dunce::canonicalize(dir.join(file)).unwrap(),
                         "{reference}"
                     );
-                    assert_eq!(property, "success.say", "{reference}");
+                    assert_eq!(property, "success.say.text", "{reference}");
                     assert_eq!(nested, "{{area}}", "{reference}");
                 }
                 other => panic!("{reference}: expected a nested-span rejection, got {other:?}"),

@@ -162,8 +162,7 @@ fn union_with_templated_sibling(sibling: &str) -> String {
          \x20   doc: file\n\
          doc: {sibling}\n\
          initialize:\n\
-         \x20 stack:\n\
-         \x20   - action: {{append_line: [\"events.log\", \"initialize\"]}}\n\
+         \x20 - append_line: [\"events.log\", \"initialize\"]\n\
          ---\nSpec document: {{{{spec}}}}\n"
     )
 }

@@ -108,7 +108,7 @@ fn proxy_resolution_error(
             context: Box::new(crate::composition::FileReferenceContext {
                 source_path: source_path.to_path_buf(),
                 event: Some(event.to_string()),
-                property: format!("{event}.stack[*].proxy"),
+                property: format!("{event}[*].proxy"),
                 reference: target.to_string(),
                 hint: PROXY_TARGET_HINT.to_string(),
             }),

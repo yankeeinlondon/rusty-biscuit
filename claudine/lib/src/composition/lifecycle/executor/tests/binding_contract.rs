@@ -60,10 +60,9 @@ fn an_absent_property_in_when_skips_the_action_without_an_error() {
     // The reported shape: a guard over an optional input nobody supplied.
     for when in ["review", "spec_fil", "review == 'x'", "!plan"] {
         let (outcome, events, ..) = run(
-            json!({"success": {"stack": [
-                {"when": when, "action": {"message": "guarded"}},
-                {"action": {"message": "after"}}
-            ]}}),
+            json!({
+                "success": [{ "when": when, "then": [{ "message": "guarded" }] }, { "message": "after" }],
+            }),
             LifecycleSignal::Success,
             json!({"spec_file": "x"}),
         );
@@ -80,14 +79,14 @@ fn an_absent_property_in_when_skips_the_action_without_an_error() {
 #[test]
 fn an_absent_property_in_a_message_renders_through_null_semantics() {
     let (outcome, events, ..) = run(
-        json!({"success": {
-            "message": "spec: {{ spec }}{{ plan ? ' plan: ' + plan : '' }}",
-            "stack": [
-                {"action": {"message": "[{{ review }}]"}},
-                {"action": {"message": "{{ review }}"}},
-                {"action": {"message": "{{ plan || 'no plan' }}"}}
-            ]
-        }}),
+        json!({
+            "success": [
+                { "message": "spec: {{ spec }}{{ plan ? ' plan: ' + plan : '' }}" },
+                { "message": "[{{ review }}]" },
+                { "message": "{{ review }}" },
+                { "message": "{{ plan || 'no plan' }}" },
+            ],
+        }),
         LifecycleSignal::Success,
         json!({"spec": "a.md"}),
     );
@@ -106,10 +105,12 @@ fn an_absent_property_in_a_message_renders_through_null_semantics() {
 #[test]
 fn an_absent_property_in_a_typed_value_resolves_to_null() {
     let (outcome, _, document, runtime) = run(
-        json!({"start": {"stack": [
-            {"action": {"set": {"copied": "{{ missing }}", "nested": "{{ missing.deep }}"}}},
-            {"action": {"action": "proxy", "target": "next.md", "with": {"carry": "{{ missing }}"}}}
-        ]}}),
+        json!({
+            "start": [
+                { "set": { "copied": "{{ missing }}", "nested": "{{ missing.deep }}" } },
+                { "proxy": { "target": "next.md", "with": { "carry": "{{ missing }}" } } },
+            ],
+        }),
         LifecycleSignal::Start,
         json!({}),
     );
@@ -127,10 +128,12 @@ fn an_absent_property_in_a_typed_value_resolves_to_null() {
 #[test]
 fn set_and_proxy_with_stay_atomic_when_a_null_member_precedes_a_failure() {
     let (outcome, events, document, runtime) = run(
-        json!({"start": {"stack": [
-            {"action": {"set": {"first": "{{ missing }}", "last": "{{ no_such_fn() }}"}}},
-            {"action": {"message": "after"}}
-        ]}}),
+        json!({
+            "start": [
+                { "set": { "first": "{{ missing }}", "last": "{{ no_such_fn() }}" } },
+                { "message": "after" },
+            ],
+        }),
         LifecycleSignal::Start,
         json!({"first": "kept"}),
     );
@@ -140,10 +143,16 @@ fn set_and_proxy_with_stay_atomic_when_a_null_member_precedes_a_failure() {
     assert!(events.is_empty(), "the stack halts before the next side effect");
 
     let (outcome, ..) = run(
-        json!({"start": {"stack": [
-            {"action": {"action": "proxy", "target": "next.md",
-                        "with": {"first": "{{ missing }}", "last": "{{ no_such_fn() }}"}}}
-        ]}}),
+        json!({
+            "start": [
+                {
+                    "proxy": {
+                        "target": "next.md",
+                        "with": { "first": "{{ missing }}", "last": "{{ no_such_fn() }}" },
+                    },
+                },
+            ],
+        }),
         LifecycleSignal::Start,
         json!({}),
     );
@@ -161,7 +170,7 @@ fn an_unavailable_global_fails_with_its_reason_and_never_reads_the_document() {
         (LifecycleSignal::Success, "{{ group.label }}", "group", OUTSIDE_GROUP),
     ] {
         let (outcome, events, ..) = run(
-            json!({signal.property_name(): {"stack": [{"action": {"message": message}}]}}),
+            json!({signal.property_name(): [{"message": message}]}),
             signal,
             json!({"err": {"msg": "document"}, "group": {"label": "document"}}),
         );
@@ -170,7 +179,7 @@ fn an_unavailable_global_fails_with_its_reason_and_never_reads_the_document() {
     }
 
     let (outcome, events, ..) = run(
-        json!({"start": {"stack": [{"action": {"message": "{{ fm.err.msg }}/{{ fm.group.label }}"}}]}}),
+        json!({ "start": [{ "message": "{{ fm.err.msg }}/{{ fm.group.label }}" }] }),
         LifecycleSignal::Start,
         json!({"err": {"msg": "document"}, "group": {"label": "g"}}),
     );
@@ -183,11 +192,11 @@ fn malformed_expressions_and_unknown_functions_halt_before_side_effects() {
     // A malformed whole value or guard cannot even be parsed: preparation
     // refuses it, so no event ever runs.
     for item in [
-        json!({"action": {"message": "{{ spec ? }}"}}),
-        json!({"when": "spec ==", "action": {"message": "guarded"}}),
+        json!({"message": "{{ spec ? }}"}),
+        json!({"when": "spec ==", "then": [{"message": "guarded"}]}),
     ] {
         assert!(
-            parse_lifecycle_config(&json!({"success": {"stack": [item]}}), Path::new("t.md")).is_err(),
+            parse_lifecycle_config(&json!({ "success": [item] }), Path::new("t.md")).is_err(),
             "{item}"
         );
     }
@@ -199,12 +208,14 @@ fn malformed_expressions_and_unknown_functions_halt_before_side_effects() {
         (None, "x {{ no_such_fn(spec) }}"),
         (Some("no_such_fn(spec)"), "guarded"),
     ] {
-        let mut item = json!({"action": [{"message": message}, {"message": "after"}]});
-        if let Some(when) = when {
-            item["when"] = json!(when);
-        }
+        let body = vec![json!({"message": message}), json!({"message": "after"})];
+        let mut stack = match when {
+            Some(when) => vec![json!({"when": when, "then": body})],
+            None => body,
+        };
+        stack.push(json!({ "message": "next item" }));
         let (outcome, events, ..) = run(
-            json!({"success": {"stack": [item, {"action": {"message": "next item"}}]}}),
+            json!({ "success": stack }),
             LifecycleSignal::Success,
             json!({"spec": "a.md"}),
         );
@@ -216,10 +227,7 @@ fn malformed_expressions_and_unknown_functions_halt_before_side_effects() {
 #[test]
 fn successful_output_containing_braces_is_delivered_as_data() {
     let (outcome, events, ..) = run(
-        json!({"success": {"stack": [
-            {"action": {"message": "{{ body }}"}},
-            {"action": {"message": "lit: {{{ raw }}}"}}
-        ]}}),
+        json!({ "success": [{ "message": "{{ body }}" }, { "message": "lit: {{{ raw }}}" }] }),
         LifecycleSignal::Success,
         json!({"body": "agent wrote {{ x }} and $(y)"}),
     );
@@ -255,12 +263,12 @@ fn the_typed_darkmatter_cause_survives_every_library_wrapper() {
 
     // Direct: the event outcome.
     let (outcome, ..) = run(
-        json!({"success": {"stack": [{"action": {"message": "{{ no_such_fn() }}"}}]}}),
+        json!({ "success": [{ "message": "{{ no_such_fn() }}" }] }),
         LifecycleSignal::Success,
         json!({}),
     );
     let info = outcome.evaluation_error.expect("evaluation error");
-    assert_eq!(info.property.as_deref(), Some("success.stack[0].action[0]"));
+    assert_eq!(info.property.as_deref(), Some("success[0].message"));
     assert!(is_unknown_function(info.cause.as_ref().and_then(|c| c.expression_error())));
 
     // Lifecycle: the composition error a caller propagates.
@@ -270,7 +278,7 @@ fn the_typed_darkmatter_cause_survives_every_library_wrapper() {
     let CompositionError::LifecycleEvaluationError { event, property, .. } = &error else {
         panic!("{error:?}");
     };
-    assert_eq!((event.as_str(), property.as_deref()), ("success", Some("success.stack[0].action[0]")));
+    assert_eq!((event.as_str(), property.as_deref()), ("success", Some("success[0].message")));
 
     // Catch: the render wrappers and the `err` rebuilt for a routed event.
     let emitted = error.already_emitted();
@@ -284,25 +292,30 @@ fn the_typed_darkmatter_cause_survives_every_library_wrapper() {
 
     // Proxy: an overlay member's failure.
     let (outcome, ..) = run(
-        json!({"start": {"stack": [{"action": {"action": "proxy", "target": "next.md",
-                                                "with": {"meta": {"bad": "{{ no_such_fn() }}"}}}}]}}),
+        json!({
+            "start": [
+                {
+                    "proxy": { "target": "next.md", "with": { "meta": { "bad": "{{ no_such_fn() }}" } } },
+                },
+            ],
+        }),
         LifecycleSignal::Start,
         json!({}),
     );
     let info = outcome.evaluation_error.expect("evaluation error");
-    assert_eq!(info.variant, "LifecycleProxyWithEvaluationFailed");
+    assert_eq!(info.variant, "LifecycleWithEvaluationFailed");
     let cause = info.cause.as_ref().expect("the proxy failure keeps its cause");
     assert!(is_unknown_function(cause.expression_error()));
     assert!(is_unknown_function(darkmatter_cause(cause)), "the cause's source is the Darkmatter error");
 
     // Set: a mapping value's failure.
     let (outcome, ..) = run(
-        json!({"start": {"stack": [{"action": {"set": {"out": "{{ no_such_fn() }}"}}}]}}),
+        json!({ "start": [{ "set": { "out": "{{ no_such_fn() }}" } }] }),
         LifecycleSignal::Start,
         json!({}),
     );
     let info = outcome.evaluation_error.expect("evaluation error");
-    assert_eq!(info.property.as_deref(), Some("start.stack[0].action[0].set.out"));
+    assert_eq!(info.property.as_deref(), Some("start[0].set.out"));
     let cause = info.cause.as_ref().expect("the set failure keeps its cause");
     assert!(is_unknown_function(cause.expression_error()));
 }
@@ -314,7 +327,7 @@ fn the_typed_darkmatter_cause_survives_every_library_wrapper() {
 fn event_time_values_follow_the_shared_missing_property_table() {
     for case in crate::composition::interpolation_conformance::missing_property_cases() {
         let (outcome, _, document, _) = run(
-            json!({"success": {"stack": [{"action": {"set": {"out": case.input}}}]}}),
+            json!({ "success": [{ "set": { "out": case.input } }] }),
             LifecycleSignal::Success,
             Value::Object(case.frontmatter),
         );
@@ -329,9 +342,9 @@ fn event_time_values_follow_the_shared_missing_property_table() {
 #[test]
 fn lifecycle_globals_shadow_frontmatter_keys_that_fm_still_reads() {
     let config = parse_lifecycle_config(
-        &json!({"failure": {"stack": [{"action": {"message":
+        &json!({"failure": [{"message":
             "{{ err.msg }}|{{ timing.document_ms }}|{{ group.label }}|\
-             {{ fm.err.msg }}|{{ fm.timing.document_ms }}|{{ fm.group.label }}"}}]}}),
+             {{ fm.err.msg }}|{{ fm.timing.document_ms }}|{{ fm.group.label }}"}]}),
         Path::new("t.md"),
     )
     .unwrap();
@@ -383,8 +396,7 @@ fn lifecycle_globals_shadow_frontmatter_keys_that_fm_still_reads() {
 
     // Unmeasured timing is the global's `null`, never the document's value.
     let (outcome, events, ..) = run(
-        json!({"start": {"stack": [{"action": {"message":
-            "{{ timing || 'unmeasured' }}/{{ fm.timing.document_ms }}"}}]}}),
+        json!({ "start": [{ "message": "{{ timing || 'unmeasured' }}/{{ fm.timing.document_ms }}" }] }),
         LifecycleSignal::Start,
         json!({"timing": {"document_ms": "document timing"}}),
     );
@@ -397,9 +409,9 @@ fn lifecycle_globals_shadow_frontmatter_keys_that_fm_still_reads() {
 #[test]
 fn reserved_roots_shadow_same_named_frontmatter_keys_in_a_lifecycle_event() {
     let (outcome, events, ..) = run(
-        json!({"start": {"stack": [{"action": {"message":
+        json!({"start": [{"message":
             "{{ fm.fm }}|{{ fm.ctx }}|{{ fm.env }}|{{ fm.current }}|{{ fm['fm'] }}|\
-             {{ fm == 'literal' }}|{{ ctx == 'document ctx' }}|{{ env == 'document env' }}"}}]}}),
+             {{ fm == 'literal' }}|{{ ctx == 'document ctx' }}|{{ env == 'document env' }}"}]}),
         LifecycleSignal::Start,
         json!({
             "fm": "literal",
@@ -423,12 +435,14 @@ fn reserved_roots_shadow_same_named_frontmatter_keys_in_a_lifecycle_event() {
 #[test]
 fn a_set_is_read_by_bare_and_qualified_fm_and_an_earlier_snapshot_is_unchanged() {
     let (outcome, events, document, _) = run(
-        json!({"start": {"stack": [
-            {"action": {"set": {"before": "{{ fm }}"}}},
-            {"action": {"set": {"x": "new"}}},
-            {"action": {"message": "{{ fm.x }}|{{ fm['x'] }}|{{ x }}|{{ fm.before.x }}"}},
-            {"action": {"set": {"after": "{{ fm }}"}}}
-        ]}}),
+        json!({
+            "start": [
+                { "set": { "before": "{{ fm }}" } },
+                { "set": { "x": "new" } },
+                { "message": "{{ fm.x }}|{{ fm['x'] }}|{{ x }}|{{ fm.before.x }}" },
+                { "set": { "after": "{{ fm }}" } },
+            ],
+        }),
         LifecycleSignal::Start,
         json!({"x": "old"}),
     );

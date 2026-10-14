@@ -15,11 +15,10 @@ doc_desc: |-
     }}
 interactive: true
 initialize:
-    stack:
-        - when: "spec && design"
-          action:
-            - warn: "The {{ link(prompts/clarify.md) }} prompt expects _either_ a `spec` or `design` document to be passed in but not both!"
-            # - stop: ""
+    - when: "spec && design"
+      then:
+        - warn: "The {{ link(prompts/clarify.md) }} prompt expects _either_ a `spec` or `design` document to be passed in but not both!"
+        # - stop: ""
 start:
     stderr: "We are starting the clarification process and will need human involvement."
     say: "Please stand by while we prepare a set of clarification questions"

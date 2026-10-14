@@ -94,12 +94,13 @@ pub use lifecycle::runtime::{
 #[allow(deprecated)]
 pub use lifecycle::{
     DefaultLifecycleEmitter, LIFECYCLE_EVENT_KEYS, LifecycleConfig, LifecycleEmitter,
-    LifecycleNotification, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleRuntimeState,
-    LifecycleSignal, parse_lifecycle_config,
+    LifecycleRunGuard, LifecycleRuntimeContext, LifecycleRuntimeState, LifecycleSignal,
+    parse_lifecycle_config,
 };
 pub use lifecycle_actions::{
     CommunicationAction, CommunicationChannel, ExpressionFunctionAction, LifecycleAction,
-    LifecycleActionKind, LifecycleControlAction, LifecycleStackItem, RetryBackoff, ShellAction,
+    LifecycleActionKind, LifecycleConditional, LifecycleControlAction, LifecycleNode,
+    LifecyclePath, RetryBackoff, ShellAction,
     SideEffectAction, is_known_side_effect, side_effect_signature,
 };
 pub use lifecycle_context::{LifecycleErrorInfo, LifecycleTiming};

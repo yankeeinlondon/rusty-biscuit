@@ -23,7 +23,7 @@ fn info(code: u8) -> LifecycleErrorInfo {
 }
 fn control(value: Control) -> StackControl {
     match value {
-        Control::Retry => StackControl::Retry { max_attempts: 1, backoff: RetryBackoff::Fixed, delay: "0s".into() },
+        Control::Retry => StackControl::Retry { max_attempts: 1, backoff: RetryBackoff::Fixed, delay: "0s".into(), overlay: indexmap::IndexMap::new() },
         Control::Resume => StackControl::Resume { message: "continue".into(), max_attempts: 1 },
         Control::Error => StackControl::Error { reason: Some("99".into()) },
         Control::Stop => StackControl::Stop,

@@ -489,7 +489,12 @@ fn extract_control_variables_action_value_template() {
 
 #[test]
 fn extract_control_variables_excludes_reserved_namespaces() {
-    let config = control_config("_loop_count < 3 && env.DEBUG", vec![]);
+    // `loop` is the host-declared global, never a frontmatter control
+    // variable, however it is read.
+    let config = control_config(
+        "loop.count < 3 && loop['is_last'] && env.DEBUG",
+        vec![],
+    );
     assert!(extract_control_variables(&config).is_empty());
 }
 

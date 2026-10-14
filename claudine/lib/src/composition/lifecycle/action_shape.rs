@@ -1,37 +1,19 @@
-pub(super) fn parse_positional_action(
+/// Parse a short-form action, `{verb: value}`, into its typed body.
+///
+/// The value is classified into arguments: a scalar is one argument, an array
+/// is one argument per element, and `null` or `[]` is none. A direct object is
+/// rejected (object data passes through a whole-value interpolation). Arity
+/// is validated against the verb's signature. `set` is not parsed here: its
+/// mapping is always mutation data.
+pub(super) fn parse_short_form(
     signal: LifecycleSignal,
     verb: &str,
     value: &serde_json::Value,
     source_file: &Path,
-    property_name: &str,
-    action_index: usize,
-    authored_order: Option<&[String]>,
-) -> Result<LifecycleAction, CompositionError> {
-    if !is_known_lifecycle_verb(verb) {
-        let rewrite = did_you_mean_verb(verb)
-            .map(|suggestion| format!("; did you mean `{suggestion}`?"))
-            .unwrap_or_default();
-        return Err(CompositionError::LifecycleUnknownVerb {
-            source_path: source_file.to_path_buf(),
-            property: property_name.to_string(),
-            verb: verb.to_string(),
-            rewrite,
-        });
-    }
-
-    if verb == "set" {
-        return super::parse::parse_runtime_set(
-            value,
-            false,
-            source_file,
-            property_name,
-            action_index,
-            authored_order,
-        );
-    }
-
-    let args = classify_positional_value(verb, value, source_file, property_name)?;
-    validate_positional_arity_and_build(signal, verb, args, source_file, property_name)
+    property: &str,
+) -> Result<LifecycleActionKind, CompositionError> {
+    let args = classify_positional_value(verb, value, source_file, property)?;
+    validate_positional_arity_and_build(signal, verb, args, source_file, property)
 }
 
 /// Classify a positional action value into zero or more [`Expr`] arguments.
@@ -80,14 +62,14 @@ fn classify_positional_value(
 }
 
 /// Validate the positional argument count for `verb` and build the typed
-/// action.
+/// action body.
 pub(super) fn validate_positional_arity_and_build(
     signal: LifecycleSignal,
     verb: &str,
     args: Vec<Expr>,
     source_file: &Path,
     property_name: &str,
-) -> Result<LifecycleAction, CompositionError> {
+) -> Result<LifecycleActionKind, CompositionError> {
     use LifecycleControlAction as A;
 
     // Lifecycle control verbs.
@@ -110,9 +92,9 @@ pub(super) fn validate_positional_arity_and_build(
             check_exact_positional_arity(verb, &args, 1, source_file, property_name)?;
             A::Proxy {
                 target: args.into_iter().next().expect("arity checked"),
-                // Positional form stays compact and carries no overlay; an
-                // author who needs `with:` opts into key/value form.
-                with: ProxyWith::default(),
+                // Short form stays compact and carries no overlay; an author
+                // who needs `with:` opts into long form.
+                with: WithOverlay::default(),
             }
         }
         "retry" => {
@@ -121,6 +103,7 @@ pub(super) fn validate_positional_arity_and_build(
                 max_attempts: args.into_iter().next(),
                 backoff: None,
                 delay: None,
+                with: WithOverlay::default(),
             }
         }
         "resume" => {
@@ -146,10 +129,7 @@ pub(super) fn validate_positional_arity_and_build(
         }
     };
 
-    Ok(LifecycleAction {
-        kind: LifecycleActionKind::LifecycleControl(control),
-        no_error: false,
-    })
+    Ok(LifecycleActionKind::LifecycleControl(control))
 }
 
 /// Build a positional action for verbs that are not lifecycle controls.
@@ -159,43 +139,33 @@ fn build_non_control_positional_action(
     args: Vec<Expr>,
     source_file: &Path,
     property_name: &str,
-) -> Result<LifecycleAction, CompositionError> {
+) -> Result<LifecycleActionKind, CompositionError> {
     // Communication channels.
     if let Some(channel) = CommunicationChannel::from_verb(verb) {
         check_exact_positional_arity(verb, &args, 1, source_file, property_name)?;
-        return Ok(LifecycleAction {
-            kind: LifecycleActionKind::Communication(CommunicationAction {
-                channel,
-                message: args.into_iter().next().expect("arity checked"),
-                route: None,
-            }),
-            no_error: false,
-        });
+        return Ok(LifecycleActionKind::Communication(CommunicationAction {
+            channel,
+            text: args.into_iter().next().expect("arity checked"),
+        }));
     }
 
     // Shell.
     if verb == "shell" {
         check_exact_positional_arity(verb, &args, 1, source_file, property_name)?;
-        return Ok(LifecycleAction {
-            kind: LifecycleActionKind::Shell(ShellAction {
-                command: args.into_iter().next().expect("arity checked"),
-                on_error: None,
-                pre_resolved: false,
-            }),
-            no_error: false,
-        });
+        return Ok(LifecycleActionKind::Shell(ShellAction {
+            command: args.into_iter().next().expect("arity checked"),
+            on_error: None,
+            pre_resolved: false,
+        }));
     }
 
     // Side-effect verbs.
     if let Some(signature) = side_effect_signature(verb) {
         check_positional_signature(verb, &args, &signature, source_file, property_name)?;
-        return Ok(LifecycleAction {
-            kind: LifecycleActionKind::SideEffect(SideEffectAction {
-                verb: verb.to_string(),
-                args,
-            }),
-            no_error: false,
-        });
+        return Ok(LifecycleActionKind::SideEffect(SideEffectAction {
+            verb: verb.to_string(),
+            args,
+        }));
     }
 
     // Expression-function verbs.
@@ -207,13 +177,10 @@ fn build_non_control_positional_action(
             variadic: true,
         });
     check_positional_signature(verb, &args, &signature, source_file, property_name)?;
-    Ok(LifecycleAction {
-        kind: LifecycleActionKind::ExpressionFunction(ExpressionFunctionAction {
-            function: verb.to_string(),
-            args,
-        }),
-        no_error: false,
-    })
+    Ok(LifecycleActionKind::ExpressionFunction(ExpressionFunctionAction {
+        function: verb.to_string(),
+        args,
+    }))
 }
 
 /// Enforce an exact positional arity.
@@ -385,59 +352,44 @@ pub(crate) fn action_value_to_expr(value: &serde_json::Value) -> Result<Expr, Ac
     }
 }
 
-/// Build a typed action from an explicit key/value verb + named parameters.
+/// Build a typed action body from a long-form verb and its named parameters.
 ///
-/// Key/value form allows per-verb named parameters that don't fit the
-/// positional `{verb: value}` shape (e.g. `shell`'s `on_error`, `retry`'s
-/// `backoff`, `set_frontmatter`'s `file`/`prop`/`value`).
+/// Long form exposes per-verb named parameters the short form cannot carry
+/// (e.g. `shell`'s `on_error`, `retry`'s `backoff`, `set_frontmatter`'s
+/// `file`/`prop`/`value`). `property` is the action's authored path.
 pub(super) fn build_action_from_params(
     signal: LifecycleSignal,
     verb: &str,
     params: Vec<(String, Expr)>,
-    no_error: bool,
-    proxy_with: Option<ProxyWith>,
+    with: Option<WithOverlay>,
     source_file: &Path,
-) -> Result<LifecycleAction, CompositionError> {
-    let property = signal.property_name();
-
+    property: &str,
+) -> Result<LifecycleActionKind, CompositionError> {
     // Params are consumed via `params_map.remove(...)` as each verb reads its
     // known keys; any leftovers are reported by `reject_extra_params`.
     let mut params_map = params.into_iter().collect::<std::collections::HashMap<_, _>>();
 
     // Lifecycle control actions.
     if let Some(control) =
-        parse_lifecycle_control_long(verb, &mut params_map, proxy_with, signal, source_file)?
+        parse_lifecycle_control_long(verb, &mut params_map, with, signal, source_file, property)?
     {
         reject_extra_params(control.verb(), &params_map, property, source_file)?;
-        return Ok(LifecycleAction {
-            kind: LifecycleActionKind::LifecycleControl(control),
-            no_error,
-        });
+        return Ok(LifecycleActionKind::LifecycleControl(control));
     }
 
-    // Communication actions.
+    // Communication actions: one payload parameter, `text`.
     if let Some(channel) = CommunicationChannel::from_verb(verb) {
-        let message = params_map
-            .remove("message")
-            .or_else(|| params_map.remove("text"))
-            .or_else(|| params_map.remove("sound"))
-            .ok_or_else(|| CompositionError::LifecycleActionInvalidLongForm {
+        let text = params_map.remove("text").ok_or_else(|| {
+            CompositionError::LifecycleActionInvalidLongForm {
                 source_path: source_file.to_path_buf(),
                 property: property.to_string(),
                 action: verb.to_string(),
-                message: format!("`{verb}` requires a `message` parameter"),
+                message: format!("`{verb}` requires a `text` parameter"),
                 source: None,
-            })?;
-        let route = params_map.remove("route");
+            }
+        })?;
         reject_extra_params(verb, &params_map, property, source_file)?;
-        return Ok(LifecycleAction {
-            kind: LifecycleActionKind::Communication(CommunicationAction {
-                channel,
-                message,
-                route,
-            }),
-            no_error,
-        });
+        return Ok(LifecycleActionKind::Communication(CommunicationAction { channel, text }));
     }
 
     // Shell action: `command` required, `on_error` optional.
@@ -453,19 +405,15 @@ pub(super) fn build_action_from_params(
         })?;
         let on_error = params_map.remove("on_error");
         reject_extra_params(verb, &params_map, property, source_file)?;
-        return Ok(LifecycleAction {
-            kind: LifecycleActionKind::Shell(ShellAction {
-                command,
-                on_error,
-                pre_resolved: false,
-            }),
-            no_error,
-        });
+        return Ok(LifecycleActionKind::Shell(ShellAction {
+            command,
+            on_error,
+            pre_resolved: false,
+        }));
     }
 
-
     // Expression-function actions with concrete named parameters. Variadic
-    // functions (`and`, `or`) are positional-only and reject key/value form.
+    // functions (`and`, `or`) are positional-only and reject long form.
     if let Some(signature) = expression_function_signature(verb) {
         if signature.variadic {
             return Err(CompositionError::LifecycleExpressionFunctionKeyValueUnsupported {
@@ -477,13 +425,10 @@ pub(super) fn build_action_from_params(
         let args =
             collect_named_signature_args(verb, &signature, &mut params_map, property, source_file)?;
         reject_extra_params(verb, &params_map, property, source_file)?;
-        return Ok(LifecycleAction {
-            kind: LifecycleActionKind::ExpressionFunction(ExpressionFunctionAction {
-                function: verb.to_string(),
-                args,
-            }),
-            no_error,
-        });
+        return Ok(LifecycleActionKind::ExpressionFunction(ExpressionFunctionAction {
+            function: verb.to_string(),
+            args,
+        }));
     }
 
     // Side-effect action: any remaining verb with named params. The
@@ -497,37 +442,31 @@ pub(super) fn build_action_from_params(
         let args =
             collect_named_signature_args(verb, &signature, &mut params_map, property, source_file)?;
         reject_extra_params(verb, &params_map, property, source_file)?;
-        return Ok(LifecycleAction {
-            kind: LifecycleActionKind::SideEffect(SideEffectAction {
-                verb: verb.to_string(),
-                args,
-            }),
-            no_error,
-        });
+        return Ok(LifecycleActionKind::SideEffect(SideEffectAction {
+            verb: verb.to_string(),
+            args,
+        }));
     }
 
     let mut named: Vec<(String, Expr)> = params_map.into_iter().collect();
     named.sort_by(|a, b| a.0.cmp(&b.0));
     let args = named.into_iter().map(|(_, v)| v).collect();
-    Ok(LifecycleAction {
-        kind: LifecycleActionKind::SideEffect(SideEffectAction {
-            verb: verb.to_string(),
-            args,
-        }),
-        no_error,
-    })
+    Ok(LifecycleActionKind::SideEffect(SideEffectAction {
+        verb: verb.to_string(),
+        args,
+    }))
 }
 
 /// Parse a long-form lifecycle control action by named parameters.
 fn parse_lifecycle_control_long(
     verb: &str,
     params: &mut std::collections::HashMap<String, Expr>,
-    proxy_with: Option<ProxyWith>,
-    signal: LifecycleSignal,
+    with: Option<WithOverlay>,
+    _signal: LifecycleSignal,
     source_file: &Path,
+    property: &str,
 ) -> Result<Option<LifecycleControlAction>, CompositionError> {
     use LifecycleControlAction as A;
-    let property = signal.property_name();
     let invalid_args = |message: String| CompositionError::LifecycleInvalidArgs {
         source_path: source_file.to_path_buf(),
         property: property.to_string(),
@@ -547,7 +486,7 @@ fn parse_lifecycle_control_long(
             })?,
             // An omitted `with:` and an authored `with: {}` are the same empty
             // overlay.
-            with: proxy_with.unwrap_or_default(),
+            with: with.unwrap_or_default(),
         },
         "retry" => {
             let max_attempts = params.remove("max_attempts");
@@ -568,6 +507,7 @@ fn parse_lifecycle_control_long(
                 max_attempts,
                 backoff,
                 delay,
+                with: with.unwrap_or_default(),
             }
         }
         "resume" => A::Resume {
@@ -578,7 +518,7 @@ fn parse_lifecycle_control_long(
         },
         "defer" => A::Defer {
             delay: params.remove("delay").ok_or_else(|| {
-                invalid_args("`requeue` requires a `delay` parameter".to_string())
+                invalid_args("`defer` requires a `delay` parameter".to_string())
             })?,
             reason: params.remove("reason"),
         },
@@ -657,38 +597,6 @@ fn expr_to_string(expr: &Expr) -> String {
         Expr::StringLiteral(s) => s.clone(),
         Expr::Variable(v) => v.clone(),
         other => other.to_string(),
-    }
-}
-
-/// Get a mutable reference to the notification slot for a signal.
-pub(super) fn event_notification_field_mut(
-    signal: LifecycleSignal,
-    config: &mut LifecycleConfig,
-) -> &mut Option<LifecycleNotification> {
-    match signal {
-        LifecycleSignal::Initialize => &mut config.initialize,
-        LifecycleSignal::Start => &mut config.start,
-        LifecycleSignal::Success => &mut config.success,
-        LifecycleSignal::Blocked => &mut config.blocked,
-        LifecycleSignal::Failure => &mut config.failure,
-        LifecycleSignal::Finalize => &mut config.finalize,
-        LifecycleSignal::Loop => &mut config.loop_concerns,
-    }
-}
-
-/// Get a mutable reference to the typed stack slot for a signal.
-pub(super) fn event_stack_field_mut(
-    signal: LifecycleSignal,
-    config: &mut LifecycleConfig,
-) -> &mut Option<Vec<LifecycleStackItem>> {
-    match signal {
-        LifecycleSignal::Initialize => &mut config.stacks.initialize,
-        LifecycleSignal::Start => &mut config.stacks.start,
-        LifecycleSignal::Success => &mut config.stacks.success,
-        LifecycleSignal::Blocked => &mut config.stacks.blocked,
-        LifecycleSignal::Failure => &mut config.stacks.failure,
-        LifecycleSignal::Finalize => &mut config.stacks.finalize,
-        LifecycleSignal::Loop => &mut config.stacks.loop_gate,
     }
 }
 

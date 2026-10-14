@@ -3,14 +3,9 @@
 use super::*;
 
 #[test]
-fn top_level_communication_fires_before_stack() {
+fn communication_actions_fire_in_stack_order() {
     let config = parse_lifecycle_config(
-        &json!({
-            "success": {
-                "stderr": "top-level first",
-                "stack": [{"action": {"info": "then the stack"}}]
-            }
-        }),
+        &json!({ "success": [{ "stderr": "top-level first" }, { "info": "then the stack" }] }),
         Path::new("test.md"),
     )
     .unwrap();
@@ -45,12 +40,7 @@ fn top_level_communication_fires_before_stack() {
 #[test]
 fn success_channel_top_level_and_stack_route_to_emit_success() {
     let config = parse_lifecycle_config(
-        &json!({
-            "success": {
-                "success": "top-level success",
-                "stack": [{"action": {"success": "stack success"}}]
-            }
-        }),
+        &json!({ "success": [{ "success": "top-level success" }, { "success": "stack success" }] }),
         Path::new("test.md"),
     )
     .unwrap();
@@ -84,10 +74,10 @@ fn success_channel_top_level_and_stack_route_to_emit_success() {
 
 #[test]
 fn top_level_message_fallback_resolves_to_default_for_unknown_optional() {
-    // A top-level communication field whose value uses the documented
+    // A root-dictionary communication verb whose value uses the documented
     // `{{ missing || 'default' }}` migration path must resolve to the
-    // fallback at event-time through the real executor (resolve_emit ->
-    // resolve_string_value), never erroring on the unknown optional root.
+    // fallback at event-time through the real executor, never erroring on
+    // the unknown optional root.
     let config = parse_lifecycle_config(
         &json!({
             "failure": {
@@ -125,12 +115,7 @@ fn top_level_message_fallback_resolves_to_default_for_unknown_optional() {
 #[test]
 fn stdout_channel_top_level_and_stack_route_to_emit_stdout() {
     let config = parse_lifecycle_config(
-        &json!({
-            "success": {
-                "stdout": "top-level stdout",
-                "stack": [{"action": {"stdout": "stack stdout"}}]
-            }
-        }),
+        &json!({ "success": [{ "stdout": "top-level stdout" }, { "stdout": "stack stdout" }] }),
         Path::new("test.md"),
     )
     .unwrap();
@@ -165,7 +150,7 @@ fn stdout_channel_top_level_and_stack_route_to_emit_stdout() {
 #[test]
 fn shell_action_runs_command() {
     let config = parse_lifecycle_config(
-        &json!({"start": {"stack": [{"action": {"shell": "git status --short"}}]}}),
+        &json!({ "start": [{ "shell": "git status --short" }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -192,13 +177,7 @@ fn shell_action_runs_command() {
 #[test]
 fn shell_nonzero_at_setup_routes_to_failure() {
     let config = parse_lifecycle_config(
-        &json!({
-            "start": {
-                "stack": [{
-                    "action": {"action": "shell", "command": "false", "on_error": "build failed"}
-                }]
-            }
-        }),
+        &json!({ "start": [{ "shell": { "command": "false", "on_error": "build failed" } }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -227,7 +206,7 @@ fn shell_nonzero_at_setup_routes_to_failure() {
 #[test]
 fn shell_nonzero_at_terminal_does_not_route_to_failure() {
     let config = parse_lifecycle_config(
-        &json!({"success": {"stack": [{"action": {"shell": "false"}}]}}),
+        &json!({ "success": [{ "shell": "false" }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -255,12 +234,7 @@ fn shell_nonzero_at_terminal_does_not_route_to_failure() {
 fn no_error_suppresses_propagation_and_continues() {
     let config = parse_lifecycle_config(
         &json!({
-            "start": {
-                "stack": [
-                    {"action": {"action": "shell", "command": "false", "no_error": true}},
-                    {"action": {"info": "reached"}}
-                ]
-            }
+            "start": [{ "shell": { "command": "false", "no_error": true } }, { "info": "reached" }],
         }),
         Path::new("t.md"),
     )
@@ -292,12 +266,10 @@ fn no_error_suppresses_propagation_and_continues() {
 fn no_error_does_not_suppress_evaluation_raise() {
     let config = parse_lifecycle_config(
         &json!({
-            "start": {
-                "stack": [
-                    {"action": {"action": "message", "message": "{{ no_such_fn(spec_file) }}", "no_error": true}},
-                    {"action": {"info": "unreached"}}
-                ]
-            }
+            "start": [
+                { "message": { "no_error": true, "text": "{{ no_such_fn(spec_file) }}" } },
+                { "info": "unreached" },
+            ],
         }),
         Path::new("t.md"),
     )
@@ -329,13 +301,7 @@ fn no_error_does_not_suppress_evaluation_raise() {
 #[test]
 fn errored_action_stops_remaining_actions() {
     let config = parse_lifecycle_config(
-        &json!({
-            "start": {
-                "stack": [{
-                    "action": [{"shell": "false"}, {"info": "unreached"}]
-                }]
-            }
-        }),
+        &json!({ "start": [{ "shell": "false" }, { "info": "unreached" }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -362,7 +328,7 @@ fn errored_action_stops_remaining_actions() {
 #[test]
 fn explicit_error_control_surfaces_with_reason() {
     let config = parse_lifecycle_config(
-        &json!({"success": {"stack": [{"action": {"error": "manual failure"}}]}}),
+        &json!({ "success": [{ "error": "manual failure" }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -394,7 +360,7 @@ fn explicit_error_control_surfaces_with_reason() {
 #[test]
 fn retry_count_shorthand_resolves_max_attempts() {
     let config = parse_lifecycle_config(
-        &json!({"failure": {"stack": [{"action": {"retry": 3}}]}}),
+        &json!({ "failure": [{ "retry": 3 }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -420,6 +386,7 @@ fn retry_count_shorthand_resolves_max_attempts() {
             max_attempts: 3,
             backoff: RetryBackoff::Fixed,
             delay: "0s".to_string(),
+            overlay: indexmap::IndexMap::new(),
         })
     );
 }
@@ -430,11 +397,7 @@ fn side_effect_short_form_quoted_args_dispatch_to_engine() {
     // unambiguous path: each arg parses as a string literal, so
     // `prop`/`value` reach the engine verbatim.
     let config = parse_lifecycle_config(
-        &json!({
-            "start": {
-                "stack": [{"action": {"set_frontmatter": ["state.md", "status", "in-progress"]}}]
-            }
-        }),
+        &json!({ "start": [{ "set_frontmatter": ["state.md", "status", "in-progress"] }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -468,18 +431,14 @@ fn side_effect_long_form_reorders_named_params_positionally() {
     // order (which would yield `[body, url]`). The executor then dispatches
     // positionally.
     let config = parse_lifecycle_config(
-        &json!({
-            "start": {
-                "stack": [{
-                    "action": {"action": "http_post", "url": "https://example.com/hook", "body": "hello"}
-                }]
-            }
-        }),
+        &json!({ "start": [{ "http_post": { "url": "https://example.com/hook", "body": "hello" } }] }),
         Path::new("t.md"),
     )
     .unwrap();
-    let actions = &config.stack(LifecycleSignal::Start).unwrap()[0].actions;
-    match &actions[0].kind {
+    let LifecycleNode::Action(action) = &config.stack(LifecycleSignal::Start)[0] else {
+        panic!("expected an action");
+    };
+    match &action.kind {
         LifecycleActionKind::SideEffect(effect) => {
             assert_eq!(effect.verb, "http_post");
             assert_eq!(effect.args.len(), 2);
@@ -496,7 +455,7 @@ fn side_effect_long_form_reorders_named_params_positionally() {
 #[test]
 fn side_effect_short_form_routes_through_expression_path() {
     let config = parse_lifecycle_config(
-        &json!({"start": {"stack": [{"action": {"ensure_file": "out/log.md"}}]}}),
+        &json!({ "start": [{ "ensure_file": "out/log.md" }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -524,45 +483,6 @@ fn side_effect_short_form_routes_through_expression_path() {
 }
 
 #[test]
-fn emit_top_level_for_signal_fires_comm_without_running_stack() {
-    // The stack carries a side-effect action; `emit_top_level_for_signal`
-    // must emit only the top-level communication and never touch it.
-    let config = parse_lifecycle_config(
-        &json!({
-            "success": {
-                "stderr": "top-level only",
-                "stack": [{"action": {"info": "must not run"}}]
-            }
-        }),
-        Path::new("t.md"),
-    )
-    .unwrap();
-    let fm = map(json!({}));
-    let (_dir, engine) = temp_engine();
-    let shell = MockShell::new(0);
-    let recorder = Recorder::default();
-    let harness = Harness::default();
-    let context = ctx(
-        LifecycleSignal::Success,
-        &fm,
-        None,
-        &engine,
-        &shell,
-        &recorder,
-        &harness,
-        Path::new("t.md"),
-    );
-
-    context.emit_top_level_for_signal(&config);
-
-    assert_eq!(
-        recorder.events(),
-        vec![Emitted::Stderr("top-level only".to_string())],
-        "only the top-level stderr fires; the stack's info action does not"
-    );
-}
-
-#[test]
 fn empty_event_yields_default_outcome() {
     let config = LifecycleConfig::default();
     let fm = map(json!({}));
@@ -585,11 +505,10 @@ fn empty_event_yields_default_outcome() {
     assert!(recorder.events().is_empty());
 }
 
-/// Legacy top-level-only lifecycle prompts (no `stack:`, no `initialize`/
-/// `finalize`/`loop`) must emit the same channels and order as before the
-/// seven-event model was introduced.
+/// Prompts that author their events as root dictionaries (no `initialize`/
+/// `finalize`/`loop`) emit the same channels, in canonical order.
 #[test]
-fn legacy_top_level_only_prompts_emit_same_channels() {
+fn root_dictionary_prompts_emit_channels_in_canonical_order() {
     let config = parse_lifecycle_config(
         &json!({
             "start": {
@@ -665,7 +584,7 @@ fn legacy_top_level_only_prompts_emit_same_channels() {
 #[test]
 fn deferred_effect_invalid_resolved_name_reports_unknown_effect() {
     let config = parse_lifecycle_config(
-        &json!({"success": {"stack": [{"action": {"effect": "{{effect_name}}"}}]}}),
+        &json!({ "success": [{ "effect": "{{effect_name}}" }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -695,7 +614,7 @@ fn deferred_effect_invalid_resolved_name_reports_unknown_effect() {
 #[test]
 fn deferred_effect_valid_resolved_name_dispatches() {
     let config = parse_lifecycle_config(
-        &json!({"success": {"stack": [{"action": {"effect": "{{effect_name}}"}}]}}),
+        &json!({ "success": [{ "effect": "{{effect_name}}" }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -733,7 +652,7 @@ fn deferred_effect_valid_resolved_name_dispatches() {
 #[test]
 fn shell_spawn_failure_projects_the_typed_runner_error() {
     let config = parse_lifecycle_config(
-        &json!({"start": {"stack": [{"action": {"shell": "definitely-not-a-binary"}}]}}),
+        &json!({ "start": [{ "shell": "definitely-not-a-binary" }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -793,11 +712,7 @@ fn shell_run_error_exposes_its_io_source() {
 #[test]
 fn side_effect_dispatch_failure_keeps_the_action_failure_aliases() {
     let config = parse_lifecycle_config(
-        &json!({
-            "success": {
-                "stack": [{"action": {"append_line": ["/nonexistent-dir/x/y.md", "line"]}}]
-            }
-        }),
+        &json!({ "success": [{ "append_line": ["/nonexistent-dir/x/y.md", "line"] }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -828,10 +743,12 @@ fn side_effect_dispatch_failure_keeps_the_action_failure_aliases() {
 
 #[test]
 fn programmatic_initialize_shell_is_rejected_even_with_no_error() {
-    let mut config = parse_lifecycle_config(&json!({
-        "start": {"stack": [{"action": {"action": "shell", "command": "echo forbidden", "no_error": true}}]}
-    }), Path::new("test.md")).unwrap();
-    config.stacks.initialize = config.stacks.start.take();
+    let mut config = parse_lifecycle_config(
+        &json!({ "start": [{ "shell": { "command": "echo forbidden", "no_error": true } }] }),
+        Path::new("test.md"),
+    )
+    .unwrap();
+    config.stacks.initialize = std::mem::take(&mut config.stacks.start);
     let fm = map(json!({}));
     let (_dir, engine) = temp_engine();
     let shell = MockShell::new(0);

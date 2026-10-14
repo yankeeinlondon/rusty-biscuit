@@ -52,7 +52,7 @@ pub struct LoopIterationContext {
     pub iteration: usize,
     /// Frontmatter state for this iteration.
     pub frontmatter: Map<String, Value>,
-    /// Ambient variables for this iteration.
+    /// The `loop` global's values for this iteration.
     pub ambient: LoopAmbient,
 }
 
@@ -60,16 +60,14 @@ impl LoopIterationContext {
     /// Build the overrides for prompt preparation.
     ///
     /// The result is `caller` — the run's own override layers — with the
-    /// current frontmatter and the read-only ambient loop variables on top.
-    /// Ambient variables intentionally shadow frontmatter keys for the duration
-    /// of an iteration.
+    /// current frontmatter on top. The loop values are not frontmatter: they
+    /// are the `loop` global ([`LoopAmbient::to_value`]), never an override.
     ///
     /// A frontmatter key is authored only while it still holds exactly the
     /// value `caller` supplied as authored (a CLI setter carried through the
     /// seed). Everything else was produced by the run — a control variable
-    /// lifted from the composed seed, a loop action result, an ambient value
-    /// such as `_loop_last_output` — so it is data, and its `{{ … }}` or
-    /// `$( … )` is never scanned again.
+    /// lifted from the composed seed or a loop action result — so it is data,
+    /// and its `{{ … }}` or `$( … )` is never scanned again.
     pub fn as_layered_overrides(&self, caller: &LayeredOverrides) -> LayeredOverrides {
         let mut overrides = caller.clone();
         for (key, value) in &self.frontmatter {
@@ -82,9 +80,6 @@ impl LoopIterationContext {
             };
             overrides.insert(origin, key.clone(), value.clone());
         }
-        let mut ambient = Map::new();
-        insert_ambient_overrides(&mut ambient, &self.ambient);
-        overrides.push(OverrideOrigin::Data, Some(&Value::Object(ambient)));
         overrides
     }
 }
@@ -136,7 +131,7 @@ pub struct LoopIterationOutput {
     /// was.
     ///
     /// Every iteration is its own run, so the loop gate that follows it, and
-    /// the next iteration's `_loop_is_last` prediction, read this snapshot
+    /// the next iteration's `loop.is_last` prediction, read this snapshot
     /// rather than the one the loop started with. `None` keeps the most recent
     /// snapshot the loop has.
     pub context: Option<darkmatter::markdown::compose::ComposeContext>,
@@ -283,23 +278,4 @@ impl LoopExecutionResult {
         self.handoff = Some(handoff);
         self
     }
-}
-
-/// Insert the read-only ambient loop variables (`_loop_*`) into a frontmatter
-/// override map for prompt preparation.
-pub(super) fn insert_ambient_overrides(frontmatter: &mut Map<String, Value>, ambient: &LoopAmbient) {
-    frontmatter.insert(
-        "_loop_count".to_string(),
-        Value::Number(ambient.iteration.into()),
-    );
-    frontmatter.insert("_loop_is_first".to_string(), Value::Bool(ambient.is_first));
-    frontmatter.insert("_loop_is_last".to_string(), Value::Bool(ambient.is_last));
-    frontmatter.insert(
-        "_loop_last_output".to_string(),
-        Value::String(ambient.last_output.clone()),
-    );
-    frontmatter.insert(
-        "_loop_last_exit_code".to_string(),
-        Value::Number(ambient.last_exit_code.into()),
-    );
 }

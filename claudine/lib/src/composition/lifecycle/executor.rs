@@ -1,11 +1,10 @@
 //! Lifecycle stack execution engine.
 //!
 //! Given a parsed [`LifecycleConfig`] and a [`LifecycleSignal`], this module
-//! runs one lifecycle event: it emits the top-level communication properties
-//! first, then processes the typed `stack:` top to bottom. Each stack item's
-//! `when:` clause is evaluated against the lifecycle execution context; when
-//! it matches, the item's actions run in order until a lifecycle control
-//! action terminates the event.
+//! runs one lifecycle event: it walks the event's ordered nodes serially. A
+//! `when` guard is evaluated once, when its item is reached, against the live
+//! state, and only the selected body runs. The first flow-control directive
+//! reached ends the whole event, however deeply it is nested.
 //!
 //! ## Scope
 //!
@@ -66,14 +65,12 @@ use serde_json::{Map, Value};
 use tracing::warn;
 
 use super::super::error::{CompositionError, LifecycleEvaluationReason};
-use super::{
-    LifecycleConfig, LifecycleEmitter, LifecycleNotification, LifecycleSignal, audio_phases,
-    tts_config_from_settings,
-};
-use super::bindings::{LifecycleScope, LifecycleValues, runtime_bindings};
+use super::{LifecycleConfig, LifecycleEmitter, LifecycleSignal, tts_config_from_settings};
+use super::bindings::{LifecycleScope, LifecycleValues, runtime_bindings_in_loop};
+use crate::composition::looping::LoopAmbient;
 use super::actions::{
-    CommunicationChannel, LifecycleAction, LifecycleActionKind, LifecycleControlAction, ProxyWith,
-    ProxyWithValue, RetryBackoff, RuntimeSet, is_known_side_effect,
+    CommunicationChannel, LifecycleAction, LifecycleActionKind, LifecycleControlAction,
+    LifecycleNode, WithOverlay, WithValue, RetryBackoff, RuntimeSet, is_known_side_effect,
 };
 use crate::composition::coordinator::ActionLocation;
 use super::context::{LifecycleCause, LifecycleErrorInfo, LifecycleTiming};
@@ -132,6 +129,12 @@ pub enum StackControl {
         backoff: RetryBackoff,
         /// Evaluated delay duration (default `"0s"`).
         delay: String,
+        /// The evaluated `retry.with` overlay, empty when `with:` was omitted
+        /// or authored as `{}`. Resolved data, never templates, evaluated by
+        /// the same path as [`StackControl::Proxy`]'s overlay. It applies to the
+        /// fresh read of this one transition only; the runtime never retains
+        /// it for a later retry or resume.
+        overlay: IndexMap<String, Value>,
     },
 
     /// Resume the agent session with a follow-up message.
@@ -541,8 +544,8 @@ pub struct StackExecutionContext<'a> {
     /// caller holding launch evidence supplies one.
     ///
     /// `current` is observed once per event: a constructor passes
-    /// [`CurrentAuthority::memoized`], so every read in the event's
-    /// notification fields and stack agrees, and [`Self::with_signal`] starts a
+    /// [`CurrentAuthority::memoized`], so every read in the event's stack
+    /// agrees, and [`Self::with_signal`] starts a
     /// new memo for another event.
     ///
     /// Owned rather than borrowed because the authority is a cheap handle to
@@ -556,6 +559,10 @@ pub struct StackExecutionContext<'a> {
     /// scope the group scheduler enters and leaves, which is why it arrives as
     /// a borrowed map rather than a snapshot type.
     pub group: Option<&'a Map<String, Value>>,
+    /// The `loop` global: the enclosing loop iteration's values, in scope for
+    /// the loop gate and every event of one iteration. `None` is known to be
+    /// outside any loop, where reading `loop` is unavailable.
+    pub loop_values: Option<&'a LoopAmbient>,
     /// Base directory for read-side expression functions and file references.
     pub base_dir: Option<&'a Path>,
     /// Base directory for `ctx.*` capture only (the launch area); when `None`,
@@ -586,46 +593,6 @@ pub struct StackExecutionContext<'a> {
     pub messaging: &'a RuntimeMessagingSettings,
     /// Global settings (TTS configuration).
     pub settings: &'a GlobalSettings,
-}
-
-/// Which authored container a running stack came from, for the property paths
-/// its diagnostics report.
-///
-/// An event's items are reached through `{signal}.stack[i]`; a task's
-/// `setup:`/`teardown:` value *is* the list, so its items are `{root}[i]` with
-/// no `stack` segment. That spelling is the only difference between the two, so
-/// they share one loop and this is where it lives. Carried as a call argument
-/// rather than on [`StackExecutionContext`] because one context runs both kinds
-/// of stack, and as a borrowed root rather than on [`ActionLocation`] because
-/// that type is the owned, `Copy` proxy-provenance identity.
-#[derive(Debug, Clone, Copy)]
-enum StackRoot<'a> {
-    /// A lifecycle event block's `stack:`.
-    Event,
-    /// A task's `setup:`/`teardown:` list, at its source-rooted property.
-    Task(&'a str),
-}
-
-impl StackRoot<'_> {
-    /// The property of the `when:` guard on the `index`-th item.
-    fn when_property(&self, signal: LifecycleSignal, index: usize) -> String {
-        match self {
-            Self::Event => format!("{}.stack[{index}].when", signal.property_name()),
-            Self::Task(root) => format!("{root}[{index}].when"),
-        }
-    }
-
-    /// The property of the action `location` names.
-    fn action_property(&self, location: ActionLocation) -> String {
-        match self {
-            Self::Event => location.to_string(),
-            Self::Task(root) => format!(
-                "{root}[{}].action[{}]",
-                location.stack_index(),
-                location.action_index()
-            ),
-        }
-    }
 }
 
 /// What a single action did.
@@ -659,112 +626,27 @@ enum ActionFailure {
     Dispatch(LifecycleErrorInfo),
 }
 
-impl ActionFailure {
-    /// Borrow the underlying error snapshot regardless of layer.
-    fn info(&self) -> &LifecycleErrorInfo {
-        match self {
-            ActionFailure::Evaluation(info) | ActionFailure::Dispatch(info) => info,
-        }
-    }
-}
 
 impl StackExecutionContext<'_> {
-    /// Run the event: top-level communication first, then the stack.
+    /// Run the event's stack.
     pub fn execute_event(&self, config: &LifecycleConfig) -> LifecycleEventOutcome {
-        if let Some(notification) = config.get(self.signal) {
-            // Top-level emission fails closed: a resolution failure halts the
-            // event before its stack runs, mirroring a stack-action failure
-            // (C4). An interpolation raise is an evaluation error; an invalid
-            // resolved effect name is a dispatch failure.
-            if let Err(failure) = self.emit_top_level(notification) {
-                let info = failure.info();
-                warn!(
-                    signal = ?self.signal,
-                    kind = info.kind,
-                    variant = %info.variant,
-                    message = %info.msg,
-                    "lifecycle top-level emission failed closed"
-                );
-                return match failure {
-                    ActionFailure::Evaluation(info) => LifecycleEventOutcome {
-                        evaluation_error: Some(info),
-                        ..Default::default()
-                    },
-                    ActionFailure::Dispatch(info) => LifecycleEventOutcome {
-                        action_error: Some(info),
-                        ..Default::default()
-                    },
-                };
-            }
-        }
         self.execute_stack_for_signal(config)
     }
 
-    /// Run only the stack for this event's signal, without emitting the
-    /// top-level communication properties.
-    ///
-    /// Used by [`LifecycleRunGuard`] when it owns top-level emission and
-    /// only needs the stack actions evaluated.
+    /// Run the stack for this event's signal.
     pub fn execute_stack_for_signal(&self, config: &LifecycleConfig) -> LifecycleEventOutcome {
-        match config.stack(self.signal) {
-            Some(items) if !items.is_empty() => self.execute_stack(items, StackRoot::Event),
-            _ => LifecycleEventOutcome::default(),
-        }
-    }
-
-    /// Emit only the top-level communication properties for this event's
-    /// signal, without running the stack.
-    ///
-    /// The counterpart to [`Self::execute_stack_for_signal`]: a caller that has
-    /// already run a stack once (e.g. to inspect its [`StackControl`] before
-    /// committing to a terminal signal) uses this to fire the communication
-    /// surface without re-running the stack's side effects.
-    ///
-    /// Returns the late-binding **evaluation** error (a raised top-level
-    /// interpolation) when one occurs, so a terminal-phase caller can halt the
-    /// run on it. A side-effect **dispatch** failure (an invalid resolved
-    /// `effect` name) is logged and skipped — the terminal slot is already
-    /// taken, so it follows the terminal-phase log-and-continue policy and is
-    /// not returned.
-    pub fn emit_top_level_for_signal(
-        &self,
-        config: &LifecycleConfig,
-    ) -> Option<LifecycleErrorInfo> {
-        if let Some(notification) = config.get(self.signal) {
-            if let Err(failure) = self.emit_top_level(notification) {
-                let info = failure.info();
-                warn!(
-                    signal = ?self.signal,
-                    kind = info.kind,
-                    variant = %info.variant,
-                    message = %info.msg,
-                    "lifecycle top-level emission failed; field skipped"
-                );
-                return match failure {
-                    ActionFailure::Evaluation(info) => Some(info),
-                    ActionFailure::Dispatch(_) => None,
-                };
-            }
-        }
-        None
+        self.execute_stack(config.stack(self.signal))
     }
 
     /// Run one already-parsed action stack — a task's `setup:` or `teardown:`.
     ///
-    /// A task stack has no event block of its own, so it never emits top-level
-    /// communication; only the items run. Mutations reach the live cell exactly
-    /// as they do for an event stack.
-    ///
-    /// `property` is the source-rooted path of the stack value itself
-    /// (`tasks[0].setup`). Item `n`'s diagnostics are rooted at `{property}[n]`,
-    /// so a task-stack failure names the authored task property rather than the
-    /// synthetic signal the stack was parsed under.
-    pub fn execute_action_stack(
-        &self,
-        items: &[super::actions::LifecycleStackItem],
-        property: &str,
-    ) -> LifecycleEventOutcome {
-        self.execute_stack(items, StackRoot::Task(property))
+    /// Mutations reach the live cell exactly as they do for an event stack.
+    /// Diagnostics name each action's authored path, which the parser rooted
+    /// at the task property (`tasks[0].setup[1].shell`), so a task-stack
+    /// failure names the authored task property rather than the synthetic
+    /// signal the stack was parsed under.
+    pub fn execute_action_stack(&self, nodes: &[LifecycleNode]) -> LifecycleEventOutcome {
+        self.execute_stack(nodes)
     }
 
     /// Dispatch one action as a task's `side_effect:` primary and return the
@@ -869,6 +751,7 @@ impl StackExecutionContext<'_> {
                     .map(darkmatter::markdown::compose::CurrentAuthority::memoized),
             },
             group: self.group,
+            loop_values: self.loop_values,
             base_dir: self.base_dir,
             ctx_base_dir: self.ctx_base_dir,
             prepared_context: self.prepared_context,
@@ -903,6 +786,7 @@ impl StackExecutionContext<'_> {
             timing: self.timing,
             current: self.current.clone(),
             group: self.group,
+            loop_values: self.loop_values,
             base_dir: self.base_dir,
             ctx_base_dir: self.ctx_base_dir,
             prepared_context: self.prepared_context,
@@ -1000,6 +884,7 @@ impl StackExecutionContext<'_> {
             timing: self.timing,
             current: self.current.clone(),
             group: self.group,
+            loop_values: self.loop_values,
             base_dir: self.base_dir,
             ctx_base_dir: self.ctx_base_dir,
             prepared_context: Some(prepared),
@@ -1018,13 +903,14 @@ impl StackExecutionContext<'_> {
     /// This scope's binding view and a runtime entry for every lifecycle
     /// global it declares, from the catalog.
     fn bindings(&self) -> (Arc<BindingView>, HashMap<String, RuntimeBinding<'static>>) {
-        runtime_bindings(
+        runtime_bindings_in_loop(
             self.binding_scope(),
             LifecycleValues {
                 err: self.err,
                 timing: self.timing,
                 group: self.group,
             },
+            self.loop_values,
         )
     }
 
@@ -1174,98 +1060,6 @@ impl StackExecutionContext<'_> {
         Err(LifecycleErrorInfo::from_composition_error(&err))
     }
 
-    /// Emit the top-level communication properties for one notification.
-    ///
-    /// Order: stdout, stderr, info, warn, success, message, notify, then the
-    /// audio phases (`say`/`say_first` and `effect`, in their deterministic
-    /// order). These strings are deferred lifecycle keys (raw `{{ … }}` through
-    /// main compose), so each is interpolated **at event-time** against the live
-    /// document state plus the event's lifecycle globals (`err`/`timing`/`group`)
-    /// and the late-binding root `current`.
-    ///
-    /// Fails closed (C4): a resolution raise (malformed span, unknown function,
-    /// unavailable global) becomes an
-    /// [`ActionFailure::Evaluation`] and an unknown resolved `effect` name an
-    /// [`ActionFailure::Dispatch`], aborting emission before the offending field
-    /// is sent, so no side effect dispatches silently-empty or raw operational
-    /// text.
-    fn emit_top_level(&self, n: &LifecycleNotification) -> Result<(), ActionFailure> {
-        if let Some(text) = self.resolve_emit("stdout", n.stdout.as_deref())? {
-            self.emitter.emit_stdout(&text, self.term);
-        }
-        if let Some(text) = self.resolve_emit("stderr", n.stderr.as_deref())? {
-            self.emitter.emit_stderr(self.signal, &text, self.term);
-        }
-        if let Some(text) = self.resolve_emit("info", n.info.as_deref())? {
-            self.emitter.emit_info(&text, self.term);
-        }
-        if let Some(text) = self.resolve_emit("warn", n.warn.as_deref())? {
-            self.emitter.emit_warn(&text, self.term);
-        }
-        if let Some(text) = self.resolve_emit("success", n.success.as_deref())? {
-            self.emitter.emit_success(&text, self.term);
-        }
-        if let Some(text) = self.resolve_emit("message", n.message.as_deref())? {
-            self.emitter
-                .emit_message(&text, self.source_path, self.repo_root, self.messaging);
-        }
-        if let Some(title) = self.resolve_emit("notify", n.notify.as_deref())? {
-            self.emitter.emit_notification(&title);
-        }
-        for phase in audio_phases(n) {
-            match phase {
-                super::AudioPhase::Speak(text) => {
-                    let field = if n.say.is_some() { "say" } else { "say_first" };
-                    if let Some(text) = self.resolve_emit(field, Some(&text))? {
-                        let config = tts_config_from_settings(self.settings.tts.as_ref());
-                        self.emitter.emit_speech(&text, config);
-                    }
-                }
-                super::AudioPhase::Effect(name) => {
-                    if let Some(name) = self.resolve_emit("effect", Some(&name))? {
-                        self.validate_effect_name(&name)
-                            .map_err(ActionFailure::Dispatch)?;
-                        self.emitter.emit_effect(&name);
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Resolve a top-level communication field at event-time.
-    ///
-    /// `None` input (absent field) yields `Ok(None)`. A field with no `{{ … }}`
-    /// span is emitted verbatim. A field carrying interpolation is resolved
-    /// through DM2 against [`Self::frontmatter`]; a resolution raise is
-    /// returned as an [`ActionFailure::Evaluation`] so the caller fails the
-    /// event closed rather than dispatching silently-empty or raw template text.
-    fn resolve_emit(
-        &self,
-        field: &str,
-        text: Option<&str>,
-    ) -> Result<Option<String>, ActionFailure> {
-        let Some(text) = text else { return Ok(None) };
-        if !text.contains("{{") {
-            return Ok(Some(text.to_string()));
-        }
-        // Top-level fields read the live cross-event document state when present
-        // so they observe frontmatter mutations made by *earlier* events in the
-        // same attempt; otherwise the composed base frontmatter is used.
-        let borrowed = self
-            .live_frontmatter
-            .map(|cell| cell.lock().expect(LIVE_POISONED));
-        let fm = borrowed.as_deref().unwrap_or(self.frontmatter);
-        self.resolve_string_value(text, fm)
-            .map(|value| Some(scalar_string(&value)))
-            .map_err(|error| {
-                ActionFailure::Evaluation(
-                    LifecycleErrorInfo::from_expr_error("interpolation", error)
-                        .at_property(format!("{}.{field}", self.signal.property_name())),
-                )
-            })
-    }
-
     /// Process the typed stack top to bottom.
     ///
     /// Holds an evolving in-memory `working` frontmatter, seeded from the shared
@@ -1279,75 +1073,79 @@ impl StackExecutionContext<'_> {
     /// live cell so a *later* event observes this event's mutations — including
     /// mutations made before an early control/error return (the side effect
     /// already hit disk).
-    fn execute_stack(
-        &self,
-        items: &[super::actions::LifecycleStackItem],
-        root: StackRoot<'_>,
-    ) -> LifecycleEventOutcome {
+    fn execute_stack(&self, nodes: &[LifecycleNode]) -> LifecycleEventOutcome {
+        if nodes.is_empty() {
+            return LifecycleEventOutcome::default();
+        }
         let mut working: Map<String, Value> = match self.live_frontmatter {
             Some(cell) => cell.lock().expect(LIVE_POISONED).clone(),
             None => self.frontmatter.clone(),
         };
-        let outcome = self.execute_stack_inner(items, root, &mut working);
+        let outcome = self
+            .execute_nodes(nodes, &mut working)
+            .unwrap_or_default();
         if let Some(cell) = self.live_frontmatter {
             *cell.lock().expect(LIVE_POISONED) = working;
         }
         outcome
     }
 
-    /// Run the stack loop against a caller-owned `working` map.
+    /// Run one ordered node list against a caller-owned `working` map.
     ///
-    /// Split from [`Self::execute_stack`] so the live-cell seed (before) and
-    /// write-back (after) wrap a single inner pass that owns no cross-event
-    /// concern: every return path here leaves `working` holding the mutations
-    /// made up to that point, which the caller persists.
-    fn execute_stack_inner(
+    /// Returns `Some` when the event must end — a directive fired, or an
+    /// action or guard failed — so every enclosing list stops at once: a
+    /// directive inside a nested `else` ends the whole event, not just its
+    /// branch. `None` means the list ran to completion. Every return path
+    /// leaves `working` holding the mutations made up to that point, which
+    /// the caller persists.
+    ///
+    /// A guard is evaluated once, when its item is reached, against the live
+    /// state; only the selected body runs. A guard that raises is an
+    /// evaluation error and never selects `else`.
+    fn execute_nodes(
         &self,
-        items: &[super::actions::LifecycleStackItem],
-        root: StackRoot<'_>,
+        nodes: &[LifecycleNode],
         working: &mut Map<String, Value>,
-    ) -> LifecycleEventOutcome {
-        for (stack_index, item) in items.iter().enumerate() {
-            match self.when_matches(item.when.as_ref(), working) {
-                Ok(true) => {}
-                Ok(false) => continue,
-                // A `when:` guard that raised is an expression-layer evaluation
-                // error, not a side-effect dispatch failure.
-                Err(info) => {
-                    let property = root.when_property(self.signal, stack_index);
-                    return LifecycleEventOutcome {
-                        evaluation_error: Some(info.at_property(property)),
-                        ..Default::default()
-                    };
+    ) -> Option<LifecycleEventOutcome> {
+        for node in nodes {
+            let ended = match node {
+                LifecycleNode::Conditional(conditional) => {
+                    match self.when_matches(Some(&conditional.when), working) {
+                        Ok(true) => self.execute_nodes(&conditional.then, working),
+                        Ok(false) => self.execute_nodes(&conditional.otherwise, working),
+                        Err(info) => Some(LifecycleEventOutcome {
+                            evaluation_error: Some(
+                                info.at_property(conditional.path.field("when").to_string()),
+                            ),
+                            ..Default::default()
+                        }),
+                    }
                 }
-            }
-            for (action_index, action) in item.actions.iter().enumerate() {
-                let location = ActionLocation::new(self.signal, stack_index, action_index);
-                let property = root.action_property(location);
-                match self.run_action(action, location, &property, working) {
-                    ActionStep::Continue => {}
-                    ActionStep::Control(control) => {
-                        return LifecycleEventOutcome {
+                LifecycleNode::Action(action) => {
+                    let location = ActionLocation::new(self.signal, action.path.clone());
+                    let property = action.path.to_string();
+                    match self.run_action(action, location, &property, working) {
+                        ActionStep::Continue => None,
+                        ActionStep::Control(control) => Some(LifecycleEventOutcome {
                             control: Some(control),
                             ..Default::default()
-                        };
-                    }
-                    ActionStep::Errored(info) => {
-                        return LifecycleEventOutcome {
+                        }),
+                        ActionStep::Errored(info) => Some(LifecycleEventOutcome {
                             action_error: Some(info),
                             ..Default::default()
-                        };
-                    }
-                    ActionStep::EvaluationErrored(info) => {
-                        return LifecycleEventOutcome {
+                        }),
+                        ActionStep::EvaluationErrored(info) => Some(LifecycleEventOutcome {
                             evaluation_error: Some(info.at_property(property)),
                             ..Default::default()
-                        };
+                        }),
                     }
                 }
+            };
+            if ended.is_some() {
+                return ended;
             }
         }
-        LifecycleEventOutcome::default()
+        None
     }
 
     /// Evaluate an optional `when:` clause, failing closed on an unresolvable
@@ -1443,7 +1241,7 @@ impl StackExecutionContext<'_> {
                 .map_err(ActionFailure::Evaluation),
             LifecycleActionKind::Communication(comm) => {
                 let message = self
-                    .render_message(&comm.message, working)
+                    .render_message(&comm.text, working)
                     .map_err(|error| {
                         ActionFailure::Evaluation(LifecycleErrorInfo::from_expr_error(
                             comm.channel.verb(),
@@ -1465,7 +1263,8 @@ impl StackExecutionContext<'_> {
                 self.run_shell_action(shell, working).map(|()| None)
             }
             LifecycleActionKind::RuntimeSet(set) => {
-                self.dispatch_runtime_set(set, &format!("{property}.set"), working)
+                // `property` is the `set` verb's own authored path.
+                self.dispatch_runtime_set(set, property, working)
                     .map(|_| None)
             }
             LifecycleActionKind::SideEffect(effect) => self
@@ -1691,7 +1490,7 @@ impl StackExecutionContext<'_> {
         }
         let mut resolved_values = HashMap::with_capacity(set.len());
         for (key, value) in set.iter() {
-            if matches!(value, ProxyWithValue::Shell(_)) {
+            if matches!(value, WithValue::Shell(_)) {
                 continue;
             }
             let resolved = self.resolve_with_value(value, &snapshot).map_err(|(suffix, error)| {
@@ -1976,17 +1775,21 @@ impl StackExecutionContext<'_> {
                 // the handoff. A failure in either leaves the source active with
                 // no partial overlay installed and the target untouched.
                 let target = self.render_message(target, fm).map_err(classify)?;
-                let overlay = self.resolve_proxy_with(with, &target, location, fm)?;
+                let overlay = self.resolve_with_overlay(with, &target, &location, fm)?;
                 StackControl::Proxy {
                     target,
                     overlay,
                     location,
                 }
             }
+            // The overlay resolves here, before the directive is returned, so an
+            // evaluation failure leaves no retry for the runtime to dispatch:
+            // no transition is taken and no attempt budget is spent.
             C::Retry {
                 max_attempts,
                 backoff,
                 delay,
+                with,
             } => StackControl::Retry {
                 max_attempts: self
                     .eval_opt_u32(max_attempts.as_ref(), fm)
@@ -1997,6 +1800,13 @@ impl StackExecutionContext<'_> {
                     .eval_opt_string(delay.as_ref(), fm)
                     .map_err(classify)?
                     .unwrap_or_else(|| "0s".to_string()),
+                // A retry's target is the fresh re-read of this same document.
+                overlay: self.resolve_with_overlay(
+                    with,
+                    &biscuit_file::to_portable_string(self.source_path),
+                    &location,
+                    fm,
+                )?,
             },
             C::Resume {
                 message,
@@ -2015,17 +1825,21 @@ impl StackExecutionContext<'_> {
         })
     }
 
-    /// Evaluate a whole `proxy.with` mapping into the typed overlay the target
-    /// will receive.
+    /// Evaluate a whole `proxy.with` or `retry.with` mapping into the typed
+    /// overlay the target will receive.
+    ///
+    /// `target` names the document the overlay is built for in a diagnostic:
+    /// the proxy target, or the current document for `retry`. `location` is the
+    /// authored directive, whose last path segment names the verb.
     ///
     /// Every value goes through the same DM2 subtree composition the rest of
     /// the lifecycle surface uses, so `with:` adds no second interpolation
     /// grammar. The first failing value aborts the whole mapping.
-    fn resolve_proxy_with(
+    fn resolve_with_overlay(
         &self,
-        with: &ProxyWith,
+        with: &WithOverlay,
         target: &str,
-        location: ActionLocation,
+        location: &ActionLocation,
         fm: &Map<String, Value>,
     ) -> Result<IndexMap<String, Value>, LifecycleErrorInfo> {
         // Capture the snapshot-less fallback context ONCE for the whole overlay,
@@ -2034,7 +1848,7 @@ impl StackExecutionContext<'_> {
         // `prepared_context: None` caller re-runs a demand-driven capture per
         // leaf. A prepared caller already reuses its single snapshot.
         match self.prepared_context {
-            Some(_) => self.walk_proxy_with(self, with, target, location, fm),
+            Some(_) => self.walk_with_overlay(self, with, target, location, fm),
             None => {
                 let base = self
                     .ctx_base_dir
@@ -2043,19 +1857,19 @@ impl StackExecutionContext<'_> {
                 let content = proxy_with_scan_content(with);
                 let fallback = capture_proxy_with_fallback(base, &content);
                 let walker = self.with_prepared_context(&fallback);
-                self.walk_proxy_with(&walker, with, target, location, fm)
+                self.walk_with_overlay(&walker, with, target, location, fm)
             }
         }
     }
 
     /// Walk `with`'s leaves through `walker`, rooting a diagnostic at the exact
     /// nested property on failure.
-    fn walk_proxy_with(
+    fn walk_with_overlay(
         &self,
         walker: &StackExecutionContext<'_>,
-        with: &ProxyWith,
+        with: &WithOverlay,
         target: &str,
-        location: ActionLocation,
+        location: &ActionLocation,
         fm: &Map<String, Value>,
     ) -> Result<IndexMap<String, Value>, LifecycleErrorInfo> {
         let mut overlay = IndexMap::with_capacity(with.len());
@@ -2065,10 +1879,10 @@ impl StackExecutionContext<'_> {
                 .and_then(|resolved| reject_control_plane_template(key, resolved))
                 .map_err(|(suffix, error)| {
                     let cause = LifecycleCause::new(error);
-                    let err = CompositionError::LifecycleProxyWithEvaluationFailed {
+                    let err = CompositionError::LifecycleWithEvaluationFailed {
                         source_path: self.source_path.to_path_buf(),
-                        property: format!("{}.stack[{}]", location.signal().property_name(), location.stack_index()),
-                        path: format!("action[{}].with.{key}{suffix}", location.action_index()),
+                        property: location.to_string(),
+                        path: format!("with.{key}{suffix}"),
                         target: target.to_string(),
                         message: cause.to_string(),
                         cause: Some(cause),
@@ -2088,23 +1902,23 @@ impl StackExecutionContext<'_> {
     /// echoed.
     fn resolve_with_value(
         &self,
-        value: &ProxyWithValue,
+        value: &WithValue,
         fm: &Map<String, Value>,
     ) -> Result<Value, (String, LifecycleExprError)> {
         match value {
-            ProxyWithValue::Null => Ok(Value::Null),
+            WithValue::Null => Ok(Value::Null),
             // Only a `set` mapping holds one, and `set` runs it separately.
-            ProxyWithValue::Shell(shell) => Err((
+            WithValue::Shell(shell) => Err((
                 String::new(),
                 LifecycleExprError::prose(format!(
                     "`{}` is a shell value, which only a `set` action runs",
                     shell.authored
                 )),
             )),
-            ProxyWithValue::Scalar(expr) => self
+            WithValue::Scalar(expr) => self
                 .resolve_typed_value(expr, fm)
                 .map_err(|msg| (String::new(), msg)),
-            ProxyWithValue::Array(items) => items
+            WithValue::Array(items) => items
                 .iter()
                 .enumerate()
                 .map(|(i, item)| {
@@ -2113,7 +1927,7 @@ impl StackExecutionContext<'_> {
                 })
                 .collect::<Result<Vec<_>, _>>()
                 .map(Value::Array),
-            ProxyWithValue::Object(map) => map
+            WithValue::Object(map) => map
                 .iter()
                 .map(|(k, v)| {
                     self.resolve_with_value(v, fm)
@@ -2204,7 +2018,7 @@ fn take_proxy_with_fallback_capture_hints() -> Vec<String> {
 /// span is a parsed [`Expr`], scanned as its rendering. The union feeds
 /// [`ComposeContext::capture_for_content`], which stays datetime-only when no
 /// leaf references `ctx.*`.
-fn proxy_with_scan_content(with: &ProxyWith) -> String {
+fn proxy_with_scan_content(with: &WithOverlay) -> String {
     let mut content = String::new();
     for (_, value) in with.iter() {
         push_proxy_with_scan_content(value, &mut content);
@@ -2213,27 +2027,27 @@ fn proxy_with_scan_content(with: &ProxyWith) -> String {
 }
 
 /// Recursively append one `with:` value's scan content to `content`.
-fn push_proxy_with_scan_content(value: &ProxyWithValue, content: &mut String) {
+fn push_proxy_with_scan_content(value: &WithValue, content: &mut String) {
     match value {
-        ProxyWithValue::Null => {}
-        ProxyWithValue::Shell(shell) => {
+        WithValue::Null => {}
+        WithValue::Shell(shell) => {
             content.push(' ');
             content.push_str(&shell.authored);
         }
-        ProxyWithValue::Scalar(Expr::StringLiteral(s)) => {
+        WithValue::Scalar(Expr::StringLiteral(s)) => {
             content.push(' ');
             content.push_str(s);
         }
-        ProxyWithValue::Scalar(expr) => {
+        WithValue::Scalar(expr) => {
             content.push(' ');
             content.push_str(&expr.to_string());
         }
-        ProxyWithValue::Array(items) => {
+        WithValue::Array(items) => {
             for item in items {
                 push_proxy_with_scan_content(item, content);
             }
         }
-        ProxyWithValue::Object(map) => {
+        WithValue::Object(map) => {
             for (_, value) in map {
                 push_proxy_with_scan_content(value, content);
             }

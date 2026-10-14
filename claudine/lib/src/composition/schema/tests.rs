@@ -360,15 +360,22 @@ fn schema_validates_while_lifecycle_err_span_is_deferred() {
             .any(|k| k == "failure"),
         "failure should be reported as a deferred lifecycle key"
     );
+    let failure = prepared
+        .lifecycle
+        .stack(crate::composition::LifecycleSignal::Failure);
+    let [crate::composition::lifecycle_actions::LifecycleNode::Action(action)] = failure else {
+        panic!("expected one failure action, got {failure:?}");
+    };
+    let crate::composition::lifecycle_actions::LifecycleActionKind::Communication(message) =
+        &action.kind
+    else {
+        panic!("expected a message action, got {action:?}");
+    };
     assert_eq!(
-        prepared
-            .lifecycle
-            .failure
-            .as_ref()
-            .unwrap()
-            .message
-            .as_deref(),
-        Some("❌️ phase {{phase}} failed: {{err.msg}}"),
+        message.text,
+        darkmatter::markdown::compose::expression::Expr::StringLiteral(
+            "❌️ phase {{phase}} failed: {{err.msg}}".to_string()
+        ),
         "lifecycle parsing sees the raw late-binding span after schema validation"
     );
 }

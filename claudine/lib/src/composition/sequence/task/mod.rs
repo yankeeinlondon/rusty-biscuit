@@ -47,7 +47,7 @@ use serde_json::{Map, Value};
 
 use super::super::error::CompositionError;
 use super::super::lifecycle::actions::{
-    LifecycleAction, LifecycleActionKind, LifecycleStackItem, is_known_side_effect,
+    LifecycleAction, LifecycleActionKind, LifecycleNode, for_each_action_mut, is_known_side_effect,
 };
 use super::super::lifecycle::context::{LifecycleCause, LifecycleErrorInfo};
 use super::super::lifecycle::executor::{LifecycleExprError, StackExecutionContext};
@@ -535,7 +535,7 @@ impl TaskExecution<'_> {
     fn run_stack(
         &self,
         stage: TaskStage,
-        items: &[LifecycleStackItem],
+        items: &[LifecycleNode],
         err: Option<&LifecycleErrorInfo>,
     ) -> Option<TaskDiagnostic> {
         // The stack reuses the step's context, so it names its own scope:
@@ -569,9 +569,7 @@ impl TaskExecution<'_> {
             }
             None => stack,
         };
-        let outcome = context
-            .in_scope(scope)
-            .execute_action_stack(items, &self.stack_property(stage));
+        let outcome = context.in_scope(scope).execute_action_stack(items);
         outcome
             .evaluation_error
             .or(outcome.action_error)
@@ -950,41 +948,54 @@ impl TaskExecution<'_> {
     fn apply_approved_commands(
         &self,
         stage: TaskStage,
-        items: &mut [LifecycleStackItem],
+        items: &mut [LifecycleNode],
     ) -> Result<(), CompositionError> {
-        for action in items.iter_mut().flat_map(|item| item.actions.iter_mut()) {
-            let LifecycleActionKind::Shell(shell) = &mut action.kind else {
-                continue;
-            };
-            for expr in std::iter::once(&mut shell.command).chain(shell.on_error.as_mut()) {
-                let literal = match expr {
-                    Expr::StringLiteral(text) => !text.contains("{{"),
-                    Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => true,
-                    _ => false,
-                };
-                if literal {
-                    continue;
-                }
-                let approved = self.task.approved_stack_commands.iter().find(|approved| {
-                    approved.site().stage() == stage
-                        && action_value_to_expr(&Value::String(approved.site().authored().to_string()))
-                            .is_ok_and(|authored| authored == *expr)
-                });
-                let Some(approved) = approved else {
-                    return Err(CompositionError::SequenceShellResolution {
-                        command: expr.to_string(),
-                        task: self.label(),
-                        message: format!(
-                            "this `{}` command was not approved at sequence preflight",
-                            stage.key()
-                        ),
-                        source: None,
-                    });
-                };
-                *expr = Expr::StringLiteral(approved.command().to_string());
+        let mut result = Ok(());
+        for_each_action_mut(items, &mut |action| {
+            if result.is_ok() {
+                result = self.apply_approved_command(stage, action);
             }
-            shell.pre_resolved = true;
+        });
+        result
+    }
+
+    /// [`Self::apply_approved_commands`] for one action.
+    fn apply_approved_command(
+        &self,
+        stage: TaskStage,
+        action: &mut LifecycleAction,
+    ) -> Result<(), CompositionError> {
+        let LifecycleActionKind::Shell(shell) = &mut action.kind else {
+            return Ok(());
+        };
+        for expr in std::iter::once(&mut shell.command).chain(shell.on_error.as_mut()) {
+            let literal = match expr {
+                Expr::StringLiteral(text) => !text.contains("{{"),
+                Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => true,
+                _ => false,
+            };
+            if literal {
+                continue;
+            }
+            let approved = self.task.approved_stack_commands.iter().find(|approved| {
+                approved.site().stage() == stage
+                    && action_value_to_expr(&Value::String(approved.site().authored().to_string()))
+                        .is_ok_and(|authored| authored == *expr)
+            });
+            let Some(approved) = approved else {
+                return Err(CompositionError::SequenceShellResolution {
+                    command: expr.to_string(),
+                    task: self.label(),
+                    message: format!(
+                        "this `{}` command was not approved at sequence preflight",
+                        stage.key()
+                    ),
+                    source: None,
+                });
+            };
+            *expr = Expr::StringLiteral(approved.command().to_string());
         }
+        shell.pre_resolved = true;
         Ok(())
     }
 
@@ -1131,8 +1142,8 @@ impl TaskExecution<'_> {
 
 /// Both parsed action stacks; `None` for an absent or empty one.
 struct ParsedStacks {
-    setup: Option<Vec<LifecycleStackItem>>,
-    teardown: Option<Vec<LifecycleStackItem>>,
+    setup: Option<Vec<LifecycleNode>>,
+    teardown: Option<Vec<LifecycleNode>>,
 }
 
 /// Everything the stage machine decided, before output commit and timing.

@@ -114,6 +114,9 @@ pub fn decide_control(
             max_attempts,
             backoff,
             delay,
+            // The overlay is not a dispatch decision; the wrapper reads it
+            // from the control when it applies the re-entry.
+            overlay: _,
         } => {
             // `control_budget` carries the absolute attempt ceiling derived
             // from `max_attempts` when the control first fired. When this is

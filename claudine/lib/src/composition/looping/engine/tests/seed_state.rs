@@ -11,7 +11,7 @@ fn build_loop_seed_resolves_control_variables_and_omits_derived() {
         ("total_phases", json!("{{ 6 }}")),
         (
             "pass_icon",
-            json!("{{ _loop_is_last ? '✅' : '🧑‍💻' }}"),
+            json!("{{ total_phases > 5 ? '✅' : '🧑‍💻' }}"),
         ),
         (
             "loop",
@@ -48,12 +48,12 @@ fn build_loop_seed_with_lifecycle_carries_event_blocks_dropped_from_seed() {
             json!({
                 "until": "phase > 2",
                 "action": "increment(phase)",
-                "stack": [{"action": {"append_line": ["events.log", "gate"]}}],
+                "gate": [{"append_line": ["events.log", "gate"]}],
             }),
         ),
-        ("initialize", json!({"stack": [{"action": {"append_line": ["events.log", "initialize"]}}]})),
-        ("start", json!({"stack": [{"action": {"append_line": ["events.log", "start"]}}]})),
-        ("finalize", json!({"stack": [{"action": {"append_line": ["events.log", "finalize"]}}]})),
+        ("initialize", json!([{"append_line": ["events.log", "initialize"]}])),
+        ("start", json!([{"append_line": ["events.log", "start"]}])),
+        ("finalize", json!([{"append_line": ["events.log", "finalize"]}])),
     ]);
     let config = resolve_loop_config(&source).unwrap().unwrap();
 
@@ -72,11 +72,11 @@ fn build_loop_seed_with_lifecycle_carries_event_blocks_dropped_from_seed() {
     // The parsed lifecycle, however, carries every event block plus the
     // `loop:` gate concerns — exactly what the loop runner needs.
     assert!(!result.lifecycle.is_empty(), "lifecycle must not be empty");
-    assert!(result.lifecycle.stacks.initialize.is_some());
-    assert!(result.lifecycle.stacks.start.is_some());
-    assert!(result.lifecycle.stacks.finalize.is_some());
+    assert!(!result.lifecycle.stacks.initialize.is_empty());
+    assert!(!result.lifecycle.stacks.start.is_empty());
+    assert!(!result.lifecycle.stacks.finalize.is_empty());
     assert!(
-        result.lifecycle.stacks.loop_gate.is_some(),
+        !result.lifecycle.stacks.loop_gate.is_empty(),
         "the loop gate's lifecycle concerns must survive into the parsed config"
     );
 }
@@ -124,6 +124,9 @@ fn build_loop_seed_inline_mode_resolves_prompt_frontmatter_with_empty_body() {
     );
 }
 
+/// A derived frontmatter value recomputes each iteration from the `loop`
+/// global the iteration's preparation declares, even though `loop` is also the
+/// deferred `loop:` configuration key.
 #[test]
 fn seeded_loop_repro_runs_to_completion_with_live_derived_variable() {
     let source = make_source_with_body(
@@ -132,7 +135,7 @@ fn seeded_loop_repro_runs_to_completion_with_live_derived_variable() {
             ("total_phases", json!(6)),
             (
                 "pass_icon",
-                json!("{{ _loop_is_last ? '✅' : '🧑‍💻' }}"),
+                json!("{{ loop.is_last ? '✅' : '🧑‍💻' }}"),
             ),
             (
                 "loop",
@@ -157,12 +160,12 @@ fn seeded_loop_repro_runs_to_completion_with_live_derived_variable() {
         seed,
         LoopExecutionOptions::default(),
         |ctx| {
-            let prepared = prepare_direct(
-                &source,
-                PrepareOptions::new(crate::test_support::context()).with_layered_overrides(
+            let mut options = PrepareOptions::new(crate::test_support::context())
+                .with_layered_overrides(
                     ctx.as_layered_overrides(&crate::composition::LayeredOverrides::new()),
-                ),
-            )?;
+                );
+            options.loop_values = Some(ctx.ambient.clone());
+            let prepared = prepare_direct(&source, options)?;
             let pass_icon = prepared
                 .effective_frontmatter
                 .as_object()
@@ -329,7 +332,7 @@ fn loop_seed_read_honors_the_deferred_schema_verdict() {
         ("phase", json!(1)),
         (
             "initialize",
-            json!({"stack": [{"action": {"set_frontmatter": ["loop.md", "count", 7]}}]}),
+            json!([{"set_frontmatter": ["loop.md", "count", 7]}]),
         ),
         (
             "loop",

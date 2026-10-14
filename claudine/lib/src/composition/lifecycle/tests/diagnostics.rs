@@ -3,126 +3,41 @@
 use super::*;
 
 #[test]
-fn lifecycle_invalid_error_renders_as_block_error() {
+fn unknown_verb_in_a_dictionary_renders_as_block_error() {
     use biscuit_terminal::errors::BlockError;
     use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 
     let frontmatter = json!({
         "success": {
-            "speak": "hello"
+            "sucess": "hello"
         }
     });
 
     let err =
         parse_lifecycle_config(&frontmatter, Path::new("prompts/sentrux.md")).unwrap_err();
-    let CompositionError::LifecycleInvalid {
+    let CompositionError::LifecycleUnknownVerb {
+        source_path,
         property,
-        unknown_field,
-        expected_fields,
-        source_file,
-        ..
+        verb,
+        rewrite,
     } = &err
     else {
-        panic!("expected LifecycleInvalid, got {err:?}");
+        panic!("expected LifecycleUnknownVerb, got {err:?}");
     };
 
-    assert_eq!(property, "success");
-    assert_eq!(unknown_field.as_deref(), Some("speak"));
-    assert_eq!(source_file, Path::new("prompts/sentrux.md"));
-    assert!(expected_fields.contains(&"say".to_string()));
-    assert!(expected_fields.contains(&"say_first".to_string()));
-    assert!(expected_fields.contains(&"effect".to_string()));
+    assert_eq!(property, "success.sucess");
+    assert_eq!(verb, "sucess");
+    assert!(rewrite.contains("`success`"), "{rewrite}");
+    assert_eq!(source_path, Path::new("prompts/sentrux.md"));
 
     let rendered = strip_escape_codes(err.report_block_error_optimistic(Some(80)));
     assert!(
-        rendered.contains("success.speak"),
-        "dotted property should appear: {rendered}"
+        rendered.contains("success.sucess"),
+        "the authored path should appear: {rendered}"
     );
     assert!(
         rendered.contains("sentrux.md"),
         "file name should appear: {rendered}"
-    );
-    assert!(
-        rendered.contains("say"),
-        "expected fields should list 'say': {rendered}"
-    );
-}
-
-#[test]
-fn parse_serde_unknown_field_extracts_field_and_expected() {
-    let frontmatter = json!({
-        "failure": {
-            "bogus_field": true
-        }
-    });
-
-    let err = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap_err();
-    let CompositionError::LifecycleInvalid {
-        property,
-        unknown_field,
-        expected_fields,
-        ..
-    } = &err
-    else {
-        panic!("expected LifecycleInvalid, got {err:?}");
-    };
-
-    assert_eq!(property, "failure");
-    assert_eq!(unknown_field.as_deref(), Some("bogus_field"));
-    assert!(!expected_fields.is_empty());
-    assert!(expected_fields.contains(&"say".to_string()));
-}
-
-#[test]
-fn stack_as_map_reports_sequence_mismatch_not_unknown_property() {
-    use biscuit_terminal::errors::BlockError;
-    use biscuit_terminal::utils::escape_codes::strip_escape_codes;
-
-    // `stack:` authored as a map (its items missing the leading `-`)
-    // rather than a YAML list. This is a type mismatch, NOT an
-    // unknown-field error, so no field name / "Expected one of" catalog
-    // must be fabricated.
-    let frontmatter = json!({
-        "initialize": {
-            "stack": {
-                "when": "phase >= total_phases",
-                "action": [{ "warn": "too big" }]
-            }
-        }
-    });
-
-    let err = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap_err();
-    let CompositionError::LifecycleInvalid {
-        property,
-        message,
-        unknown_field,
-        expected_fields,
-        ..
-    } = &err
-    else {
-        panic!("expected LifecycleInvalid, got {err:?}");
-    };
-
-    assert_eq!(property, "initialize");
-    assert!(unknown_field.is_none());
-    assert!(expected_fields.is_empty());
-    assert!(
-        message.contains("expected a sequence"),
-        "raw serde message should be preserved: {message}"
-    );
-
-    let rendered = strip_escape_codes(err.report_block_error_optimistic(Some(80)));
-    assert!(
-        !rendered.contains("Unknown property"),
-        "must not fabricate an unknown-property diagnostic: {rendered}"
-    );
-    assert!(
-        !rendered.contains("Expected one of"),
-        "must not fabricate a field catalog: {rendered}"
-    );
-    assert!(
-        rendered.contains("stack"),
-        "hint should point at the `stack` list shape: {rendered}"
     );
 }
 
@@ -136,19 +51,13 @@ fn frontmatter_excerpt_included_for_placement_error() {
     // (CLI handlers), not at the parse site. Here we only verify that the
     // underlying placement error carries the property name needed for
     // frontmatter highlighting.
-    let fm = json!({
-        "start": {"stack": [{"action": "skip"}]}
-    });
+    let fm = json!({ "start": ["skip"] });
     let err = parse_lifecycle_config(&fm, dummy_path()).unwrap_err();
     match err {
         CompositionError::LifecycleActionPlacement {
             property, event, ..
         } => {
-            // The stack item is at index 0, so the annotated property
-            // path is `start.stack[0]`. Frontmatter highlighting falls
-            // back to the top-level `start` key when no per-stack-item
-            // line is found.
-            assert!(property.starts_with("start"), "got: {property}");
+            assert_eq!(property, "start[0].skip");
             assert_eq!(event, "start");
         }
         other => panic!("expected placement error, got: {other:?}"),
@@ -165,13 +74,7 @@ fn frontmatter_excerpt_included_for_placement_error() {
 fn err_in_start_stack_when_clause_is_rejected() {
     // `err` is forbidden in `start` (a no-error event) — even inside a
     // `when:` condition.
-    let fm = json!({
-        "start": {
-            "stack": [
-                {"when": "err != null", "action": {"say": "has error"}}
-            ]
-        }
-    });
+    let fm = json!({ "start": [{ "when": "err != null", "then": [{ "say": "has error" }] }] });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
     let err = validate_no_err_in_no_error_events(&fm, &config, dummy_path()).unwrap_err();
     match err {
@@ -189,11 +92,7 @@ fn err_member_access_in_single_text_arg_is_literal() {
     // the text, not the `err` global. There is nothing to reject. To
     // reference the error in an error-carrying event, interpolate instead:
     // `{ say: "{{err.msg}}" }`.
-    let fm = json!({
-        "start": {
-            "stack": [{"action": {"say": "err.msg"}}]
-        }
-    });
+    let fm = json!({ "start": [{ "say": "err.msg" }] });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
     assert!(validate_no_err_in_no_error_events(&fm, &config, dummy_path()).is_ok());
 }
@@ -204,9 +103,7 @@ fn err_in_single_text_arg_is_literal_across_no_error_events() {
     // the err-availability guard only governs expression surfaces (e.g.
     // `when:` clauses), not literal message bodies.
     for ev in ["initialize", "success"] {
-        let fm = json!({
-            ev: {"stack": [{"action": {"say": "err"}}]}
-        });
+        let fm = json!({ ev: [{"say": "err"}] });
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
         assert!(
             validate_no_err_in_no_error_events(&fm, &config, dummy_path()).is_ok(),
@@ -217,7 +114,7 @@ fn err_in_single_text_arg_is_literal_across_no_error_events() {
     let fm = json!({
         "loop": {
             "while": "true",
-            "stack": [{"action": {"say": "err"}}]
+            "gate": [{"say": "err"}]
         }
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
@@ -228,9 +125,7 @@ fn err_in_single_text_arg_is_literal_across_no_error_events() {
 fn err_in_blocked_failure_finalize_is_allowed() {
     // `err` is permitted in error-carrying events.
     for event in ["blocked", "failure", "finalize"] {
-        let fm = json!({
-            event: {"stack": [{"action": {"say": "err.msg"}}]}
-        });
+        let fm = json!({ event: [{"say": "err.msg"}] });
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
         let result = validate_no_err_in_no_error_events(&fm, &config, dummy_path());
         assert!(
@@ -250,13 +145,11 @@ fn fm_err_escape_hatch_is_allowed_everywhere() {
             json!({
                 "loop": {
                     "while": "true",
-                    "stack": [{"action": {"say": "fm.err"}}]
+                    "gate": [{"say": "fm.err"}]
                 }
             })
         } else {
-            json!({
-                event: {"stack": [{"action": {"say": "fm.err"}}]}
-            })
+            json!({ event: [{"say": "fm.err"}] })
         };
         let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
         let result = validate_no_err_in_no_error_events(&fm, &config, dummy_path());
@@ -273,11 +166,7 @@ fn err_in_control_reason_single_text_arg_is_literal() {
     // `error` with a positional scalar value takes its reason literally, so
     // `err.msg` is text, not a reference to the `err` global and is not
     // rejected.
-    let fm = json!({
-        "start": {
-            "stack": [{"action": {"error": "err.msg"}}]
-        }
-    });
+    let fm = json!({ "start": [{ "error": "err.msg" }] });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
     assert!(validate_no_err_in_no_error_events(&fm, &config, dummy_path()).is_ok());
 }
@@ -289,7 +178,7 @@ fn err_in_shell_command_single_text_arg_is_literal() {
     let fm = json!({
         "loop": {
             "while": "true",
-            "stack": [{"action": {"shell": "err.msg"}}]
+            "gate": [{"shell": "err.msg"}]
         }
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
@@ -299,8 +188,8 @@ fn err_in_shell_command_single_text_arg_is_literal() {
 // -- err static scan over interpolation spans (C4) --------------------
 
 #[test]
-fn err_interpolation_span_in_top_level_field_rejected_in_no_error_event() {
-    // Late binding (C4): a top-level field reaches `err` only through a
+fn err_interpolation_span_in_root_dictionary_rejected_in_no_error_event() {
+    // Late binding (C4): a root-dictionary verb reaches `err` only through a
     // `{{ … }}` span, and `err` is still forbidden in a no-error event.
     let fm = json!({ "start": { "message": "❌️  {{err.msg}}" } });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
@@ -308,7 +197,7 @@ fn err_interpolation_span_in_top_level_field_rejected_in_no_error_event() {
     match err {
         CompositionError::LifecycleErrNotAvailable { event, property, .. } => {
             assert_eq!(event, "start");
-            assert_eq!(property, "start.message");
+            assert_eq!(property, "start.message.text");
         }
         other => panic!("expected LifecycleErrNotAvailable, got: {other:?}"),
     }
@@ -318,15 +207,13 @@ fn err_interpolation_span_in_top_level_field_rejected_in_no_error_event() {
 fn err_interpolation_span_in_stack_message_rejected_in_no_error_event() {
     // A positional scalar message body is literal text, but its `{{ … }}`
     // span still reaches the `err` global and must be rejected in `start`.
-    let fm = json!({
-        "start": { "stack": [{"action": {"message": "❌️  {{err.msg}}"}}] }
-    });
+    let fm = json!({ "start": [{ "message": "❌️  {{err.msg}}" }] });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
     let err = validate_no_err_in_no_error_events(&fm, &config, dummy_path()).unwrap_err();
     match err {
         CompositionError::LifecycleErrNotAvailable { event, property, .. } => {
             assert_eq!(event, "start");
-            assert!(property.starts_with("start.stack"), "got: {property}");
+            assert!(property.starts_with("start[0].message"), "got: {property}");
         }
         other => panic!("expected LifecycleErrNotAvailable, got: {other:?}"),
     }

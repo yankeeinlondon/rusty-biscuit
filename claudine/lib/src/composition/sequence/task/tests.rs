@@ -447,6 +447,7 @@ impl Fixture {
             timing: None,
             current: None,
             group: None,
+            loop_values: None,
             base_dir: None,
             ctx_base_dir: None,
             prepared_context: None,
@@ -891,8 +892,8 @@ mod stages {
             json!({
                 "name": "alpha",
                 "shell": "primary-command",
-                "setup": [{ "action": { "shell": "setup-command" } }],
-                "teardown": [{ "action": { "shell": "teardown-command" } }],
+                "setup": [{ "shell": "setup-command" }],
+                "teardown": [{ "shell": "teardown-command" }],
             }),
         );
         let fixture = Fixture::build(dir, &source).unwrap();
@@ -921,8 +922,8 @@ mod stages {
             json!({
                 "name": "alpha",
                 "shell": "primary-command",
-                "setup": [{ "action": { "shell": "setup-command" } }],
-                "teardown": [{ "action": { "shell": "teardown-command" } }],
+                "setup": [{ "shell": "setup-command" }],
+                "teardown": [{ "shell": "teardown-command" }],
             }),
         );
         let fixture = Fixture::build(dir, &source).unwrap();
@@ -955,7 +956,7 @@ mod stages {
             json!({
                 "name": "alpha",
                 "shell": "primary-command",
-                "teardown": [{ "action": { "message": "cleanup after: {{ err.msg }}" } }],
+                "teardown": [{ "message": "cleanup after: {{ err.msg }}" }],
             }),
         );
         let fixture = Fixture::build(dir, &source).unwrap();
@@ -987,7 +988,7 @@ mod stages {
             json!({
                 "name": "alpha",
                 "shell": "primary-command",
-                "teardown": [{ "action": { "shell": "teardown-command" } }],
+                "teardown": [{ "shell": "teardown-command" }],
             }),
         );
         let fixture = Fixture::build(dir, &source).unwrap();
@@ -1017,7 +1018,7 @@ mod stages {
             json!({
                 "name": "alpha",
                 "shell": "primary-command",
-                "teardown": [{ "action": { "shell": "teardown-command" } }],
+                "teardown": [{ "shell": "teardown-command" }],
             }),
         );
         let fixture = Fixture::build(dir, &source).unwrap();
@@ -1051,9 +1052,7 @@ mod stages {
             json!({
                 "name": "alpha",
                 "shell": "primary-command",
-                "teardown": [{
-                    "action": { "action": "shell", "command": "teardown-command", "no_error": true },
-                }],
+                "teardown": [{ "shell": { "command": "teardown-command", "no_error": true } }],
             }),
         );
         let fixture = Fixture::build(dir, &source).unwrap();
@@ -1074,8 +1073,8 @@ mod stages {
             json!({
                 "name": "alpha",
                 "shell": "primary-command",
-                "setup": [{ "when": "not a || valid ==", "action": { "message": "hi" } }],
-                "teardown": [{ "action": { "shell": "teardown-command" } }],
+                "setup": [{ "when": "not a || valid ==", "then": [{ "message": "hi" }] }],
+                "teardown": [{ "shell": "teardown-command" }],
             }),
         );
         let fixture = Fixture::build(dir, &source).unwrap();
@@ -1093,15 +1092,11 @@ mod stages {
     }
 
     #[test]
-    fn a_stack_that_is_not_a_list_is_rejected() {
+    fn a_stack_that_is_neither_a_list_nor_a_dictionary_is_rejected() {
         let dir = TempDir::new().unwrap();
         let source = one_step_source(
             dir.path(),
-            json!({
-                "name": "alpha",
-                "shell": "primary-command",
-                "setup": { "action": { "message": "hi" } },
-            }),
+            json!({ "name": "alpha", "shell": "primary-command", "setup": "hi" }),
         );
         let fixture = Fixture::build(dir, &source).unwrap();
         let recorder = Recorder::default();
@@ -1111,7 +1106,7 @@ mod stages {
 
         assert_eq!(outcome.status, TaskStatus::Failed);
         assert!(
-            failure_message(&outcome).contains("must be a list of action-stack items"),
+            failure_message(&outcome).contains("must be a list of actions or a dictionary of verbs"),
             "{}",
             failure_message(&outcome),
         );
@@ -2519,8 +2514,8 @@ mod side_effect_tasks {
             dir.path(),
             json!({
                 "name": "alpha",
-                "side_effect": { "set": {"stage": "primary"} },
-                "setup": [{ "action": { "set": {"stage": "setup"} } }],
+                "side_effect": { "set": { "stage": "primary" } },
+                "setup": [{ "set": { "stage": "setup" } }],
             }),
         );
         let fixture = Fixture::build(dir, &source).unwrap();
@@ -2846,10 +2841,9 @@ mod authored_set_order {
                 "  - name: alpha\n",
                 "    shell: \"true\"\n",
                 "    setup:\n",
-                "      - action:\n",
-                "          set:\n",
-                "            z_last_lexically: \"{{ z_unknown_root() }}\"\n",
-                "            a_first_lexically: \"{{ a_unknown_root() }}\"\n",
+                "      - set:\n",
+                "          z_last_lexically: \"{{ z_unknown_root() }}\"\n",
+                "          a_first_lexically: \"{{ a_unknown_root() }}\"\n",
                 "---\n\n",
                 "Document body.\n",
             ),
@@ -2890,19 +2884,19 @@ mod authored_set_order {
 mod task_stack_diagnostics {
     use super::*;
 
-    /// The failing `set:` mapping, indented to `indent` columns so it nests
-    /// under whichever `action:` key the calling fixture authored.
+    /// A one-`set` stack item whose `- ` sits at column `indent`, so it nests
+    /// under whichever stack key the calling fixture authored.
     ///
     /// Its innermost element cannot resolve, so the failure carries the
     /// object-key plus array-index suffix R5 requires.
     fn failing_set(indent: usize) -> String {
         let pad = " ".repeat(indent);
         [
-            "set:",
-            "  stable: changed",
-            "  metadata:",
-            "    files:",
-            "      - \"{{unknown_root()}}\"",
+            "- set:",
+            "    stable: changed",
+            "    metadata:",
+            "      files:",
+            "        - \"{{unknown_root()}}\"",
         ]
         .iter()
         .map(|line| format!("{pad}{line}\n"))
@@ -2996,8 +2990,7 @@ mod task_stack_diagnostics {
                 "  - name: alpha\n",
                 "    shell: \"true\"\n",
                 "    setup:\n",
-                "      - action:\n",
-                "          set: ready\n",
+                "      - set: ready\n",
                 "---\n\n",
                 "Document body.\n",
             ),
@@ -3009,7 +3002,7 @@ mod task_stack_diagnostics {
         assert_stack_failure(
             &outcome,
             Path::new(&source),
-            "tasks[0].setup[0].action[0].set",
+            "tasks[0].setup[0].set",
             Some("set: ready"),
         );
         // A stack that will not parse fails the task before setup starts.
@@ -3036,8 +3029,7 @@ mod task_stack_diagnostics {
                 "      tasks:\n",
                 "        - shell: \"true\"\n",
                 "          teardown:\n",
-                "            - action:\n",
-                "                set: [ready, \"yes\"]\n",
+                "            - set: [ready, \"yes\"]\n",
                 "---\n\n",
                 "Document body.\n",
             ),
@@ -3049,7 +3041,7 @@ mod task_stack_diagnostics {
         assert_stack_failure(
             &outcome,
             Path::new(&source),
-            "tasks[0].group.tasks[0].teardown[0].action[0].set",
+            "tasks[0].group.tasks[0].teardown[0].set",
             Some("set: [ready, \"yes\"]"),
         );
         assert!(runtime.snapshot().mutations.is_empty());
@@ -3070,8 +3062,7 @@ mod task_stack_diagnostics {
                 "kind: task\n",
                 "shell: \"true\"\n",
                 "setup:\n",
-                "  - action:\n",
-                "      set: ready\n",
+                "  - set: ready\n",
             ),
         );
         let source = one_step_source(dir.path(), json!({ "name": "alpha", "task": "task.yaml" }));
@@ -3080,7 +3071,7 @@ mod task_stack_diagnostics {
         let (outcome, runtime, commands) = run(&mut fixture);
 
         // A YAML data document has no frontmatter block to excerpt.
-        assert_stack_failure(&outcome, &task_path, "setup[0].action[0].set", None);
+        assert_stack_failure(&outcome, &task_path, "setup[0].set", None);
         assert!(
             !failure_message(&outcome).contains("seq.md"),
             "the invoking sequence is not the authoring document: {}",
@@ -3103,12 +3094,11 @@ mod task_stack_diagnostics {
                     "  - name: alpha\n",
                     "    shell: \"true\"\n",
                     "    setup:\n",
-                    "      - action:\n",
                     "{}",
                     "---\n\n",
                     "Document body.\n",
                 ),
-                failing_set(10),
+                failing_set(6),
             ),
         );
         let mut fixture = Fixture::build(dir, &source).unwrap();
@@ -3118,7 +3108,7 @@ mod task_stack_diagnostics {
         assert_stack_failure(
             &outcome,
             Path::new(&source),
-            "tasks[0].setup[0].action[0].set.metadata.files[0]",
+            "tasks[0].setup[0].set.metadata.files[0]",
             Some("{{unknown_root()}}"),
         );
         assert_eq!(outcome.error.as_ref().unwrap().stage, TaskStage::Setup);
@@ -3141,12 +3131,11 @@ mod task_stack_diagnostics {
                     "  - name: alpha\n",
                     "    shell: \"true\"\n",
                     "    teardown:\n",
-                    "      - action:\n",
                     "{}",
                     "---\n\n",
                     "Document body.\n",
                 ),
-                failing_set(10),
+                failing_set(6),
             ),
         );
         let mut fixture = Fixture::build(dir, &source).unwrap();
@@ -3156,7 +3145,7 @@ mod task_stack_diagnostics {
         assert_stack_failure(
             &outcome,
             Path::new(&source),
-            "tasks[0].teardown[0].action[0].set.metadata.files[0]",
+            "tasks[0].teardown[0].set.metadata.files[0]",
             Some("{{unknown_root()}}"),
         );
         assert_eq!(outcome.error.as_ref().unwrap().stage, TaskStage::Teardown);
@@ -3182,10 +3171,9 @@ mod task_stack_diagnostics {
                     "kind: task\n",
                     "shell: \"true\"\n",
                     "setup:\n",
-                    "  - action:\n",
                     "{}",
                 ),
-                failing_set(6),
+                failing_set(2),
             ),
         );
         let source = one_step_source(dir.path(), json!({ "name": "alpha", "task": "task.yaml" }));
@@ -3196,7 +3184,7 @@ mod task_stack_diagnostics {
         assert_stack_failure(
             &outcome,
             &task_path,
-            "setup[0].action[0].set.metadata.files[0]",
+            "setup[0].set.metadata.files[0]",
             // An external task document is data, not Markdown, so there is no
             // frontmatter block to excerpt — the same outcome the file-backed
             // group cases record. Enrichment still has to run against *this*
@@ -3230,12 +3218,11 @@ mod task_stack_diagnostics {
                     "      tasks:\n",
                     "        - shell: \"true\"\n",
                     "          setup:\n",
-                    "            - action:\n",
                     "{}",
                     "---\n\n",
                     "Document body.\n",
                 ),
-                failing_set(16),
+                failing_set(12),
             ),
         );
         let mut fixture = Fixture::build(dir, &source).unwrap();
@@ -3245,7 +3232,7 @@ mod task_stack_diagnostics {
         assert_stack_failure(
             &outcome,
             Path::new(&source),
-            "tasks[0].group.tasks[0].setup[0].action[0].set.metadata.files[0]",
+            "tasks[0].group.tasks[0].setup[0].set.metadata.files[0]",
             Some("{{unknown_root()}}"),
         );
         assert!(runtime.snapshot().mutations.is_empty());
@@ -3726,8 +3713,8 @@ mod outcome_contract {
             json!({
                 "name": "alpha",
                 "shell": "primary-command",
-                "setup": [{ "action": { "shell": "setup-command" } }],
-                "teardown": [{ "action": { "shell": "teardown-command" } }],
+                "setup": [{ "shell": "setup-command" }],
+                "teardown": [{ "shell": "teardown-command" }],
             }),
         );
         let fixture = Fixture::build(dir, &source).unwrap();
@@ -3754,7 +3741,7 @@ mod outcome_contract {
         let task_body = json!({
             "shell": ["first", "second"],
             "timeout": "45s",
-            "teardown": [{ "action": { "message": "cleaned" } }],
+            "teardown": [{ "message": "cleaned" }],
         });
 
         let inline_dir = TempDir::new().unwrap();
@@ -4200,15 +4187,12 @@ mod serial_groups {
                         {
                             "name": "writer",
                             "shell": "one",
-                            "teardown": [{ "action": { "set": {"marker": "written"} } }],
+                            "teardown": [{ "set": { "marker": "written" } }],
                         },
                         {
                             "name": "reader",
                             "prompt": "target.md",
-                            "params": {
-                                "seen": "{{ marker }}",
-                                "prior": "{{ last(outputs) }}",
-                            },
+                            "params": { "seen": "{{ marker }}", "prior": "{{ last(outputs) }}" },
                         },
                     ],
                 },
@@ -4247,12 +4231,14 @@ mod serial_groups {
                 "group": {
                     "name": "bundle",
                     "variables": { "label": "release", "attempt": 2 },
-                    "tasks": [{
-                        "name": "member",
-                        "prompt": "target.md",
-                        "params": { "which": "{{ group.label }}", "attempt": "{{ group.attempt }}" },
-                        "setup": [{ "action": { "info": "starting {{ group.label }}" } }],
-                    }],
+                    "tasks": [
+                        {
+                            "name": "member",
+                            "prompt": "target.md",
+                            "params": { "which": "{{ group.label }}", "attempt": "{{ group.attempt }}" },
+                            "setup": [{ "info": "starting {{ group.label }}" }],
+                        },
+                    ],
                 },
             }),
         );
@@ -4666,17 +4652,27 @@ mod parallel_groups {
             "seq.md",
             &[
                 ("marker", json!("initial")),
-                ("sequence", json!([{
-                "name": "alpha",
-                "group": {
-                    "name": "bundle",
-                    "execution": "parallel",
-                    "tasks": [
-                        { "name": "writer", "shell": "write", "setup": [{ "action": [{ "set": {"marker": "written"} }] }] },
-                        { "name": "reader", "shell": "read", "teardown": [{ "action": [{ "set": {"observed": "{{ marker }}"} }] }] },
-                    ],
-                },
-            }])),
+                ("sequence", json!([
+                    {
+                        "name": "alpha",
+                        "group": {
+                            "name": "bundle",
+                            "execution": "parallel",
+                            "tasks": [
+                                {
+                                    "name": "writer",
+                                    "shell": "write",
+                                    "setup": [{ "set": { "marker": "written" } }],
+                                },
+                                {
+                                    "name": "reader",
+                                    "shell": "read",
+                                    "teardown": [{ "set": { "observed": "{{ marker }}" } }],
+                                },
+                            ],
+                        },
+                    },
+                ])),
             ],
             "Document body.\n",
         );
@@ -4795,8 +4791,16 @@ mod parallel_groups {
                     "name": "bundle",
                     "execution": "parallel",
                     "tasks": [
-                        { "name": "left", "shell": "l", "setup": [{ "action": [{ "set": {"left_key": "L"} }] }] },
-                        { "name": "right", "shell": "r", "setup": [{ "action": [{ "set": {"right_key": "R"} }] }] },
+                        {
+                            "name": "left",
+                            "shell": "l",
+                            "setup": [{ "set": { "left_key": "L" } }],
+                        },
+                        {
+                            "name": "right",
+                            "shell": "r",
+                            "setup": [{ "set": { "right_key": "R" } }],
+                        },
                     ],
                 },
             }),
@@ -4836,8 +4840,16 @@ mod parallel_groups {
                     "name": "bundle",
                     "execution": "parallel",
                     "tasks": [
-                        { "name": "early", "shell": "e", "setup": [{ "action": [{ "set": {"shared": "from-early"} }] }] },
-                        { "name": "late", "shell": "l", "setup": [{ "action": [{ "set": {"shared": "from-late"} }] }] },
+                        {
+                            "name": "early",
+                            "shell": "e",
+                            "setup": [{ "set": { "shared": "from-early" } }],
+                        },
+                        {
+                            "name": "late",
+                            "shell": "l",
+                            "setup": [{ "set": { "shared": "from-late" } }],
+                        },
                     ],
                 },
             }),
@@ -4888,7 +4900,11 @@ mod parallel_groups {
                     "name": "bundle",
                     "execution": "parallel",
                     "tasks": [
-                        { "name": "a", "shell": "a", "setup": [{ "action": [{ "set": {"touched": "yes"} }] }] },
+                        {
+                            "name": "a",
+                            "shell": "a",
+                            "setup": [{ "set": { "touched": "yes" } }],
+                        },
                         { "name": "b", "shell": "b" },
                     ],
                 },
@@ -4936,9 +4952,13 @@ mod parallel_groups {
                         "name": "bundle",
                         "execution": "parallel",
                         "tasks": [
-                            { "name": "one", "shell": "one", "setup": [{ "action": [{ "set": {"k1": 1} }] }] },
-                            { "name": "two", "shell": "two", "setup": [{ "action": [{ "set": {"k2": 2} }] }] },
-                            { "name": "three", "shell": "three", "setup": [{ "action": [{ "set": {"k3": 3} }] }] },
+                            { "name": "one", "shell": "one", "setup": [{ "set": { "k1": 1 } }] },
+                            { "name": "two", "shell": "two", "setup": [{ "set": { "k2": 2 } }] },
+                            {
+                                "name": "three",
+                                "shell": "three",
+                                "setup": [{ "set": { "k3": 3 } }],
+                            },
                         ],
                     },
                 }),
@@ -5535,11 +5555,11 @@ mod byte_parity {
                         // A setup `set` changes `value` before the commands
                         // that read it run: re-evaluating would see `changed`.
                         "setup": [
-                            {"action": {"set": {"value": "changed"}}},
-                            {"action": {"shell": "setup {{ value }}"}},
-                            {"action": {"action": "shell", "command": "{{ 'whole ' + value }}"}}
+                            {"set": {"value": "changed"}},
+                            {"shell": "setup {{ value }}"},
+                            {"shell": {"command": "{{ 'whole ' + value }}"}}
                         ],
-                        "teardown": [{"action": {"shell": "teardown {{ value }}"}}],
+                        "teardown": [{"shell": "teardown {{ value }}"}],
                     }]),
                 ),
             ],
@@ -5586,7 +5606,7 @@ mod byte_parity {
             let dir = TempDir::new().unwrap();
             let mut step = json!({"name": "alpha", "shell": shell.unwrap_or("true")});
             if let Some(setup) = setup {
-                step["setup"] = json!([{"action": {"shell": setup}}]);
+                step["setup"] = json!([{ "shell": setup }]);
             }
             let source = write_source(
                 dir.path(),
@@ -5693,7 +5713,7 @@ mod document_environment {
             json!({
                 "name": "alpha",
                 "shell": format!("echo run={{{{ env.{PROBE} }}}}"),
-                "setup": [{ "action": [{ "shell": format!("echo setup={{{{ env.{PROBE} }}}}") }] }],
+                "setup": [{ "shell": format!("echo setup={{{{ env.{PROBE} }}}}") }],
             }),
         );
         let invocation = InvocationContext::capture(

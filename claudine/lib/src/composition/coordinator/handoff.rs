@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use indexmap::IndexMap;
 
 use crate::composition::lifecycle::LifecycleSignal;
+use crate::composition::lifecycle::actions::LifecyclePath;
 
 /// Render an overlay as its property names against a redaction placeholder.
 ///
@@ -36,33 +37,20 @@ pub(crate) const REDACTED_VALUE: &str = "<redacted>";
 
 /// Where in a document's lifecycle frontmatter an action was authored.
 ///
-/// Renders as the dotted `"{event}.stack[{i}].action[{j}]"` form that the
-/// shell-preflight resolver already uses for its diagnostics
-/// (`composition::preflight`), so a proxy diagnostic and a shell diagnostic
-/// name the same property the same way.
-///
-/// This is the *event* spelling only. A task's `setup:`/`teardown:` stack runs
-/// under a synthetic signal, so its diagnostics are rooted at the authored task
-/// property instead; the executor's `StackRoot` decides which spelling an
-/// action reports, while this type stays the signal-and-index identity a proxy
-/// is attributed to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Renders as the action's authored path (`failure[0].else[1].proxy`), the
+/// same spelling every lifecycle diagnostic uses, so a proxy diagnostic and a
+/// parse or shell diagnostic name the same property the same way. The path
+/// is what the author wrote, never an execution position.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionLocation {
     signal: LifecycleSignal,
-    stack_index: usize,
-    action_index: usize,
+    path: LifecyclePath,
 }
 
 impl ActionLocation {
-    /// Locate the `action_index`-th action of the `stack_index`-th stack item
-    /// under `signal`. Both indices are 0-based, matching the authored YAML
-    /// sequence order.
-    pub fn new(signal: LifecycleSignal, stack_index: usize, action_index: usize) -> Self {
-        Self {
-            signal,
-            stack_index,
-            action_index,
-        }
+    /// Locate the action at `path` in the stack of `signal`.
+    pub fn new(signal: LifecycleSignal, path: LifecyclePath) -> Self {
+        Self { signal, path }
     }
 
     #[allow(missing_docs)]
@@ -71,25 +59,14 @@ impl ActionLocation {
     }
 
     #[allow(missing_docs)]
-    pub fn stack_index(&self) -> usize {
-        self.stack_index
-    }
-
-    #[allow(missing_docs)]
-    pub fn action_index(&self) -> usize {
-        self.action_index
+    pub fn path(&self) -> &LifecyclePath {
+        &self.path
     }
 }
 
 impl fmt::Display for ActionLocation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}.stack[{}].action[{}]",
-            self.signal.property_name(),
-            self.stack_index,
-            self.action_index
-        )
+        write!(f, "{}", self.path)
     }
 }
 

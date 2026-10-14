@@ -6,12 +6,10 @@ use super::*;
 fn when_false_skips_item_when_true_runs() {
     let config = parse_lifecycle_config(
         &json!({
-            "success": {
-                "stack": [
-                    {"when": "flag == 'yes'", "action": {"say": "matched"}},
-                    {"when": "flag == 'no'", "action": {"say": "never"}}
-                ]
-            }
+            "success": [
+                { "when": "flag == 'yes'", "then": [{ "say": "matched" }] },
+                { "when": "flag == 'no'", "then": [{ "say": "never" }] },
+            ],
         }),
         Path::new("t.md"),
     )
@@ -40,7 +38,7 @@ fn when_false_skips_item_when_true_runs() {
 #[test]
 fn omitted_when_always_runs() {
     let config = parse_lifecycle_config(
-        &json!({"success": {"stack": [{"action": {"warn": "always"}}]}}),
+        &json!({ "success": [{ "warn": "always" }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -70,11 +68,7 @@ fn omitted_when_always_runs() {
 #[test]
 fn when_unknown_function_fails_closed() {
     let config = parse_lifecycle_config(
-        &json!({
-            "success": {
-                "stack": [{"when": "spec_fil()", "action": {"message": "guarded"}}]
-            }
-        }),
+        &json!({ "success": [{ "when": "spec_fil()", "then": [{ "message": "guarded" }] }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -116,9 +110,7 @@ fn when_unknown_function_fails_closed() {
 fn when_guarded_fallback_false_skips_cleanly() {
     let config = parse_lifecycle_config(
         &json!({
-            "success": {
-                "stack": [{"when": "maybe_missing || false", "action": {"message": "guarded"}}]
-            }
+            "success": [{ "when": "maybe_missing || false", "then": [{ "message": "guarded" }] }],
         }),
         Path::new("t.md"),
     )
@@ -148,11 +140,7 @@ fn when_guarded_fallback_false_skips_cleanly() {
 #[test]
 fn when_guarded_fallback_true_runs_action() {
     let config = parse_lifecycle_config(
-        &json!({
-            "success": {
-                "stack": [{"when": "maybe_missing || true", "action": {"message": "guarded"}}]
-            }
-        }),
+        &json!({ "success": [{ "when": "maybe_missing || true", "then": [{ "message": "guarded" }] }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -185,12 +173,10 @@ fn when_guarded_fallback_true_runs_action() {
 fn when_known_key_runs_when_truthy_skips_when_falsy() {
     let config = parse_lifecycle_config(
         &json!({
-            "success": {
-                "stack": [
-                    {"when": "ready", "action": {"message": "ran"}},
-                    {"when": "blocked", "action": {"message": "never"}}
-                ]
-            }
+            "success": [
+                { "when": "ready", "then": [{ "message": "ran" }] },
+                { "when": "blocked", "then": [{ "message": "never" }] },
+            ],
         }),
         Path::new("t.md"),
     )
@@ -221,13 +207,7 @@ fn when_known_key_runs_when_truthy_skips_when_falsy() {
 #[test]
 fn array_actions_run_in_order_then_stop_at_control() {
     let config = parse_lifecycle_config(
-        &json!({
-            "failure": {
-                "stack": [{
-                    "action": [{"say": "one"}, {"message": "two"}, "stop"]
-                }]
-            }
-        }),
+        &json!({ "failure": [{ "say": "one" }, { "message": "two" }, "stop"] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -260,14 +240,7 @@ fn array_actions_run_in_order_then_stop_at_control() {
 #[test]
 fn control_action_terminates_remaining_items() {
     let config = parse_lifecycle_config(
-        &json!({
-            "failure": {
-                "stack": [
-                    {"action": "stop"},
-                    {"action": {"say": "unreached"}}
-                ]
-            }
-        }),
+        &json!({ "failure": [{ "when": "true", "then": ["stop"] }, { "say": "unreached" }] }),
         Path::new("t.md"),
     )
     .unwrap();
@@ -295,12 +268,7 @@ fn control_action_terminates_remaining_items() {
 fn err_global_visible_in_failure_stack_when() {
     let config = parse_lifecycle_config(
         &json!({
-            "failure": {
-                "stack": [{
-                    "when": "err.variant == 'Io'",
-                    "action": {"stderr": "saw io error"}
-                }]
-            }
+            "failure": [{ "when": "err.variant == 'Io'", "then": [{ "stderr": "saw io error" }] }],
         }),
         Path::new("t.md"),
     )
@@ -337,3 +305,250 @@ fn err_global_visible_in_failure_stack_when() {
 }
 
 
+
+/// Run `signal`'s stack from `frontmatter` against `fm` with a shell that
+/// exits `shell_code`, returning the outcome, the emitted events, and the
+/// shell commands that ran.
+fn run_stack(
+    frontmatter: Value,
+    signal: LifecycleSignal,
+    fm: Value,
+    shell_code: i32,
+) -> (LifecycleEventOutcome, Vec<Emitted>, Vec<String>) {
+    let config = parse_lifecycle_config(&frontmatter, Path::new("t.md")).unwrap();
+    let fm = map(fm);
+    let (_dir, engine) = temp_engine();
+    let shell = MockShell::new(shell_code);
+    let recorder = Recorder::default();
+    let harness = Harness::default();
+    let context = ctx(
+        signal,
+        &fm,
+        None,
+        &engine,
+        &shell,
+        &recorder,
+        &harness,
+        Path::new("t.md"),
+    );
+    let outcome = context.execute_event(&config);
+    (outcome, recorder.events(), shell.commands())
+}
+
+fn info(text: &str) -> Emitted {
+    Emitted::Info(text.to_string())
+}
+
+/// Only the selected body runs: its effects happen in order and its raising
+/// operand surfaces at the selected path, never the unselected one.
+#[test]
+fn only_the_selected_branch_evaluates_its_operands_and_runs_effects() {
+    for (flag, expected_info, expected_shell) in
+        [(true, "then", "then.sh"), (false, "else", "else.sh")]
+    {
+        let (outcome, events, commands) = run_stack(
+            json!({ "start": [{
+                "when": "flag",
+                "then": [
+                    { "info": "then" },
+                    { "shell": "then.sh" },
+                    { "info": "{{ no_such_fn() }}" },
+                ],
+                "else": [
+                    { "info": "else" },
+                    { "shell": "else.sh" },
+                    { "info": "{{ no_such_fn() }}" },
+                ],
+            }]}),
+            LifecycleSignal::Start,
+            json!({ "flag": flag }),
+            0,
+        );
+        let selected = if flag { "start[0].then[2].info" } else { "start[0].else[2].info" };
+        let error = outcome
+            .evaluation_error
+            .as_ref()
+            .unwrap_or_else(|| panic!("flag={flag}: the selected raise must surface"));
+        assert_eq!(error.property.as_deref(), Some(selected), "flag={flag}");
+        assert_eq!(events, vec![info(expected_info)], "flag={flag}");
+        assert_eq!(commands, vec![expected_shell.to_string()], "flag={flag}");
+    }
+}
+
+/// The unselected body's raising operand is never evaluated: with the raise
+/// only on the unselected side, the event completes cleanly.
+#[test]
+fn an_unselected_raising_operand_is_never_evaluated() {
+    for flag in [true, false] {
+        let raising = json!([{ "say": "{{ no_such_fn() }}" }, { "shell": "never.sh" }]);
+        let clean = json!([{ "info": "selected" }]);
+        let (then_body, else_body) = if flag { (clean, raising) } else { (raising, clean) };
+        let (outcome, events, commands) = run_stack(
+            json!({ "start": [
+                { "when": "flag", "then": then_body, "else": else_body },
+                { "info": "after" },
+            ]}),
+            LifecycleSignal::Start,
+            json!({ "flag": flag }),
+            0,
+        );
+        assert_eq!(outcome, LifecycleEventOutcome::default(), "flag={flag}");
+        assert_eq!(events, vec![info("selected"), info("after")], "flag={flag}");
+        assert!(commands.is_empty(), "flag={flag}: {commands:?}");
+    }
+}
+
+/// A guard is evaluated exactly once, when its item is reached: a `set` in the
+/// selected body that falsifies the guard neither aborts the body nor runs
+/// `else`, while the next guard over the same property sees the mutation, as
+/// do later actions inside and outside the nested branch.
+#[test]
+fn a_guard_is_evaluated_once_and_set_is_visible_to_later_actions_and_guards() {
+    let (outcome, events, _) = run_stack(
+        json!({ "success": [
+            {
+                "when": "armed",
+                "then": [
+                    { "set": { "armed": false, "phase": "inner" } },
+                    { "info": "armed={{ armed }}" },
+                    { "when": "phase == 'inner'", "then": [
+                        { "set": { "phase": "deep" } },
+                        { "info": "deep={{ phase }}" },
+                    ]},
+                    { "info": "after-nested={{ phase }}" },
+                ],
+                "else": [{ "info": "else ran" }],
+            },
+            { "info": "outside={{ phase }}" },
+            { "when": "armed", "then": [{ "info": "still armed" }], "else": [{ "info": "disarmed" }] },
+        ]}),
+        LifecycleSignal::Success,
+        json!({ "armed": true, "phase": "start" }),
+        0,
+    );
+    assert_eq!(outcome, LifecycleEventOutcome::default());
+    assert_eq!(
+        events,
+        vec![
+            info("armed=false"),
+            info("deep=deep"),
+            info("after-nested=deep"),
+            info("outside=deep"),
+            info("disarmed"),
+        ]
+    );
+}
+
+/// A guard that raises is an evaluation error at its own authored path: it
+/// never selects `else`, and nothing after it in any enclosing list runs.
+#[test]
+fn a_raising_nested_guard_fails_the_event_without_selecting_else() {
+    let (outcome, events, commands) = run_stack(
+        json!({ "start": [
+            { "when": "true", "then": [
+                { "info": "before" },
+                {
+                    "when": "no_such_fn()",
+                    "then": [{ "info": "then ran" }],
+                    "else": [{ "info": "else ran" }, { "shell": "else.sh" }],
+                },
+                { "info": "inner sibling" },
+            ]},
+            { "info": "outer sibling" },
+        ]}),
+        LifecycleSignal::Start,
+        json!({}),
+        0,
+    );
+    let error = outcome
+        .evaluation_error
+        .as_ref()
+        .expect("a raising guard is an evaluation error");
+    assert_eq!(error.property.as_deref(), Some("start[0].then[1].when"));
+    assert!(outcome.action_error.is_none(), "{outcome:?}");
+    assert!(outcome.control.is_none(), "{outcome:?}");
+    assert!(outcome.has_evaluation_error());
+    assert_eq!(events, vec![info("before")]);
+    assert!(commands.is_empty(), "{commands:?}");
+}
+
+/// A directive two levels down ends the whole event: no later sibling in the
+/// directive's list, its parent's list, or the root list runs. Covered in both
+/// a `then` and an `else` body.
+#[test]
+fn a_depth_two_directive_terminates_every_enclosing_list() {
+    for (flag, expected) in [(true, "then-inner"), (false, "else-inner")] {
+        let (outcome, events, commands) = run_stack(
+            json!({ "failure": [
+                { "info": "root-first" },
+                { "when": "true", "then": [
+                    { "when": "flag",
+                      "then": [{ "info": "then-inner" }, "stop"],
+                      "else": [{ "info": "else-inner" }, "stop"] },
+                    { "info": "depth-one sibling" },
+                    { "shell": "unreached.sh" },
+                ]},
+                { "info": "root sibling" },
+            ]}),
+            LifecycleSignal::Failure,
+            json!({ "flag": flag }),
+            0,
+        );
+        assert_eq!(outcome.control, Some(StackControl::Stop), "flag={flag}");
+        assert_eq!(events, vec![info("root-first"), info(expected)], "flag={flag}");
+        assert!(commands.is_empty(), "flag={flag}: {commands:?}");
+    }
+}
+
+/// A nested failing shell under a bundle `no_error` is suppressed and the
+/// stack continues past the branch; without `no_error` the same failure
+/// stops every enclosing list as an action error.
+#[test]
+fn nested_dispatch_failure_obeys_no_error_and_otherwise_stops_the_event() {
+    for (no_error, expected) in [
+        (true, vec![info("in-bundle"), info("after branch")]),
+        (false, vec![info("in-bundle")]),
+    ] {
+        let (outcome, events, commands) = run_stack(
+            json!({ "success": [
+                { "when": "true", "then": [
+                    { "info": "in-bundle", "shell": "fails.sh", "no_error": no_error },
+                ]},
+                { "info": "after branch" },
+            ]}),
+            LifecycleSignal::Success,
+            json!({}),
+            7,
+        );
+        assert_eq!(commands, vec!["fails.sh".to_string()]);
+        assert_eq!(events, expected, "no_error={no_error}");
+        assert!(outcome.evaluation_error.is_none(), "{outcome:?}");
+        assert_eq!(outcome.action_error.is_some(), !no_error, "{outcome:?}");
+    }
+}
+
+/// `no_error` never suppresses an expression-evaluation error, also when the
+/// raising operand sits in a nested bundle: the stack halts on the evaluation
+/// channel and the bundle's later verbs do not run.
+#[test]
+fn nested_no_error_does_not_suppress_an_evaluation_error() {
+    let (outcome, events, commands) = run_stack(
+        json!({ "success": [
+            { "when": "true", "then": [
+                { "say": "{{ no_such_fn() }}", "shell": "later.sh", "no_error": true },
+            ]},
+            { "info": "after branch" },
+        ]}),
+        LifecycleSignal::Success,
+        json!({}),
+        0,
+    );
+    let error = outcome
+        .evaluation_error
+        .as_ref()
+        .expect("an evaluation raise halts despite no_error");
+    assert_eq!(error.property.as_deref(), Some("success[0].then[0].say"));
+    assert!(outcome.action_error.is_none());
+    assert!(events.is_empty(), "{events:?}");
+    assert!(commands.is_empty(), "{commands:?}");
+}

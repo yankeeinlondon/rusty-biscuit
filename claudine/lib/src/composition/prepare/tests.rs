@@ -6,6 +6,40 @@ use serde_json::json;
 use std::fs;
 use tempfile::TempDir;
 
+/// The payload of the first `verb` communication action in `signal`'s stack,
+/// as the parser kept it for event-time evaluation.
+fn communication_expr(
+    lifecycle: &crate::composition::lifecycle::LifecycleConfig,
+    signal: crate::composition::lifecycle::LifecycleSignal,
+    verb: &str,
+) -> Option<darkmatter::markdown::compose::expression::Expr> {
+    use crate::composition::lifecycle_actions::{LifecycleActionKind, for_each_action};
+    let mut found = None;
+    for_each_action(lifecycle.stack(signal), &mut |action| {
+        if let LifecycleActionKind::Communication(comm) = &action.kind
+            && comm.channel.verb() == verb
+            && found.is_none()
+        {
+            found = Some(comm.text.clone());
+        }
+    });
+    found
+}
+
+/// [`communication_expr`] for a payload kept as literal text (a template
+/// with surrounding text is interpolated at event time, never at prepare).
+fn communication_text(
+    lifecycle: &crate::composition::lifecycle::LifecycleConfig,
+    signal: crate::composition::lifecycle::LifecycleSignal,
+    verb: &str,
+) -> Option<String> {
+    use darkmatter::markdown::compose::expression::Expr;
+    communication_expr(lifecycle, signal, verb).map(|expr| match expr {
+        Expr::StringLiteral(text) => text,
+        other => panic!("expected the raw text of `{verb}`, got {other:?}"),
+    })
+}
+
 fn make_source(
     dir: &TempDir,
     frontmatter: &[(&str, serde_json::Value)],
@@ -322,10 +356,10 @@ fn direct_composition_parses_lifecycle_config() {
     );
 
     let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
-    assert!(prepared.lifecycle.start.is_some());
-    assert!(prepared.lifecycle.success.is_some());
-    assert!(prepared.lifecycle.blocked.is_none());
-    assert!(prepared.lifecycle.failure.is_none());
+    assert!(!prepared.lifecycle.stack(crate::composition::lifecycle::LifecycleSignal::Start).is_empty());
+    assert!(!prepared.lifecycle.stack(crate::composition::lifecycle::LifecycleSignal::Success).is_empty());
+    assert!(prepared.lifecycle.stack(crate::composition::lifecycle::LifecycleSignal::Blocked).is_empty());
+    assert!(prepared.lifecycle.stack(crate::composition::lifecycle::LifecycleSignal::Failure).is_empty());
 }
 
 /// Regression: Darkmatter's `normalize_list_spacing` used to insert a
@@ -375,8 +409,8 @@ fn inline_composition_parses_lifecycle_config() {
     );
 
     let prepared = prepare_inline(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
-    assert!(prepared.lifecycle.failure.is_some());
-    assert!(prepared.lifecycle.start.is_none());
+    assert!(!prepared.lifecycle.stack(crate::composition::lifecycle::LifecycleSignal::Failure).is_empty());
+    assert!(prepared.lifecycle.stack(crate::composition::lifecycle::LifecycleSignal::Start).is_empty());
 }
 
 #[test]
@@ -386,7 +420,7 @@ fn invalid_lifecycle_config_fails_preparation() {
         &dir,
         &[
             ("title", json!("Test")),
-            ("start", json!({"say": "Hello", "say_first": "Also hello"})),
+            ("start", json!({"say": "Hello", "speak": "Also hello"})),
         ],
         "Content",
     );
@@ -413,14 +447,8 @@ fn lifecycle_malformed_span_is_deferred_raw_through_prepare() {
     );
 
     let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
-    let message = prepared
-        .lifecycle
-        .start
-        .as_ref()
-        .unwrap()
-        .message
-        .as_ref()
-        .unwrap();
+    let message = communication_text(&prepared.lifecycle, crate::composition::lifecycle::LifecycleSignal::Start, "message")
+        .expect("message action");
     assert_eq!(message, "leak {{ parent_dir(review)) }}");
 }
 
@@ -442,14 +470,8 @@ fn undefined_lifecycle_variable_is_deferred_not_rejected_at_prepare() {
     );
 
     let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
-    let message = prepared
-        .lifecycle
-        .start
-        .as_ref()
-        .unwrap()
-        .message
-        .as_ref()
-        .unwrap();
+    let message = communication_text(&prepared.lifecycle, crate::composition::lifecycle::LifecycleSignal::Start, "message")
+        .expect("message action");
     assert_eq!(message, "before {{ missing_lifecycle_var }} after");
 }
 
@@ -468,21 +490,16 @@ fn lifecycle_message_referencing_frontmatter_is_deferred_raw() {
     );
 
     let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
-    let message = prepared
-        .lifecycle
-        .start
-        .as_ref()
-        .unwrap()
-        .message
-        .as_ref()
-        .unwrap();
+    let message = communication_text(&prepared.lifecycle, crate::composition::lifecycle::LifecycleSignal::Start, "message")
+        .expect("message action");
     assert_eq!(message, "working on {{ area }}");
 }
 
 #[test]
-fn lifecycle_fallback_span_is_deferred_raw() {
+fn lifecycle_fallback_span_is_deferred_unresolved() {
     // Fallback (`{{ x || 'y' }}`) is deferred like any other lifecycle
-    // span; it resolves at event-time.
+    // span: a whole-value span is parsed, never resolved, at prepare and
+    // resolves at event-time.
     let dir = TempDir::new().unwrap();
     let source = make_source(
         &dir,
@@ -494,19 +511,20 @@ fn lifecycle_fallback_span_is_deferred_raw() {
     );
 
     let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
-    let message = prepared
-        .lifecycle
-        .start
-        .as_ref()
-        .unwrap()
-        .message
-        .as_ref()
-        .unwrap();
-    assert_eq!(message, "{{ missing_lifecycle_var || 'default' }}");
+    use darkmatter::markdown::compose::expression::Expr;
+    let message = communication_expr(&prepared.lifecycle, crate::composition::lifecycle::LifecycleSignal::Start, "message")
+        .expect("message action");
+    assert_eq!(
+        message,
+        Expr::Fallback {
+            primary: Box::new(Expr::Variable("missing_lifecycle_var".to_string())),
+            fallback: Box::new(Expr::StringLiteral("default".to_string())),
+        }
+    );
 }
 
 #[test]
-fn lifecycle_ctx_interpolation_is_deferred_raw() {
+fn lifecycle_ctx_interpolation_is_deferred_unresolved() {
     let dir = TempDir::new().unwrap();
     let source = make_source(
         &dir,
@@ -518,10 +536,12 @@ fn lifecycle_ctx_interpolation_is_deferred_raw() {
     );
 
     let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
-    let start = prepared.lifecycle.start.as_ref().unwrap();
-    let message = start.message.as_ref().unwrap();
-    // Deferred: the span survives raw for event-time interpolation (C2).
-    assert_eq!(message, "{{ ctx.today }}");
+    use darkmatter::markdown::compose::expression::Expr;
+    let message = communication_expr(&prepared.lifecycle, crate::composition::lifecycle::LifecycleSignal::Start, "message")
+        .expect("message action");
+    // Deferred: the whole-value span is the unresolved expression, evaluated
+    // at event time (C2).
+    assert_eq!(message, Expr::Variable("ctx.today".to_string()));
 }
 
 #[test]
@@ -541,11 +561,11 @@ fn multiple_lifecycle_spans_all_deferred_raw() {
 
     let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert_eq!(
-        prepared.lifecycle.start.as_ref().unwrap().message.as_deref(),
+        communication_text(&prepared.lifecycle, crate::composition::lifecycle::LifecycleSignal::Start, "message").as_deref(),
         Some("leak {{ parent_dir(review)) }}")
     );
     assert_eq!(
-        prepared.lifecycle.failure.as_ref().unwrap().say.as_deref(),
+        communication_text(&prepared.lifecycle, crate::composition::lifecycle::LifecycleSignal::Failure, "say").as_deref(),
         Some("leak {{ broken( }}")
     );
 }
@@ -646,8 +666,11 @@ fn direct_lifecycle_ctx_message_is_deferred_raw() {
     };
 
     let prepared = prepare_direct(&source, options).unwrap();
-    let start = prepared.lifecycle.start.as_ref().unwrap();
-    assert_eq!(start.message.as_deref(), Some("{{ctx.agent}}/{{ctx.model}}"));
+    assert_eq!(
+        communication_text(&prepared.lifecycle, crate::composition::lifecycle::LifecycleSignal::Start, "message")
+            .as_deref(),
+        Some("{{ctx.agent}}/{{ctx.model}}")
+    );
 }
 
 #[test]
@@ -1033,13 +1056,7 @@ fn lifecycle_err_span_survives_raw_in_effective_frontmatter() {
         "deferred lifecycle subtree retains its raw span"
     );
     assert_eq!(
-        prepared
-            .lifecycle
-            .failure
-            .as_ref()
-            .unwrap()
-            .message
-            .as_deref(),
+        communication_text(&prepared.lifecycle, crate::composition::lifecycle::LifecycleSignal::Failure, "message").as_deref(),
         Some("❌️ {{err.msg}}"),
         "parse_lifecycle_config sees the raw span"
     );
@@ -1052,15 +1069,13 @@ fn first_shell_command(
     signal: crate::composition::lifecycle::LifecycleSignal,
 ) -> darkmatter::markdown::compose::expression::Expr {
     use crate::composition::lifecycle_actions::LifecycleActionKind;
-    let stack = lifecycle.stack(signal).expect("stack present");
-    for item in stack {
-        for action in &item.actions {
-            if let LifecycleActionKind::Shell(shell) = &action.kind {
-                return shell.command.clone();
-            }
+    let mut command = None;
+    crate::composition::lifecycle_actions::for_each_action(lifecycle.stack(signal), &mut |action| {
+        if let LifecycleActionKind::Shell(shell) = &action.kind {
+            command.get_or_insert_with(|| shell.command.clone());
         }
-    }
-    panic!("no shell action in stack");
+    });
+    command.expect("a shell action in the stack")
 }
 
 #[test]
@@ -1076,7 +1091,7 @@ fn shell_command_early_binding_resolves_at_preflight() {
             ("branch", json!("main")),
             (
                 "start",
-                json!({"stack": [{"action": {"shell": "git fetch {{branch}}"}}]}),
+                json!([{ "shell": "git fetch {{branch}}" }]),
             ),
         ],
         "Do the work.",
@@ -1097,7 +1112,7 @@ fn shell_command_late_binding_reference_rejected_at_prepare() {
         &dir,
         &[(
             "failure",
-            json!({"stack": [{"action": {"shell": "rm {{err.msg}}"}}]}),
+            json!([{ "shell": "rm {{err.msg}}" }]),
         )],
         "Do the work.",
     );
@@ -1110,7 +1125,7 @@ fn shell_command_late_binding_reference_rejected_at_prepare() {
             message,
             ..
         } => {
-            assert_eq!(property, "failure.stack[0].action[0].command");
+            assert_eq!(property, "failure[0].shell.command");
             assert_eq!(raw, "rm {{err.msg}}");
             assert!(
                 message.contains("err"),
@@ -1133,7 +1148,7 @@ fn the_lazy_current_root_in_a_lifecycle_shell_command_is_rejected_at_prepare() {
     let command = "rm {{current.branch}}".to_string();
     let source = make_source(
         &dir,
-        &[("failure", json!({"stack": [{"action": {"shell": command.clone()}}]}))],
+        &[("failure", json!([{ "shell": command.clone() }]))],
         "Do the work.",
     );
 
@@ -1160,7 +1175,7 @@ fn current_env_in_a_lifecycle_shell_command_reads_the_frontmatter() {
         &dir,
         &[
             ("current_env", json!({"HOME": "userland"})),
-            ("start", json!({"stack": [{"action": {"shell": "echo {{ current_env.HOME }}"}}]})),
+            ("start", json!([{ "shell": "echo {{ current_env.HOME }}" }])),
         ],
         "Do the work.",
     );
@@ -1188,7 +1203,7 @@ fn lifecycle_shell_approval_refuses_group_in_any_branch_while_doc_group_reads_th
             ("group", json!({"label": "document"})),
             (
                 "start",
-                json!({"stack": [{"action": {"shell": "echo {{ false ? group.label : 'x' }}"}}]}),
+                json!([{ "shell": "echo {{ false ? group.label : 'x' }}" }]),
             ),
         ],
         "Do the work.",
@@ -1214,7 +1229,7 @@ fn lifecycle_shell_approval_refuses_group_in_any_branch_while_doc_group_reads_th
         &dir,
         &[
             ("group", json!({"label": "document"})),
-            ("start", json!({"stack": [{"action": {"shell": "echo {{ fm.group.label }}"}}]})),
+            ("start", json!([{ "shell": "echo {{ fm.group.label }}" }])),
         ],
         "Do the work.",
     );
@@ -1234,7 +1249,7 @@ fn shell_long_form_command_late_binding_rejected_at_prepare() {
         &dir,
         &[(
             "failure",
-            json!({"stack": [{"action": {"action": "shell", "command": "rm {{err.msg}}"}}]}),
+            json!([{ "shell": { "command": "rm {{err.msg}}" } }]),
         )],
         "Do the work.",
     );
@@ -1242,7 +1257,7 @@ fn shell_long_form_command_late_binding_rejected_at_prepare() {
     let err = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     match err {
         CompositionError::LifecycleShellResolution { property, raw, .. } => {
-            assert_eq!(property, "failure.stack[0].action[0].command");
+            assert_eq!(property, "failure[0].shell.command");
             assert_eq!(raw, "rm {{err.msg}}");
         }
         other => panic!("expected LifecycleShellResolution, got: {other:?}"),

@@ -60,7 +60,7 @@ struct ExcerptRegion {
 
 impl FrontmatterExcerpt {
     /// Capture the excerpt for one dotted frontmatter property
-    /// (e.g. `"success.message"`, `"initialize.stack[0].action[1].set"`).
+    /// (e.g. `"success.message"`, `"initialize[1].set"`).
     ///
     /// ## Returns
     ///

@@ -127,6 +127,8 @@ fn runs_until_condition_stops_and_commits_actions() {
     assert_eq!(result.last_output, "ok");
 }
 
+/// Each iteration gets the current frontmatter as overrides and its `loop`
+/// values as [`LoopIterationContext::ambient`], never as frontmatter.
 #[test]
 fn injects_ambient_values_and_current_frontmatter() {
     let config = counter_loop(2);
@@ -137,10 +139,11 @@ fn injects_ambient_values_and_current_frontmatter() {
         object(json!({"counter": 0, "iteration": 99})),
         LoopExecutionOptions::default(),
         |ctx| {
-            seen.borrow_mut().push(
+            seen.borrow_mut().push((
                 ctx.as_layered_overrides(&crate::composition::LayeredOverrides::new())
                     .to_value(),
-            );
+                ctx.ambient.to_value(),
+            ));
             Ok(LoopIterationOutput::success(format!(
                 "run {}",
                 ctx.iteration
@@ -153,21 +156,27 @@ fn injects_ambient_values_and_current_frontmatter() {
     let seen = seen.borrow();
     // `counter < 2` from 0 runs with counter 0, 1, 2.
     assert_eq!(seen.len(), 3);
-    assert_eq!(seen[0]["counter"], json!(0));
-    // User frontmatter property `iteration` is preserved verbatim
-    // because loop ambients live under `_loop_*`.
-    assert_eq!(seen[0]["iteration"], json!(99));
-    assert_eq!(seen[0]["_loop_count"], json!(1));
-    assert_eq!(seen[0]["_loop_is_first"], json!(true));
-    assert_eq!(seen[0]["_loop_last_output"], json!(""));
-    assert_eq!(seen[1]["counter"], json!(1));
-    assert_eq!(seen[1]["iteration"], json!(99));
-    assert_eq!(seen[1]["_loop_count"], json!(2));
-    assert_eq!(seen[1]["_loop_is_first"], json!(false));
-    assert_eq!(seen[1]["_loop_last_output"], json!("run 1"));
+    let (overrides, ambient) = &seen[0];
+    assert_eq!(overrides["counter"], json!(0));
+    // User frontmatter property `iteration` is preserved verbatim, and no
+    // loop value is written into the frontmatter overrides.
+    assert_eq!(overrides["iteration"], json!(99));
+    assert_eq!(
+        overrides.as_object().unwrap().keys().collect::<std::collections::BTreeSet<_>>(),
+        ["counter", "iteration"].iter().map(ToString::to_string).collect::<std::collections::BTreeSet<_>>().iter().collect()
+    );
+    assert_eq!(ambient["count"], json!(1));
+    assert_eq!(ambient["is_first"], json!(true));
+    assert_eq!(ambient["last_output"], json!(""));
+    let (overrides, ambient) = &seen[1];
+    assert_eq!(overrides["counter"], json!(1));
+    assert_eq!(overrides["iteration"], json!(99));
+    assert_eq!(ambient["count"], json!(2));
+    assert_eq!(ambient["is_first"], json!(false));
+    assert_eq!(ambient["last_output"], json!("run 1"));
 }
 
-/// `_loop_is_last` is predicted by reading the condition against the state an
+/// `loop.is_last` is predicted by reading the condition against the state an
 /// iteration is about to run with. `counter < 3` from 0 runs four times; only
 /// the counter-3 iteration fails the condition, so only it is last.
 #[test]
@@ -231,7 +240,7 @@ fn computes_is_last_when_max_iterations_is_stopping_condition() {
 #[test]
 fn fail_fast_false_continues_after_iteration_failure() {
     let config = LoopConfig {
-        condition: LoopCondition::While("_loop_count < 4".into()),
+        condition: LoopCondition::While("loop.count < 4".into()),
         actions: vec![LoopAction::Increment("counter".into())],
         max_iterations: None,
         fail_fast: Some(false),
@@ -261,7 +270,7 @@ fn fail_fast_false_continues_after_iteration_failure() {
     .unwrap();
 
     assert!(result.error.is_none());
-    // `_loop_count < 4` stops at the gate after iteration 4. Under
+    // `loop.count < 4` stops at the gate after iteration 4. Under
     // `fail_fast: false` the failed iteration 1 still reaches the gate, so its
     // action applies like any other continuing pass: gates 1-3 increment.
     assert_eq!(&*seen_exit_codes.borrow(), &[0, 42, 0, 0]);
@@ -299,7 +308,7 @@ fn fail_fast_true_stops_after_iteration_failure() {
 #[test]
 fn fail_fast_false_discards_failed_action_stage() {
     let config = LoopConfig {
-        condition: LoopCondition::While("_loop_count < 3".into()),
+        condition: LoopCondition::While("loop.count < 3".into()),
         actions: vec![
             LoopAction::Increment("counter".into()),
             LoopAction::Increment("bad".into()),
@@ -318,7 +327,7 @@ fn fail_fast_false_discards_failed_action_stage() {
     .unwrap();
 
     assert!(result.error.is_none());
-    // `_loop_count < 3` stops at the gate after iteration 3. Each continuing
+    // `loop.count < 3` stops at the gate after iteration 3. Each continuing
     // gate's action list fails on `bad`, and the whole stage is discarded, so
     // `counter` never moves even though its own increment succeeded.
     assert_eq!(result.iteration_count, 3);
@@ -328,20 +337,20 @@ fn fail_fast_false_discards_failed_action_stage() {
 
 #[test]
 fn set_template_renders_against_post_executor_iteration_state() {
-    // After iteration N runs, `set(stamp, {{_loop_count}})` should land
+    // After iteration N runs, `set(stamp, {{loop.count}})` should land
     // a typed JSON number reflecting the iteration that just ran (N),
-    // and `set(echo, {{_loop_last_output}})` should reflect the output
+    // and `set(echo, {{loop.last_output}})` should reflect the output
     // the executor produced moments ago.
     let config = LoopConfig {
-        condition: LoopCondition::While("_loop_count < 3".into()),
+        condition: LoopCondition::While("loop.count < 3".into()),
         actions: vec![
             LoopAction::Set {
                 prop: "stamp".into(),
-                value: Value::String("{{_loop_count}}".into()),
+                value: Value::String("{{loop.count}}".into()),
             },
             LoopAction::Set {
                 prop: "echo".into(),
-                value: Value::String("{{_loop_last_output}}".into()),
+                value: Value::String("{{loop.last_output}}".into()),
             },
         ],
         max_iterations: Some(2),
@@ -452,7 +461,7 @@ fn until_loop_with_counter_reaches_target() {
 #[test]
 fn append_accumulates_log_across_iterations() {
     let config = LoopConfig {
-        condition: LoopCondition::While("_loop_count < 4".into()),
+        condition: LoopCondition::While("loop.count < 4".into()),
         actions: vec![LoopAction::Append {
             prop: "log".into(),
             value: json!({"event": "tick"}),
@@ -471,7 +480,7 @@ fn append_accumulates_log_across_iterations() {
     .unwrap();
 
     assert!(result.error.is_none());
-    // Gates 1-3 read `_loop_count < 4` as true and append; gate 4 stops.
+    // Gates 1-3 read `loop.count < 4` as true and append; gate 4 stops.
     assert_eq!(result.iteration_count, 4);
     let log = result
         .final_frontmatter
@@ -485,7 +494,7 @@ fn append_accumulates_log_across_iterations() {
 #[test]
 fn last_output_and_last_exit_code_propagate() {
     let config = LoopConfig {
-        condition: LoopCondition::While("_loop_count < 4".into()),
+        condition: LoopCondition::While("loop.count < 4".into()),
         actions: vec![],
         max_iterations: None,
         fail_fast: None,
@@ -510,7 +519,7 @@ fn last_output_and_last_exit_code_propagate() {
     .unwrap();
 
     assert!(result.error.is_none());
-    // `_loop_count < 4` stops at the gate after iteration 4.
+    // `loop.count < 4` stops at the gate after iteration 4.
     assert_eq!(result.iteration_count, 4);
     assert_eq!(result.last_output, "run-4");
 
@@ -524,7 +533,7 @@ fn last_output_and_last_exit_code_propagate() {
 #[test]
 fn last_exit_code_reflects_failure_in_next_iteration() {
     let config = LoopConfig {
-        condition: LoopCondition::While("_loop_count < 4".into()),
+        condition: LoopCondition::While("loop.count < 4".into()),
         actions: vec![],
         max_iterations: None,
         fail_fast: Some(false),
@@ -552,7 +561,7 @@ fn last_exit_code_reflects_failure_in_next_iteration() {
     .unwrap();
 
     assert!(result.error.is_none());
-    // `_loop_count < 4` stops at the gate after iteration 4, which succeeded.
+    // `loop.count < 4` stops at the gate after iteration 4, which succeeded.
     assert_eq!(result.iteration_count, 4);
     assert_eq!(result.final_exit_code, 0);
 
