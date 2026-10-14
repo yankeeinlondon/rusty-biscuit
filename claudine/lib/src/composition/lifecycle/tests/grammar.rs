@@ -387,6 +387,22 @@ fn a_sixth_level_is_a_typed_error_naming_its_path() {
     );
 }
 
+// Claudine's schema accepts `{}` as an empty bundle, so the parser is the only
+// layer that rejects an empty stack item.
+#[test]
+fn an_empty_stack_item_is_a_typed_error_naming_its_path() {
+    for (event, value, path) in [
+        ("start", json!([{}]), "start[0]"),
+        ("initialize", json!([{}]), "initialize[0]"),
+        ("failure", json!([{ "when": "fm.x", "then": [{}] }]), "failure[0].then[0]"),
+    ] {
+        let error = parse_err(json!({ event: value }));
+        assert_eq!(shape_property(&error), path, "{event}");
+        let CompositionError::LifecycleStackInvalidShape { message, .. } = &error else { unreachable!() };
+        assert!(message.contains("cannot be empty"), "{event}: {message}");
+    }
+}
+
 #[test]
 fn an_else_if_chain_counts_each_nested_when_and_siblings_do_not() {
     // Five levels through `else`, with sibling guards at every level.
