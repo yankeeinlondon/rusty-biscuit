@@ -80,6 +80,74 @@ docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_6:
+    - claudine/lib/src/config/claudine_config.rs
+    - claudine/lib/src/dispatch/runner/speak.rs
+    - claudine/lib/src/composition/lifecycle/audio.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/mod.rs
+docs_updated_during_phase_6:
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/configuring-actions.md
+    - claudine/docs/topics/testing.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/timeline.md
+source_code:
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/mod.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/preparer.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/fakes.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/tests.rs
+    - claudine/lib/src/config/tts.rs
+    - claudine/lib/src/config/claudine_config/tests.rs
+    - claudine/lib/src/events/config.rs
+    - claudine/lib/src/dispatch/loader.rs
+    - claudine/lib/src/dispatch/loader/tests.rs
+    - claudine/lib/src/dispatch/runner/speak.rs
+    - claudine/lib/src/dispatch/runner/tests.rs
+    - claudine/lib/src/dispatch/tests.rs
+    - claudine/lib/src/composition/lifecycle/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/tests/tts_settings.rs
+    - claudine/cli/src/commands/config_tui/reducers.rs
+    - claudine/cli/src/commands/config_tui/tabs/tts.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/collect.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/collect/tests.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/classify.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/classify/tests.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/key.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/key/tests.rs
+    - claudine/cli/tests/l1/composition_seams.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/worker.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/worker/tests.rs
+    - claudine/lib/src/composition/lifecycle/tests/audio_emission.rs
+    - claudine/lib/tests/l1/context_construction_guard.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/fixture.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/sequence.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/sequence/tests.rs
+    - claudine/lib/src/invocation_context.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/tts_prewarm.rs
+    - claudine/lib/src/config/claudine_config.rs
+    - claudine/lib/src/composition/lifecycle/audio.rs
+documentation:
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/configuring-actions.md
+    - claudine/docs/topics/testing.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/timeline.md
+completed_phase: 6
+implemented: true
 ---
 # Plan: TTS Pre-warm
 
@@ -397,20 +465,20 @@ if the detached-playback boundary was touched (criterion 14).
 
 **Wave 6.1 (parallel)**
 
-- [ ] **Lifecycle docs.** Update `docs/topics/flow-control/lifecycle.md` (or the
+- [x] **Lifecycle docs.** Update `docs/topics/flow-control/lifecycle.md` (or the
   audio page it links) with pre-warm, early vs. late phrases (small example each,
   Mermaid flow of bootstrap -> reread -> worker -> cache), and the Limits list.
   Audience is a developer new to this repo. Do not name any feature or fix
   directory; state behavior in its own words.
-- [ ] **Config docs.** Document the `tts` object, its keys, and the shape table
+- [x] **Config docs.** Document the `tts` object, its keys, and the shape table
   in the configuration docs; mark nothing "planned" that has landed.
-- [ ] **Skill.** Update `.claude/skills/claudine/` (SKILL.md and the relevant
+- [x] **Skill.** Update `.claude/skills/claudine/` (SKILL.md and the relevant
   topic file; `topics` is a symlink to `claudine/docs/topics`) with the `tts`
   keys and shape table.
-- [ ] **Comment drift pass.** Review `///`/`//` comments on every touched symbol
+- [x] **Comment drift pass.** Review `///`/`//` comments on every touched symbol
   (`TtsValue`, `bridge_tts_settings`, `tts_config_from_settings`, the TUI tab)
   and fix any that drifted.
-- [ ] **Fixture gaps** noted in Task "Fixture check" (Phase 1), if any.
+- [x] **Fixture gaps** noted in Task "Fixture check" (Phase 1), if any.
   - `CliProcessFixture` does not isolate `TMPDIR`/`TMP`/`TEMP` (the audio
     cache directory is `std::env::temp_dir()`) or `BISCUIT_SPEAKS_CACHE` (the
     voice-capability cache file); the child inherits the host's values. Add
@@ -419,13 +487,13 @@ if the detached-playback boundary was touched (criterion 14).
 
 **Wave 6.2 (after 6.1)**
 
-- [ ] **Audit.** Walk acceptance criteria 1-14 against tests by name; record
+- [x] **Audit.** Walk acceptance criteria 1-14 against tests by name; record
   the map in `implementation-log.md`. Grep `#[serde(default)]`,
   `unwrap_or_default`, `.ok()` over touched config code. Confirm no new CI cell,
   no new dependency (else update `docs/dependencies.md`), and Windows/WSL2
   portability (no path-comparison or `cfg(windows)` assumptions; load the `os`
   skill if any are touched).
-- [ ] **Final run.** `just test` and `just lint` in `claudine/`. Terminal state
+- [x] **Final run.** `just test` and `just lint` in `claudine/`. Terminal state
   is "implementation complete, ready for review"; do not move the feature to
   `_completed`.
 

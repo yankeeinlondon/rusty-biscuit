@@ -80,34 +80,74 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/claudine/SKILL.md
 human_review: false
-message_to_agent: |-
-    Phase 5 notes for Phase 6 (docs, skill, audit):
-    - Behavior to document: one deferred worker per top-level command
-      (compose, inline-compose, sequence, provider wrapper). It starts on the
-      first submission that speaks, using that document's lifecycle
-      settings, so the first speaking document's `tts` config and `prewarm`
-      decide for the whole invocation. Submission points: the bootstrap
-      before `initialize` (staged and loop), every prepared document before
-      launch (stabilized reread, loop iteration, proxy target, sequence step
-      or task), harness retry/resume/adoption, and sequence preflight before
-      step one.
-    - Limit to state plainly: a lifecycle mapping `set` in `initialize` (or
-      any event) changes runtime state, not the reread's frontmatter. A
-      phrase reading a `set` key is pre-warmed with its earlier text and
-      misses the cache at event time (never wrong audio). A document that
-      rewrites itself (`set_frontmatter`) is re-read and warmed with the new
-      text.
-    - In a sequence, the per-step overlay keys (state, previous, next,
-      outputs, sequence_id), the caller's setters, and a prompt task's
-      `params` are late. Preflight also leaves late any frontmatter value
-      still holding `{{`, `$(`, or a backtick, plus `ctx`/`env` reads.
-    - The CLI test seam is CLAUDINE_TEST_PREWARM=record:<path> or
-      block:<path> (test-fixtures only). The SKILL.md now has a short
-      pre-warm wiring paragraph; add the `tts` keys and shape table there.
-    - Fixture gaps (Phase 6 task): the criterion-10 test sets
-      TMPDIR/TMP/TEMP and BISCUIT_SPEAKS_CACHE on its own builder.
-      CliProcessFixture still does not set them by default; decide whether to
-      move them into the fixture.
+source_files_during_phase_6:
+    - claudine/lib/src/config/claudine_config.rs
+    - claudine/lib/src/dispatch/runner/speak.rs
+    - claudine/lib/src/composition/lifecycle/audio.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/mod.rs
+docs_updated_during_phase_6:
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/configuring-actions.md
+    - claudine/docs/topics/testing.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/timeline.md
+source_code:
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/mod.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/preparer.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/fakes.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/tests.rs
+    - claudine/lib/src/config/tts.rs
+    - claudine/lib/src/config/claudine_config/tests.rs
+    - claudine/lib/src/events/config.rs
+    - claudine/lib/src/dispatch/loader.rs
+    - claudine/lib/src/dispatch/loader/tests.rs
+    - claudine/lib/src/dispatch/runner/speak.rs
+    - claudine/lib/src/dispatch/runner/tests.rs
+    - claudine/lib/src/dispatch/tests.rs
+    - claudine/lib/src/composition/lifecycle/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/tests/tts_settings.rs
+    - claudine/cli/src/commands/config_tui/reducers.rs
+    - claudine/cli/src/commands/config_tui/tabs/tts.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/collect.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/collect/tests.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/classify.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/classify/tests.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/key.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/key/tests.rs
+    - claudine/cli/tests/l1/composition_seams.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/worker.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/worker/tests.rs
+    - claudine/lib/src/composition/lifecycle/tests/audio_emission.rs
+    - claudine/lib/tests/l1/context_construction_guard.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/fixture.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/sequence.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/sequence/tests.rs
+    - claudine/lib/src/invocation_context.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/tts_prewarm.rs
+    - claudine/lib/src/config/claudine_config.rs
+    - claudine/lib/src/composition/lifecycle/audio.rs
+documentation:
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/configuring-actions.md
+    - claudine/docs/topics/testing.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/timeline.md
+completed_phase: 6
+implemented: true
 ---
 # Implementation Log for 2026-10-22-tts-prewarm (6 phases)
 
@@ -687,3 +727,112 @@ loader unchanged.
   run was needed.
 - New L1 test durations: CLI 0.6–2.4 s each (the slowest is the four-spelling
   loop), lib under 0.1 s.
+
+## Phase 6
+
+### What changed
+
+- **Lifecycle docs** (`docs/topics/flow-control/lifecycle.md`): new section
+  "Speech is prepared ahead of time (pre-warm)" under Communication Actions:
+  what pre-warm is and why, an early/late example, which stacks and shapes are
+  walked, a table of eligible and ineligible phrase shapes (one example each),
+  how it differs from the general early-binding rule (functions are excluded),
+  a Mermaid flow (bootstrap / reread / preflight / re-entry → dedup → worker →
+  cache → `say`), submission points, de-duplication and failure behavior,
+  sequence-injected values, configuration and off switches, and the Limits
+  list. The `set` limit Phase 5 found is stated plainly. No feature or fix
+  directory is named.
+- **Config docs** (`docs/topics/configuring-actions.md`): new section
+  "Text-to-speech settings (`tts`)" with the five JSON5 shapes, the key table,
+  the per-shape effect table, the validation rules (unknown key, explicit
+  `null`, wrong type, `{}`, duplicate key last-wins), and the TUI behavior.
+  The hook `speak` section links to it.
+- **Testing docs** (`docs/topics/testing.md`): the fixture-gap decision and the
+  `CLAUDINE_TEST_PREWARM` seam, under "Silent audio fixtures".
+- **Skill**: `.claude/skills/claudine/SKILL.md` gained the eligibility summary,
+  the `set` limit, the `tts` keys, and a compact shape table, linking the
+  topic docs (which are the skill's `topics/` symlink). `timeline.md` gained a
+  2026-10-14 `tts-prewarm` entry with the "new preparation site must call
+  `collect_and_submit`" trap.
+- **Comment drift** (code assumed correct, comments fixed):
+  - `ClaudineConfig.tts` said `false` "disables" TTS; it only disables hook
+    speech. Now points at `TtsValue`, which documents every shape.
+  - `dispatch/runner/speak.rs`: the test-only `tts_config_from_settings` was
+    documented as "Speak a message … (fire-and-forget)"; it builds a config.
+  - `lifecycle/audio.rs::tts_config_from_settings`: added the hidden coupling
+    that pre-warm builds candidates with the same function, so a cache hit
+    needs an identical configuration.
+  - `prewarm/mod.rs`: removed a stray blank line splitting the `//!` block.
+  - `TtsValue`, `TtsConfigSettings`, `bridge_tts_settings`,
+    `GlobalSettings.tts_prewarm`, and the TUI tab's comments were reviewed and
+    are accurate.
+
+### Fixture gap decision
+
+`CliProcessFixture` still does not set `TMPDIR`/`TMP`/`TEMP` or
+`BISCUIT_SPEAKS_CACHE` by default; the criterion-10 test sets them on its own
+builder (the plan's second option). Reason: redirecting the temp directory
+for every L1 `claudine` child changes far more than audio (Git, Darkmatter, and
+shell temp files; the fixture's checkout-containment guard reads it), while
+`PLAYA_DRY_RUN=1` already stops pre-warm before any phrase is resolved, so an
+ordinary test writes no audio cache. Only a test that asserts the absence of
+cache files needs the isolation. Recorded in `docs/topics/testing.md`.
+
+### Audit: acceptance criteria → tests
+
+Paths: lib tests are `claudine composition::lifecycle::prewarm::…` unless
+named otherwise; CLI tests are `claudine-cli::l1 tts_prewarm::…`.
+
+| # | Criterion | Tests |
+| --- | --- | --- |
+| 1 | every stack but `initialize`, `then`/`else`, depth 3, `speak`, bundles, named args | `collect::tests::every_stack_but_initialize_is_walked_in_event_order`, `…::loose_loop_verbs_are_walked`, `…::both_branches_are_walked_at_every_depth_without_evaluating_guards`, `…::only_speech_is_collected`, `…::frontmatter_keys_named_say_are_not_phrases`, `…::task_setup_and_teardown_stacks_are_walked_in_their_own_scope`; CLI `compose_prepares_every_early_phrase_once_with_its_resolved_text` |
+| 2 | late roots and overlay values not prepared; `fm`/bare/`ctx`/`env` prepared with resolved text | `classify::tests::literal_and_frontmatter_ctx_env_phrases_are_early_with_playback_text`, `…::late_roots_are_skipped_even_in_untaken_branches`, `…::sequence_injected_keys_are_late_through_bare_dotted_and_bracket_reads`, `…::ctx_and_env_wait_for_the_documents_own_capture`, `…::every_reserved_namespace_and_declared_global_has_a_decided_timing`, `tests::entry::sequence_injected_keys_are_late_in_every_document_their_handle_submits` |
+| 3 | `$( … )`, any function call, untaken branch; data not re-evaluated; empty not submitted | `classify::tests::function_calls_are_ineligible_wherever_they_appear`, `…::authored_shell_expansion_is_ineligible_and_never_runs`, `…::data_returned_by_an_interpolation_is_never_evaluated_again`, `…::empty_results_are_not_submitted`, `…::operators_indexing_fallback_and_ternary_over_early_values_are_early`, `…::a_failed_speculative_resolution_is_a_silent_skip` |
+| 4 | three-prompt sequence submits in preflight, blocked prep does not block launch, unresolved inputs skipped | `sequence::tests::every_early_phrase_of_three_prompts_is_queued_before_any_step_runs`, `sequence::tests::task_inputs_unresolved_values_and_captures_are_left_late`; CLI `a_three_prompt_sequence_submits_every_document_before_step_one` |
+| 5 | `proxy` target prepared with its `with` overlay, only when prepared | CLI `a_proxy_target_is_prepared_with_its_overlay` |
+| 6 | `prewarm: false` and `--dry-run` prepare nothing | `worker::tests::dry_run_and_prewarm_false_start_nothing_and_resolve_nothing`, `tests::entry::the_first_speaking_submission_decides_the_gates`, `tests::entry::dry_run_turns_a_deferred_worker_off_before_any_submission`; CLI `dry_run_prepares_nothing`, `prewarm_false_in_config_prepares_nothing_and_still_launches` |
+| 7 | config shapes, unknown key, provider-less object, TUI round trip | `claudine dispatch::loader::tests::tts_config_input_robustness_matrix`, `…::tts_shapes_bridge_to_the_documented_prewarm_and_playback_settings`, `…::tts_object_round_trips_without_materializing_defaults`, `claudine dispatch::runner::speak::tests::provider_less_object_drives_hook_speak_exactly_as_true` (+3 siblings), `claudine composition::lifecycle::tests::tts_settings::*` (4), `claudine-cli commands::config_tui::reducers::tests::provider_selection_*` (3), `claudine-cli commands::config_tui::tabs::tts::tests::*` (5); pre-existing `config::tts::tests::*` |
+| 8 | errors never change outcome, nothing on terminal, one sanitized warn, no retry | `worker::tests::failures_warn_once_without_the_phrase_and_later_candidates_still_run`; CLI `a_blocked_preparation_does_not_delay_the_provider_launch` (exit success, empty terminal) |
+| 9 | blocking `prepare` does not delay launch (stub provider) | `worker::tests::submission_returns_while_preparation_is_blocked_and_runs_serially`; CLI `a_blocked_preparation_does_not_delay_the_provider_launch`, `a_three_prompt_sequence_submits_every_document_before_step_one` (blocking mode) |
+| 10 | `PLAYA_DRY_RUN=1` leaves no cache/spool/subprocess; accepted spellings | CLI `playa_dry_run_prepares_nothing_and_leaves_no_audio_artifacts`, `every_accepted_playa_dry_run_spelling_prepares_nothing`; `worker::tests::every_gate_and_every_accepted_dry_run_spelling_disables_prewarm`, `…::every_accepted_playa_dry_run_spelling_starts_nothing` |
+| 11 | docs and skill | this phase: `lifecycle.md`, `configuring-actions.md`, `SKILL.md` (documentation; no test) |
+| 12 | bootstrap/reread share one worker; retry, loop, proxy, repeated paths, parallel tasks dedup; bare/bracket `fm`, new globals, sequence values via `fm` | `tests::entry::bootstrap_and_reread_share_one_worker_without_repeating_a_candidate`, `tests::entry::differently_scoped_tasks_share_one_de_duplication`, `worker::tests::a_candidate_is_queued_once_per_invocation`, `key::tests::*` (3), `classify::tests::every_reserved_namespace_and_declared_global_has_a_decided_timing`; CLI `a_retry_prepares_its_new_snapshot_without_repeating_a_candidate`, `initialize_changes_are_discovered_by_the_reread_without_repeating_a_candidate` |
+| 13 | event before prep finishes publishes normally; prep never publishes; no-op is success; shutdown cancels without draining | `claudine composition::lifecycle::tests::audio_emission::speech_fired_during_a_blocked_prewarm_publishes_without_joining_it`, `worker::tests::a_successful_or_no_op_preparation_counts_as_done`, `…::dropping_the_worker_cancels_without_draining_and_keeps_completed_work` |
+| 14 | `just test`/`just lint` green; `test-l2` only if detached playback touched | gates below; detached playback not touched in any phase |
+
+### Other audit checks
+
+- **Smell grep** over touched config code (`config/tts.rs`, `dispatch/loader.rs`,
+  `events/config.rs`, the TUI tab and reducers): the `#[serde(default)]` on
+  `provider` and `prewarm` are paired with the `present` deserializer (null
+  rejected, matrix-tested). `voice`'s `#[serde(default)]` (null reads as
+  absent) and the `unwrap_or_default`/`.ok()` hits in `loader.rs` (messenger
+  bridge, path canonicalization) predate this feature and are not on a field
+  it added or changed. `GlobalSettings.tts_prewarm`'s serde default is never
+  read from a user file (`GlobalSettings` is built by the bridge).
+- **Dependencies:** no claudine `Cargo.toml` changed in any phase; the branch's
+  `Cargo.toml` diffs belong to Darkmatter work. `docs/dependencies.md`
+  unchanged.
+- **CI:** no new CI cell, recipe, feature, or test target. The CLI tests sit in
+  the declared `l1` binary under `cfg(all(unix, feature = "test-fixtures"))`.
+- **Portability:** no `cfg(windows)`, path comparison, or temp-dir read in
+  production pre-warm code. The seam splits `mode:path` on the first `:`, so a
+  Windows drive path survives. The CLI tests are Unix-only (shell-script stub
+  providers); the same behavior is asserted portably at lib level. No rig run
+  was needed; the nightly Windows/WSL2 legs cover the lib tests.
+
+### Requirement → test (this phase)
+
+Phase 6 changed only documentation and comments; no behavior changed, so
+there is no new regression test. The existing suite is the evidence that the
+comment edits changed nothing.
+
+### Gates
+
+- `just test` in `claudine/`: 9138 passed, 9 skipped (the same pre-existing
+  skips).
+- `just lint` in `claudine/`: clean.
+- `just test-l2` not run: the detached-playback boundary was not touched.
+
+Implementation complete, ready for review. The feature directory stays where
+it is.
