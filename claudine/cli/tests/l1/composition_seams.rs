@@ -137,11 +137,12 @@ const SUBTREE_COMPOSE_BASELINE: &[AllowedSite] = &[
                  does not evaluate lifecycle values",
     },
     AllowedSite {
-        site: "lifecycle::executor::resolve_string_value",
+        site: "lifecycle::executor::interpolate_text_in",
         calls: 1,
         reason: "THE event-time interpolator for every lifecycle surface, \
-                 `proxy.with` values included. A second site here would be a \
-                 second interpolation grammar.",
+                 `proxy.with` values included, shared with speech pre-warm's \
+                 speculative resolution so both produce the same text. A second \
+                 site here would be a second interpolation grammar.",
     },
 ];
 
@@ -456,7 +457,7 @@ fn subtree_compose_baseline_holds_the_line() {
         &found,
         SUBTREE_COMPOSE_BASELINE,
         "SubtreeCompose entry point",
-        "Event-time interpolation has one owner: `lifecycle::executor::resolve_string_value`. \
+        "Event-time interpolation has one owner: `lifecycle::executor::interpolate_text_in`. \
          A new `SubtreeCompose::new` site is a second interpolator — route the value through \
          the executor's existing resolution instead, or add the site to \
          `SUBTREE_COMPOSE_BASELINE` with a reason saying why it is not a duplicate grammar.",

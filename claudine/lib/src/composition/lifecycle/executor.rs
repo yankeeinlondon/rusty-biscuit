@@ -988,11 +988,7 @@ impl StackExecutionContext<'_> {
     fn eval_expr(&self, expr: &Expr, fm: &Map<String, Value>) -> Result<Value, LifecycleExprError> {
         let state = self.build_state(fm, &expr.to_string());
         let (view, globals) = self.bindings();
-        let lookup = layered_session(&state, globals, Some(view), Some(self.resolution_context()?))
-            .map_err(|error| {
-                LifecycleExprError::Evaluate(Box::new(ExpressionError::Binding(Box::new(error))))
-            })?;
-        evaluate(expr, &lookup).map_err(|error| LifecycleExprError::Evaluate(Box::new(error)))
+        evaluate_expr_in(expr, &state, view, globals, Some(self.resolution_context()?))
     }
 
     /// Interpolate a string's `{{ … }}` spans at event-time through Darkmatter's
@@ -1013,13 +1009,7 @@ impl StackExecutionContext<'_> {
     ) -> Result<Value, LifecycleExprError> {
         let state = self.build_state(fm, s);
         let (view, globals) = self.bindings();
-        let value = Value::String(s.to_string());
-        SubtreeCompose::new(&value, &state)
-            .with_globals(globals)
-            .with_binding_view(view)
-            .with_resolution_context(self.resolution_context()?)
-            .compose()
-            .map_err(|error| LifecycleExprError::Compose(Box::new(error)))
+        interpolate_text_in(s, &state, view, globals, Some(self.resolution_context()?))
     }
 
     /// Evaluate one action operand at event time.
@@ -1035,7 +1025,9 @@ impl StackExecutionContext<'_> {
         fm: &Map<String, Value>,
     ) -> Result<Value, LifecycleExprError> {
         match expr {
-            Expr::StringLiteral(text) if text.contains("{{") => self.resolve_string_value(text, fm),
+            Expr::StringLiteral(text) if is_template_operand(expr) => {
+                self.resolve_string_value(text, fm)
+            }
             _ => self.eval_expr(expr, fm),
         }
     }
@@ -2053,6 +2045,67 @@ fn push_proxy_with_scan_content(value: &WithValue, content: &mut String) {
             }
         }
     }
+}
+
+/// Whether an action operand is a template, interpolated once by
+/// [`interpolate_text_in`], rather than an expression evaluated by
+/// [`evaluate_expr_in`]: an authored literal body carrying `{{ … }}` spans.
+pub(super) fn is_template_operand(expr: &Expr) -> bool {
+    matches!(expr, Expr::StringLiteral(text) if text.contains("{{"))
+}
+
+/// Evaluate one action operand against an established state, as lifecycle
+/// playback does: a template is interpolated, every other expression yields
+/// data that is never scanned again.
+///
+/// Shared by event-time playback and pre-warm's speculative resolution, so
+/// both produce the same text from the same inputs.
+pub(super) fn evaluate_operand_in(
+    expr: &Expr,
+    state: &EffectiveState,
+    view: Arc<BindingView>,
+    globals: HashMap<String, RuntimeBinding<'static>>,
+    resolution_context: Option<ResolutionContext>,
+) -> Result<Value, LifecycleExprError> {
+    match expr {
+        Expr::StringLiteral(text) if is_template_operand(expr) => {
+            interpolate_text_in(text, state, view, globals, resolution_context)
+        }
+        _ => evaluate_expr_in(expr, state, view, globals, resolution_context),
+    }
+}
+
+fn evaluate_expr_in(
+    expr: &Expr,
+    state: &EffectiveState,
+    view: Arc<BindingView>,
+    globals: HashMap<String, RuntimeBinding<'static>>,
+    resolution_context: Option<ResolutionContext>,
+) -> Result<Value, LifecycleExprError> {
+    let lookup = layered_session(state, globals, Some(view), resolution_context).map_err(|error| {
+        LifecycleExprError::Evaluate(Box::new(ExpressionError::Binding(Box::new(error))))
+    })?;
+    evaluate(expr, &lookup).map_err(|error| LifecycleExprError::Evaluate(Box::new(error)))
+}
+
+fn interpolate_text_in(
+    text: &str,
+    state: &EffectiveState,
+    view: Arc<BindingView>,
+    globals: HashMap<String, RuntimeBinding<'static>>,
+    resolution_context: Option<ResolutionContext>,
+) -> Result<Value, LifecycleExprError> {
+    let value = Value::String(text.to_string());
+    let compose = SubtreeCompose::new(&value, state)
+        .with_globals(globals)
+        .with_binding_view(view);
+    let compose = match resolution_context {
+        Some(context) => compose.with_resolution_context(context),
+        None => compose,
+    };
+    compose
+        .compose()
+        .map_err(|error| LifecycleExprError::Compose(Box::new(error)))
 }
 
 /// Refuse template syntax in a `with:` value that becomes lifecycle
