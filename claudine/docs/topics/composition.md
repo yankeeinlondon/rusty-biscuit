@@ -929,6 +929,78 @@ Any composition error (schema validation failure, missing file, denied shell com
 
 Composition documents can declare a `$schema` in their frontmatter to constrain the property values that drive the prompt. Schema processing is anchored on Darkmatter's `SimplifiedSchema` and runs as a stage inside the existing `Resolve → Pre-Flight → Prepare → Select → Launch → Closure` pipeline — between override application and shell expansion. The wrapper layer translates Darkmatter's structural failures into typed claudine errors so users see actionable reports instead of a generic compose failure.
 
+### Claudine's Trigger Schemas in the Launch Verdict
+
+The launch verdict judges a document by its **effective schema**: Claudine's
+trigger schemas (`claudine.yaml` and `inline-compose.yaml`) plus any other
+matching trigger schema, under the document's authored `$schema`. A document
+with no `$schema` is still checked: a lifecycle stack, `loop`, `agent`,
+`model`, timeout, or linking key with the wrong shape blocks the launch.
+
+```yaml
+---
+prompt: "review the diff"
+start:
+    - shell: { cmd: "git status" }   # the long form's key is `command`
+---
+```
+
+`claudine compose` of this document fails launch validation at
+`/start/0/shell`, and no provider is launched. The report names the action's
+path and echoes the offending value (`{"cmd":"git status"}`); it does not yet
+single out the unknown key. [Schemas](schemas.md) describes the five schema
+files, what they check, and how a document reaches them.
+
+The rules:
+
+- **A Claudine control is never dropped.** A property whose winning
+  declaration comes from a Claudine trigger is a *Claudine control*. An invalid
+  one fails the launch at every phase, even though it is optional; Claudine
+  never scrubs it and runs without the author's intended actions.
+- **Authored application values keep drop-and-warn.** An optional, non-eager
+  property declared in the authored `$schema` and holding an invalid value is
+  still dropped with a warning (see [Required vs Optional](#required-vs-optional)).
+- **The authored `$schema` applies last and takes ownership.** Redeclaring a
+  property in `$schema` replaces the trigger's declaration, so the authored
+  type and cleanup rules apply instead. This can weaken Claudine's type; the
+  lifecycle parser still enforces what can run.
+- **Selection adds no required inputs.** The trigger payloads declare nothing
+  required. `compose` keeps its unphased verdict and `inline-compose` keeps
+  `SchemaPhase::Launch`, exactly as described below.
+- **Two decisions still read only the authored `$schema`:** which argument
+  tokens are setters ([type-aware ownership](argv-normalization.md#type-aware-ownership)),
+  and which caller values are eager files to complete before `initialize`
+  ([Provided Partial File References](#provided-partial-file-references)).
+  Claudine's payload never turns `model=x` into a setter.
+- **`initialize` still runs first.** For a document that declares
+  `initialize`, the verdict is reached on the stabilized reread (see
+  [Documents That Declare `initialize`](#documents-that-declare-initialize)).
+  A failing verdict fires `blocked` and `finalize`; `start` and the provider
+  never run. A lifecycle stack the parser cannot read fails earlier still,
+  before `initialize`, because the bootstrap parses every stack.
+- **Retired spellings report the migration.** When a document fails the
+  verdict and its lifecycle uses a removed spelling, the error is the parser's
+  `RemovedGrammar` with its replacement, not a bare schema mismatch.
+- **Fresh reads use the same verdict.** Retries, resumes, proxy targets, and
+  sequence steps re-read their document through it.
+- **The schema is frozen at launch.** The inline completion verdict judges the
+  effective schema resolved at launch, trigger payloads included. An edit to
+  `$schema` or to a schema file during the run takes effect on the next run.
+
+```mermaid
+flowchart LR
+    I["initialize<br/>(when declared)"] --> V{"launch verdict:<br/>trigger payloads<br/>+ authored $schema"}
+    V -- "invalid Claudine control" --> B["blocked → finalize<br/>no start, no provider"]
+    V -- "invalid authored optional" --> D["drop with a warning,<br/>retry once"]
+    D --> V
+    V -- valid --> S["start → provider"]
+```
+
+The `claudine` binary embeds the five schema files, so this holds for an
+installed binary with no checkout. A schema file on disk with the same name
+wins over the embedded copy; see
+[How a Document Reaches the Schemas](schemas.md#how-a-document-reaches-the-schemas).
+
 ### Caller File Provenance and Materialization
 
 Each explicit caller setter (`key=value` or `--set`) retains an immutable,
@@ -1032,7 +1104,7 @@ Remote `http://` / `https://` schema references remain unsupported.
 
 ### Required vs Optional
 
-For each property declared in `$schema`, claudine routes the validation outcome through three categories:
+For each property declared in `$schema`, claudine routes the validation outcome through three categories. A [Claudine control](#claudines-trigger-schemas-in-the-launch-verdict) follows the **Required** column for a present-but-invalid value whatever its declaration says, and so does a property the authored `$schema` does not declare (a root union declares none):
 
 | Outcome                | Required                                                            | Optional                                                                                |
 | ---------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
@@ -1041,7 +1113,7 @@ For each property declared in `$schema`, claudine routes the validation outcome 
 | Missing                | prompt in Interactive Mode when allowed; otherwise `MissingProperties` | continue                                                                                |
 | Present but invalid    | hard `SchemaValidation` abort (no prompt, no recovery)              | the value is dropped from the prompt context, a `tracing::warn!` fires, composition retries once |
 
-The drop-and-retry for invalid optionals is automatic; users see the discarded value via the `dropping optional schema property with invalid value` log line.
+The drop-and-retry for invalid optionals is automatic; users see the discarded value via the `dropping optional schema property with invalid value` log line. It applies only to an optional, non-eager property of the authored `$schema`; an invalid Claudine control fails the launch instead.
 
 `Missing` means a top-level property is absent. A field missing *inside* a
 value is that value's problem, routed by the property's own row: with

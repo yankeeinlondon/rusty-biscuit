@@ -4,7 +4,13 @@ The SimplifiedSchema files that type Claudine's Markdown frontmatter. This YAML
 is the only definition of Claudine's schemas; the files are hand-maintained.
 Darkmatter discovers the two trigger files through its schema locations, so a
 document under `claudine/` is validated against them in the editor (DMLS) and
-by `md schema validate`.
+by `md schema validate`. The `claudine` binary embeds the same five files and
+judges them in its launch verdict, so an invalid Claudine control fails
+`claudine compose` and `claudine inline-compose` before any provider starts.
+
+[Schemas](../docs/topics/schemas.md) explains what the schemas check, which
+events allow which actions, and how a document outside `claudine/` reaches
+them.
 
 | File | Kind | Role |
 | --- | --- | --- |
@@ -15,9 +21,12 @@ by `md schema validate`.
 | `inline-compose.yaml` | trigger (`kind: trigger-schema`) | applies inline-compose's document metadata to a document with a non-null `prompt` and no non-null `sequence` |
 | `review.yaml` | standalone schema (`$schema`) | the schema of a specification review document |
 
-A library reaches a document only when a trigger or a document's `$schema`
-imports it (`stack@./lifecycle.yaml`), so the five files above are used
-together: copy all of them when placing the bundle elsewhere.
+A **library** (`kind: schema`) holds named types only and reaches a document
+only when a trigger or a document's `$schema` imports it
+(`stack@./lifecycle.yaml`). A **trigger** (`kind: trigger-schema`) applies its
+payload to every document its `match:` selects; it is never named by a
+`$schema`. The five files above are used together: copy all of them, as
+regular files, when placing the bundle elsewhere.
 
 The lifecycle parser in `claudine/lib/src/composition/lifecycle/` remains the
 authority on what can run. Tests in `claudine/lib/tests/l1/claudine_schemas.rs`

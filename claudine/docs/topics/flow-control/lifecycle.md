@@ -82,7 +82,8 @@ initialize → launch validation → start → provider → inline closure → v
 ```
 
 The verdict asks two questions — did the body change meaningfully (inline only),
-and does the document satisfy the `$schema` that was resolved at launch? A
+and does the document satisfy the schema that was resolved at launch (its
+`$schema` plus Claudine's [trigger schemas](../schemas.md))? A
 failed verdict fires `failure` with a typed `err`
 (`composition.body_unchanged` or `composition.completion_schema`, the latter
 carrying `err.detail.properties[]`), so `success` cannot have fired first. It
@@ -1141,7 +1142,10 @@ Code using the guard can:
 
 Claudine validates lifecycle frontmatter when the document is prepared, before
 any event fires. Every error names the authored path of the offending node,
-for example `failure[0].else[1].shell.command`. The most common errors:
+for example `failure[0].else[1].shell.command`. Claudine's
+[schemas](../schemas.md) catch many of the same mistakes earlier, in the editor
+and in the launch verdict, but only within three conditional levels; the
+parser below is the authority. The most common errors:
 
 | Error | Cause |
 |-------|-------|

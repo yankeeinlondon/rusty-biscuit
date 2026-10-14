@@ -234,9 +234,13 @@ Scans all shell command sources in the document before execution begins.
 #### Step 4b: Schema Validation (compose)
 
 After `prepare_direct` produces the effective frontmatter, the schema-aware
-wrapper translates Darkmatter's structural failures into typed claudine errors:
+wrapper judges it against the document's effective schema — Claudine's trigger
+schemas and any other matching trigger, under the authored `$schema` (see
+[Claudine's trigger schemas in the launch verdict](composition.md#claudines-trigger-schemas-in-the-launch-verdict))
+— and translates Darkmatter's structural failures into typed claudine errors:
 
-1. **No `$schema`** — pass through unchanged.
+1. **No schema applies** (no authored `$schema` and no matching trigger) —
+   pass through unchanged.
 2. **Required value missing** — return `CompositionError::MissingProperties`
    carrying the prompt path, the missing names in declaration order, their
    type labels and descriptions, and the frontmatter `description` for context.
@@ -245,11 +249,15 @@ wrapper translates Darkmatter's structural failures into typed claudine errors:
    prompt loop and re-runs preparation with the collected overrides.
 3. **Required value present but invalid** — return
    `CompositionError::SchemaValidation` as a hard abort; no prompting.
-4. **Optional value present but invalid** — drop the key from a clone of the
+4. **Optional value present but invalid** — for an optional, non-eager
+   property of the authored `$schema`, drop the key from a clone of the
    markdown, emit a `tracing::warn!`, and retry preparation once. Residual
-   problems (typically a missing required) surface after the retry.
-5. **`$schema` itself unresolvable / uncompilable** — return
-   `CompositionError::SchemaLoad`.
+   problems (typically a missing required) surface after the retry. A
+   *Claudine control* (a property whose winning declaration is a Claudine
+   trigger) is never dropped: an invalid one is a hard `SchemaValidation`
+   abort, like a required value.
+5. **`$schema` or a discovered trigger schema unresolvable / uncompilable** —
+   return `CompositionError::SchemaLoad`.
 
 This stage runs before provider/model selection so a schema failure aborts
 without launching anything.
@@ -259,6 +267,7 @@ without launching anything.
 | Input                              | Impact                                                                                                  |
 |------------------------------------|---------------------------------------------------------------------------------------------------------|
 | Frontmatter `$schema`              | Activates schema validation; controls required vs optional classification and Interactive Mode mapping  |
+| Claudine controls (lifecycle events, `loop`, `agent`, `model`, …) | Select Claudine's trigger schemas, which type them even without a `$schema`; an invalid one aborts |
 | `--set` / `key=value` setters      | Applied before validation so users can satisfy required values without entering the interactive prompt  |
 | Config `prompt_for_missing`        | Required (along with TTY/silent checks) to enable Interactive Mode for missing-required collection      |
 | `--silent`                         | Forces Interactive Mode off; missing required values surface as `MissingProperties` instead of prompts  |
@@ -516,8 +525,11 @@ Schema validation runs **after** the `prompt` property check so a missing or
 non-string `prompt` still surfaces as `PromptPropertyMissing` /
 `PromptPropertyWrongType` instead of a generic schema error. After that
 guard, the same typed translation as direct compose applies — `SchemaLoad`,
-`SchemaValidation`, `MissingProperties`, automatic drop-and-retry for invalid
-optionals. The original `$schema` declaration is preserved byte-for-byte by
+`SchemaValidation`, `MissingProperties`, and automatic drop-and-retry for
+invalid optional values of the authored `$schema`, against the same effective
+schema (Claudine's trigger schemas under the authored `$schema`). An invalid
+Claudine control fails the launch instead of being dropped. The original
+`$schema` declaration is preserved byte-for-byte by
 the inline rewrite, and interactive values collected during the run are never
 persisted to the source file.
 
@@ -1045,9 +1057,9 @@ The inline write grant adds the document's *parent directory* as the provider's 
 
 When a sequence step fails in non-fail-fast mode, the only information preserved is the exit code and error message. Capturing structured failure metadata (which harness check failed, what the agent's partial response was, etc.) would enable more intelligent retry or skip decisions in downstream tooling.
 
-### 9. Frontmatter Schema Validation During Prepare
+### 9. Deeper Schema Coverage for Claudine Controls
 
-Agent and model hints are validated during preparation (unknown providers error immediately), but other frontmatter properties (lifecycle config, harness checks, sequence definitions) are parsed without schema validation beyond basic type checks. A schema-driven validation pass during preparation would surface configuration errors earlier and with better error messages.
+Claudine's trigger schemas now type its frontmatter in the launch verdict, but only within three conditional levels, with untyped values for the generated verbs and untyped sequence tasks; the parser alone judges the rest (see [Schemas](schemas.md#what-only-the-parser-checks)). A misspelled long-form key is also reported as an `anyOf` mismatch that echoes the value rather than naming the key. Recursive lifecycle types, typed generated-verb arguments, and narrower union diagnostics would surface these errors earlier and with better messages.
 
 ### 10. Unified Telemetry Span Across All Three Commands
 
