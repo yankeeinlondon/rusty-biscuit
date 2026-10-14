@@ -20,29 +20,25 @@ fail_fast: false
 # schema-invalidated documents (e.g. after a breaking schema change) always
 # re-enter the research pool
 initialize:
-    stack:
-        - when: "!file_exists(file) || !validate_schema(file) || !frontmatter(file, 'last_updated') || date_delta(frontmatter(file, 'last_updated'), ctx.today, '14d')"
-          action:
-              - message: "The provider **{{state.name}}** needs to update its research on **Local Runners**"
-        - action:
-              - stderr: "The provider **{{state.name}}** has research for **Local Runners** that is current; skipping updates"
-              - skip
+    - when: "!file_exists(file) || !validate_schema(file) || !frontmatter(file, 'last_updated') || date_delta(frontmatter(file, 'last_updated'), ctx.today, '14d')"
+      then:
+          - message: "The provider **{{state.name}}** needs to update its research on **Local Runners**"
+    - stderr: "The provider **{{state.name}}** has research for **Local Runners** that is current; skipping updates"
+    - skip
 # a provider exiting 0 is not proof the research was written — verify the
 # agent actually stamped today's date AND that the frontmatter validates
 # before accepting success
 success:
-    stack:
-        - when: "frontmatter(file, 'last_updated') != ctx.today"
-          action:
-              - stderr: "The step reported success but <b>{{file}}</b> was not updated — <code>last_updated</code> is not {{ctx.today}}."
-              - error: "NOT_STAMPED: research file was not updated"
-        - when: "!validate_schema(file)"
-          action:
-              - stderr: "<b>{{file}}</b> fails <code>md schema validate</code> — the agent's exit-criteria claim was wrong."
-              - error: "SCHEMA_INVALID: research frontmatter fails schema validation"
-        - action:
-              - info: "The **Local Runners** research on **{{state.name}}** completed successfully: {{ link(file) }}"
-              - message: "🎉  the **Local Runners** research on **{{state.name}}** completed successfully"
+    - when: "frontmatter(file, 'last_updated') != ctx.today"
+      then:
+          - stderr: "The step reported success but <b>{{file}}</b> was not updated — <code>last_updated</code> is not {{ctx.today}}."
+          - error: "NOT_STAMPED: research file was not updated"
+    - when: "!validate_schema(file)"
+      then:
+          - stderr: "<b>{{file}}</b> fails <code>md schema validate</code> — the agent's exit-criteria claim was wrong."
+          - error: "SCHEMA_INVALID: research frontmatter fails schema validation"
+    - info: "The **Local Runners** research on **{{state.name}}** completed successfully: {{ link(file) }}"
+    - message: "🎉  the **Local Runners** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the Local Runners research on **{{state.name}}** failed to complete!"
     warn: "The Local Runners research on **{{state.name}}** failed to complete! (err: {{err.code}}: {{err.msg}})"

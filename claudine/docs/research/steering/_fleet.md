@@ -5,23 +5,19 @@ agent: codex
 model: gpt-5.6-sol
 update: "{{file_exists(file) && !markdown_body_empty(file)}}"
 initialize:
-    stack:
-        - when: "state.skip_research == true"
-          action:
-              - skip
-        - action:
-              - stderr: "Researching steering for **{{state.name}}**"
+    - when: "state.skip_research == true"
+      then:
+          - skip
+    - stderr: "Researching steering for **{{state.name}}**"
 success:
-    stack:
-        - when: "!file_exists(file) || frontmatter(file, 'last_updated') != ctx.today"
-          action:
-              - error: "Steering research did not produce a current document"
-        - action:
-              - action: shell
-                command: "md schema validate '{{file}}' --no-trigger-schemas"
-              - action: shell
-                command: "claudine providers steering check '{{state.slug}}'"
-              - stderr: "Steering schema and relationship checks completed for **{{state.name}}**; source review and live activation gates remain separate."
+    - when: "!file_exists(file) || frontmatter(file, 'last_updated') != ctx.today"
+      then:
+          - error: "Steering research did not produce a current document"
+    - shell:
+          command: "md schema validate '{{file}}' --no-trigger-schemas"
+    - shell:
+          command: "claudine providers steering check '{{state.slug}}'"
+    - stderr: "Steering schema and relationship checks completed for **{{state.name}}**; source review and live activation gates remain separate."
 failure:
     warn: "Steering research failed for **{{state.name}}**: {{ err.msg }}"
 ---
