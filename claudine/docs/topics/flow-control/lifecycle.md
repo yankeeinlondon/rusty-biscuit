@@ -236,7 +236,11 @@ or not that branch will be selected:
 
 - the shape of every item and body, and verb placement (`skip` only in
   `initialize`);
-- expression syntax of every `when` and every `{{ … }}` span;
+- expression syntax of every `when` and every `{{ … }}` span, including each
+  span inside mixed text such as `"status {{ fm.title }}"`. Spans are parsed,
+  never evaluated: `"status {{ fm. }}"` is refused in a branch that is never
+  selected, while a span that parses but would fail when evaluated
+  (`"{{ no_such_fn(1) }}"`) is accepted and only fails if its branch runs;
 - the late-binding globals each expression reads (`err`, `group`, …);
 - nested spans inside quoted literals
   ([`LifecycleNestedSpanInLiteral`](#lifecyclenestedspaninliteral));
@@ -1144,7 +1148,7 @@ for example `failure[0].else[1].shell.command`. The most common errors:
 | `RemovedGrammar` | An [old spelling](#removed-spellings), such as `stack:`, `- action:`, `say_first`, or a `_loop_*` read |
 | `LifecycleStackInvalidShape` | A malformed event, item, or body: wrong type, empty explicit `then`/`else`, orphan `then`/`else`, a sixth nesting level, a misplaced `no_error`, long form in a several-verb bundle, `when` in a root dictionary or at the `loop:` root, loose loop verbs beside `gate:` |
 | `LifecycleUnknownVerb` | A key that is not a verb (`- sya: "hi"`); suggests a spelling when one is close |
-| `LifecycleActionInvalidLongForm` | An unknown or ill-typed long-form parameter (`shell: { command: "x", cwd: "/tmp" }`) |
+| `LifecycleActionInvalidLongForm` | An unknown or ill-typed long-form parameter (`shell: { command: "x", cwd: "/tmp" }`), or an operand whose `{{ … }}` span does not parse, whole value or inside mixed text (`info: "status {{ fm. }}"` names `start[0].info.text`) |
 | `LifecycleActionOrder` | An action follows an unconditional directive in the same list |
 | `LifecycleMultipleLifecycleActions` | Two directives in one bundle |
 | `LifecycleSayConflict` | `say` and `speak` in one dictionary |

@@ -694,7 +694,11 @@ In the lifecycle executor, `evaluate_operand` interpolates an authored literal
 once and returns any other expression's result as data; the old
 `reject_surviving_spans` guard is gone. DM2 (Darkmatter subtree compose) fails
 a malformed span, an unknown function, or a read of an unavailable global, and
-an absent document property is `null`. Which globals a scope may read comes
+an absent document property is `null`. An authored operand never reaches DM2
+with a malformed span: `action_shape.rs::action_value_to_expr` parses every
+span, whole-value or inside mixed text, when the stack parses (both branches,
+nothing evaluated), so it is a `LifecycleActionInvalidLongForm` naming the
+operand path. Which globals a scope may read comes
 from `lifecycle/bindings.rs` (`binding_view`/`runtime_bindings`), handed to
 Darkmatter as a `BindingView`; `group` outside an established group is an
 unavailable global (`claudine.outside-group`). `loop` is declared the same way:
