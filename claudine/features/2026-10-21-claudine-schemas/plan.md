@@ -4,6 +4,13 @@ created: 2026-10-12
 phase: 1
 agent: codex/gpt-6.1-sol
 yolo: true
+source_files_during_phase_1: 
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages: 
+    - darkmatter
 ---
 # Claudine Schemas Implementation Plan
 
@@ -38,18 +45,18 @@ The specification reports no open questions. The following rules make implementa
 
 ### Wave 1 — Contract inventory
 
-- [ ] **Confirm prerequisites**
+- [x] **Confirm prerequisites**
   - Verify built-in `shell`/`expression`, non-null presence union semantics, required constraints through named references, `@this` precedence, union-list lowering, and the new lifecycle parser using focused existing tests.
   - Inspect the actual launch integration points: `claudine/lib/src/composition/schema/{mod,translate,classify,supplied}.rs`, `composition/prepare.rs`, and completion handling; Darkmatter's `markdown/schemas/{mod,resolve,roots}.rs` and `triggers/{discovery,assemble,envelope}.rs`; compose-stage schema validation; DMLS frontmatter and nested diagnostic paths.
   - Note both authored-schema-only gates and the optional-drop/retry paths. Establish how a composed snapshot reaches trigger matching and how a retained effective schema reaches completion. Keep original successful-launch assertions unchanged.
 
-- [ ] **Freeze inventories**
+- [x] **Freeze inventories**
   - Inventory every current property in `claudine/docs/topics/frontmatter-properties.md`, sequence overlays, all eleven linking keys, linking reader input forms, loop controls, parser hand/bare verb inventories, and both Darkmatter generated-verb catalogs.
   - Record the specific source/test owners, payload property types, optionality, and planned descriptions; identify declarations duplicated by the inline payload and require equal types.
   - Inventory every consumer of the retiring schemas. Current additional consumers include Darkmatter CLI shipped-artifact/schema-validation tests; library `base_schema_end_to_end`, `shipped_schema_corpus`, `meta_schema_phase1`, and `schemas_constraints_block_matrix`; prompt-only identifier corpus; DMLS nested-span parity and mapping corpus. Recheck rather than trusting this list.
   - Define an AC1–AC14 ledger with test locations and owners. Register new tests in existing consolidated targets, not new CI gates.
 
-- [ ] **Agree loader seam**
+- [x] **Agree loader seam**
   - Write the concrete minimal source/origin and fallback API contract into the implementation log: bundle name/text inputs, import anchoring, disk-name suppression, malformed-file errors, property ownership, and dependency reporting.
   - Characterize existing root-union authored-schema behavior, eager/non-eager collection, literal tokens, deferred verdicts, and optional cleanup through public results. Preserve those contracts when passing the effective schema through composition and retained completion state.
   - Finalize the input matrix below against actual loader semantics and enumerate any additional load-bearing field introduced by the seam. No implementation proceeds with an unnamed cell outcome or a silently assumed format behavior.
