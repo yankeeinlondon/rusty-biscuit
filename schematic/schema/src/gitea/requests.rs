@@ -238,8 +238,6 @@ impl schematic_runtime::EndpointSpec for GetRepositoryContentRawRequest {
 /// use schematic_schema::gitea::ListPullRequestsRequest;
 ///
 /// let request = ListPullRequestsRequest::new("owner_value", "repo_value")
-///     .with_page(/* value */)
-///     .with_limit(/* value */)
 ///     .with_state(/* value */)
 ///     .with_sort(/* value */)
 ///;
@@ -250,10 +248,6 @@ pub struct ListPullRequestsRequest {
     pub owner: String,
     /// Path parameter: repo
     pub repo: String,
-    /// Query parameter: Page number (1-indexed, default: 1)
-    pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 50, max: 100)
-    pub limit: Option<i64>,
     /// Query parameter: Filter by PR state
     pub state: Option<String>,
     /// Query parameter: Sort order for results
@@ -265,21 +259,9 @@ impl ListPullRequestsRequest {
         Self {
             owner: owner.into(),
             repo: repo.into(),
-            page: None,
-            limit: None,
             state: None,
             sort: None,
         }
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: i64) -> Self {
-        self.page = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
     }
     /// Sets the `state` query parameter.
     pub fn with_state(mut self, value: String) -> Self {
@@ -307,12 +289,6 @@ impl schematic_runtime::EndpointSpec for ListPullRequestsRequest {
             urlencoding::encode(& self.repo.to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.state {
             query.push(("state".to_string(), value.to_string()));
         }
@@ -337,8 +313,6 @@ impl schematic_runtime::EndpointSpec for ListPullRequestsRequest {
 /// use schematic_schema::gitea::ListPullRequestFilesRequest;
 ///
 /// let request = ListPullRequestFilesRequest::new("owner_value", "repo_value", "index_value")
-///     .with_page(/* value */)
-///     .with_limit(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -349,10 +323,6 @@ pub struct ListPullRequestFilesRequest {
     pub repo: String,
     /// Path parameter: index
     pub index: String,
-    /// Query parameter: Page number (1-indexed, default: 1)
-    pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 50, max: 100)
-    pub limit: Option<i64>,
 }
 impl ListPullRequestFilesRequest {
     /// Creates a new request with the required path parameters.
@@ -365,19 +335,7 @@ impl ListPullRequestFilesRequest {
             owner: owner.into(),
             repo: repo.into(),
             index: index.into(),
-            page: None,
-            limit: None,
         }
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: i64) -> Self {
-        self.page = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
     }
 }
 impl schematic_runtime::EndpointSpec for ListPullRequestFilesRequest {
@@ -395,13 +353,7 @@ impl schematic_runtime::EndpointSpec for ListPullRequestFilesRequest {
             urlencoding::encode(& self.repo.to_string()), urlencoding::encode(& self
             .index.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
+        let query: Vec<(String, String)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -420,8 +372,6 @@ impl schematic_runtime::EndpointSpec for ListPullRequestFilesRequest {
 /// use schematic_schema::gitea::ListIssuesRequest;
 ///
 /// let request = ListIssuesRequest::new("owner_value", "repo_value")
-///     .with_page(/* value */)
-///     .with_limit(/* value */)
 ///     .with_state(/* value */)
 ///     .with_issue_type(/* value */)
 ///;
@@ -432,10 +382,6 @@ pub struct ListIssuesRequest {
     pub owner: String,
     /// Path parameter: repo
     pub repo: String,
-    /// Query parameter: Page number (1-indexed, default: 1)
-    pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 50, max: 100)
-    pub limit: Option<i64>,
     /// Query parameter: Filter by issue state
     pub state: Option<String>,
     /// Query parameter: Filter by type (issues, pulls, or all)
@@ -447,21 +393,9 @@ impl ListIssuesRequest {
         Self {
             owner: owner.into(),
             repo: repo.into(),
-            page: None,
-            limit: None,
             state: None,
             issue_type: None,
         }
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: i64) -> Self {
-        self.page = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
     }
     /// Sets the `state` query parameter.
     pub fn with_state(mut self, value: String) -> Self {
@@ -489,12 +423,6 @@ impl schematic_runtime::EndpointSpec for ListIssuesRequest {
             urlencoding::encode(& self.repo.to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.state {
             query.push(("state".to_string(), value.to_string()));
         }
@@ -578,8 +506,6 @@ impl schematic_runtime::EndpointSpec for GetIssueRequest {
 /// use schematic_schema::gitea::ListIssueCommentsRequest;
 ///
 /// let request = ListIssueCommentsRequest::new("owner_value", "repo_value", "index_value")
-///     .with_page(/* value */)
-///     .with_limit(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -590,10 +516,6 @@ pub struct ListIssueCommentsRequest {
     pub repo: String,
     /// Path parameter: index
     pub index: String,
-    /// Query parameter: Page number (1-indexed, default: 1)
-    pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 50, max: 100)
-    pub limit: Option<i64>,
 }
 impl ListIssueCommentsRequest {
     /// Creates a new request with the required path parameters.
@@ -606,19 +528,7 @@ impl ListIssueCommentsRequest {
             owner: owner.into(),
             repo: repo.into(),
             index: index.into(),
-            page: None,
-            limit: None,
         }
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: i64) -> Self {
-        self.page = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
     }
 }
 impl schematic_runtime::EndpointSpec for ListIssueCommentsRequest {
@@ -636,13 +546,7 @@ impl schematic_runtime::EndpointSpec for ListIssueCommentsRequest {
             .to_string()), urlencoding::encode(& self.repo.to_string()),
             urlencoding::encode(& self.index.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
+        let query: Vec<(String, String)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -661,8 +565,6 @@ impl schematic_runtime::EndpointSpec for ListIssueCommentsRequest {
 /// use schematic_schema::gitea::ListIssueTimelineRequest;
 ///
 /// let request = ListIssueTimelineRequest::new("owner_value", "repo_value", "index_value")
-///     .with_page(/* value */)
-///     .with_limit(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -673,10 +575,6 @@ pub struct ListIssueTimelineRequest {
     pub repo: String,
     /// Path parameter: index
     pub index: String,
-    /// Query parameter: Page number (1-indexed, default: 1)
-    pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 50, max: 100)
-    pub limit: Option<i64>,
 }
 impl ListIssueTimelineRequest {
     /// Creates a new request with the required path parameters.
@@ -689,19 +587,7 @@ impl ListIssueTimelineRequest {
             owner: owner.into(),
             repo: repo.into(),
             index: index.into(),
-            page: None,
-            limit: None,
         }
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: i64) -> Self {
-        self.page = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
     }
 }
 impl schematic_runtime::EndpointSpec for ListIssueTimelineRequest {
@@ -719,13 +605,7 @@ impl schematic_runtime::EndpointSpec for ListIssueTimelineRequest {
             .to_string()), urlencoding::encode(& self.repo.to_string()),
             urlencoding::encode(& self.index.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
+        let query: Vec<(String, String)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -744,8 +624,6 @@ impl schematic_runtime::EndpointSpec for ListIssueTimelineRequest {
 /// use schematic_schema::gitea::ListTagsRequest;
 ///
 /// let request = ListTagsRequest::new("owner_value", "repo_value")
-///     .with_page(/* value */)
-///     .with_limit(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -754,10 +632,6 @@ pub struct ListTagsRequest {
     pub owner: String,
     /// Path parameter: repo
     pub repo: String,
-    /// Query parameter: Page number (1-indexed, default: 1)
-    pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 50, max: 100)
-    pub limit: Option<i64>,
 }
 impl ListTagsRequest {
     /// Creates a new request with the required path parameters.
@@ -765,19 +639,7 @@ impl ListTagsRequest {
         Self {
             owner: owner.into(),
             repo: repo.into(),
-            page: None,
-            limit: None,
         }
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: i64) -> Self {
-        self.page = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
     }
 }
 impl schematic_runtime::EndpointSpec for ListTagsRequest {
@@ -794,13 +656,7 @@ impl schematic_runtime::EndpointSpec for ListTagsRequest {
             "/repos/{}/{}/tags", urlencoding::encode(& self.owner.to_string()),
             urlencoding::encode(& self.repo.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
+        let query: Vec<(String, String)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -819,8 +675,6 @@ impl schematic_runtime::EndpointSpec for ListTagsRequest {
 /// use schematic_schema::gitea::ListReleasesRequest;
 ///
 /// let request = ListReleasesRequest::new("owner_value", "repo_value")
-///     .with_page(/* value */)
-///     .with_limit(/* value */)
 ///     .with_draft(/* value */)
 ///     .with_pre_release(/* value */)
 ///;
@@ -831,10 +685,6 @@ pub struct ListReleasesRequest {
     pub owner: String,
     /// Path parameter: repo
     pub repo: String,
-    /// Query parameter: Page number (1-indexed, default: 1)
-    pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 50, max: 100)
-    pub limit: Option<i64>,
     /// Query parameter: Include draft releases
     pub draft: Option<bool>,
     /// Query parameter: Include pre-releases
@@ -846,21 +696,9 @@ impl ListReleasesRequest {
         Self {
             owner: owner.into(),
             repo: repo.into(),
-            page: None,
-            limit: None,
             draft: None,
             pre_release: None,
         }
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: i64) -> Self {
-        self.page = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
     }
     /// Sets the `draft` query parameter.
     pub fn with_draft(mut self, value: bool) -> Self {
@@ -888,12 +726,6 @@ impl schematic_runtime::EndpointSpec for ListReleasesRequest {
             urlencoding::encode(& self.repo.to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.draft {
             query.push(("draft".to_string(), value.to_string()));
         }
@@ -1095,55 +927,27 @@ impl schematic_runtime::EndpointSpec for GetAnnotatedTagRequest {
 /// use schematic_schema::gitea::ListOrgReposRequest;
 ///
 /// let request = ListOrgReposRequest::new("org_value")
-///     .with_page(/* value */)
-///     .with_limit(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListOrgReposRequest {
     /// Path parameter: org
     pub org: String,
-    /// Query parameter: Page number (1-indexed, default: 1)
-    pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 50, max: 100)
-    pub limit: Option<i64>,
 }
 impl ListOrgReposRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(org: impl Into<String>) -> Self {
-        Self {
-            org: org.into(),
-            page: None,
-            limit: None,
-        }
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: i64) -> Self {
-        self.page = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
+        Self { org: org.into() }
     }
 }
 impl From<&str> for ListOrgReposRequest {
     fn from(param: &str) -> Self {
-        Self {
-            org: param.to_string(),
-            page: None,
-            limit: None,
-        }
+        Self { org: param.to_string() }
     }
 }
 impl From<String> for ListOrgReposRequest {
     fn from(param: String) -> Self {
-        Self {
-            org: param,
-            page: None,
-            limit: None,
-        }
+        Self { org: param }
     }
 }
 impl schematic_runtime::EndpointSpec for ListOrgReposRequest {
@@ -1159,13 +963,7 @@ impl schematic_runtime::EndpointSpec for ListOrgReposRequest {
         let path = format!(
             "/orgs/{}/repos", urlencoding::encode(& self.org.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
+        let query: Vec<(String, String)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1176,6 +974,286 @@ impl schematic_runtime::EndpointSpec for ListOrgReposRequest {
         })
     }
 }
+impl schematic_runtime::pager::Paginated for ListPullRequestsRequest {
+    type Item = PullRequestSummary;
+    type Kind = schematic_runtime::pager::PageNumberKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::PageNumber {
+            page: schematic_runtime::pager::spec::Input::Query("page"),
+            base: schematic_runtime::pager::spec::IndexBase::OneBased,
+            more: schematic_runtime::pager::spec::MoreSignal::LinkRel {
+                rel: "next",
+            },
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(30),
+            sent_default: None,
+            min: 1,
+            max: Some(50),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Header("X-Total-Count")),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[schematic_runtime::pager::spec::Step::Each],
+        projection: &[],
+    };
+    const PATH: &'static str = "/repos/{owner}/{repo}/pulls";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListPullRequestsRequest {}
+impl schematic_runtime::pager::HasTotal for ListPullRequestsRequest {}
+impl schematic_runtime::pager::Paginated for ListPullRequestFilesRequest {
+    type Item = PullRequestFile;
+    type Kind = schematic_runtime::pager::PageNumberKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::PageNumber {
+            page: schematic_runtime::pager::spec::Input::Query("page"),
+            base: schematic_runtime::pager::spec::IndexBase::OneBased,
+            more: schematic_runtime::pager::spec::MoreSignal::LinkRel {
+                rel: "next",
+            },
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(30),
+            sent_default: None,
+            min: 1,
+            max: Some(50),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Header("X-Total-Count")),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[schematic_runtime::pager::spec::Step::Each],
+        projection: &[],
+    };
+    const PATH: &'static str = "/repos/{owner}/{repo}/pulls/{index}/files";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListPullRequestFilesRequest {}
+impl schematic_runtime::pager::HasTotal for ListPullRequestFilesRequest {}
+impl schematic_runtime::pager::Paginated for ListIssuesRequest {
+    type Item = IssueSummary;
+    type Kind = schematic_runtime::pager::PageNumberKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::PageNumber {
+            page: schematic_runtime::pager::spec::Input::Query("page"),
+            base: schematic_runtime::pager::spec::IndexBase::OneBased,
+            more: schematic_runtime::pager::spec::MoreSignal::LinkRel {
+                rel: "next",
+            },
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(30),
+            sent_default: None,
+            min: 1,
+            max: Some(50),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Header("X-Total-Count")),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[schematic_runtime::pager::spec::Step::Each],
+        projection: &[],
+    };
+    const PATH: &'static str = "/repos/{owner}/{repo}/issues";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListIssuesRequest {}
+impl schematic_runtime::pager::HasTotal for ListIssuesRequest {}
+impl schematic_runtime::pager::Paginated for ListIssueCommentsRequest {
+    type Item = IssueComment;
+    type Kind = schematic_runtime::pager::PageNumberKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::PageNumber {
+            page: schematic_runtime::pager::spec::Input::Query("page"),
+            base: schematic_runtime::pager::spec::IndexBase::OneBased,
+            more: schematic_runtime::pager::spec::MoreSignal::LinkRel {
+                rel: "next",
+            },
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(30),
+            sent_default: None,
+            min: 1,
+            max: Some(50),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Header("X-Total-Count")),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[schematic_runtime::pager::spec::Step::Each],
+        projection: &[],
+    };
+    const PATH: &'static str = "/repos/{owner}/{repo}/issues/{index}/comments";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListIssueCommentsRequest {}
+impl schematic_runtime::pager::HasTotal for ListIssueCommentsRequest {}
+impl schematic_runtime::pager::Paginated for ListIssueTimelineRequest {
+    type Item = TimelineEvent;
+    type Kind = schematic_runtime::pager::PageNumberKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::PageNumber {
+            page: schematic_runtime::pager::spec::Input::Query("page"),
+            base: schematic_runtime::pager::spec::IndexBase::OneBased,
+            more: schematic_runtime::pager::spec::MoreSignal::LinkRel {
+                rel: "next",
+            },
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(30),
+            sent_default: None,
+            min: 1,
+            max: Some(50),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Header("X-Total-Count")),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[schematic_runtime::pager::spec::Step::Each],
+        projection: &[],
+    };
+    const PATH: &'static str = "/repos/{owner}/{repo}/issues/{index}/timeline";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListIssueTimelineRequest {}
+impl schematic_runtime::pager::HasTotal for ListIssueTimelineRequest {}
+impl schematic_runtime::pager::Paginated for ListTagsRequest {
+    type Item = RepoTag;
+    type Kind = schematic_runtime::pager::PageNumberKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::PageNumber {
+            page: schematic_runtime::pager::spec::Input::Query("page"),
+            base: schematic_runtime::pager::spec::IndexBase::OneBased,
+            more: schematic_runtime::pager::spec::MoreSignal::LinkRel {
+                rel: "next",
+            },
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(30),
+            sent_default: None,
+            min: 1,
+            max: Some(50),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Header("X-Total-Count")),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[schematic_runtime::pager::spec::Step::Each],
+        projection: &[],
+    };
+    const PATH: &'static str = "/repos/{owner}/{repo}/tags";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListTagsRequest {}
+impl schematic_runtime::pager::HasTotal for ListTagsRequest {}
+impl schematic_runtime::pager::Paginated for ListReleasesRequest {
+    type Item = Release;
+    type Kind = schematic_runtime::pager::PageNumberKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::PageNumber {
+            page: schematic_runtime::pager::spec::Input::Query("page"),
+            base: schematic_runtime::pager::spec::IndexBase::OneBased,
+            more: schematic_runtime::pager::spec::MoreSignal::LinkRel {
+                rel: "next",
+            },
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(30),
+            sent_default: None,
+            min: 1,
+            max: Some(50),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Header("X-Total-Count")),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[schematic_runtime::pager::spec::Step::Each],
+        projection: &[],
+    };
+    const PATH: &'static str = "/repos/{owner}/{repo}/releases";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListReleasesRequest {}
+impl schematic_runtime::pager::HasTotal for ListReleasesRequest {}
+impl schematic_runtime::pager::Paginated for ListOrgReposRequest {
+    type Item = RepositoryInfo;
+    type Kind = schematic_runtime::pager::PageNumberKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::PageNumber {
+            page: schematic_runtime::pager::spec::Input::Query("page"),
+            base: schematic_runtime::pager::spec::IndexBase::OneBased,
+            more: schematic_runtime::pager::spec::MoreSignal::LinkRel {
+                rel: "next",
+            },
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(30),
+            sent_default: None,
+            min: 1,
+            max: Some(50),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Header("X-Total-Count")),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[schematic_runtime::pager::spec::Step::Each],
+        projection: &[],
+    };
+    const PATH: &'static str = "/orgs/{org}/repos";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListOrgReposRequest {}
+impl schematic_runtime::pager::HasTotal for ListOrgReposRequest {}
 /// A call to the `GetRepository` endpoint, returned by [`Gitea::get_repository`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
@@ -1379,20 +1457,14 @@ impl<'a> ::core::future::IntoFuture for GetRepositoryContentRawCall<'a> {
 /// A call to the `ListPullRequests` endpoint, returned by [`Gitea::list_pull_requests`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListPullRequestsCall<'a>(
     schematic_runtime::Call<'a, GiteaApi, ListPullRequestsRequest>,
 );
 impl<'a> ListPullRequestsCall<'a> {
-    /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    pub fn page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `limit` query parameter (`i64`). Items per page (default: 50, max: 100)
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `state` query parameter (`String`). Filter by PR state
     pub fn state(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_state(value)))
@@ -1430,6 +1502,56 @@ impl<'a> ListPullRequestsCall<'a> {
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListPullRequestsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page`](schematic_runtime::pager::Pager::page).
+    #[inline]
+    pub fn page(
+        self,
+        number: u64,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListPullRequestsRequest> {
+        self.0.pager().page(number)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListPullRequestsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, GiteaApi, ListPullRequestsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListPullRequestsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListPullRequestsRequest>,
+    > {
+        self.0.pager().collect_all()
+    }
 }
 impl<'a> ::core::future::IntoFuture for ListPullRequestsCall<'a> {
     type Output = <schematic_runtime::Call<
@@ -1446,20 +1568,14 @@ impl<'a> ::core::future::IntoFuture for ListPullRequestsCall<'a> {
 /// A call to the `ListPullRequestFiles` endpoint, returned by [`Gitea::list_pull_request_files`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListPullRequestFilesCall<'a>(
     schematic_runtime::Call<'a, GiteaApi, ListPullRequestFilesRequest>,
 );
 impl<'a> ListPullRequestFilesCall<'a> {
-    /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    pub fn page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `limit` query parameter (`i64`). Items per page (default: 50, max: 100)
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -1489,6 +1605,56 @@ impl<'a> ListPullRequestFilesCall<'a> {
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListPullRequestFilesRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page`](schematic_runtime::pager::Pager::page).
+    #[inline]
+    pub fn page(
+        self,
+        number: u64,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListPullRequestFilesRequest> {
+        self.0.pager().page(number)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListPullRequestFilesRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, GiteaApi, ListPullRequestFilesRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListPullRequestFilesRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListPullRequestFilesRequest>,
+    > {
+        self.0.pager().collect_all()
+    }
 }
 impl<'a> ::core::future::IntoFuture for ListPullRequestFilesCall<'a> {
     type Output = <schematic_runtime::Call<
@@ -1505,18 +1671,12 @@ impl<'a> ::core::future::IntoFuture for ListPullRequestFilesCall<'a> {
 /// A call to the `ListIssues` endpoint, returned by [`Gitea::list_issues`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListIssuesCall<'a>(schematic_runtime::Call<'a, GiteaApi, ListIssuesRequest>);
 impl<'a> ListIssuesCall<'a> {
-    /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    pub fn page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `limit` query parameter (`i64`). Items per page (default: 50, max: 100)
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `state` query parameter (`String`). Filter by issue state
     pub fn state(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_state(value)))
@@ -1551,6 +1711,56 @@ impl<'a> ListIssuesCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListIssuesRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page`](schematic_runtime::pager::Pager::page).
+    #[inline]
+    pub fn page(
+        self,
+        number: u64,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListIssuesRequest> {
+        self.0.pager().page(number)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListIssuesRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, GiteaApi, ListIssuesRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListIssuesRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListIssuesRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListIssuesCall<'a> {
@@ -1615,20 +1825,14 @@ impl<'a> ::core::future::IntoFuture for GetIssueCall<'a> {
 /// A call to the `ListIssueComments` endpoint, returned by [`Gitea::list_issue_comments`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListIssueCommentsCall<'a>(
     schematic_runtime::Call<'a, GiteaApi, ListIssueCommentsRequest>,
 );
 impl<'a> ListIssueCommentsCall<'a> {
-    /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    pub fn page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `limit` query parameter (`i64`). Items per page (default: 50, max: 100)
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -1658,6 +1862,56 @@ impl<'a> ListIssueCommentsCall<'a> {
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListIssueCommentsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page`](schematic_runtime::pager::Pager::page).
+    #[inline]
+    pub fn page(
+        self,
+        number: u64,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListIssueCommentsRequest> {
+        self.0.pager().page(number)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListIssueCommentsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, GiteaApi, ListIssueCommentsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListIssueCommentsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListIssueCommentsRequest>,
+    > {
+        self.0.pager().collect_all()
+    }
 }
 impl<'a> ::core::future::IntoFuture for ListIssueCommentsCall<'a> {
     type Output = <schematic_runtime::Call<
@@ -1674,20 +1928,14 @@ impl<'a> ::core::future::IntoFuture for ListIssueCommentsCall<'a> {
 /// A call to the `ListIssueTimeline` endpoint, returned by [`Gitea::list_issue_timeline`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListIssueTimelineCall<'a>(
     schematic_runtime::Call<'a, GiteaApi, ListIssueTimelineRequest>,
 );
 impl<'a> ListIssueTimelineCall<'a> {
-    /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    pub fn page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `limit` query parameter (`i64`). Items per page (default: 50, max: 100)
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -1717,6 +1965,56 @@ impl<'a> ListIssueTimelineCall<'a> {
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListIssueTimelineRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page`](schematic_runtime::pager::Pager::page).
+    #[inline]
+    pub fn page(
+        self,
+        number: u64,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListIssueTimelineRequest> {
+        self.0.pager().page(number)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListIssueTimelineRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, GiteaApi, ListIssueTimelineRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListIssueTimelineRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListIssueTimelineRequest>,
+    > {
+        self.0.pager().collect_all()
+    }
 }
 impl<'a> ::core::future::IntoFuture for ListIssueTimelineCall<'a> {
     type Output = <schematic_runtime::Call<
@@ -1733,18 +2031,12 @@ impl<'a> ::core::future::IntoFuture for ListIssueTimelineCall<'a> {
 /// A call to the `ListTags` endpoint, returned by [`Gitea::list_tags`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListTagsCall<'a>(schematic_runtime::Call<'a, GiteaApi, ListTagsRequest>);
 impl<'a> ListTagsCall<'a> {
-    /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    pub fn page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `limit` query parameter (`i64`). Items per page (default: 50, max: 100)
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -1772,6 +2064,56 @@ impl<'a> ListTagsCall<'a> {
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListTagsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page`](schematic_runtime::pager::Pager::page).
+    #[inline]
+    pub fn page(
+        self,
+        number: u64,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListTagsRequest> {
+        self.0.pager().page(number)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListTagsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, GiteaApi, ListTagsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListTagsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListTagsRequest>,
+    > {
+        self.0.pager().collect_all()
+    }
 }
 impl<'a> ::core::future::IntoFuture for ListTagsCall<'a> {
     type Output = <schematic_runtime::Call<
@@ -1788,20 +2130,14 @@ impl<'a> ::core::future::IntoFuture for ListTagsCall<'a> {
 /// A call to the `ListReleases` endpoint, returned by [`Gitea::list_releases`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListReleasesCall<'a>(
     schematic_runtime::Call<'a, GiteaApi, ListReleasesRequest>,
 );
 impl<'a> ListReleasesCall<'a> {
-    /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    pub fn page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `limit` query parameter (`i64`). Items per page (default: 50, max: 100)
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `draft` query parameter (`bool`). Include draft releases
     pub fn draft(self, value: bool) -> Self {
         Self(self.0.map_request(|request| request.with_draft(value)))
@@ -1836,6 +2172,56 @@ impl<'a> ListReleasesCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListReleasesRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page`](schematic_runtime::pager::Pager::page).
+    #[inline]
+    pub fn page(
+        self,
+        number: u64,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListReleasesRequest> {
+        self.0.pager().page(number)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListReleasesRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, GiteaApi, ListReleasesRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListReleasesRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListReleasesRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListReleasesCall<'a> {
@@ -2002,20 +2388,14 @@ impl<'a> ::core::future::IntoFuture for GetAnnotatedTagCall<'a> {
 /// A call to the `ListOrgRepos` endpoint, returned by [`Gitea::list_org_repos`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListOrgReposCall<'a>(
     schematic_runtime::Call<'a, GiteaApi, ListOrgReposRequest>,
 );
 impl<'a> ListOrgReposCall<'a> {
-    /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    pub fn page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `limit` query parameter (`i64`). Items per page (default: 50, max: 100)
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -2042,6 +2422,56 @@ impl<'a> ListOrgReposCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListOrgReposRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page`](schematic_runtime::pager::Pager::page).
+    #[inline]
+    pub fn page(
+        self,
+        number: u64,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListOrgReposRequest> {
+        self.0.pager().page(number)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, GiteaApi, ListOrgReposRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, GiteaApi, ListOrgReposRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListOrgReposRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListOrgReposRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListOrgReposCall<'a> {
@@ -2148,8 +2578,6 @@ impl Gitea {
     ///
     /// ## Optional values
     ///
-    /// - [`page`](ListPullRequestsCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`limit`](ListPullRequestsCall::limit): the `limit` query parameter (`i64`). Items per page (default: 50, max: 100)
     /// - [`state`](ListPullRequestsCall::state): the `state` query parameter (`String`). Filter by PR state
     /// - [`sort`](ListPullRequestsCall::sort): the `sort` query parameter (`String`). Sort order for results
     pub fn list_pull_requests(
@@ -2170,11 +2598,6 @@ impl Gitea {
     /// - `owner: impl Into<String>`: the `{owner}` path parameter
     /// - `repo: impl Into<String>`: the `{repo}` path parameter
     /// - `index: impl Into<String>`: the `{index}` path parameter
-    ///
-    /// ## Optional values
-    ///
-    /// - [`page`](ListPullRequestFilesCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`limit`](ListPullRequestFilesCall::limit): the `limit` query parameter (`i64`). Items per page (default: 50, max: 100)
     pub fn list_pull_request_files(
         &self,
         owner: impl Into<String>,
@@ -2198,8 +2621,6 @@ impl Gitea {
     ///
     /// ## Optional values
     ///
-    /// - [`page`](ListIssuesCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`limit`](ListIssuesCall::limit): the `limit` query parameter (`i64`). Items per page (default: 50, max: 100)
     /// - [`state`](ListIssuesCall::state): the `state` query parameter (`String`). Filter by issue state
     /// - [`issue_type`](ListIssuesCall::issue_type): the `issue_type` query parameter (`String`). Filter by type (issues, pulls, or all)
     pub fn list_issues(
@@ -2239,11 +2660,6 @@ impl Gitea {
     /// - `owner: impl Into<String>`: the `{owner}` path parameter
     /// - `repo: impl Into<String>`: the `{repo}` path parameter
     /// - `index: impl Into<String>`: the `{index}` path parameter
-    ///
-    /// ## Optional values
-    ///
-    /// - [`page`](ListIssueCommentsCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`limit`](ListIssueCommentsCall::limit): the `limit` query parameter (`i64`). Items per page (default: 50, max: 100)
     pub fn list_issue_comments(
         &self,
         owner: impl Into<String>,
@@ -2265,11 +2681,6 @@ impl Gitea {
     /// - `owner: impl Into<String>`: the `{owner}` path parameter
     /// - `repo: impl Into<String>`: the `{repo}` path parameter
     /// - `index: impl Into<String>`: the `{index}` path parameter
-    ///
-    /// ## Optional values
-    ///
-    /// - [`page`](ListIssueTimelineCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`limit`](ListIssueTimelineCall::limit): the `limit` query parameter (`i64`). Items per page (default: 50, max: 100)
     pub fn list_issue_timeline(
         &self,
         owner: impl Into<String>,
@@ -2290,11 +2701,6 @@ impl Gitea {
     ///
     /// - `owner: impl Into<String>`: the `{owner}` path parameter
     /// - `repo: impl Into<String>`: the `{repo}` path parameter
-    ///
-    /// ## Optional values
-    ///
-    /// - [`page`](ListTagsCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`limit`](ListTagsCall::limit): the `limit` query parameter (`i64`). Items per page (default: 50, max: 100)
     pub fn list_tags(
         &self,
         owner: impl Into<String>,
@@ -2315,8 +2721,6 @@ impl Gitea {
     ///
     /// ## Optional values
     ///
-    /// - [`page`](ListReleasesCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`limit`](ListReleasesCall::limit): the `limit` query parameter (`i64`). Items per page (default: 50, max: 100)
     /// - [`draft`](ListReleasesCall::draft): the `draft` query parameter (`bool`). Include draft releases
     /// - [`pre_release`](ListReleasesCall::pre_release): the `pre_release` query parameter (`bool`). Include pre-releases
     pub fn list_releases(
@@ -2394,11 +2798,6 @@ impl Gitea {
     /// ## Arguments
     ///
     /// - `org: impl Into<String>`: the `{org}` path parameter
-    ///
-    /// ## Optional values
-    ///
-    /// - [`page`](ListOrgReposCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`limit`](ListOrgReposCall::limit): the `limit` query parameter (`i64`). Items per page (default: 50, max: 100)
     pub fn list_org_repos(&self, org: impl Into<String>) -> ListOrgReposCall<'_> {
         ListOrgReposCall(self.0.send(ListOrgReposRequest::new(org)))
     }

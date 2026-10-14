@@ -46,6 +46,7 @@ pub use types::*;
 use crate::registry::SchemaRegistry;
 use schematic_define::{
     ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping, RestApi, RestMethod,
+    pagination::{Collection, MoreSignal, PageSize, PaginationException, Strategy, ValueSource},
     params::{EndpointParams, PaginationStyle, QueryParamType},
 };
 
@@ -95,6 +96,14 @@ pub fn openapi_registry() -> SchemaRegistry {
         .register::<Vec<RepositoryInfo>>("Vec<RepositoryInfo>")
 }
 
+/// GitHub's page-number pagination: a 1-based `page`, a `per_page` size, and
+/// a `Link` header whose `next` relation marks a further page.
+fn github_page_number() -> Strategy {
+    Strategy::page_number("page", MoreSignal::link_rel("next"))
+        .page_size(PageSize::new("per_page").server_default(30).max(100))
+        .build()
+}
+
 /// Creates the GitHub REST API definition.
 ///
 /// This defines a focused slice of the GitHub REST API covering repository
@@ -121,7 +130,9 @@ pub fn openapi_registry() -> SchemaRegistry {
 /// | ListWorkflowRuns | GET | /repos/{owner}/{repo}/actions/runs | List workflow runs |
 /// | ListOrgRepos | GET | /orgs/{org}/repos | List organization repositories |
 ///
-/// All `List*` endpoints support pagination via `page` and `per_page` query parameters.
+/// All `List*` endpoints are paginated by `page` and `per_page`, which the
+/// generated pager manages (`.page(n)`, `.page_size(n)`) instead of request
+/// setters.
 /// `GetGitTree` takes an optional `recursive` boolean query parameter.
 ///
 /// ## Examples
@@ -516,8 +527,13 @@ pub fn define_github_api() -> RestApi {
         // GitHub sends its request id in `X-GitHub-Request-Id`.
         request_id_header: Some("x-github-request-id".to_string()),
         secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
+        default_pagination: Some(github_page_number()),
+        pagination_exceptions: vec![PaginationException::new(
+            "ListWorkflowRuns",
+            Collection::at("workflow_runs")
+                .item_type("WorkflowRun")
+                .paginate(github_page_number().total(ValueSource::body("total_count"))),
+        )],
     }
 }
 

@@ -188,22 +188,22 @@ impl EndpointParams {
         self
     }
 
-    /// Checks if this endpoint has pagination parameters.
-    ///
-    /// Returns `true` if pagination was added via [`Self::with_pagination`].
+    /// Checks if a superseded [`PaginationStyle`] was recorded via
+    /// [`Self::with_pagination`].
     ///
     /// ## Note
     ///
-    /// This checks whether a [`PaginationStyle`] was explicitly set, not whether
+    /// This does not say whether the endpoint is paginated; that is decided by
+    /// [`resolve`](crate::pagination::resolve). Nor does it look at whether
     /// query parameters happen to have pagination-like names.
     pub fn has_pagination(&self) -> bool {
         self.pagination.is_some()
     }
 
-    /// Sets how the API signals pagination state in responses.
+    /// Records a superseded [`PaginationResponse`] signal.
     ///
-    /// Use this to describe how clients can determine whether more pages exist.
-    /// This is metadata for introspection and potential code generation.
+    /// Nothing reads the recorded value; a pager's continuation is described by
+    /// an API-level [`Strategy`](crate::pagination::Strategy).
     ///
     /// ## Examples
     ///

@@ -7,16 +7,15 @@
 //! provider model that provider's pagination mechanism, not its real
 //! definition.
 
-use http::Method;
 use schematic_runtime::pager::spec::{
-    Boundary, Carry, CountUnit, CursorLeg, CursorPart, CursorSource, Fixed, FollowUp, IndexBase, Input, Kind,
-    LinkSource, MoreSignal, PageSize, Polarity, Source, Step,
+    Boundary, Carry, CountUnit, CursorLeg, CursorPart, CursorSource, Fixed, FollowUp, IndexBase, Input, KeepAlive,
+    Kind, LinkSource, MoreSignal, PageSize, Partition, Polarity, Session, SessionOpen, SessionStep, Source, Step,
 };
 use schematic_runtime::pager::{
-    AdjustablePageSize, CursorKind, HasPrev, HasTotal, ItemSelector, NextLinkKind, NoSession, OffsetKind,
-    PageNumberKind, PageSizeKnob, Paginated, ResumeAfter, ResumeBefore, Strategy,
+    AdjustablePageSize, CursorKind, HasPrev, HasTotal, ItemSelector, KeepAliveKnob, NextLinkKind, OffsetKind,
+    PageNumberKind, PageSizeKnob, Partitioned, Renewable, ResumeAfter, ResumeBefore, Strategy,
 };
-use schematic_runtime::{Client, EndpointSpec, InvalidArgument, Json, RequestParts};
+use schematic_runtime::Client;
 use serde::Deserialize;
 use serde_json::Value;
 use wiremock::matchers::{header, query_param};
@@ -124,51 +123,96 @@ const fn forward_cursor(leg: CursorLeg, more: Option<MoreSignal>, resumable: boo
 
 /// Declares a GET fixture endpoint of [`TestApi`] at `$path` whose request
 /// is its parts, paginated by `$strategy` with items at `$items`.
+///
+/// Paths are absolute so other suites can declare their own fixtures.
 macro_rules! endpoint {
     ($name:ident, $kind:ty, $item:ty, $path:literal, $strategy:expr, $items:expr) => {
         #[derive(Debug, Clone)]
-        pub struct $name(pub RequestParts);
+        pub struct $name(pub ::schematic_runtime::RequestParts);
 
         impl $name {
             #[allow(dead_code, reason = "a fixture with ordinary inputs is built by `with_query`")]
             pub fn get() -> Self {
-                Self(RequestParts::new(Method::GET, $path))
+                Self(::schematic_runtime::RequestParts::new(::http::Method::GET, $path))
             }
 
             /// The request with ordinary query inputs.
             #[allow(dead_code, reason = "only some fixtures take ordinary inputs")]
             pub fn with_query(query: &[(&str, &str)]) -> Self {
-                let mut parts = RequestParts::new(Method::GET, $path);
+                let mut parts = ::schematic_runtime::RequestParts::new(::http::Method::GET, $path);
                 parts.query = query.iter().map(|(name, value)| ((*name).to_owned(), (*value).to_owned())).collect();
                 Self(parts)
             }
         }
 
-        impl EndpointSpec for $name {
-            type Api = TestApi;
-            type Success = Value;
-            type Failure = ProviderError;
-            type Decoder = Json<Value>;
+        impl ::schematic_runtime::EndpointSpec for $name {
+            type Api = crate::support::TestApi;
+            type Success = ::serde_json::Value;
+            type Failure = crate::support::ProviderError;
+            type Decoder = ::schematic_runtime::Json<::serde_json::Value>;
 
             const ENDPOINT_ID: &'static str = stringify!($name);
-            const METHOD: Method = Method::GET;
+            const METHOD: ::http::Method = ::http::Method::GET;
 
-            fn into_parts(self) -> Result<RequestParts, InvalidArgument> {
+            fn into_parts(self) -> Result<::schematic_runtime::RequestParts, ::schematic_runtime::InvalidArgument> {
                 Ok(self.0)
             }
         }
 
-        impl Paginated for $name {
+        impl ::schematic_runtime::pager::Paginated for $name {
             type Item = $item;
             type Kind = $kind;
-            type Session = NoSession;
+            type Session = ::schematic_runtime::pager::NoSession;
 
-            const STRATEGY: &'static Strategy = &$strategy;
-            const ITEMS: &'static ItemSelector = &$items;
+            const STRATEGY: &'static ::schematic_runtime::pager::Strategy = &$strategy;
+            const ITEMS: &'static ::schematic_runtime::pager::ItemSelector = &$items;
             const PATH: &'static str = $path;
         }
     };
 }
+pub(crate) use endpoint;
+
+/// Declares a fixture endpoint like [`endpoint!`] whose strategy has a
+/// server-side session, so it is iterated only inside `with_session`.
+macro_rules! session_endpoint {
+    ($name:ident, $kind:ty, $item:ty, $path:literal, $strategy:expr, $items:expr) => {
+        #[derive(Debug, Clone)]
+        pub struct $name(pub ::schematic_runtime::RequestParts);
+
+        impl $name {
+            #[allow(dead_code, reason = "a fixture with a body or ordinary inputs builds its own parts")]
+            pub fn get() -> Self {
+                Self(::schematic_runtime::RequestParts::new(::http::Method::GET, $path))
+            }
+        }
+
+        impl ::schematic_runtime::EndpointSpec for $name {
+            type Api = crate::support::TestApi;
+            type Success = ::serde_json::Value;
+            type Failure = crate::support::ProviderError;
+            type Decoder = ::schematic_runtime::Json<::serde_json::Value>;
+
+            const ENDPOINT_ID: &'static str = stringify!($name);
+            const METHOD: ::http::Method = ::http::Method::GET;
+
+            fn into_parts(self) -> Result<::schematic_runtime::RequestParts, ::schematic_runtime::InvalidArgument> {
+                Ok(self.0)
+            }
+        }
+
+        impl ::schematic_runtime::pager::Paginated for $name {
+            type Item = $item;
+            type Kind = $kind;
+            type Session = ::schematic_runtime::pager::WithSession;
+
+            const STRATEGY: &'static ::schematic_runtime::pager::Strategy = &$strategy;
+            const ITEMS: &'static ::schematic_runtime::pager::ItemSelector = &$items;
+            const PATH: &'static str = $path;
+        }
+    };
+}
+#[allow(unused_imports, reason = "suites with their own session fixtures use it")]
+pub(crate) use session_endpoint;
 
 const fn under(record: &'static [Step]) -> ItemSelector {
     ItemSelector { record, projection: &[] }
@@ -919,4 +963,186 @@ pub fn names(items: &[Named]) -> Vec<&str> {
 /// `[{"id": n}, ..]`.
 pub fn numbered(range: impl IntoIterator<Item = u64>) -> Value {
     Value::Array(range.into_iter().map(|id| serde_json::json!({ "id": id })).collect())
+}
+
+// ---------------------------------------------------------------------------
+// Sessions (R22, R22a, R23)
+// ---------------------------------------------------------------------------
+
+// Elasticsearch-style point in time: `POST /logs/_pit?keep_alive=..` opens
+// it and returns `{"id": ..}`; every page is `POST /_search` carrying the
+// handle and keep-alive in `pit`, and `search_after` from the last hit's
+// `sort`; each page returns the latest handle as `pit_id`; partitions send
+// `slice.id` and `slice.max`; `DELETE /_pit` with `{"id": ..}` closes it.
+session_endpoint!(
+    PitSearch,
+    CursorKind,
+    Named,
+    "/logs/_search",
+    Strategy {
+        kind: Kind::Cursor {
+            forward: CursorLeg {
+                parts: &[CursorPart {
+                    param: Input::Body(&["search_after"]),
+                    source: CursorSource::LastItem(&["sort"]),
+                }],
+                boundary: Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(MoreSignal::NonEmptyPage),
+            resumable: false,
+        },
+        size: Some(PageSize {
+            max: Some(10_000),
+            ..size(Input::Body(&["size"]))
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: Some(Session {
+            open: SessionOpen::Request {
+                step: SessionStep {
+                    method: http::Method::POST,
+                    path: "/logs/_pit",
+                    handle: None,
+                    constants: &[],
+                },
+                handle: Source::Body(&["id"]),
+            },
+            pages: Some((http::Method::POST, "/_search")),
+            handle_from_page: Some(Source::Body(&["pit_id"])),
+            send_handle_as: Some(Input::Body(&["pit", "id"])),
+            keep_alive: Some(KeepAlive {
+                default: "1m",
+                on_open: Some(Input::Query("keep_alive")),
+                on_page: Some(Input::Body(&["pit", "keep_alive"])),
+                adjustable: true,
+            }),
+            renew: None,
+            close: Some(SessionStep {
+                method: http::Method::DELETE,
+                path: "/_pit",
+                handle: Some(Input::Body(&["id"])),
+                constants: &[],
+            }),
+        }),
+        partition: Some(Partition {
+            index: Input::Body(&["slice", "id"]),
+            count: Input::Body(&["slice", "max"]),
+            max: Some(4),
+        }),
+    },
+    ItemSelector {
+        record: &[Step::Key("hits"), Step::Key("hits"), Step::Each],
+        projection: &["_source"],
+    }
+);
+impl PageSizeKnob for PitSearch {}
+impl KeepAliveKnob for PitSearch {}
+impl Partitioned for PitSearch {}
+
+// Elasticsearch-style scroll: the first page, `GET /logs/_search?scroll=..`,
+// opens it; the scroll id is both the cursor and the handle, so later
+// pages are `POST /_search/scroll` with `{"scroll_id", "scroll"}`; an
+// out-of-band `POST /_search/scroll/renew` renews it, and
+// `DELETE /_search/scroll` with `{"scroll_id": ..}` closes it. Items are
+// `hits.hits[*]._source`; a page with no hits ends the list.
+session_endpoint!(
+    ScrollSearch,
+    CursorKind,
+    Item,
+    "/logs/_search",
+    Strategy {
+        kind: Kind::Cursor {
+            forward: CursorLeg {
+                parts: &[CursorPart {
+                    param: Input::Body(&["scroll_id"]),
+                    source: CursorSource::Field(Source::Body(&["_scroll_id"])),
+                }],
+                boundary: Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(MoreSignal::NonEmptyPage),
+            resumable: false,
+        },
+        size: None,
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: Some(FollowUp {
+            method: None,
+            path: None,
+            carry: Carry::Nothing,
+        }),
+        session: Some(Session {
+            open: SessionOpen::FirstPage,
+            pages: Some((http::Method::POST, "/_search/scroll")),
+            handle_from_page: Some(Source::Body(&["_scroll_id"])),
+            send_handle_as: None,
+            keep_alive: Some(KeepAlive {
+                default: "1m",
+                on_open: Some(Input::Query("scroll")),
+                on_page: Some(Input::Body(&["scroll"])),
+                adjustable: false,
+            }),
+            renew: Some(SessionStep {
+                method: http::Method::POST,
+                path: "/_search/scroll/renew",
+                handle: Some(Input::Body(&["scroll_id"])),
+                constants: &[Fixed {
+                    param: Input::Body(&["scroll"]),
+                    value: "5m",
+                }],
+            }),
+            close: Some(SessionStep {
+                method: http::Method::DELETE,
+                path: "/_search/scroll",
+                handle: Some(Input::Body(&["scroll_id"])),
+                constants: &[],
+            }),
+        }),
+        partition: None,
+    },
+    ItemSelector {
+        record: &[Step::Key("hits"), Step::Key("hits"), Step::Each],
+        projection: &["_source"],
+    }
+);
+impl Renewable for ScrollSearch {}
+
+/// `{"hits": {"hits": [{"_source": {"id": n}}, ..]}}` merged into `extra`.
+pub fn hits(ids: impl IntoIterator<Item = u64>, extra: Value) -> Value {
+    let hits: Vec<Value> = ids
+        .into_iter()
+        .map(|id| serde_json::json!({ "_source": { "id": id }, "sort": [id] }))
+        .collect();
+    let mut body = serde_json::json!({ "hits": { "hits": hits } });
+    if let (Value::Object(body), Value::Object(extra)) = (&mut body, extra) {
+        body.extend(extra);
+    }
+    body
+}
+
+/// `{"hits": {"hits": [{"_source": {"id": "<name>"}, "sort": ["<name>"]}, ..]}}`
+/// merged into `extra`, for [`PitSearch`]'s named items.
+pub fn named_hits(names: &[&str], extra: Value) -> Value {
+    let hits: Vec<Value> = names
+        .iter()
+        .map(|name| serde_json::json!({ "_source": { "id": name }, "sort": [name] }))
+        .collect();
+    let mut body = serde_json::json!({ "hits": { "hits": hits } });
+    if let (Value::Object(body), Value::Object(extra)) = (&mut body, extra) {
+        body.extend(extra);
+    }
+    body
+}
+
+/// A received request as `METHOD /path?query body`, for asserting a
+/// session's request sequence in one comparison.
+pub fn line(request: &Request) -> String {
+    let query = request.url.query().map(|query| format!("?{query}")).unwrap_or_default();
+    let body = String::from_utf8_lossy(&request.body);
+    let body = if body.is_empty() { String::new() } else { format!(" {body}") };
+    format!("{} {}{query}{body}", request.method, request.url.path())
 }

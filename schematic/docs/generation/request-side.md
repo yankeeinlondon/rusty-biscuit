@@ -80,23 +80,27 @@ use schematic_schema::gitea::ListPullRequestsRequest;
 use schematic_schema::schematic_runtime::{EndpointSpec, Method};
 
 let parts = ListPullRequestsRequest::new("own er", "repo")
+    .with_sort("newest".to_string())
     .with_state("open closed".to_string())
-    .with_page(2)
     .into_parts()?;
 assert_eq!(parts.method, Method::GET);
 assert_eq!(parts.path, "/repos/own%20er/repo/pulls");
-// Declared order (page comes before state), values not encoded.
+// Declared order (state comes before sort), values not encoded.
 assert_eq!(
     parts.query,
     vec![
-        ("page".to_string(), "2".to_string()),
         ("state".to_string(), "open closed".to_string()),
+        ("sort".to_string(), "newest".to_string()),
     ]
 );
 ```
 
 A Gitea client sends that request as
-`GET /api/v1/repos/own%20er/repo/pulls?page=2&state=open%20closed`.
+`GET /api/v1/repos/own%20er/repo/pulls?state=open%20closed&sort=newest`.
+
+A parameter that the endpoint's pagination strategy adopts, such as this
+endpoint's `page` and `limit`, is not a field: the pager writes it after the
+request's own query. See [Pagination](../pagination.md#adopted-parameters).
 
 ### Encoding rules
 

@@ -1,0 +1,32 @@
+error[E0277]: `ListBatchesRequest` has no resumable backward cursor
+ --> tests/fixtures/compile_fail/before_on_a_forward_only_cursor.rs
+  |
+  |     let _ = client.list_batches().pager().before("b1");
+  |                                           ^^^^^^ `.before(..)` needs a resumable cursor with a backward leg in the definition
+  |
+  = help: the trait `ResumeBefore` is not implemented for `ListBatchesRequest`
+  = note: the definition for `ListBatchesRequest` authors no resumable backward cursor
+  = help: the following other types implement trait `ResumeBefore`:
+            ListAuditLogsRequest
+            ListFilesInVectorStoreBatchRequest
+            ListOrganizationSpendAlertsRequest
+            ListProjectRateLimitsRequest
+            ListProjectSpendAlertsRequest
+            ListThreadItemsMethodRequest
+            ListThreadsMethodRequest
+            ListVectorStoreFilesRequest
+            ListVectorStoresRequest
+note: required by a bound in `Pager::<'a, A, R>::before`
+ --> $SCHEMATIC_RUNTIME/src/pager/pages.rs
+  |
+  |     pub fn before(mut self, cursor: impl Into<<R as ResumeBefore>::Cursor>) -> Self
+  |            ------ required by a bound in this associated function
+  |     where
+  |         R: ResumeBefore,
+  |            ^^^^^^^^^^^^ required by this bound in `Pager::<'a, A, R>::before`
+
+error[E0599]: no method named `before` found for struct `ListBatchesCall<'a>` in the current scope
+ --> tests/fixtures/compile_fail/before_on_a_forward_only_cursor.rs
+  |
+  |     let _ = client.list_batches().before("b1");
+  |                                   ^^^^^^ method not found in `ListBatchesCall<'_>`

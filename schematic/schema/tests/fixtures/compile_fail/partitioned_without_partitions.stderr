@@ -1,0 +1,16 @@
+error[E0277]: `schematic_schema::github::ListReleasesRequest` has no partitions
+ --> tests/fixtures/compile_fail/partitioned_without_partitions.rs
+  |
+  |     let _ = client.list_releases("octo", "widgets").pager().partitioned(2);
+  |                                                             ^^^^^^^^^^^ `.partitioned(..)` needs a `Partition` in the definition
+  |
+  = help: the trait `Partitioned` is not implemented for `schematic_schema::github::ListReleasesRequest`
+  = note: the definition for `schematic_schema::github::ListReleasesRequest` authors no partitioned iteration
+note: required by a bound in `Pager::<'a, A, R>::partitioned`
+ --> $SCHEMATIC_RUNTIME/src/pager/pages.rs
+  |
+  |     pub fn partitioned(self, count: u32) -> Result<Vec<Pages<'a, A, R>>, InvalidArgument>
+  |            ----------- required by a bound in this associated function
+  |     where
+  |         R: Partitioned + Sessionless,
+  |            ^^^^^^^^^^^ required by this bound in `Pager::<'a, A, R>::partitioned`

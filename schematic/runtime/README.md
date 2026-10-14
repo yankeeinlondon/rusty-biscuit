@@ -110,6 +110,7 @@ explain each behavior with examples:
 | `pre_response_json` and `mutate_response` | [Response hooks](../docs/runtime/hooks.md) |
 | the `Decode` and `ErrorBody` traits, `LiveBody`, writing a codec | [Codecs and decoding](../docs/runtime/codecs.md) |
 | `RequestMeta`, `ResponseMeta`, request ids, redaction | [Metadata and redaction](../docs/runtime/metadata-and-redaction.md) |
+| pagers, `collect_all`, `Incomplete`, `PagerError`, sessions, partitions | [Pagination](../docs/pagination.md) |
 
 The crate-level rustdoc (`cargo doc -p schematic-runtime --open`) documents
 every type.
@@ -133,6 +134,7 @@ every type.
 | `meta` | `RequestMeta`, `ResponseMeta`, `AuthMethod` |
 | `redact` | `SecretNames`, `RedactedUrl`, `REDACTED` |
 | `transport` | `SharedTransport`, `SharedTransportBuilder` |
+| `pager` | `Paginated` and its capability traits, `Pager`, `Pages`, `Items`, `Page`, `PagerError`, `Incomplete`, `IncompleteReason`, `SessionScope`, `SessionError`, `DEFAULT_PAGE_LIMIT`, `DEFAULT_CLOSE_GRACE` |
 
 The runtime does not depend on `schematic-define`; generated code translates
 definition data into runtime configuration.

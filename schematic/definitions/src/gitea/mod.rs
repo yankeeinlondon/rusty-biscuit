@@ -55,6 +55,7 @@ pub use types::*;
 use crate::registry::SchemaRegistry;
 use schematic_define::{
     ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod,
+    pagination::{Collection, MoreSignal, PageSize, PaginationException, Strategy, ValueSource},
     params::{EndpointParams, PaginationStyle, QueryParamType},
 };
 
@@ -104,6 +105,15 @@ pub fn openapi_registry() -> SchemaRegistry {
         .register::<Vec<GitRef>>("Vec<GitRef>")
         .register::<AnnotatedTagObject>("AnnotatedTagObject")
         .register::<Vec<RepositoryInfo>>("Vec<RepositoryInfo>")
+}
+
+/// Gitea's page-number pagination: a 1-based `page`, a `limit` size the
+/// server caps at 50, a `Link` header whose `next` relation marks a further
+/// page, and the item count in `X-Total-Count`.
+fn gitea_page_number() -> Strategy {
+    Strategy::page_number("page", MoreSignal::link_rel("next"))
+        .page_size(PageSize::new("limit").server_default(30).max(50))
+        .total(ValueSource::header("X-Total-Count"))
 }
 
 /// Creates the Gitea REST API definition.
@@ -449,8 +459,25 @@ pub fn define_gitea_api() -> RestApi {
         cross_origin: CrossOrigin::same_origin(),
         request_id_header: None,
         secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
+        default_pagination: Some(gitea_page_number()),
+        pagination_exceptions: vec![
+            // Unverified: the tree is believed to page by `page`/`per_page`
+            // and report `truncated`, but no source confirms it.
+            PaginationException::new(
+                "GetGitTree",
+                Collection::at("tree")
+                    .item_type("GitTreeEntry")
+                    .unpaginated(),
+            ),
+            PaginationException::new(
+                "GetGitTreeRecursive",
+                Collection::at("tree")
+                    .item_type("GitTreeEntry")
+                    .unpaginated(),
+            ),
+            // A ref-prefix lookup, not a list the server pages.
+            PaginationException::new("GetTagReference", Collection::root().unpaginated()),
+        ],
     }
 }
 

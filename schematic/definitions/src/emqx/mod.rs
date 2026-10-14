@@ -64,6 +64,7 @@ use crate::registry::SchemaRegistry;
 use schematic_define::{
     ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping, RestApi,
     RestMethod,
+    pagination::{Collection, PaginationException},
 };
 
 /// Creates a schema registry containing all EMQX response types.
@@ -205,7 +206,7 @@ pub fn define_emqx_basic_api() -> RestApi {
         request_id_header: None,
         secret_names: vec![],
         default_pagination: None,
-        pagination_exceptions: vec![],
+        pagination_exceptions: common_lists(),
     }
 }
 
@@ -280,8 +281,30 @@ pub fn define_emqx_bearer_api() -> RestApi {
         request_id_header: None,
         secret_names: vec![],
         default_pagination: None,
-        pagination_exceptions: vec![],
+        pagination_exceptions: common_lists(),
     }
+}
+
+/// The `{data, meta}` lists shared by both variants, left unpaginated.
+///
+/// Unverified: they are believed to page by `page`/`limit` and report
+/// `meta.hasnext`, but the definitions declare no request inputs and no source
+/// confirms them.
+fn common_lists() -> Vec<PaginationException> {
+    [
+        ("ListAlarms", "AlarmInfo"),
+        ("ListClients", "ClientInfo"),
+        ("ListSubscriptions", "SubscriptionInfo"),
+        ("ListTopics", "TopicInfo"),
+        ("ListRetained", "RetainedMessage"),
+        ("ListRules", "RuleInfo"),
+        ("ListBanned", "BanInfo"),
+    ]
+    .into_iter()
+    .map(|(endpoint, item)| {
+        PaginationException::new(endpoint, Collection::at("data").item_type(item).unpaginated())
+    })
+    .collect()
 }
 
 /// Build the common endpoints shared by both Basic and Bearer API variants.

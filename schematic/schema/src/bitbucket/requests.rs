@@ -151,7 +151,6 @@ impl schematic_runtime::EndpointSpec for GetSourceRequest {
 ///
 /// let request = ListPullRequestsRequest::new("workspace_value", "repo_slug_value")
 ///     .with_page(/* value */)
-///     .with_pagelen(/* value */)
 ///     .with_state(/* value */)
 ///;
 /// ```
@@ -163,8 +162,6 @@ pub struct ListPullRequestsRequest {
     pub repo_slug: String,
     /// Query parameter: Page number (1-indexed, default: 1)
     pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 50, max: 100)
-    pub pagelen: Option<i64>,
     /// Query parameter: Filter by state (OPEN, MERGED, DECLINED, SUPERSEDED)
     pub state: Option<String>,
 }
@@ -175,18 +172,12 @@ impl ListPullRequestsRequest {
             workspace: workspace.into(),
             repo_slug: repo_slug.into(),
             page: None,
-            pagelen: None,
             state: None,
         }
     }
     /// Sets the `page` query parameter.
     pub fn with_page(mut self, value: i64) -> Self {
         self.page = Some(value);
-        self
-    }
-    /// Sets the `pagelen` query parameter.
-    pub fn with_pagelen(mut self, value: i64) -> Self {
-        self.pagelen = Some(value);
         self
     }
     /// Sets the `state` query parameter.
@@ -212,9 +203,6 @@ impl schematic_runtime::EndpointSpec for ListPullRequestsRequest {
         let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.page {
             query.push(("page".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.pagelen {
-            query.push(("pagelen".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.state {
             query.push(("state".to_string(), value.to_string()));
@@ -297,7 +285,6 @@ impl schematic_runtime::EndpointSpec for GetPullRequestRequest {
 ///
 /// let request = ListPullRequestCommentsRequest::new("workspace_value", "repo_slug_value", "id_value")
 ///     .with_page(/* value */)
-///     .with_pagelen(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -310,8 +297,6 @@ pub struct ListPullRequestCommentsRequest {
     pub id: String,
     /// Query parameter: Page number (1-indexed, default: 1)
     pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 50, max: 100)
-    pub pagelen: Option<i64>,
 }
 impl ListPullRequestCommentsRequest {
     /// Creates a new request with the required path parameters.
@@ -325,17 +310,11 @@ impl ListPullRequestCommentsRequest {
             repo_slug: repo_slug.into(),
             id: id.into(),
             page: None,
-            pagelen: None,
         }
     }
     /// Sets the `page` query parameter.
     pub fn with_page(mut self, value: i64) -> Self {
         self.page = Some(value);
-        self
-    }
-    /// Sets the `pagelen` query parameter.
-    pub fn with_pagelen(mut self, value: i64) -> Self {
-        self.pagelen = Some(value);
         self
     }
 }
@@ -358,9 +337,6 @@ impl schematic_runtime::EndpointSpec for ListPullRequestCommentsRequest {
         if let Some(ref value) = self.page {
             query.push(("page".to_string(), value.to_string()));
         }
-        if let Some(ref value) = self.pagelen {
-            query.push(("pagelen".to_string(), value.to_string()));
-        }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -380,7 +356,6 @@ impl schematic_runtime::EndpointSpec for ListPullRequestCommentsRequest {
 ///
 /// let request = ListIssuesRequest::new("workspace_value", "repo_slug_value")
 ///     .with_page(/* value */)
-///     .with_pagelen(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -391,8 +366,6 @@ pub struct ListIssuesRequest {
     pub repo_slug: String,
     /// Query parameter: Page number (1-indexed, default: 1)
     pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 50, max: 100)
-    pub pagelen: Option<i64>,
 }
 impl ListIssuesRequest {
     /// Creates a new request with the required path parameters.
@@ -401,17 +374,11 @@ impl ListIssuesRequest {
             workspace: workspace.into(),
             repo_slug: repo_slug.into(),
             page: None,
-            pagelen: None,
         }
     }
     /// Sets the `page` query parameter.
     pub fn with_page(mut self, value: i64) -> Self {
         self.page = Some(value);
-        self
-    }
-    /// Sets the `pagelen` query parameter.
-    pub fn with_pagelen(mut self, value: i64) -> Self {
-        self.pagelen = Some(value);
         self
     }
 }
@@ -432,9 +399,6 @@ impl schematic_runtime::EndpointSpec for ListIssuesRequest {
         let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.page {
             query.push(("page".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.pagelen {
-            query.push(("pagelen".to_string(), value.to_string()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -514,7 +478,6 @@ impl schematic_runtime::EndpointSpec for GetIssueRequest {
 ///
 /// let request = ListIssueCommentsRequest::new("workspace_value", "repo_slug_value", "id_value")
 ///     .with_page(/* value */)
-///     .with_pagelen(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -527,8 +490,6 @@ pub struct ListIssueCommentsRequest {
     pub id: String,
     /// Query parameter: Page number (1-indexed, default: 1)
     pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 50, max: 100)
-    pub pagelen: Option<i64>,
 }
 impl ListIssueCommentsRequest {
     /// Creates a new request with the required path parameters.
@@ -542,17 +503,11 @@ impl ListIssueCommentsRequest {
             repo_slug: repo_slug.into(),
             id: id.into(),
             page: None,
-            pagelen: None,
         }
     }
     /// Sets the `page` query parameter.
     pub fn with_page(mut self, value: i64) -> Self {
         self.page = Some(value);
-        self
-    }
-    /// Sets the `pagelen` query parameter.
-    pub fn with_pagelen(mut self, value: i64) -> Self {
-        self.pagelen = Some(value);
         self
     }
 }
@@ -575,9 +530,6 @@ impl schematic_runtime::EndpointSpec for ListIssueCommentsRequest {
         if let Some(ref value) = self.page {
             query.push(("page".to_string(), value.to_string()));
         }
-        if let Some(ref value) = self.pagelen {
-            query.push(("pagelen".to_string(), value.to_string()));
-        }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -597,7 +549,6 @@ impl schematic_runtime::EndpointSpec for ListIssueCommentsRequest {
 ///
 /// let request = ListIssueChangesRequest::new("workspace_value", "repo_slug_value", "id_value")
 ///     .with_page(/* value */)
-///     .with_pagelen(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -610,8 +561,6 @@ pub struct ListIssueChangesRequest {
     pub id: String,
     /// Query parameter: Page number (1-indexed, default: 1)
     pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 50, max: 100)
-    pub pagelen: Option<i64>,
 }
 impl ListIssueChangesRequest {
     /// Creates a new request with the required path parameters.
@@ -625,17 +574,11 @@ impl ListIssueChangesRequest {
             repo_slug: repo_slug.into(),
             id: id.into(),
             page: None,
-            pagelen: None,
         }
     }
     /// Sets the `page` query parameter.
     pub fn with_page(mut self, value: i64) -> Self {
         self.page = Some(value);
-        self
-    }
-    /// Sets the `pagelen` query parameter.
-    pub fn with_pagelen(mut self, value: i64) -> Self {
-        self.pagelen = Some(value);
         self
     }
 }
@@ -657,9 +600,6 @@ impl schematic_runtime::EndpointSpec for ListIssueChangesRequest {
         let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.page {
             query.push(("page".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.pagelen {
-            query.push(("pagelen".to_string(), value.to_string()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -739,7 +679,6 @@ impl schematic_runtime::EndpointSpec for GetBranchRequest {
 ///
 /// let request = ListTagsRequest::new("workspace_value", "repo_slug_value")
 ///     .with_page(/* value */)
-///     .with_pagelen(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -750,8 +689,6 @@ pub struct ListTagsRequest {
     pub repo_slug: String,
     /// Query parameter: Page number (1-indexed, default: 1)
     pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 50, max: 100)
-    pub pagelen: Option<i64>,
 }
 impl ListTagsRequest {
     /// Creates a new request with the required path parameters.
@@ -760,17 +697,11 @@ impl ListTagsRequest {
             workspace: workspace.into(),
             repo_slug: repo_slug.into(),
             page: None,
-            pagelen: None,
         }
     }
     /// Sets the `page` query parameter.
     pub fn with_page(mut self, value: i64) -> Self {
         self.page = Some(value);
-        self
-    }
-    /// Sets the `pagelen` query parameter.
-    pub fn with_pagelen(mut self, value: i64) -> Self {
-        self.pagelen = Some(value);
         self
     }
 }
@@ -791,9 +722,6 @@ impl schematic_runtime::EndpointSpec for ListTagsRequest {
         let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.page {
             query.push(("page".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.pagelen {
-            query.push(("pagelen".to_string(), value.to_string()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -873,7 +801,6 @@ impl schematic_runtime::EndpointSpec for GetTagRequest {
 ///
 /// let request = ListDownloadsRequest::new("workspace_value", "repo_slug_value")
 ///     .with_page(/* value */)
-///     .with_pagelen(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -884,8 +811,6 @@ pub struct ListDownloadsRequest {
     pub repo_slug: String,
     /// Query parameter: Page number (1-indexed, default: 1)
     pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 50, max: 100)
-    pub pagelen: Option<i64>,
 }
 impl ListDownloadsRequest {
     /// Creates a new request with the required path parameters.
@@ -894,17 +819,11 @@ impl ListDownloadsRequest {
             workspace: workspace.into(),
             repo_slug: repo_slug.into(),
             page: None,
-            pagelen: None,
         }
     }
     /// Sets the `page` query parameter.
     pub fn with_page(mut self, value: i64) -> Self {
         self.page = Some(value);
-        self
-    }
-    /// Sets the `pagelen` query parameter.
-    pub fn with_pagelen(mut self, value: i64) -> Self {
-        self.pagelen = Some(value);
         self
     }
 }
@@ -925,9 +844,6 @@ impl schematic_runtime::EndpointSpec for ListDownloadsRequest {
         let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.page {
             query.push(("page".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.pagelen {
-            query.push(("pagelen".to_string(), value.to_string()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -1007,7 +923,6 @@ impl schematic_runtime::EndpointSpec for GetDownloadRequest {
 ///
 /// let request = ListWorkspaceReposRequest::new("workspace_value")
 ///     .with_page(/* value */)
-///     .with_pagelen(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1016,8 +931,6 @@ pub struct ListWorkspaceReposRequest {
     pub workspace: String,
     /// Query parameter: Page number (1-indexed, default: 1)
     pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 50, max: 100)
-    pub pagelen: Option<i64>,
 }
 impl ListWorkspaceReposRequest {
     /// Creates a new request with the required path parameters.
@@ -1025,17 +938,11 @@ impl ListWorkspaceReposRequest {
         Self {
             workspace: workspace.into(),
             page: None,
-            pagelen: None,
         }
     }
     /// Sets the `page` query parameter.
     pub fn with_page(mut self, value: i64) -> Self {
         self.page = Some(value);
-        self
-    }
-    /// Sets the `pagelen` query parameter.
-    pub fn with_pagelen(mut self, value: i64) -> Self {
-        self.pagelen = Some(value);
         self
     }
 }
@@ -1044,7 +951,6 @@ impl From<&str> for ListWorkspaceReposRequest {
         Self {
             workspace: param.to_string(),
             page: None,
-            pagelen: None,
         }
     }
 }
@@ -1053,7 +959,6 @@ impl From<String> for ListWorkspaceReposRequest {
         Self {
             workspace: param,
             page: None,
-            pagelen: None,
         }
     }
 }
@@ -1074,9 +979,6 @@ impl schematic_runtime::EndpointSpec for ListWorkspaceReposRequest {
         if let Some(ref value) = self.page {
             query.push(("page".to_string(), value.to_string()));
         }
-        if let Some(ref value) = self.pagelen {
-            query.push(("pagelen".to_string(), value.to_string()));
-        }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1087,6 +989,342 @@ impl schematic_runtime::EndpointSpec for ListWorkspaceReposRequest {
         })
     }
 }
+impl schematic_runtime::pager::Paginated for ListPullRequestsRequest {
+    type Item = PullRequest;
+    type Kind = schematic_runtime::pager::NextLinkKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::NextLink {
+            next: schematic_runtime::pager::spec::LinkSource::Field(
+                schematic_runtime::pager::spec::Source::Body(&["next"]),
+            ),
+            prev: Some(
+                schematic_runtime::pager::spec::LinkSource::Field(
+                    schematic_runtime::pager::spec::Source::Body(&["previous"]),
+                ),
+            ),
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("pagelen"),
+            server_default: Some(10),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Body(&["size"])),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("values"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/repositories/{workspace}/{repo_slug}/pullrequests";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListPullRequestsRequest {}
+impl schematic_runtime::pager::HasPrev for ListPullRequestsRequest {}
+impl schematic_runtime::pager::HasTotal for ListPullRequestsRequest {}
+impl schematic_runtime::pager::Paginated for ListPullRequestCommentsRequest {
+    type Item = PullRequestComment;
+    type Kind = schematic_runtime::pager::NextLinkKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::NextLink {
+            next: schematic_runtime::pager::spec::LinkSource::Field(
+                schematic_runtime::pager::spec::Source::Body(&["next"]),
+            ),
+            prev: Some(
+                schematic_runtime::pager::spec::LinkSource::Field(
+                    schematic_runtime::pager::spec::Source::Body(&["previous"]),
+                ),
+            ),
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("pagelen"),
+            server_default: Some(10),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Body(&["size"])),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("values"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/repositories/{workspace}/{repo_slug}/pullrequests/{id}/comments";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListPullRequestCommentsRequest {}
+impl schematic_runtime::pager::HasPrev for ListPullRequestCommentsRequest {}
+impl schematic_runtime::pager::HasTotal for ListPullRequestCommentsRequest {}
+impl schematic_runtime::pager::Paginated for ListIssuesRequest {
+    type Item = Issue;
+    type Kind = schematic_runtime::pager::NextLinkKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::NextLink {
+            next: schematic_runtime::pager::spec::LinkSource::Field(
+                schematic_runtime::pager::spec::Source::Body(&["next"]),
+            ),
+            prev: Some(
+                schematic_runtime::pager::spec::LinkSource::Field(
+                    schematic_runtime::pager::spec::Source::Body(&["previous"]),
+                ),
+            ),
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("pagelen"),
+            server_default: Some(10),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Body(&["size"])),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("values"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/repositories/{workspace}/{repo_slug}/issues";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListIssuesRequest {}
+impl schematic_runtime::pager::HasPrev for ListIssuesRequest {}
+impl schematic_runtime::pager::HasTotal for ListIssuesRequest {}
+impl schematic_runtime::pager::Paginated for ListIssueCommentsRequest {
+    type Item = IssueComment;
+    type Kind = schematic_runtime::pager::NextLinkKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::NextLink {
+            next: schematic_runtime::pager::spec::LinkSource::Field(
+                schematic_runtime::pager::spec::Source::Body(&["next"]),
+            ),
+            prev: Some(
+                schematic_runtime::pager::spec::LinkSource::Field(
+                    schematic_runtime::pager::spec::Source::Body(&["previous"]),
+                ),
+            ),
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("pagelen"),
+            server_default: Some(10),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Body(&["size"])),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("values"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/repositories/{workspace}/{repo_slug}/issues/{id}/comments";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListIssueCommentsRequest {}
+impl schematic_runtime::pager::HasPrev for ListIssueCommentsRequest {}
+impl schematic_runtime::pager::HasTotal for ListIssueCommentsRequest {}
+impl schematic_runtime::pager::Paginated for ListIssueChangesRequest {
+    type Item = IssueChange;
+    type Kind = schematic_runtime::pager::NextLinkKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::NextLink {
+            next: schematic_runtime::pager::spec::LinkSource::Field(
+                schematic_runtime::pager::spec::Source::Body(&["next"]),
+            ),
+            prev: Some(
+                schematic_runtime::pager::spec::LinkSource::Field(
+                    schematic_runtime::pager::spec::Source::Body(&["previous"]),
+                ),
+            ),
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("pagelen"),
+            server_default: Some(10),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Body(&["size"])),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("values"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/repositories/{workspace}/{repo_slug}/issues/{id}/changes";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListIssueChangesRequest {}
+impl schematic_runtime::pager::HasPrev for ListIssueChangesRequest {}
+impl schematic_runtime::pager::HasTotal for ListIssueChangesRequest {}
+impl schematic_runtime::pager::Paginated for ListTagsRequest {
+    type Item = Tag;
+    type Kind = schematic_runtime::pager::NextLinkKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::NextLink {
+            next: schematic_runtime::pager::spec::LinkSource::Field(
+                schematic_runtime::pager::spec::Source::Body(&["next"]),
+            ),
+            prev: Some(
+                schematic_runtime::pager::spec::LinkSource::Field(
+                    schematic_runtime::pager::spec::Source::Body(&["previous"]),
+                ),
+            ),
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("pagelen"),
+            server_default: Some(10),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Body(&["size"])),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("values"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/repositories/{workspace}/{repo_slug}/refs/tags";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListTagsRequest {}
+impl schematic_runtime::pager::HasPrev for ListTagsRequest {}
+impl schematic_runtime::pager::HasTotal for ListTagsRequest {}
+impl schematic_runtime::pager::Paginated for ListDownloadsRequest {
+    type Item = Download;
+    type Kind = schematic_runtime::pager::NextLinkKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::NextLink {
+            next: schematic_runtime::pager::spec::LinkSource::Field(
+                schematic_runtime::pager::spec::Source::Body(&["next"]),
+            ),
+            prev: Some(
+                schematic_runtime::pager::spec::LinkSource::Field(
+                    schematic_runtime::pager::spec::Source::Body(&["previous"]),
+                ),
+            ),
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("pagelen"),
+            server_default: Some(10),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Body(&["size"])),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("values"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/repositories/{workspace}/{repo_slug}/downloads";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListDownloadsRequest {}
+impl schematic_runtime::pager::HasPrev for ListDownloadsRequest {}
+impl schematic_runtime::pager::HasTotal for ListDownloadsRequest {}
+impl schematic_runtime::pager::Paginated for ListWorkspaceReposRequest {
+    type Item = Repository;
+    type Kind = schematic_runtime::pager::NextLinkKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::NextLink {
+            next: schematic_runtime::pager::spec::LinkSource::Field(
+                schematic_runtime::pager::spec::Source::Body(&["next"]),
+            ),
+            prev: Some(
+                schematic_runtime::pager::spec::LinkSource::Field(
+                    schematic_runtime::pager::spec::Source::Body(&["previous"]),
+                ),
+            ),
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("pagelen"),
+            server_default: Some(10),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Body(&["size"])),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("values"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/repositories/{workspace}";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListWorkspaceReposRequest {}
+impl schematic_runtime::pager::HasPrev for ListWorkspaceReposRequest {}
+impl schematic_runtime::pager::HasTotal for ListWorkspaceReposRequest {}
 /// A call to the `GetRepository` endpoint, returned by [`Bitbucket::get_repository`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
@@ -1200,6 +1438,8 @@ impl<'a> ::core::future::IntoFuture for GetSourceCall<'a> {
 /// A call to the `ListPullRequests` endpoint, returned by [`Bitbucket::list_pull_requests`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListPullRequestsCall<'a>(
@@ -1209,10 +1449,6 @@ impl<'a> ListPullRequestsCall<'a> {
     /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
     pub fn page(self, value: i64) -> Self {
         Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `pagelen` query parameter (`i64`). Items per page (default: 50, max: 100)
-    pub fn pagelen(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_pagelen(value)))
     }
     /// Sets the `state` query parameter (`String`). Filter by state (OPEN, MERGED, DECLINED, SUPERSEDED)
     pub fn state(self, value: String) -> Self {
@@ -1246,6 +1482,48 @@ impl<'a> ListPullRequestsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, BitbucketApi, ListPullRequestsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, BitbucketApi, ListPullRequestsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, BitbucketApi, ListPullRequestsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListPullRequestsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListPullRequestsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListPullRequestsCall<'a> {
@@ -1314,6 +1592,8 @@ impl<'a> ::core::future::IntoFuture for GetPullRequestCall<'a> {
 /// A call to the `ListPullRequestComments` endpoint, returned by [`Bitbucket::list_pull_request_comments`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListPullRequestCommentsCall<'a>(
@@ -1323,10 +1603,6 @@ impl<'a> ListPullRequestCommentsCall<'a> {
     /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
     pub fn page(self, value: i64) -> Self {
         Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `pagelen` query parameter (`i64`). Items per page (default: 50, max: 100)
-    pub fn pagelen(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_pagelen(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
@@ -1357,6 +1633,60 @@ impl<'a> ListPullRequestCommentsCall<'a> {
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        BitbucketApi,
+        ListPullRequestCommentsRequest,
+    > {
+        self.0.pager()
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        BitbucketApi,
+        ListPullRequestCommentsRequest,
+    > {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<
+        'a,
+        BitbucketApi,
+        ListPullRequestCommentsRequest,
+    > {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListPullRequestCommentsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListPullRequestCommentsRequest>,
+    > {
+        self.0.pager().collect_all()
+    }
 }
 impl<'a> ::core::future::IntoFuture for ListPullRequestCommentsCall<'a> {
     type Output = <schematic_runtime::Call<
@@ -1373,6 +1703,8 @@ impl<'a> ::core::future::IntoFuture for ListPullRequestCommentsCall<'a> {
 /// A call to the `ListIssues` endpoint, returned by [`Bitbucket::list_issues`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListIssuesCall<'a>(
@@ -1382,10 +1714,6 @@ impl<'a> ListIssuesCall<'a> {
     /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
     pub fn page(self, value: i64) -> Self {
         Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `pagelen` query parameter (`i64`). Items per page (default: 50, max: 100)
-    pub fn pagelen(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_pagelen(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
@@ -1415,6 +1743,48 @@ impl<'a> ListIssuesCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, BitbucketApi, ListIssuesRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, BitbucketApi, ListIssuesRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, BitbucketApi, ListIssuesRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListIssuesRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListIssuesRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListIssuesCall<'a> {
@@ -1479,6 +1849,8 @@ impl<'a> ::core::future::IntoFuture for GetIssueCall<'a> {
 /// A call to the `ListIssueComments` endpoint, returned by [`Bitbucket::list_issue_comments`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListIssueCommentsCall<'a>(
@@ -1488,10 +1860,6 @@ impl<'a> ListIssueCommentsCall<'a> {
     /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
     pub fn page(self, value: i64) -> Self {
         Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `pagelen` query parameter (`i64`). Items per page (default: 50, max: 100)
-    pub fn pagelen(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_pagelen(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
@@ -1522,6 +1890,48 @@ impl<'a> ListIssueCommentsCall<'a> {
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, BitbucketApi, ListIssueCommentsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, BitbucketApi, ListIssueCommentsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, BitbucketApi, ListIssueCommentsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListIssueCommentsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListIssueCommentsRequest>,
+    > {
+        self.0.pager().collect_all()
+    }
 }
 impl<'a> ::core::future::IntoFuture for ListIssueCommentsCall<'a> {
     type Output = <schematic_runtime::Call<
@@ -1538,6 +1948,8 @@ impl<'a> ::core::future::IntoFuture for ListIssueCommentsCall<'a> {
 /// A call to the `ListIssueChanges` endpoint, returned by [`Bitbucket::list_issue_changes`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListIssueChangesCall<'a>(
@@ -1547,10 +1959,6 @@ impl<'a> ListIssueChangesCall<'a> {
     /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
     pub fn page(self, value: i64) -> Self {
         Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `pagelen` query parameter (`i64`). Items per page (default: 50, max: 100)
-    pub fn pagelen(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_pagelen(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
@@ -1580,6 +1988,48 @@ impl<'a> ListIssueChangesCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, BitbucketApi, ListIssueChangesRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, BitbucketApi, ListIssueChangesRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, BitbucketApi, ListIssueChangesRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListIssueChangesRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListIssueChangesRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListIssueChangesCall<'a> {
@@ -1648,6 +2098,8 @@ impl<'a> ::core::future::IntoFuture for GetBranchCall<'a> {
 /// A call to the `ListTags` endpoint, returned by [`Bitbucket::list_tags`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListTagsCall<'a>(schematic_runtime::Call<'a, BitbucketApi, ListTagsRequest>);
@@ -1655,10 +2107,6 @@ impl<'a> ListTagsCall<'a> {
     /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
     pub fn page(self, value: i64) -> Self {
         Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `pagelen` query parameter (`i64`). Items per page (default: 50, max: 100)
-    pub fn pagelen(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_pagelen(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
@@ -1686,6 +2134,48 @@ impl<'a> ListTagsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, BitbucketApi, ListTagsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, BitbucketApi, ListTagsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, BitbucketApi, ListTagsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListTagsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListTagsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListTagsCall<'a> {
@@ -1750,6 +2240,8 @@ impl<'a> ::core::future::IntoFuture for GetTagCall<'a> {
 /// A call to the `ListDownloads` endpoint, returned by [`Bitbucket::list_downloads`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListDownloadsCall<'a>(
@@ -1759,10 +2251,6 @@ impl<'a> ListDownloadsCall<'a> {
     /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
     pub fn page(self, value: i64) -> Self {
         Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `pagelen` query parameter (`i64`). Items per page (default: 50, max: 100)
-    pub fn pagelen(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_pagelen(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
@@ -1792,6 +2280,48 @@ impl<'a> ListDownloadsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, BitbucketApi, ListDownloadsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, BitbucketApi, ListDownloadsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, BitbucketApi, ListDownloadsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListDownloadsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListDownloadsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListDownloadsCall<'a> {
@@ -1860,6 +2390,8 @@ impl<'a> ::core::future::IntoFuture for GetDownloadCall<'a> {
 /// A call to the `ListWorkspaceRepos` endpoint, returned by [`Bitbucket::list_workspace_repos`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListWorkspaceReposCall<'a>(
@@ -1869,10 +2401,6 @@ impl<'a> ListWorkspaceReposCall<'a> {
     /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
     pub fn page(self, value: i64) -> Self {
         Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `pagelen` query parameter (`i64`). Items per page (default: 50, max: 100)
-    pub fn pagelen(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_pagelen(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
@@ -1902,6 +2430,48 @@ impl<'a> ListWorkspaceReposCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, BitbucketApi, ListWorkspaceReposRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, BitbucketApi, ListWorkspaceReposRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, BitbucketApi, ListWorkspaceReposRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListWorkspaceReposRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListWorkspaceReposRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListWorkspaceReposCall<'a> {
@@ -1976,7 +2546,6 @@ impl Bitbucket {
     /// ## Optional values
     ///
     /// - [`page`](ListPullRequestsCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`pagelen`](ListPullRequestsCall::pagelen): the `pagelen` query parameter (`i64`). Items per page (default: 50, max: 100)
     /// - [`state`](ListPullRequestsCall::state): the `state` query parameter (`String`). Filter by state (OPEN, MERGED, DECLINED, SUPERSEDED)
     pub fn list_pull_requests(
         &self,
@@ -2023,7 +2592,6 @@ impl Bitbucket {
     /// ## Optional values
     ///
     /// - [`page`](ListPullRequestCommentsCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`pagelen`](ListPullRequestCommentsCall::pagelen): the `pagelen` query parameter (`i64`). Items per page (default: 50, max: 100)
     pub fn list_pull_request_comments(
         &self,
         workspace: impl Into<String>,
@@ -2048,7 +2616,6 @@ impl Bitbucket {
     /// ## Optional values
     ///
     /// - [`page`](ListIssuesCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`pagelen`](ListIssuesCall::pagelen): the `pagelen` query parameter (`i64`). Items per page (default: 50, max: 100)
     pub fn list_issues(
         &self,
         workspace: impl Into<String>,
@@ -2090,7 +2657,6 @@ impl Bitbucket {
     /// ## Optional values
     ///
     /// - [`page`](ListIssueCommentsCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`pagelen`](ListIssueCommentsCall::pagelen): the `pagelen` query parameter (`i64`). Items per page (default: 50, max: 100)
     pub fn list_issue_comments(
         &self,
         workspace: impl Into<String>,
@@ -2116,7 +2682,6 @@ impl Bitbucket {
     /// ## Optional values
     ///
     /// - [`page`](ListIssueChangesCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`pagelen`](ListIssueChangesCall::pagelen): the `pagelen` query parameter (`i64`). Items per page (default: 50, max: 100)
     pub fn list_issue_changes(
         &self,
         workspace: impl Into<String>,
@@ -2160,7 +2725,6 @@ impl Bitbucket {
     /// ## Optional values
     ///
     /// - [`page`](ListTagsCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`pagelen`](ListTagsCall::pagelen): the `pagelen` query parameter (`i64`). Items per page (default: 50, max: 100)
     pub fn list_tags(
         &self,
         workspace: impl Into<String>,
@@ -2201,7 +2765,6 @@ impl Bitbucket {
     /// ## Optional values
     ///
     /// - [`page`](ListDownloadsCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`pagelen`](ListDownloadsCall::pagelen): the `pagelen` query parameter (`i64`). Items per page (default: 50, max: 100)
     pub fn list_downloads(
         &self,
         workspace: impl Into<String>,
@@ -2243,7 +2806,6 @@ impl Bitbucket {
     /// ## Optional values
     ///
     /// - [`page`](ListWorkspaceReposCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`pagelen`](ListWorkspaceReposCall::pagelen): the `pagelen` query parameter (`i64`). Items per page (default: 50, max: 100)
     pub fn list_workspace_repos(
         &self,
         workspace: impl Into<String>,

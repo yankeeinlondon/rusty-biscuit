@@ -36,15 +36,12 @@ use schematic_schema::prelude::*;
 
 let deadline = Deadline::after(Duration::from_secs(20));
 
-let mut page = 1;
-loop {
-    let pulls = client
-        .list_pull_requests("o", "r")
-        .page(page)
+for (owner, repo) in repositories {
+    let repository = client
+        .get_repository(owner, repo)
         .deadline(&deadline)
         .await?; // each send: min(timeout, time left)
-    // … stop when the page is short …
-    page += 1;
+    // …
 }
 ```
 
@@ -55,6 +52,30 @@ loop {
   leaves the client.
 - `DeadlineExceeded` carries `completed_requests` and `deadline_elapsed`,
   so the error says how far the operation got.
+
+A pager takes the deadline once, through `.deadline(&deadline)` on the call
+or on the pager, and every page request shares it. When the deadline expires
+before a page's response head arrives, the pager returns
+`PagerError::DeadlineExceeded` with the number of pages it received, and
+`collect_all` reports `IncompleteReason::DeadlineExceeded` with their items.
+No further page is sent. A deadline that expires while a page's body is
+still arriving cuts that body off, so the page fails with
+`ErrorKind::BodyInterrupted`.
+
+A session scope (`with_session`) closes its session with a request that the
+deadline does not bound. The close gets its own grace, 5 seconds unless
+`.close_grace(..)` sets another, further limited by the per-request
+timeout, so it is still sent after the deadline expired. The open and renew
+requests share the deadline like pages do. The grace never gives a page
+more time:
+
+```rust
+let deadline = Deadline::after(Duration::from_secs(10));
+let hits = es.search(index).deadline(&deadline).close_grace(Duration::from_secs(2))
+    .with_session(|scope| Box::pin(async move { scope.collect_all().await }))
+    .await;
+// Pages stop at 10 s; the close may then take up to 2 s more.
+```
 
 ### What counts as a completed request
 

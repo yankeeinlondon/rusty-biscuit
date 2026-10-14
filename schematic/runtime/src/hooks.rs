@@ -13,6 +13,10 @@
 //! endpoint's success type, run the endpoint's mutator. Every other reply
 //! skips both hooks: non-2xx statuses (including declared error bodies),
 //! text, binary, and empty endpoints, and [raw sends](crate::Client::send_raw).
+//! A [pager](crate::pager)'s page runs the global hook, because the
+//! definition's item and continuation paths describe the body it produces,
+//! but not the endpoint's mutator, which is typed by the endpoint's own
+//! response rather than a page.
 //!
 //! A hook that returns [`HookError`] makes the send's outcome
 //! [`ErrorKind::Hook`](crate::ErrorKind::Hook) with the original body bytes;

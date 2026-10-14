@@ -30,6 +30,13 @@ pub struct ImportOptions {
     /// When set, `mod.rs` + `types.rs` are written here instead of a
     /// standalone client, so the imported API joins the definitions catalog.
     pub definitions_out: Option<String>,
+    /// Rust path of a hand-written `fn(RestApi) -> RestApi` the emitted
+    /// `define_{api}_api()` applies to the imported value, such as
+    /// `crate::openai_pagination::apply`.
+    ///
+    /// Requires `definitions_out`: a standalone client has no definitions
+    /// factory to call it from.
+    pub overlay: Option<String>,
     /// Path prefixes whose endpoints are excluded from the import.
     pub exclude_paths: Vec<String>,
     /// Response header carrying the provider's request id; an OpenAPI
@@ -61,11 +68,23 @@ pub struct ImportResult {
 /// ## Errors
 ///
 /// Returns `GeneratorError` if:
+/// - `overlay` is not a plain Rust path, or is given without `definitions_out`
+///   (checked before anything is read or written)
 /// - The input file cannot be read
 /// - The OpenAPI spec fails to parse
 /// - Strict mode is enabled and warnings were generated
 /// - Code generation fails
 pub fn run_import(options: &ImportOptions) -> Result<ImportResult, GeneratorError> {
+    if let Some(overlay) = &options.overlay {
+        if options.definitions_out.is_none() {
+            return Err(GeneratorError::ConfigError(
+                "--overlay requires --definitions-out; a standalone client has no definitions factory to apply it in"
+                    .to_string(),
+            ));
+        }
+        definition_gen::parse_overlay_path(overlay)?;
+    }
+
     // Read the input file
     let source = OpenApiSource::path(&options.input);
 
@@ -146,6 +165,7 @@ pub fn run_import(options: &ImportOptions) -> Result<ImportResult, GeneratorErro
                 &api,
                 &module_name,
                 &model_type_names(&models),
+                options.overlay.as_deref(),
                 definitions_dir,
                 options.dry_run,
             )?;
@@ -215,6 +235,7 @@ mod tests {
             module_path: None,
             output: "./out".to_string(),
             definitions_out: None,
+            overlay: None,
             exclude_paths: vec![],
             request_id_header: None,
             dry_run: true,
@@ -293,6 +314,7 @@ components:
             module_path: None,
             output: output_dir.to_string_lossy().to_string(),
             definitions_out: None,
+            overlay: None,
             exclude_paths: vec![],
             request_id_header: None,
             dry_run: true,
@@ -317,6 +339,7 @@ components:
             module_path: None,
             output: "/tmp/out".to_string(),
             definitions_out: None,
+            overlay: None,
             exclude_paths: vec![],
             request_id_header: None,
             dry_run: true,

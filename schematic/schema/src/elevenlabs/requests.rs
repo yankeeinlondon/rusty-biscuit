@@ -2321,6 +2321,100 @@ impl schematic_runtime::EndpointSpec for DeleteWebhookRequest {
         })
     }
 }
+impl schematic_runtime::pager::Paginated for ListSharedVoicesRequest {
+    type Item = LibraryVoiceResponseModel;
+    type Kind = schematic_runtime::pager::PageNumberKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::PageNumber {
+            page: schematic_runtime::pager::spec::Input::Query("page"),
+            base: schematic_runtime::pager::spec::IndexBase::ZeroBased,
+            more: schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            },
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("page_size"),
+            server_default: Some(30),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("voices"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/v1/shared-voices";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListSharedVoicesRequest {}
+impl schematic_runtime::pager::Paginated for GetHistoryRequest {
+    type Item = SpeechHistoryItemResponseModel;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query(
+                            "start_after_history_item_id",
+                        ),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(
+                                &["last_history_item_id"],
+                            ),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("page_size"),
+            server_default: Some(100),
+            sent_default: None,
+            min: 1,
+            max: Some(1000),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("history"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/v1/history";
+}
+impl schematic_runtime::pager::ResumeAfter for GetHistoryRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for GetHistoryRequest {}
 /// A call to the `CreateSpeech` endpoint, returned by [`ElevenLabs::create_speech`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
@@ -3001,6 +3095,8 @@ impl<'a> ::core::future::IntoFuture for AddVoiceSampleCall<'a> {
 /// A call to the `ListSharedVoices` endpoint, returned by [`ElevenLabs::list_shared_voices`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListSharedVoicesCall<'a>(
@@ -3035,6 +3131,56 @@ impl<'a> ListSharedVoicesCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, ElevenLabsApi, ListSharedVoicesRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page`](schematic_runtime::pager::Pager::page).
+    #[inline]
+    pub fn page(
+        self,
+        number: u64,
+    ) -> schematic_runtime::pager::Pager<'a, ElevenLabsApi, ListSharedVoicesRequest> {
+        self.0.pager().page(number)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, ElevenLabsApi, ListSharedVoicesRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, ElevenLabsApi, ListSharedVoicesRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListSharedVoicesRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListSharedVoicesRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListSharedVoicesCall<'a> {
@@ -3409,6 +3555,8 @@ impl<'a> ::core::future::IntoFuture for CreateSingleUseTokenCall<'a> {
 /// A call to the `GetHistory` endpoint, returned by [`ElevenLabs::get_history`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetHistoryCall<'a>(
@@ -3443,6 +3591,58 @@ impl<'a> GetHistoryCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, ElevenLabsApi, GetHistoryRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <GetHistoryRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, ElevenLabsApi, GetHistoryRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, ElevenLabsApi, GetHistoryRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, ElevenLabsApi, GetHistoryRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<GetHistoryRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<GetHistoryRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for GetHistoryCall<'a> {

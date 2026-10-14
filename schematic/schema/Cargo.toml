@@ -24,4 +24,5 @@ urlencoding = "2.1"
 
 [dev-dependencies]
 serial_test = "3"
+trybuild = "1.0"
 wiremock = "0.6"

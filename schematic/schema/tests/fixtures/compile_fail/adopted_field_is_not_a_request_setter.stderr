@@ -1,0 +1,19 @@
+error[E0599]: no method named `per_page` found for struct `schematic_schema::github::ListReleasesCall<'a>` in the current scope
+ --> tests/fixtures/compile_fail/adopted_field_is_not_a_request_setter.rs
+  |
+  |     let _ = client.list_releases("octo", "widgets").per_page(5);
+  |                                                     ^^^^^^^^
+  |
+help: there is a method `page` with a similar name
+  |
+6 -     let _ = client.list_releases("octo", "widgets").per_page(5);
+6 +     let _ = client.list_releases("octo", "widgets").page(5);
+  |
+
+error[E0560]: struct `schematic_schema::github::ListReleasesRequest` has no field named `per_page`
+ --> tests/fixtures/compile_fail/adopted_field_is_not_a_request_setter.rs
+  |
+  |     let _ = ListReleasesRequest { per_page: Some(5), ..ListReleasesRequest::new("octo", "widgets") };
+  |                                   ^^^^^^^^ `schematic_schema::github::ListReleasesRequest` does not have this field
+  |
+  = note: available fields are: `owner`, `repo`

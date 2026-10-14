@@ -11,7 +11,7 @@ use super::spec::{Boundary, CursorLeg, CursorSource};
 
 /// Every continuation one direction of one traversal has sent, kept exactly
 /// (not hashed), so any repeat, however far back, is a loop.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct History {
     seen: HashSet<Vec<String>>,
 }
@@ -45,7 +45,7 @@ pub enum BoundaryError {
 /// parts. Records at the last page's final key whose identity was already
 /// delivered are dropped; a non-empty page made only of such records is no
 /// progress.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundaryTracker {
     key_paths: Vec<&'static [&'static str]>,
     identity: &'static [&'static str],

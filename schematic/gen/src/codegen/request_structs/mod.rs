@@ -21,6 +21,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::Endpoint;
 
+use crate::codegen::pagination::OrdinaryDefault;
 use crate::parser::extract_path_params;
 
 use named_params::ParamLocation;
@@ -115,6 +116,19 @@ pub fn generate_request_struct_with_options(
     module_path: Option<&str>,
     api_marker: &str,
 ) -> TokenStream {
+    generate_request_struct_with_defaults(endpoint, suffix, module_path, api_marker, &[])
+}
+
+/// [`generate_request_struct_with_options`] for an endpoint seen through its
+/// pager view, whose `into_parts` also sends `defaults`, the required
+/// parameters its pagination strategy adopted.
+pub(crate) fn generate_request_struct_with_defaults(
+    endpoint: &Endpoint,
+    suffix: &str,
+    module_path: Option<&str>,
+    api_marker: &str,
+    defaults: &[OrdinaryDefault],
+) -> TokenStream {
     let struct_name = format_ident!("{}{}", endpoint.id, suffix);
     let struct_name_str = format!("{}{}", endpoint.id, suffix);
     let path_params = extract_path_params(&endpoint.path);
@@ -173,7 +187,7 @@ pub fn generate_request_struct_with_options(
     let from_string_impls =
         single::generate_from_string_impls(&struct_name, &path_params, &optional_params, has_body);
 
-    let into_parts_body = into_parts::generate_into_parts_body(endpoint, &path_params, &query_params);
+    let into_parts_body = into_parts::generate_into_parts_body(endpoint, &path_params, &query_params, defaults);
     let endpoint_spec_impl =
         endpoint_spec::generate_endpoint_spec_impl(&struct_name, api_marker, endpoint, into_parts_body);
 

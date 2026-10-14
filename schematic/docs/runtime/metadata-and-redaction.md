@@ -26,7 +26,7 @@ a secret and can be logged, attached to an error report, or shown to a user.
 | `query` | decoded query pairs in URL order, secret values redacted |
 | `headers` | request headers, secret values redacted |
 | `auth` | the credential's source: `PerCall`, `ClientLevel`, `EnvVar(name)`, or `Anonymous` |
-| `page` | reserved for pagination, which is **planned**; always `None` today |
+| `page` | the page's position in its traversal, from 1, on a pager's page request (and on that page's transport error); `None` on every other send |
 
 After a redirect, `request` describes the last request sent, the hop that
 received the reply.

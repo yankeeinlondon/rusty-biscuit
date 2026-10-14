@@ -141,6 +141,31 @@ assert_eq!(api.name, "Bitbucket");
 assert_eq!(api.endpoints.len(), 16);
 ```
 
+## Pagination
+
+Each `RestApi` declares how its list endpoints page: a `default_pagination`
+strategy that every GET endpoint with an explicit `Vec<T>` response inherits,
+and a `pagination_exceptions` table keyed by endpoint id that marks wrapper
+lists (`{"values": [...]}`), overrides the default, or opts a list out. The
+generated client exposes a pager with exactly the controls a strategy authors.
+
+| API | Strategy |
+|-----|----------|
+| GitHub | page number `page` from 1, size `per_page` (max 100), ends without a `Link` `rel="next"` |
+| GitLab | page number `page` from 1, size `per_page` (max 100), ends without `X-Next-Page`, total `X-Total` |
+| Gitea | page number `page` from 1, size `limit` (max 50), ends without a `Link` `rel="next"`, total `X-Total-Count` |
+| Bitbucket | follows the body's `next` URL (and `previous`), size `pagelen` (max 100), total `size` |
+| OpenAI | cursors from the reply (`last_id`, `next`, `next_page`) with `has_more`, size `limit` |
+| ElevenLabs | `GetHistory` (cursor) and `ListSharedVoices` (page number from 0) |
+
+Every other list, including those of Anthropic, EMQX, and Hugging Face, is
+unpaginated until its provider's pagination is verified. OpenAI's definition
+is imported, so its pagination lives in the hand-written
+`src/openai_pagination.rs`, which `just import-openai` applies through the
+importer's `--overlay` option and never overwrites. Every list endpoint's
+expected resolution is pinned by `tests/pagination_coverage/`, and the lists
+awaiting verification are tabled in [Pagination](../docs/pagination.md#lists-left-unpaginated).
+
 ## Bitbucket API
 
 The Bitbucket module provides a definition for the Bitbucket Cloud REST API v2.0, optimized for common developer workflows.
@@ -160,7 +185,7 @@ Create App Passwords via Bitbucket Settings: **Personal settings > App passwords
 
 ### Pagination
 
-Bitbucket uses **cursor-based pagination** (not page-based). Responses include a `next` URL field. The generated `PaginatedResponse<T>` type provides:
+Bitbucket uses **cursor-based pagination** (not page-based). Responses include a `next` URL field, which the definition's next-link strategy follows; a `page` query parameter stays an ordinary request field. The generated `PaginatedResponse<T>` type also provides:
 
 ```rust
 if paginated.has_next() {
@@ -302,7 +327,7 @@ The default base URL is a placeholder (`https://gitea.example.com/api/v1`). Conf
 |--------|-------|--------|
 | Auth header | `Authorization: token <pat>` | `Authorization: Bearer <token>` |
 | Base URL | Instance-specific | `https://api.github.com` |
-| Pagination | `limit` (default 50) | `per_page` (default 30) |
+| Pagination | `limit` (default 30, max 50) | `per_page` (default 30, max 100) |
 | Issues list | `type=issues` excludes PRs | `pull_request` field filtering |
 | Tag refs | Returns **array** | Returns single object |
 
@@ -463,6 +488,7 @@ To add a new API definition:
 4. **Choose correct `ApiResponse` for each endpoint** (see above)
 5. **Set `module_path` if API name differs from module name**
 5b. **Set `request_suffix` if sharing a module with another API** (to avoid naming collisions)
+5c. **Author pagination** in `default_pagination` and `pagination_exceptions` (see [Pagination](#pagination)); every GET `Vec<T>` endpoint inherits the default unless a row opts it out
 6. Export from `src/lib.rs`
 7. Add to the prelude in `src/prelude.rs`
 8. **Run verification checklist above**

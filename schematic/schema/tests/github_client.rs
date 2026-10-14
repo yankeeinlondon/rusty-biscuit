@@ -532,6 +532,8 @@ async fn undecodable_success_body_is_malformed_success_with_raw_bytes() {
 /// The endpoint method and the generic `send` of the same request object
 /// (kept for code that is generic over requests) reach the same URL and
 /// decode the same data, with only the API struct and the request imported.
+/// `per_page` is pager-managed, so both set it through the pager's
+/// `page_size` and fetch one page.
 #[tokio::test]
 async fn endpoint_method_and_generic_send_of_its_request_agree() {
     let mock_server = MockServer::start().await;
@@ -546,20 +548,20 @@ async fn endpoint_method_and_generic_send_of_its_request_agree() {
     let by_method = client
         .list_pull_requests("octo", "widgets")
         .state("closed".to_string())
-        .per_page(5)
+        .page_size(5)
+        .fetch_page()
         .await
         .expect("the endpoint method decodes the list");
     let by_request = client
-        .send(
-            ListPullRequestsRequest::new("octo", "widgets")
-                .with_state("closed".to_string())
-                .with_per_page(5),
-        )
+        .send(ListPullRequestsRequest::new("octo", "widgets").with_state("closed".to_string()))
+        .pager()
+        .page_size(5)
+        .fetch_page()
         .await
         .expect("the generic send decodes the list");
 
-    assert!(by_method.is_empty());
-    assert!(by_request.is_empty());
+    assert!(by_method.items.is_empty());
+    assert!(by_request.items.is_empty());
     let received = mock_server
         .received_requests()
         .await

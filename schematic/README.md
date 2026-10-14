@@ -158,6 +158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 Topic documentation lives in [`docs/`](./docs/):
 
 - [`docs/runtime/`](./docs/runtime/README.md) - sending requests and reading responses with a generated client; start with [Calling an API](./docs/runtime/calling-an-api.md)
+- [`docs/pagination.md`](./docs/pagination.md) - paging through list endpoints with a generated client, and authoring an API's pagination
 - [`docs/generation/`](./docs/generation/request-side.md) - how request structs become HTTP requests, generation validation, and partial generation
 - [`docs/headers/`](./docs/headers/README.md) - credential precedence and the `Headers` builder
 - [`docs/io/`](./docs/io/) - OpenAPI and Postman import and export
@@ -195,6 +196,7 @@ APIs sharing a module (`ollama`, `emqx`) are combined into a single generated fi
 - **Credentials**: Bearer, API Key (header, query, or cookie), Basic, and OAuth2 tokens, supplied per call, per client, or from env var fallback chains; a missing credential sends anonymously
 - **Safe redirects**: the runtime follows redirects itself under a per-API cross-origin policy and sends the credential only where that policy allows
 - **Deadlines**: a per-request timeout plus a `Deadline` shared across many sends
+- **Pagination**: list endpoints get a pager with exactly the controls their definition authors; `collect_all` succeeds only when the provider signals the end of the list (see [Pagination](./docs/pagination.md))
 - **Response hooks**: client-global JSON transformation (`pre_response_json`) and type-safe per-endpoint mutation (`mutate_response`)
 - **Redacted metadata**: request and response metadata never stores a credential, so it is safe to log
 - **Multiple response types**: JSON, Text, Binary, and Empty responses, each with its own success type (`T`, `String`, `bytes::Bytes`, `()`)

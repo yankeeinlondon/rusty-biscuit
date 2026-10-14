@@ -8,9 +8,9 @@ use pagination_support::{
     with_required_query,
 };
 use schematic_define::pagination::{
-    AdoptionOutcome, Collection, CursorSource, Direction, IndexBase, InputParam, Knob, LinkSource,
-    ManagedRole, MoreSignal, PageSize, PaginationError, PaginationRuleGroup, ParamLocation,
-    Partition, Resolution, ResolutionOrigin, ResolvedList, Strategy, ValueSource, adopted_params,
+    AdoptionOutcome, Collection, CursorSource, Direction, IndexBase, InputParam, KeepAlive, Knob,
+    LinkSource, ManagedRole, MoreSignal, PageSize, PaginationError, PaginationRuleGroup,
+    ParamLocation, Partition, Resolution, ResolutionOrigin, ResolvedList, Session, Strategy, ValueSource, adopted_params,
     caller_knobs, param_adoptions, root_array_item_type, validate_pagination,
 };
 use schematic_define::{ApiResponse, EndpointParams, PaginationResponse, PaginationStyle, RestMethod};
@@ -421,6 +421,39 @@ fn a_required_managed_parameter_needs_a_value_to_send() {
     let cursor_required = with_required_query(get("L", "/l", "Vec<T>"), "after");
     let api = listed(cursor_required, Collection::root().paginate(openai_cursor()));
     assert_eq!(errors(&api), vec![PaginationError::PagerManagedRequiredWithoutDefault("after".into())]);
+}
+
+#[test]
+fn each_role_sends_its_authored_default_or_none() {
+    let one_based = page_default();
+    let zero_based = Strategy::page_number("p", MoreSignal::NonEmptyPage).zero_based().build();
+    let offset = Strategy::offset("offset", MoreSignal::NonEmptyPage)
+        .page_size(PageSize::new("limit").sent_default(20))
+        .build();
+    let scroll = Strategy::cursor("scroll_id", CursorSource::body("_scroll_id"))
+        .more_when(MoreSignal::NonEmptyPage)
+        .session(
+            Session::opened_by_first_page()
+                .handle_from_page(ValueSource::body("_scroll_id"))
+                .keep_alive(KeepAlive::new("1m").on_open("scroll").adjustable()),
+        );
+
+    assert_eq!(ManagedRole::Page.sent_default(&one_based).as_deref(), Some("1"));
+    assert_eq!(ManagedRole::Page.sent_default(&zero_based).as_deref(), Some("0"));
+    assert_eq!(ManagedRole::Offset.sent_default(&offset).as_deref(), Some("0"));
+    assert_eq!(ManagedRole::PageSize.sent_default(&offset).as_deref(), Some("20"));
+    // A server default documents the provider; it is never sent.
+    assert_eq!(ManagedRole::PageSize.sent_default(&one_based), None);
+    assert_eq!(ManagedRole::KeepAlive.sent_default(&scroll).as_deref(), Some("1m"));
+    for role in [
+        ManagedRole::Cursor(Direction::Forward),
+        ManagedRole::PartitionIndex,
+        ManagedRole::PartitionCount,
+        ManagedRole::SessionHandle,
+        ManagedRole::Constant,
+    ] {
+        assert_eq!(role.sent_default(&scroll), None, "{role:?}");
+    }
 }
 
 #[test]

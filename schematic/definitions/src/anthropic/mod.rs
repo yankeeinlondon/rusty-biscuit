@@ -45,6 +45,7 @@ use crate::registry::SchemaRegistry;
 use schematic_define::{
     ApiKeyEnv, ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping,
     RestApi, RestMethod,
+    pagination::{Collection, PaginationException},
 };
 
 /// Creates a schema registry containing all Anthropic response types.
@@ -186,7 +187,13 @@ pub fn define_anthropic_api() -> RestApi {
         request_id_header: None,
         secret_names: vec![],
         default_pagination: None,
-        pagination_exceptions: vec![],
+        // Unverified: believed to page by an `after_id`/`before_id` cursor,
+        // but the definition declares no request inputs and no source
+        // confirms them.
+        pagination_exceptions: vec![PaginationException::new(
+            "ListModels",
+            Collection::at("data").item_type("ModelInfo").unpaginated(),
+        )],
     }
 }
 

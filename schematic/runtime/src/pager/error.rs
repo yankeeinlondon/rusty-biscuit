@@ -1,4 +1,5 @@
-//! Pages, pager errors, and the incomplete result of `collect_all`.
+//! Pages, pager errors, the incomplete result of `collect_all`, and the
+//! failed close of a session scope.
 //!
 //! ## What is safe to log
 //!
@@ -101,6 +102,10 @@ pub enum PagerError<E> {
     /// A page-number or offset page was empty while its end signal said more
     /// follows.
     EmptyPageClaimsMore { meta: Box<ResponseMeta> },
+    /// The request that opens a session succeeded but its response holds no
+    /// usable session handle, so no page can be requested and no close can
+    /// be addressed.
+    MissingSessionHandle { meta: Box<ResponseMeta> },
     /// The shared deadline expired before the next page's response head.
     DeadlineExceeded {
         /// Pages received before the deadline expired.
@@ -125,6 +130,7 @@ pub enum PagerErrorKind {
     RepeatedContinuation,
     BoundaryNoProgress,
     EmptyPageClaimsMore,
+    MissingSessionHandle,
     DeadlineExceeded,
 }
 
@@ -139,6 +145,7 @@ impl<E> PagerError<E> {
             Self::RepeatedContinuation { .. } => PagerErrorKind::RepeatedContinuation,
             Self::BoundaryNoProgress { .. } => PagerErrorKind::BoundaryNoProgress,
             Self::EmptyPageClaimsMore { .. } => PagerErrorKind::EmptyPageClaimsMore,
+            Self::MissingSessionHandle { .. } => PagerErrorKind::MissingSessionHandle,
             Self::DeadlineExceeded { .. } => PagerErrorKind::DeadlineExceeded,
             Self::AlreadyFailed { first } => *first,
         }
@@ -152,7 +159,8 @@ impl<E> PagerError<E> {
             | Self::InvalidContinuation { meta, .. }
             | Self::RepeatedContinuation { meta }
             | Self::BoundaryNoProgress { meta }
-            | Self::EmptyPageClaimsMore { meta } => Some(meta),
+            | Self::EmptyPageClaimsMore { meta }
+            | Self::MissingSessionHandle { meta } => Some(meta),
             Self::Transport(_) | Self::DeadlineExceeded { .. } | Self::AlreadyFailed { .. } => None,
         }
     }
@@ -177,7 +185,7 @@ impl<E> PagerError<E> {
                 ..
             } => IncompleteReason::TransportError,
             Self::Api { .. } => IncompleteReason::HttpError,
-            Self::MissingContinuation { .. } | Self::InvalidContinuation { .. } => {
+            Self::MissingContinuation { .. } | Self::InvalidContinuation { .. } | Self::MissingSessionHandle { .. } => {
                 IncompleteReason::InvalidContinuation
             }
             Self::RepeatedContinuation { .. } | Self::BoundaryNoProgress { .. } | Self::EmptyPageClaimsMore { .. } => {
@@ -187,9 +195,9 @@ impl<E> PagerError<E> {
             Self::AlreadyFailed { first } => match first {
                 PagerErrorKind::Transport => IncompleteReason::TransportError,
                 PagerErrorKind::Api => IncompleteReason::HttpError,
-                PagerErrorKind::MissingContinuation | PagerErrorKind::InvalidContinuation => {
-                    IncompleteReason::InvalidContinuation
-                }
+                PagerErrorKind::MissingContinuation
+                | PagerErrorKind::InvalidContinuation
+                | PagerErrorKind::MissingSessionHandle => IncompleteReason::InvalidContinuation,
                 PagerErrorKind::RepeatedContinuation
                 | PagerErrorKind::BoundaryNoProgress
                 | PagerErrorKind::EmptyPageClaimsMore => IncompleteReason::RepeatedContinuation,
@@ -226,6 +234,9 @@ impl<E> fmt::Display for PagerError<E> {
                 write!(f, "{} delivered no record past the cursor boundary", about(meta))
             }
             Self::EmptyPageClaimsMore { meta } => write!(f, "{} is empty but says more pages follow", about(meta)),
+            Self::MissingSessionHandle { meta } => {
+                write!(f, "{} opened a session but returned no session handle", about(meta))
+            }
             Self::DeadlineExceeded {
                 completed_pages,
                 error,
@@ -264,7 +275,8 @@ pub enum IncompleteReason {
     DeadlineExceeded,
     /// A followed link's origin was refused.
     CrossOriginRejected,
-    /// A continuation was missing where one was required, or unusable.
+    /// A continuation was missing where one was required, or unusable, or a
+    /// session open returned no handle.
     InvalidContinuation,
     /// An argument (page size, start position, page limit) was refused
     /// before sending.
@@ -322,5 +334,33 @@ impl<T, E> fmt::Display for Incomplete<T, E> {
 impl<T: fmt::Debug, E: fmt::Debug + 'static> std::error::Error for Incomplete<T, E> {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         self.error.as_ref().map(|error| error as &(dyn std::error::Error + 'static))
+    }
+}
+
+/// A session scope whose close attempt failed or was abandoned.
+///
+/// `outcome` is what the scope's closure returned, kept intact: a fully
+/// collected list stays `Ok` with every item, and a closure error stays the
+/// primary error. `close` is why the close request failed: an error status,
+/// a refused or failed send, or the close grace running out (a
+/// [`PagerError::Transport`] of kind
+/// [`TransportErrorKind::DeadlineExceeded`]). The server's lease is then
+/// the backstop that releases the session.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct SessionError<O, E> {
+    pub outcome: O,
+    pub close: PagerError<E>,
+}
+
+impl<O, E> fmt::Display for SessionError<O, E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "the session scope ended but closing the session failed ({:?})", self.close.kind())
+    }
+}
+
+impl<O: fmt::Debug, E: fmt::Debug + 'static> std::error::Error for SessionError<O, E> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.close)
     }
 }

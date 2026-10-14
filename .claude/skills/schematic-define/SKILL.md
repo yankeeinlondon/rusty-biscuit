@@ -133,6 +133,7 @@ Every `RestApi` literal also sets `default_pagination: Option<Strategy>` and
 `pagination_exceptions: Vec<PaginationException>` (empty: `None`, `vec![]`).
 `Endpoint` and `EndpointParams` gained no field. Types live in
 `schematic_define::pagination` (and the prelude), not the crate root.
+The canonical behavior page is `schematic/docs/pagination.md`.
 
 - `pagination::resolve(api, endpoint)`: a row for the endpoint id decides;
   else a **GET** whose response is literally `Vec<T>` is a list inheriting the
@@ -146,18 +147,47 @@ Every `RestApi` literal also sets `default_pagination: Option<Strategy>` and
   only when the strategy authors the matching knob (a cursor part needs
   `.resumable()`); otherwise `adoption-without-knob`. A required adopted size
   needs `PageSize::sent_default(n)`; `server_default` is documentation only.
+  `ManagedRole::sent_default` is the value sent when the caller sets none,
+  and the generator writes it into `into_parts` for a required adopted
+  param, so an ordinary send still carries it; the pager replaces it.
 - `validate_pagination` feeds `schematic-gen`'s `validate_rust_client` as the
   `pagination-strategy` / `pagination-exception` / `pagination-parameter`
   features; rules are listed in `schematic/docs/generation/validation.md`.
 - `PaginationStyle`, `PaginationResponse`, and `with_pagination` are
   superseded and inert: only the query params they materialize matter.
+- Real definitions keep one API-local strategy helper (`github_page_number()`,
+  `bitbucket_next_link()`, ...) and never edit endpoint literals to page them.
+  Authored: GitHub, GitLab, Gitea, Bitbucket, OpenAI, and ElevenLabs
+  `GetHistory`/`ListSharedVoices` (94 lists). Unverified providers (Anthropic,
+  EMQX, Hugging Face, GitLab participants, Gitea trees) stay unpaginated: a
+  GET `Vec<T>` under a default needs a `Collection::root().unpaginated()` row,
+  and a wrapper gets an `.unpaginated()` row so it reads as a list.
+- `schematic/definitions/tests/pagination_coverage/` is exhaustive: every
+  endpoint resolving as a list needs a row (origin, items, item type,
+  strategy description, exact knobs, adopted fields), so authoring or
+  re-importing changes fail there until the row is updated.
 - A paginated endpoint generates `impl schematic_runtime::pager::Paginated`
   (`&'static` strategy constants) plus one capability marker per knob, and
   its call type forwards `pager()`, each authored knob (`page`, `offset`,
-  `after`, `before`, `page_size`), and `pages()` / `fetch_page()` /
-  `collect_all()`. Knobs return the runtime `Pager`, so endpoint setters come
-  first. A remaining setter named like a forwarded knob becomes `<name>_param`.
-  Traversal logic lives only in `schematic-runtime`'s `pager` module.
+  `after`, `before`, `page_size`, `keep_alive`), and `pages()` / `fetch_page()` /
+  `collect_all()`, or `with_session(|scope| Box::pin(async move { .. }))` for
+  a strategy with a `Session` (pages, `partitioned`, and `renew` only inside
+  the scope, which closes with the latest handle under its own grace,
+  `close_grace(..)`, default 5 s). A
+  partition without a session forwards `partitioned(n)`. Knobs return the
+  runtime `Pager`, so endpoint setters come first. A remaining setter named
+  like a forwarded knob becomes `<name>_param`. Traversal and session logic
+  live only in `schematic-runtime`'s `pager` module.
+- The committed generated crate carries its own pager evidence, run only by
+  `just test-schema` (CI does not build `schematic-schema`):
+  `schematic/schema/tests/pagination.rs` pages GitHub `ListReleases`, OpenAI
+  `ListBatches`, and Bitbucket `ListTags` against wiremock, and
+  `compile_fail.rs` runs trybuild cases on real endpoints (`trybuild` is a
+  generated dev-dependency in `gen/src/cargo_gen.rs`). Some `.stderr` files
+  list rustc's first eight implementors of a capability trait, so adding a
+  paginated endpoint can change them: refresh with `TRYBUILD=overwrite cargo
+  nextest run --manifest-path schematic/schema/Cargo.toml --test
+  compile_fail` and review the diff.
 
 ## Generated-Client Contracts To Keep In Sync
 
@@ -300,6 +330,12 @@ so the imported API flows through the normal `generate` pipeline.
 
 - `--exclude-path <PREFIX>` drops endpoints by path prefix (repeatable).
 - `--request-id-header <HEADER>` sets the imported `RestApi::request_id_header` (OpenAPI does not declare one); `just import-openai` passes `x-request-id`.
+- `--overlay <RUST_PATH>` (requires `--definitions-out`) makes the factory end
+  `let api = RestApi { .. }; <path>(api)`, so hand-written additions survive a
+  re-import. OpenAI's pagination lives in `definitions/src/openai_pagination.rs`
+  (`--overlay crate::openai_pagination::apply`); the importer never writes it.
+  `import_overlay::reimporting_the_vendored_openai_document_reproduces_the_committed_definition`
+  fails when the committed module and a fresh import differ.
 - Out-of-`i64` schema bounds are clamped with a warning rather than failing the
   parse (`import/normalize.rs`) — OpenAI's `seed` bounds need this.
 - Bodies and responses with no named schema become the type path

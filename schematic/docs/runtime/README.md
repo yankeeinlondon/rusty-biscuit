@@ -17,6 +17,8 @@ These pages describe that runtime from the caller's side. You can:
   answered" with one `match`
 - supply credentials per call, per client, or from environment variables,
   and see in the metadata which one was sent
+- page through a list endpoint, or collect all of it, and know whether the
+  list is complete
 - bound a whole multi-request operation by one shared deadline
 - control which redirects and next-page links may leave the API's origin,
   and whether the credential goes with them
@@ -64,6 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | [Response hooks](./hooks.md) | `pre_response_json` and `mutate_response` |
 | [Codecs and decoding](./codecs.md) | how an endpoint fixes its result type, the `Decode` and `ErrorBody` traits, `LiveBody`, and what a codec that runs hooks must do |
 | [Metadata and redaction](./metadata-and-redaction.md) | `RequestMeta`, `ResponseMeta`, request ids, and which values are redacted |
+| [Pagination](../pagination.md) | `collect_all`, `pages()`, `fetch_page()`, the pager's controls, `Incomplete` and `PagerError`, sessions, and partitions |
 
 How a request struct's fields become a URL, headers, and body is covered by
 [Request-Side Inputs](../generation/request-side.md).
@@ -87,10 +90,6 @@ How a request struct's fields become a URL, headers, and body is covered by
 
 ## Planned
 
-- **Pagination.** Pagers that check next-page links with
-  `Client::check_link::<R>`, their listing request as `R`, and count pages
-  against a shared `Deadline` are **planned**. `RequestMeta::page` exists for them and is always `None`
-  today.
 - **More codecs.** Server-sent events, NDJSON, and GraphQL codecs, built on
   the same [`Decode` trait](./codecs.md) as the four built-in codecs, are **planned**. Until
   then a streaming endpoint is modeled as binary and framed by the caller.

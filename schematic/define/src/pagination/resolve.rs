@@ -369,14 +369,30 @@ impl ManagedRole {
     /// authored [`PageSize::sent_default`](super::PageSize::sent_default).
     fn has_sent_default(self, strategy: &Strategy) -> bool {
         match self {
-            Self::Page | Self::Offset | Self::KeepAlive | Self::Constant => true,
-            Self::PageSize => strategy
-                .kind
-                .size()
-                .is_some_and(|size| size.sent_default.is_some()),
-            Self::Cursor(_) | Self::PartitionIndex | Self::PartitionCount | Self::SessionHandle => {
-                false
-            }
+            Self::Constant => true,
+            _ => self.sent_default(strategy).is_some(),
+        }
+    }
+
+    /// The value the pager sends for an adopted input of this role when the
+    /// caller sets none: the first page or offset of the strategy's index
+    /// base, the authored [`PageSize::sent_default`](super::PageSize::sent_default),
+    /// or the keep-alive default. `None` for a role without one, and for a
+    /// constant, which is never adopted.
+    ///
+    /// An ordinary send of the endpoint sends this value for an adopted
+    /// parameter the endpoint declares required.
+    pub fn sent_default(self, strategy: &Strategy) -> Option<String> {
+        let first = |base: IndexBase| match base {
+            IndexBase::ZeroBased => "0",
+            IndexBase::OneBased => "1",
+        };
+        match (self, &strategy.kind) {
+            (Self::Page, PageStrategy::PageNumber(kind)) => Some(first(kind.base).to_owned()),
+            (Self::Offset, PageStrategy::Offset(kind)) => Some(first(kind.base).to_owned()),
+            (Self::PageSize, _) => strategy.kind.size()?.sent_default.map(|size| size.to_string()),
+            (Self::KeepAlive, _) => Some(strategy.session.as_ref()?.keep_alive.as_ref()?.default.clone()),
+            _ => None,
         }
     }
 }
@@ -498,8 +514,9 @@ pub(crate) fn path_params(path: &str) -> Vec<&str> {
 /// and what happens to it.
 ///
 /// A query input matches a declared query parameter by exact name; a header
-/// input matches a declared header without regard to case. The same name in
-/// any other location (query, header, cookie, or path) is a near miss. Body
+/// input matches a declared header without regard to case. The same name,
+/// compared without regard to case, in any other location (query, header,
+/// cookie, or path) is a near miss. Body
 /// inputs are not matched: the request body has no declared parameter list.
 ///
 /// The request-struct emitter removes exactly the [`AdoptionOutcome::Adopted`]

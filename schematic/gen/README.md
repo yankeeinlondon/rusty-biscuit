@@ -50,6 +50,11 @@ schematic-gen validate --api openai
 schematic-gen import --input petstore.yaml --output generated/src
 schematic-gen import --input api.json --api-name MyApi --output src --strict
 
+# Import into schematic-definitions, keeping a hand-written overlay
+# (see ../docs/io/import-openapi.md)
+schematic-gen import --input api.yaml --api-name MyApi --module-path my_api \
+    --definitions-out definitions/src/my_api --overlay crate::my_api_overlay::apply
+
 # Dry run (print generated code without writing files)
 schematic-gen generate --api openai --dry-run
 
@@ -518,42 +523,52 @@ folded into every endpoint's static headers instead, because the runtime
 refuses a default header that can carry a credential.
 
 Each REST endpoint also gets a method on the API struct and a call type that
-wraps the runtime's `Call` (abridged; `ListReleases` from GitHub, which has
-optional values):
+wraps the runtime's `Call` (abridged; `ListPullRequests` from GitHub, a
+paginated list with optional values):
 
 ```rust
-/// A call to the `ListReleases` endpoint, returned by [`GitHub::list_releases`].
+/// A call to the `ListPullRequests` endpoint, returned by [`GitHub::list_pull_requests`].
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
-pub struct ListReleasesCall<'a>(schematic_runtime::Call<'a, GitHubApi, ListReleasesRequest>);
+pub struct ListPullRequestsCall<'a>(schematic_runtime::Call<'a, GitHubApi, ListPullRequestsRequest>);
 
-impl<'a> ListReleasesCall<'a> {
-    // One setter per optional value, named after the request field without `with_`
-    pub fn page(self, value: i64) -> Self { ... }
-    pub fn per_page(self, value: i64) -> Self { ... }
+impl<'a> ListPullRequestsCall<'a> {
+    // One setter per optional value, named after the request field without `with_`;
+    // `page` and `per_page` are adopted by the pagination strategy, so they have none
+    pub fn state(self, value: String) -> Self { ... }
+    pub fn sort(self, value: String) -> Self { ... }
+    pub fn direction(self, value: String) -> Self { ... }
     // Shared per-call forwards to `schematic_runtime::Call`
     pub fn anonymous(self) -> Self { ... }
     pub fn credential(self, credential: schematic_runtime::Credential) -> Self { ... }
     pub fn deadline(self, deadline: &schematic_runtime::Deadline) -> Self { ... }
     // `full` ends the endpoint's setters: `FullCall` keeps only the per-call settings
-    pub fn full(self) -> schematic_runtime::FullCall<'a, GitHubApi, ListReleasesRequest> { ... }
+    pub fn full(self) -> schematic_runtime::FullCall<'a, GitHubApi, ListPullRequestsRequest> { ... }
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> { ... }
+    // Paginated lists only: `pager`, each authored control, and the iteration
+    // entry points (see "Pagination Support")
+    pub fn pager(self) -> schematic_runtime::pager::Pager<'a, GitHubApi, ListPullRequestsRequest> { ... }
+    pub fn page(self, number: u64) -> schematic_runtime::pager::Pager<'a, GitHubApi, ListPullRequestsRequest> { ... }
+    pub fn page_size(self, size: u32) -> schematic_runtime::pager::Pager<'a, GitHubApi, ListPullRequestsRequest> { ... }
+    pub fn pages(self) -> schematic_runtime::pager::Pages<'a, GitHubApi, ListPullRequestsRequest> { ... }
+    pub fn fetch_page(self) -> schematic_runtime::CallFuture<'a, schematic_runtime::pager::PageResult<ListPullRequestsRequest>> { ... }
+    pub fn collect_all(self) -> schematic_runtime::CallFuture<'a, schematic_runtime::pager::CollectResult<ListPullRequestsRequest>> { ... }
 }
 
 // `.await` resolves to Result<Success, CallError<Failure>>
-impl<'a> IntoFuture for ListReleasesCall<'a> { ... }
+impl<'a> IntoFuture for ListPullRequestsCall<'a> { ... }
 
 impl GitHub {
-    /// List releases (linked to tags via tag_name)
+    /// List pull requests with metadata
     ///
-    /// `GET /repos/{owner}/{repo}/releases`
+    /// `GET /repos/{owner}/{repo}/pulls`
     /// ... `## Arguments` and `## Optional values` (links to the setters)
-    pub fn list_releases(
+    pub fn list_pull_requests(
         &self,
         owner: impl Into<String>,
         repo: impl Into<String>,
-    ) -> ListReleasesCall<'_> {
-        ListReleasesCall(self.0.send(ListReleasesRequest::new(owner, repo)))
+    ) -> ListPullRequestsCall<'_> {
+        ListPullRequestsCall(self.0.send(ListPullRequestsRequest::new(owner, repo)))
     }
 }
 ```
@@ -1133,11 +1148,33 @@ while let Some(page) = pages.next().await? {
 ```
 
 - A parameter the strategy adopts (for example `page` or `per_page`) is not
-  a request field or setter; the pager controls it.
+  a request field or setter; the pager controls it. An ordinary send of the
+  request (`.await`) still sends an adopted parameter the endpoint declares
+  required, at the value the pager would send: the first page or offset, or
+  the size's authored `sent_default`. An optional one is omitted. To send
+  one customized page, use `.page(3).page_size(10).fetch_page()`, which
+  returns a `Page<T>` rather than the endpoint's own response.
+- An endpoint whose strategy has a server-side session (a scroll or point
+  in time) forwards `with_session` instead of `pages`, `fetch_page`, and
+  `collect_all`, plus `close_grace(..)` for the close request's time limit
+  (5 s by default); its pages, partitions, and `renew()` exist only inside
+  that scope, which closes the session when it ends:
+
+  ```rust
+  let hits = es.search(index).keep_alive("5m")
+      .with_session(|scope| Box::pin(async move { scope.collect_all().await }))
+      .await?;
+  ```
+
+  A partition without a session forwards `partitioned(n)`, which returns
+  `n` independent page iterators.
 - A setter named like a pager control the call type forwards gains a
   `_param` suffix, reported as an `endpoint-method-rename` warning.
 - The legacy `EndpointParams::pagination` metadata and alternates generate
   nothing.
+
+How resolution, adoption, completeness, sessions, and partitions behave for
+callers is described in [Pagination](../docs/pagination.md).
 
 ## Safety Guarantees
 

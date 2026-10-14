@@ -58,8 +58,11 @@
 //! - [`ParamDef`] - Single parameter definition
 //! - [`QueryParamType`] - Parameter value type
 //! - [`ParamStyle`] - Parameter serialization style
-//! - [`PaginationStyle`] - Common pagination request patterns
-//! - [`PaginationResponse`] - How APIs signal pagination state in responses
+//! - [`PaginationStyle`] - Legacy pagination query parameters, superseded by
+//!   [`pagination::Strategy`]
+//! - [`PaginationResponse`] - Legacy response pagination signal; nothing reads it
+//!
+//! List pagination is authored per API through the [`pagination`] module.
 //!
 //! ## Examples
 //!

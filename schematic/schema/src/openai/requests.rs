@@ -366,35 +366,10 @@ impl schematic_runtime::EndpointSpec for CreateTranslationRequest {
 /// use schematic_schema::openai::ListVoiceConsentsRequest;
 ///
 /// let request = ListVoiceConsentsRequest::default()
-///     .with_after(/* value */)
-///     .with_limit(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ListVoiceConsentsRequest {
-    /** Query parameter: A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-*/
-    pub after: Option<String>,
-    /** Query parameter: A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-*/
-    pub limit: Option<i64>,
-}
-impl ListVoiceConsentsRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
-        Self { after: None, limit: None }
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-}
+pub struct ListVoiceConsentsRequest {}
 impl schematic_runtime::EndpointSpec for ListVoiceConsentsRequest {
     type Api = OpenAIApi;
     type Success = VoiceConsentListResource;
@@ -406,13 +381,7 @@ impl schematic_runtime::EndpointSpec for ListVoiceConsentsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/audio/voice_consents".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
+        let query: Vec<(String, String)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -797,35 +766,10 @@ impl schematic_runtime::EndpointSpec for CreateVoiceRequest {
 /// use schematic_schema::openai::ListBatchesRequest;
 ///
 /// let request = ListBatchesRequest::default()
-///     .with_after(/* value */)
-///     .with_limit(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ListBatchesRequest {
-    /** Query parameter: A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-*/
-    pub after: Option<String>,
-    /** Query parameter: A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-*/
-    pub limit: Option<i64>,
-}
-impl ListBatchesRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
-        Self { after: None, limit: None }
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-}
+pub struct ListBatchesRequest {}
 impl schematic_runtime::EndpointSpec for ListBatchesRequest {
     type Api = OpenAIApi;
     type Success = ListBatchesResponse;
@@ -837,13 +781,7 @@ impl schematic_runtime::EndpointSpec for ListBatchesRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/batches".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
+        let query: Vec<(String, String)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1037,8 +975,6 @@ impl schematic_runtime::EndpointSpec for CancelBatchRequest {
 /// let request = ListChatCompletionsRequest::default()
 ///     .with_model(/* value */)
 ///     .with_metadata(/* value */)
-///     .with_after(/* value */)
-///     .with_limit(/* value */)
 ///     .with_order(/* value */)
 ///;
 /// ```
@@ -1051,10 +987,6 @@ pub struct ListChatCompletionsRequest {
 `metadata[key1]=value1&metadata[key2]=value2`
 */
     pub metadata: Option<serde_json::Value>,
-    /// Query parameter: Identifier for the last chat completion from the previous pagination request.
-    pub after: Option<String>,
-    /// Query parameter: Number of Chat Completions to retrieve.
-    pub limit: Option<i64>,
     /// Query parameter: Sort order for Chat Completions by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
     pub order: Option<String>,
 }
@@ -1064,8 +996,6 @@ impl ListChatCompletionsRequest {
         Self {
             model: None,
             metadata: None,
-            after: None,
-            limit: None,
             order: None,
         }
     }
@@ -1077,16 +1007,6 @@ impl ListChatCompletionsRequest {
     /// Sets the `metadata` query parameter.
     pub fn with_metadata(mut self, value: serde_json::Value) -> Self {
         self.metadata = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
         self
     }
     /// Sets the `order` query parameter.
@@ -1112,12 +1032,6 @@ impl schematic_runtime::EndpointSpec for ListChatCompletionsRequest {
         }
         if let Some(ref value) = self.metadata {
             query.push(("metadata".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
@@ -1378,8 +1292,6 @@ impl schematic_runtime::EndpointSpec for DeleteChatCompletionRequest {
 /// use schematic_schema::openai::GetChatCompletionMessagesRequest;
 ///
 /// let request = GetChatCompletionMessagesRequest::new("completion_id_value")
-///     .with_after(/* value */)
-///     .with_limit(/* value */)
 ///     .with_order(/* value */)
 ///;
 /// ```
@@ -1387,10 +1299,6 @@ impl schematic_runtime::EndpointSpec for DeleteChatCompletionRequest {
 pub struct GetChatCompletionMessagesRequest {
     /// Path parameter: completion_id
     pub completion_id: String,
-    /// Query parameter: Identifier for the last message from the previous pagination request.
-    pub after: Option<String>,
-    /// Query parameter: Number of messages to retrieve.
-    pub limit: Option<i64>,
     /// Query parameter: Sort order for messages by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
     pub order: Option<String>,
 }
@@ -1399,20 +1307,8 @@ impl GetChatCompletionMessagesRequest {
     pub fn new(completion_id: impl Into<String>) -> Self {
         Self {
             completion_id: completion_id.into(),
-            after: None,
-            limit: None,
             order: None,
         }
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
@@ -1424,8 +1320,6 @@ impl From<&str> for GetChatCompletionMessagesRequest {
     fn from(param: &str) -> Self {
         Self {
             completion_id: param.to_string(),
-            after: None,
-            limit: None,
             order: None,
         }
     }
@@ -1434,8 +1328,6 @@ impl From<String> for GetChatCompletionMessagesRequest {
     fn from(param: String) -> Self {
         Self {
             completion_id: param,
-            after: None,
-            limit: None,
             order: None,
         }
     }
@@ -1455,12 +1347,6 @@ impl schematic_runtime::EndpointSpec for GetChatCompletionMessagesRequest {
             .to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
         }
@@ -1541,49 +1427,26 @@ impl schematic_runtime::EndpointSpec for CreateCompletionRequest {
 /// use schematic_schema::openai::ListContainersRequest;
 ///
 /// let request = ListContainersRequest::default()
-///     .with_limit(/* value */)
 ///     .with_order(/* value */)
-///     .with_after(/* value */)
 ///     .with_name(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListContainersRequest {
-    /** Query parameter: A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-*/
-    pub limit: Option<i64>,
     /** Query parameter: Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
 */
     pub order: Option<String>,
-    /** Query parameter: A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-*/
-    pub after: Option<String>,
     /// Query parameter: Filter results by container name.
     pub name: Option<String>,
 }
 impl ListContainersRequest {
     /// Creates a new request with default values.
     pub fn new() -> Self {
-        Self {
-            limit: None,
-            order: None,
-            after: None,
-            name: None,
-        }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
+        Self { order: None, name: None }
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
         self.order = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
         self
     }
     /// Sets the `name` query parameter.
@@ -1604,14 +1467,8 @@ impl schematic_runtime::EndpointSpec for ListContainersRequest {
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/containers".to_string();
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.name {
             query.push(("name".to_string(), value.to_string()));
@@ -1811,48 +1668,28 @@ impl schematic_runtime::EndpointSpec for DeleteContainerRequest {
 /// use schematic_schema::openai::ListContainerFilesRequest;
 ///
 /// let request = ListContainerFilesRequest::new("container_id_value")
-///     .with_limit(/* value */)
 ///     .with_order(/* value */)
-///     .with_after(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListContainerFilesRequest {
     /// Path parameter: container_id
     pub container_id: String,
-    /** Query parameter: A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-*/
-    pub limit: Option<i64>,
     /** Query parameter: Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
 */
     pub order: Option<String>,
-    /** Query parameter: A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-*/
-    pub after: Option<String>,
 }
 impl ListContainerFilesRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(container_id: impl Into<String>) -> Self {
         Self {
             container_id: container_id.into(),
-            limit: None,
             order: None,
-            after: None,
         }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
         self.order = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
         self
     }
 }
@@ -1860,9 +1697,7 @@ impl From<&str> for ListContainerFilesRequest {
     fn from(param: &str) -> Self {
         Self {
             container_id: param.to_string(),
-            limit: None,
             order: None,
-            after: None,
         }
     }
 }
@@ -1870,9 +1705,7 @@ impl From<String> for ListContainerFilesRequest {
     fn from(param: String) -> Self {
         Self {
             container_id: param,
-            limit: None,
             order: None,
-            after: None,
         }
     }
 }
@@ -1890,14 +1723,8 @@ impl schematic_runtime::EndpointSpec for ListContainerFilesRequest {
             "/containers/{}/files", urlencoding::encode(& self.container_id.to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -2131,9 +1958,7 @@ impl schematic_runtime::EndpointSpec for RetrieveContainerFileContentRequest {
 /// use schematic_schema::openai::ListConversationItemsRequest;
 ///
 /// let request = ListConversationItemsRequest::new("conversation_id_value")
-///     .with_limit(/* value */)
 ///     .with_order(/* value */)
-///     .with_after(/* value */)
 ///     .with_include(/* value */)
 ///;
 /// ```
@@ -2141,18 +1966,11 @@ impl schematic_runtime::EndpointSpec for RetrieveContainerFileContentRequest {
 pub struct ListConversationItemsRequest {
     /// Path parameter: conversation_id
     pub conversation_id: String,
-    /** Query parameter: A limit on the number of objects to be returned. Limit can range between
-1 and 100, and the default is 20.
-*/
-    pub limit: Option<i64>,
     /** Query parameter: The order to return the input items in. Default is `desc`.
 - `asc`: Return the input items in ascending order.
 - `desc`: Return the input items in descending order.
 */
     pub order: Option<String>,
-    /** Query parameter: An item ID to list items after, used in pagination.
-*/
-    pub after: Option<String>,
     /** Query parameter: Specify additional output data to include in the model response. Currently supported values are:
 - `web_search_call.action.sources`: Include the sources of the web search tool call.
 - `code_interpreter_call.outputs`: Includes the outputs of python code execution in code interpreter tool call items.
@@ -2168,25 +1986,13 @@ impl ListConversationItemsRequest {
     pub fn new(conversation_id: impl Into<String>) -> Self {
         Self {
             conversation_id: conversation_id.into(),
-            limit: None,
             order: None,
-            after: None,
             include: None,
         }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
         self.order = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
         self
     }
     /// Sets the `include` query parameter.
@@ -2199,9 +2005,7 @@ impl From<&str> for ListConversationItemsRequest {
     fn from(param: &str) -> Self {
         Self {
             conversation_id: param.to_string(),
-            limit: None,
             order: None,
-            after: None,
             include: None,
         }
     }
@@ -2210,9 +2014,7 @@ impl From<String> for ListConversationItemsRequest {
     fn from(param: String) -> Self {
         Self {
             conversation_id: param,
-            limit: None,
             order: None,
-            after: None,
             include: None,
         }
     }
@@ -2232,14 +2034,8 @@ impl schematic_runtime::EndpointSpec for ListConversationItemsRequest {
             .to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref values) = self.include {
             for value in values {
@@ -2519,18 +2315,12 @@ impl schematic_runtime::EndpointSpec for CreateEmbeddingRequest {
 /// use schematic_schema::openai::ListEvalsRequest;
 ///
 /// let request = ListEvalsRequest::default()
-///     .with_after(/* value */)
-///     .with_limit(/* value */)
 ///     .with_order(/* value */)
 ///     .with_order_by(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListEvalsRequest {
-    /// Query parameter: Identifier for the last eval from the previous pagination request.
-    pub after: Option<String>,
-    /// Query parameter: Number of evals to retrieve.
-    pub limit: Option<i64>,
     /// Query parameter: Sort order for evals by timestamp. Use `asc` for ascending order or `desc` for descending order.
     pub order: Option<String>,
     /** Query parameter: Evals can be ordered by creation time or last updated time. Use
@@ -2542,21 +2332,9 @@ impl ListEvalsRequest {
     /// Creates a new request with default values.
     pub fn new() -> Self {
         Self {
-            after: None,
-            limit: None,
             order: None,
             order_by: None,
         }
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
@@ -2581,12 +2359,6 @@ impl schematic_runtime::EndpointSpec for ListEvalsRequest {
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/evals".to_string();
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
         }
@@ -2835,8 +2607,6 @@ impl schematic_runtime::EndpointSpec for DeleteEvalRequest {
 /// use schematic_schema::openai::GetEvalRunsRequest;
 ///
 /// let request = GetEvalRunsRequest::new("eval_id_value")
-///     .with_after(/* value */)
-///     .with_limit(/* value */)
 ///     .with_order(/* value */)
 ///     .with_status(/* value */)
 ///;
@@ -2845,10 +2615,6 @@ impl schematic_runtime::EndpointSpec for DeleteEvalRequest {
 pub struct GetEvalRunsRequest {
     /// Path parameter: eval_id
     pub eval_id: String,
-    /// Query parameter: Identifier for the last run from the previous pagination request.
-    pub after: Option<String>,
-    /// Query parameter: Number of runs to retrieve.
-    pub limit: Option<i64>,
     /// Query parameter: Sort order for runs by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
     pub order: Option<String>,
     /// Query parameter: Filter runs by status. One of `queued` | `in_progress` | `failed` | `completed` | `canceled`.
@@ -2859,21 +2625,9 @@ impl GetEvalRunsRequest {
     pub fn new(eval_id: impl Into<String>) -> Self {
         Self {
             eval_id: eval_id.into(),
-            after: None,
-            limit: None,
             order: None,
             status: None,
         }
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
@@ -2890,8 +2644,6 @@ impl From<&str> for GetEvalRunsRequest {
     fn from(param: &str) -> Self {
         Self {
             eval_id: param.to_string(),
-            after: None,
-            limit: None,
             order: None,
             status: None,
         }
@@ -2901,8 +2653,6 @@ impl From<String> for GetEvalRunsRequest {
     fn from(param: String) -> Self {
         Self {
             eval_id: param,
-            after: None,
-            limit: None,
             order: None,
             status: None,
         }
@@ -2922,12 +2672,6 @@ impl schematic_runtime::EndpointSpec for GetEvalRunsRequest {
             "/evals/{}/runs", urlencoding::encode(& self.eval_id.to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
         }
@@ -3166,8 +2910,6 @@ impl schematic_runtime::EndpointSpec for DeleteEvalRunRequest {
 /// use schematic_schema::openai::GetEvalRunOutputItemsRequest;
 ///
 /// let request = GetEvalRunOutputItemsRequest::new("eval_id_value", "run_id_value")
-///     .with_after(/* value */)
-///     .with_limit(/* value */)
 ///     .with_status(/* value */)
 ///     .with_order(/* value */)
 ///;
@@ -3178,10 +2920,6 @@ pub struct GetEvalRunOutputItemsRequest {
     pub eval_id: String,
     /// Path parameter: run_id
     pub run_id: String,
-    /// Query parameter: Identifier for the last output item from the previous pagination request.
-    pub after: Option<String>,
-    /// Query parameter: Number of output items to retrieve.
-    pub limit: Option<i64>,
     /** Query parameter: Filter output items by status. Use `failed` to filter by failed output
 items or `pass` to filter by passed output items.
 */
@@ -3195,21 +2933,9 @@ impl GetEvalRunOutputItemsRequest {
         Self {
             eval_id: eval_id.into(),
             run_id: run_id.into(),
-            after: None,
-            limit: None,
             status: None,
             order: None,
         }
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
     }
     /// Sets the `status` query parameter.
     pub fn with_status(mut self, value: String) -> Self {
@@ -3237,12 +2963,6 @@ impl schematic_runtime::EndpointSpec for GetEvalRunOutputItemsRequest {
             .to_string()), urlencoding::encode(& self.run_id.to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.status {
             query.push(("status".to_string(), value.to_string()));
         }
@@ -3327,53 +3047,30 @@ impl schematic_runtime::EndpointSpec for GetEvalRunOutputItemRequest {
 ///
 /// let request = ListFilesRequest::default()
 ///     .with_purpose(/* value */)
-///     .with_limit(/* value */)
 ///     .with_order(/* value */)
-///     .with_after(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListFilesRequest {
     /// Query parameter: Only return files with the given purpose.
     pub purpose: Option<String>,
-    /** Query parameter: A limit on the number of objects to be returned. Limit can range between 1 and 10,000, and the default is 10,000.
-*/
-    pub limit: Option<i64>,
     /** Query parameter: Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
 */
     pub order: Option<String>,
-    /** Query parameter: A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-*/
-    pub after: Option<String>,
 }
 impl ListFilesRequest {
     /// Creates a new request with default values.
     pub fn new() -> Self {
-        Self {
-            purpose: None,
-            limit: None,
-            order: None,
-            after: None,
-        }
+        Self { purpose: None, order: None }
     }
     /// Sets the `purpose` query parameter.
     pub fn with_purpose(mut self, value: String) -> Self {
         self.purpose = Some(value);
         self
     }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
         self.order = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
         self
     }
 }
@@ -3392,14 +3089,8 @@ impl schematic_runtime::EndpointSpec for ListFilesRequest {
         if let Some(ref value) = self.purpose {
             query.push(("purpose".to_string(), value.to_string()));
         }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -3793,8 +3484,6 @@ impl schematic_runtime::EndpointSpec for ValidateGraderRequest {
 ///
 /// let request = ListFineTuningCheckpointPermissionsRequest::new("fine_tuned_model_checkpoint_value")
 ///     .with_project_id(/* value */)
-///     .with_after(/* value */)
-///     .with_limit(/* value */)
 ///     .with_order(/* value */)
 ///;
 /// ```
@@ -3804,10 +3493,6 @@ pub struct ListFineTuningCheckpointPermissionsRequest {
     pub fine_tuned_model_checkpoint: String,
     /// Query parameter: The ID of the project to get permissions for.
     pub project_id: Option<String>,
-    /// Query parameter: Identifier for the last permission ID from the previous pagination request.
-    pub after: Option<String>,
-    /// Query parameter: Number of permissions to retrieve.
-    pub limit: Option<i64>,
     /// Query parameter: The order in which to retrieve permissions.
     pub order: Option<String>,
 }
@@ -3817,24 +3502,12 @@ impl ListFineTuningCheckpointPermissionsRequest {
         Self {
             fine_tuned_model_checkpoint: fine_tuned_model_checkpoint.into(),
             project_id: None,
-            after: None,
-            limit: None,
             order: None,
         }
     }
     /// Sets the `project_id` query parameter.
     pub fn with_project_id(mut self, value: String) -> Self {
         self.project_id = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
         self
     }
     /// Sets the `order` query parameter.
@@ -3848,8 +3521,6 @@ impl From<&str> for ListFineTuningCheckpointPermissionsRequest {
         Self {
             fine_tuned_model_checkpoint: param.to_string(),
             project_id: None,
-            after: None,
-            limit: None,
             order: None,
         }
     }
@@ -3859,8 +3530,6 @@ impl From<String> for ListFineTuningCheckpointPermissionsRequest {
         Self {
             fine_tuned_model_checkpoint: param,
             project_id: None,
-            after: None,
-            limit: None,
             order: None,
         }
     }
@@ -3882,12 +3551,6 @@ impl schematic_runtime::EndpointSpec for ListFineTuningCheckpointPermissionsRequ
         let mut query: Vec<(String, String)> = Vec::new();
         if let Some(ref value) = self.project_id {
             query.push(("project_id".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
@@ -4030,17 +3693,11 @@ impl schematic_runtime::EndpointSpec for DeleteFineTuningCheckpointPermissionReq
 /// use schematic_schema::openai::ListPaginatedFineTuningJobsRequest;
 ///
 /// let request = ListPaginatedFineTuningJobsRequest::default()
-///     .with_after(/* value */)
-///     .with_limit(/* value */)
 ///     .with_metadata(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListPaginatedFineTuningJobsRequest {
-    /// Query parameter: Identifier for the last job from the previous pagination request.
-    pub after: Option<String>,
-    /// Query parameter: Number of fine-tuning jobs to retrieve.
-    pub limit: Option<i64>,
     /** Query parameter: Optional metadata filter. To filter, use the syntax `metadata[k]=v`. Alternatively, set `metadata=null` to indicate no metadata.
 */
     pub metadata: Option<serde_json::Value>,
@@ -4048,21 +3705,7 @@ pub struct ListPaginatedFineTuningJobsRequest {
 impl ListPaginatedFineTuningJobsRequest {
     /// Creates a new request with default values.
     pub fn new() -> Self {
-        Self {
-            after: None,
-            limit: None,
-            metadata: None,
-        }
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
+        Self { metadata: None }
     }
     /// Sets the `metadata` query parameter.
     pub fn with_metadata(mut self, value: serde_json::Value) -> Self {
@@ -4082,12 +3725,6 @@ impl schematic_runtime::EndpointSpec for ListPaginatedFineTuningJobsRequest {
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/fine_tuning/jobs".to_string();
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.metadata {
             query.push(("metadata".to_string(), value.to_string()));
         }
@@ -4288,55 +3925,31 @@ impl schematic_runtime::EndpointSpec for CancelFineTuningJobRequest {
 /// use schematic_schema::openai::ListFineTuningJobCheckpointsRequest;
 ///
 /// let request = ListFineTuningJobCheckpointsRequest::new("fine_tuning_job_id_value")
-///     .with_after(/* value */)
-///     .with_limit(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListFineTuningJobCheckpointsRequest {
     /// Path parameter: fine_tuning_job_id
     pub fine_tuning_job_id: String,
-    /// Query parameter: Identifier for the last checkpoint ID from the previous pagination request.
-    pub after: Option<String>,
-    /// Query parameter: Number of checkpoints to retrieve.
-    pub limit: Option<i64>,
 }
 impl ListFineTuningJobCheckpointsRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(fine_tuning_job_id: impl Into<String>) -> Self {
         Self {
             fine_tuning_job_id: fine_tuning_job_id.into(),
-            after: None,
-            limit: None,
         }
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
     }
 }
 impl From<&str> for ListFineTuningJobCheckpointsRequest {
     fn from(param: &str) -> Self {
         Self {
             fine_tuning_job_id: param.to_string(),
-            after: None,
-            limit: None,
         }
     }
 }
 impl From<String> for ListFineTuningJobCheckpointsRequest {
     fn from(param: String) -> Self {
-        Self {
-            fine_tuning_job_id: param,
-            after: None,
-            limit: None,
-        }
+        Self { fine_tuning_job_id: param }
     }
 }
 impl schematic_runtime::EndpointSpec for ListFineTuningJobCheckpointsRequest {
@@ -4353,13 +3966,7 @@ impl schematic_runtime::EndpointSpec for ListFineTuningJobCheckpointsRequest {
             "/fine_tuning/jobs/{}/checkpoints", urlencoding::encode(& self
             .fine_tuning_job_id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
+        let query: Vec<(String, String)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -4378,55 +3985,31 @@ impl schematic_runtime::EndpointSpec for ListFineTuningJobCheckpointsRequest {
 /// use schematic_schema::openai::ListFineTuningEventsRequest;
 ///
 /// let request = ListFineTuningEventsRequest::new("fine_tuning_job_id_value")
-///     .with_after(/* value */)
-///     .with_limit(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListFineTuningEventsRequest {
     /// Path parameter: fine_tuning_job_id
     pub fine_tuning_job_id: String,
-    /// Query parameter: Identifier for the last event from the previous pagination request.
-    pub after: Option<String>,
-    /// Query parameter: Number of events to retrieve.
-    pub limit: Option<i64>,
 }
 impl ListFineTuningEventsRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(fine_tuning_job_id: impl Into<String>) -> Self {
         Self {
             fine_tuning_job_id: fine_tuning_job_id.into(),
-            after: None,
-            limit: None,
         }
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
     }
 }
 impl From<&str> for ListFineTuningEventsRequest {
     fn from(param: &str) -> Self {
         Self {
             fine_tuning_job_id: param.to_string(),
-            after: None,
-            limit: None,
         }
     }
 }
 impl From<String> for ListFineTuningEventsRequest {
     fn from(param: String) -> Self {
-        Self {
-            fine_tuning_job_id: param,
-            after: None,
-            limit: None,
-        }
+        Self { fine_tuning_job_id: param }
     }
 }
 impl schematic_runtime::EndpointSpec for ListFineTuningEventsRequest {
@@ -4443,13 +4026,7 @@ impl schematic_runtime::EndpointSpec for ListFineTuningEventsRequest {
             "/fine_tuning/jobs/{}/events", urlencoding::encode(& self.fine_tuning_job_id
             .to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
+        let query: Vec<(String, String)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -5019,42 +4596,22 @@ impl schematic_runtime::EndpointSpec for CreateModerationRequest {
 /// use schematic_schema::openai::AdminApiKeysListRequest;
 ///
 /// let request = AdminApiKeysListRequest::default()
-///     .with_after(/* value */)
 ///     .with_order(/* value */)
-///     .with_limit(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AdminApiKeysListRequest {
-    /// Query parameter: after
-    pub after: Option<String>,
     /// Query parameter: order
     pub order: Option<String>,
-    /// Query parameter: limit
-    pub limit: Option<i64>,
 }
 impl AdminApiKeysListRequest {
     /// Creates a new request with default values.
     pub fn new() -> Self {
-        Self {
-            after: None,
-            order: None,
-            limit: None,
-        }
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
+        Self { order: None }
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
         self.order = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
         self
     }
 }
@@ -5070,14 +4627,8 @@ impl schematic_runtime::EndpointSpec for AdminApiKeysListRequest {
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/admin_api_keys".to_string();
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -5275,9 +4826,6 @@ impl schematic_runtime::EndpointSpec for AdminApiKeysDeleteRequest {
 ///     .with_actor_emails__(/* value */)
 ///     .with_resource_ids__(/* value */)
 ///     .with_tenant_only(/* value */)
-///     .with_limit(/* value */)
-///     .with_after(/* value */)
-///     .with_before(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -5301,15 +4849,6 @@ pub struct ListAuditLogsRequest {
     pub resource_ids__: Option<Vec<String>>,
     /// Query parameter: Return only tenant-scoped events associated with this organization. Required for tenant-scoped events such as `role.bound_to_resource` and `role.unbound_from_resource`. When `true`, all supplied event types must be tenant-scoped.
     pub tenant_only: Option<bool>,
-    /** Query parameter: A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-*/
-    pub limit: Option<i64>,
-    /** Query parameter: A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-*/
-    pub after: Option<String>,
-    /** Query parameter: A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
-*/
-    pub before: Option<String>,
 }
 impl ListAuditLogsRequest {
     /// Creates a new request with default values.
@@ -5322,9 +4861,6 @@ impl ListAuditLogsRequest {
             actor_emails__: None,
             resource_ids__: None,
             tenant_only: None,
-            limit: None,
-            after: None,
-            before: None,
         }
     }
     /// Sets the `effective_at` query parameter.
@@ -5360,21 +4896,6 @@ impl ListAuditLogsRequest {
     /// Sets the `tenant_only` query parameter.
     pub fn with_tenant_only(mut self, value: bool) -> Self {
         self.tenant_only = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
-    }
-    /// Sets the `before` query parameter.
-    pub fn with_before(mut self, value: String) -> Self {
-        self.before = Some(value);
         self
     }
 }
@@ -5421,15 +4942,6 @@ impl schematic_runtime::EndpointSpec for ListAuditLogsRequest {
         if let Some(ref value) = self.tenant_only {
             query.push(("tenant_only".to_string(), value.to_string()));
         }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.before {
-            query.push(("before".to_string(), value.to_string()));
-        }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -5448,19 +4960,11 @@ impl schematic_runtime::EndpointSpec for ListAuditLogsRequest {
 /// use schematic_schema::openai::ListOrganizationCertificatesRequest;
 ///
 /// let request = ListOrganizationCertificatesRequest::default()
-///     .with_limit(/* value */)
-///     .with_after(/* value */)
 ///     .with_order(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListOrganizationCertificatesRequest {
-    /** Query parameter: A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-*/
-    pub limit: Option<i64>,
-    /** Query parameter: A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-*/
-    pub after: Option<String>,
     /** Query parameter: Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
 */
     pub order: Option<String>,
@@ -5468,21 +4972,7 @@ pub struct ListOrganizationCertificatesRequest {
 impl ListOrganizationCertificatesRequest {
     /// Creates a new request with default values.
     pub fn new() -> Self {
-        Self {
-            limit: None,
-            after: None,
-            order: None,
-        }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
+        Self { order: None }
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
@@ -5502,12 +4992,6 @@ impl schematic_runtime::EndpointSpec for ListOrganizationCertificatesRequest {
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/certificates".to_string();
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
         }
@@ -5915,8 +5399,6 @@ impl schematic_runtime::EndpointSpec for DeleteCertificateRequest {
 ///     .with_project_ids(/* value */)
 ///     .with_api_key_ids(/* value */)
 ///     .with_group_by(/* value */)
-///     .with_limit(/* value */)
-///     .with_page(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -5933,11 +5415,6 @@ pub struct UsageCostsRequest {
     pub api_key_ids: Option<Vec<String>>,
     /// Query parameter: Group the costs by the specified fields. Support fields include `project_id`, `line_item`, `api_key_id` and any combination of them.
     pub group_by: Option<Vec<String>>,
-    /** Query parameter: A limit on the number of buckets to be returned. Limit can range between 1 and 180, and the default is 7.
-*/
-    pub limit: Option<i64>,
-    /// Query parameter: A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
-    pub page: Option<String>,
 }
 impl UsageCostsRequest {
     /// Creates a new request with default values.
@@ -5949,8 +5426,6 @@ impl UsageCostsRequest {
             project_ids: None,
             api_key_ids: None,
             group_by: None,
-            limit: None,
-            page: None,
         }
     }
     /// Sets the `start_time` query parameter.
@@ -5981,16 +5456,6 @@ impl UsageCostsRequest {
     /// Sets the `group_by` query parameter.
     pub fn with_group_by(mut self, value: Vec<String>) -> Self {
         self.group_by = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: String) -> Self {
-        self.page = Some(value);
         self
     }
 }
@@ -6029,12 +5494,6 @@ impl schematic_runtime::EndpointSpec for UsageCostsRequest {
             for value in values {
                 query.push(("group_by".to_string(), value.to_string()));
             }
-        }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -6148,40 +5607,18 @@ impl schematic_runtime::EndpointSpec for UpdateOrganizationDataRetentionRequest 
 /// use schematic_schema::openai::ListGroupsRequest;
 ///
 /// let request = ListGroupsRequest::default()
-///     .with_limit(/* value */)
-///     .with_after(/* value */)
 ///     .with_order(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListGroupsRequest {
-    /** Query parameter: A limit on the number of groups to be returned. Limit can range between 0 and 1000, and the default is 100.
-*/
-    pub limit: Option<i64>,
-    /** Query parameter: A cursor for use in pagination. `after` is a group ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with group_abc, your subsequent call can include `after=group_abc` in order to fetch the next page of the list.
-*/
-    pub after: Option<String>,
     /// Query parameter: Specifies the sort order of the returned groups.
     pub order: Option<String>,
 }
 impl ListGroupsRequest {
     /// Creates a new request with default values.
     pub fn new() -> Self {
-        Self {
-            limit: None,
-            after: None,
-            order: None,
-        }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
+        Self { order: None }
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
@@ -6201,12 +5638,6 @@ impl schematic_runtime::EndpointSpec for ListGroupsRequest {
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/groups".to_string();
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
         }
@@ -6462,8 +5893,6 @@ impl schematic_runtime::EndpointSpec for DeleteGroupRequest {
 /// use schematic_schema::openai::ListGroupRoleAssignmentsRequest;
 ///
 /// let request = ListGroupRoleAssignmentsRequest::new("group_id_value")
-///     .with_limit(/* value */)
-///     .with_after(/* value */)
 ///     .with_order(/* value */)
 ///;
 /// ```
@@ -6471,10 +5900,6 @@ impl schematic_runtime::EndpointSpec for DeleteGroupRequest {
 pub struct ListGroupRoleAssignmentsRequest {
     /// Path parameter: group_id
     pub group_id: String,
-    /// Query parameter: A limit on the number of organization role assignments to return.
-    pub limit: Option<i64>,
-    /// Query parameter: Cursor for pagination. Provide the value from the previous response's `next` field to continue listing organization roles.
-    pub after: Option<String>,
     /// Query parameter: Sort order for the returned organization roles.
     pub order: Option<String>,
 }
@@ -6483,20 +5908,8 @@ impl ListGroupRoleAssignmentsRequest {
     pub fn new(group_id: impl Into<String>) -> Self {
         Self {
             group_id: group_id.into(),
-            limit: None,
-            after: None,
             order: None,
         }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
@@ -6508,8 +5921,6 @@ impl From<&str> for ListGroupRoleAssignmentsRequest {
     fn from(param: &str) -> Self {
         Self {
             group_id: param.to_string(),
-            limit: None,
-            after: None,
             order: None,
         }
     }
@@ -6518,8 +5929,6 @@ impl From<String> for ListGroupRoleAssignmentsRequest {
     fn from(param: String) -> Self {
         Self {
             group_id: param,
-            limit: None,
-            after: None,
             order: None,
         }
     }
@@ -6539,12 +5948,6 @@ impl schematic_runtime::EndpointSpec for ListGroupRoleAssignmentsRequest {
             .to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
         }
@@ -6733,8 +6136,6 @@ impl schematic_runtime::EndpointSpec for UnassignGroupRoleRequest {
 /// use schematic_schema::openai::ListGroupUsersRequest;
 ///
 /// let request = ListGroupUsersRequest::new("group_id_value")
-///     .with_limit(/* value */)
-///     .with_after(/* value */)
 ///     .with_order(/* value */)
 ///;
 /// ```
@@ -6742,12 +6143,6 @@ impl schematic_runtime::EndpointSpec for UnassignGroupRoleRequest {
 pub struct ListGroupUsersRequest {
     /// Path parameter: group_id
     pub group_id: String,
-    /** Query parameter: A limit on the number of users to be returned. Limit can range between 0 and 1000, and the default is 100.
-*/
-    pub limit: Option<i64>,
-    /** Query parameter: A cursor for use in pagination. Provide the ID of the last user from the previous list response to retrieve the next page.
-*/
-    pub after: Option<String>,
     /// Query parameter: Specifies the sort order of users in the list.
     pub order: Option<String>,
 }
@@ -6756,20 +6151,8 @@ impl ListGroupUsersRequest {
     pub fn new(group_id: impl Into<String>) -> Self {
         Self {
             group_id: group_id.into(),
-            limit: None,
-            after: None,
             order: None,
         }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
@@ -6781,8 +6164,6 @@ impl From<&str> for ListGroupUsersRequest {
     fn from(param: &str) -> Self {
         Self {
             group_id: param.to_string(),
-            limit: None,
-            after: None,
             order: None,
         }
     }
@@ -6791,8 +6172,6 @@ impl From<String> for ListGroupUsersRequest {
     fn from(param: String) -> Self {
         Self {
             group_id: param,
-            limit: None,
-            after: None,
             order: None,
         }
     }
@@ -6812,12 +6191,6 @@ impl schematic_runtime::EndpointSpec for ListGroupUsersRequest {
             .to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
         }
@@ -7003,35 +6376,10 @@ impl schematic_runtime::EndpointSpec for RemoveGroupUserRequest {
 /// use schematic_schema::openai::ListInvitesRequest;
 ///
 /// let request = ListInvitesRequest::default()
-///     .with_limit(/* value */)
-///     .with_after(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ListInvitesRequest {
-    /** Query parameter: A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-*/
-    pub limit: Option<i64>,
-    /** Query parameter: A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-*/
-    pub after: Option<String>,
-}
-impl ListInvitesRequest {
-    /// Creates a new request with default values.
-    pub fn new() -> Self {
-        Self { limit: None, after: None }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
-    }
-}
+pub struct ListInvitesRequest {}
 impl schematic_runtime::EndpointSpec for ListInvitesRequest {
     type Api = OpenAIApi;
     type Success = InviteListResponse;
@@ -7043,13 +6391,7 @@ impl schematic_runtime::EndpointSpec for ListInvitesRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/invites".to_string();
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
+        let query: Vec<(String, String)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -7245,40 +6587,18 @@ impl schematic_runtime::EndpointSpec for DeleteInviteRequest {
 /// use schematic_schema::openai::ListProjectsRequest;
 ///
 /// let request = ListProjectsRequest::default()
-///     .with_limit(/* value */)
-///     .with_after(/* value */)
 ///     .with_include_archived(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListProjectsRequest {
-    /** Query parameter: A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-*/
-    pub limit: Option<i64>,
-    /** Query parameter: A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-*/
-    pub after: Option<String>,
     /// Query parameter: If `true` returns all projects including those that have been `archived`. Archived projects are not included by default.
     pub include_archived: Option<bool>,
 }
 impl ListProjectsRequest {
     /// Creates a new request with default values.
     pub fn new() -> Self {
-        Self {
-            limit: None,
-            after: None,
-            include_archived: None,
-        }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
+        Self { include_archived: None }
     }
     /// Sets the `include_archived` query parameter.
     pub fn with_include_archived(mut self, value: bool) -> Self {
@@ -7298,12 +6618,6 @@ impl schematic_runtime::EndpointSpec for ListProjectsRequest {
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/projects".to_string();
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.include_archived {
             query.push(("include_archived".to_string(), value.to_string()));
         }
@@ -7506,8 +6820,6 @@ impl schematic_runtime::EndpointSpec for ModifyProjectRequest {
 /// use schematic_schema::openai::ListProjectApiKeysRequest;
 ///
 /// let request = ListProjectApiKeysRequest::new("project_id_value")
-///     .with_limit(/* value */)
-///     .with_after(/* value */)
 ///     .with_owner_project_access(/* value */)
 ///;
 /// ```
@@ -7515,12 +6827,6 @@ impl schematic_runtime::EndpointSpec for ModifyProjectRequest {
 pub struct ListProjectApiKeysRequest {
     /// Path parameter: project_id
     pub project_id: String,
-    /** Query parameter: A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-*/
-    pub limit: Option<i64>,
-    /** Query parameter: A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-*/
-    pub after: Option<String>,
     /** Query parameter: Filter API keys by whether the owner currently has effective access to the project. Use `active` for owners with access, `inactive` for owners without access, or `any` for all enabled project API keys. If omitted, the endpoint applies its existing membership-based visibility rules, which may exclude some enabled keys.
 */
     pub owner_project_access: Option<String>,
@@ -7530,20 +6836,8 @@ impl ListProjectApiKeysRequest {
     pub fn new(project_id: impl Into<String>) -> Self {
         Self {
             project_id: project_id.into(),
-            limit: None,
-            after: None,
             owner_project_access: None,
         }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
     }
     /// Sets the `owner_project_access` query parameter.
     pub fn with_owner_project_access(mut self, value: String) -> Self {
@@ -7555,8 +6849,6 @@ impl From<&str> for ListProjectApiKeysRequest {
     fn from(param: &str) -> Self {
         Self {
             project_id: param.to_string(),
-            limit: None,
-            after: None,
             owner_project_access: None,
         }
     }
@@ -7565,8 +6857,6 @@ impl From<String> for ListProjectApiKeysRequest {
     fn from(param: String) -> Self {
         Self {
             project_id: param,
-            limit: None,
-            after: None,
             owner_project_access: None,
         }
     }
@@ -7586,12 +6876,6 @@ impl schematic_runtime::EndpointSpec for ListProjectApiKeysRequest {
             .to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.owner_project_access {
             query.push(("owner_project_access".to_string(), value.to_string()));
         }
@@ -7775,8 +7059,6 @@ impl schematic_runtime::EndpointSpec for ArchiveProjectRequest {
 /// use schematic_schema::openai::ListProjectCertificatesRequest;
 ///
 /// let request = ListProjectCertificatesRequest::new("project_id_value")
-///     .with_limit(/* value */)
-///     .with_after(/* value */)
 ///     .with_order(/* value */)
 ///;
 /// ```
@@ -7784,12 +7066,6 @@ impl schematic_runtime::EndpointSpec for ArchiveProjectRequest {
 pub struct ListProjectCertificatesRequest {
     /// Path parameter: project_id
     pub project_id: String,
-    /** Query parameter: A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-*/
-    pub limit: Option<i64>,
-    /** Query parameter: A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-*/
-    pub after: Option<String>,
     /** Query parameter: Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
 */
     pub order: Option<String>,
@@ -7799,20 +7075,8 @@ impl ListProjectCertificatesRequest {
     pub fn new(project_id: impl Into<String>) -> Self {
         Self {
             project_id: project_id.into(),
-            limit: None,
-            after: None,
             order: None,
         }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
@@ -7824,8 +7088,6 @@ impl From<&str> for ListProjectCertificatesRequest {
     fn from(param: &str) -> Self {
         Self {
             project_id: param.to_string(),
-            limit: None,
-            after: None,
             order: None,
         }
     }
@@ -7834,8 +7096,6 @@ impl From<String> for ListProjectCertificatesRequest {
     fn from(param: String) -> Self {
         Self {
             project_id: param,
-            limit: None,
-            after: None,
             order: None,
         }
     }
@@ -7855,12 +7115,6 @@ impl schematic_runtime::EndpointSpec for ListProjectCertificatesRequest {
             .project_id.to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
         }
@@ -8135,8 +7389,6 @@ impl schematic_runtime::EndpointSpec for UpdateProjectDataRetentionRequest {
 /// use schematic_schema::openai::ListProjectGroupsRequest;
 ///
 /// let request = ListProjectGroupsRequest::new("project_id_value")
-///     .with_limit(/* value */)
-///     .with_after(/* value */)
 ///     .with_order(/* value */)
 ///;
 /// ```
@@ -8144,10 +7396,6 @@ impl schematic_runtime::EndpointSpec for UpdateProjectDataRetentionRequest {
 pub struct ListProjectGroupsRequest {
     /// Path parameter: project_id
     pub project_id: String,
-    /// Query parameter: A limit on the number of project groups to return. Defaults to 20.
-    pub limit: Option<i64>,
-    /// Query parameter: Cursor for pagination. Provide the ID of the last group from the previous response to fetch the next page.
-    pub after: Option<String>,
     /// Query parameter: Sort order for the returned groups.
     pub order: Option<String>,
 }
@@ -8156,20 +7404,8 @@ impl ListProjectGroupsRequest {
     pub fn new(project_id: impl Into<String>) -> Self {
         Self {
             project_id: project_id.into(),
-            limit: None,
-            after: None,
             order: None,
         }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
@@ -8181,8 +7417,6 @@ impl From<&str> for ListProjectGroupsRequest {
     fn from(param: &str) -> Self {
         Self {
             project_id: param.to_string(),
-            limit: None,
-            after: None,
             order: None,
         }
     }
@@ -8191,8 +7425,6 @@ impl From<String> for ListProjectGroupsRequest {
     fn from(param: String) -> Self {
         Self {
             project_id: param,
-            limit: None,
-            after: None,
             order: None,
         }
     }
@@ -8212,12 +7444,6 @@ impl schematic_runtime::EndpointSpec for ListProjectGroupsRequest {
             .to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
         }
@@ -8725,69 +7951,31 @@ impl schematic_runtime::EndpointSpec for DeleteProjectModelPermissionsRequest {
 /// use schematic_schema::openai::ListProjectRateLimitsRequest;
 ///
 /// let request = ListProjectRateLimitsRequest::new("project_id_value")
-///     .with_limit(/* value */)
-///     .with_after(/* value */)
-///     .with_before(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListProjectRateLimitsRequest {
     /// Path parameter: project_id
     pub project_id: String,
-    /** Query parameter: A limit on the number of objects to be returned. The default is 100.
-*/
-    pub limit: Option<i64>,
-    /** Query parameter: A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-*/
-    pub after: Option<String>,
-    /** Query parameter: A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, beginning with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
-*/
-    pub before: Option<String>,
 }
 impl ListProjectRateLimitsRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(project_id: impl Into<String>) -> Self {
         Self {
             project_id: project_id.into(),
-            limit: None,
-            after: None,
-            before: None,
         }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
-    }
-    /// Sets the `before` query parameter.
-    pub fn with_before(mut self, value: String) -> Self {
-        self.before = Some(value);
-        self
     }
 }
 impl From<&str> for ListProjectRateLimitsRequest {
     fn from(param: &str) -> Self {
         Self {
             project_id: param.to_string(),
-            limit: None,
-            after: None,
-            before: None,
         }
     }
 }
 impl From<String> for ListProjectRateLimitsRequest {
     fn from(param: String) -> Self {
-        Self {
-            project_id: param,
-            limit: None,
-            after: None,
-            before: None,
-        }
+        Self { project_id: param }
     }
 }
 impl schematic_runtime::EndpointSpec for ListProjectRateLimitsRequest {
@@ -8804,16 +7992,7 @@ impl schematic_runtime::EndpointSpec for ListProjectRateLimitsRequest {
             "/organization/projects/{}/rate_limits", urlencoding::encode(& self
             .project_id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.before {
-            query.push(("before".to_string(), value.to_string()));
-        }
+        let query: Vec<(String, String)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -8902,57 +8081,31 @@ impl schematic_runtime::EndpointSpec for UpdateProjectRateLimitsRequest {
 /// use schematic_schema::openai::ListProjectServiceAccountsRequest;
 ///
 /// let request = ListProjectServiceAccountsRequest::new("project_id_value")
-///     .with_limit(/* value */)
-///     .with_after(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListProjectServiceAccountsRequest {
     /// Path parameter: project_id
     pub project_id: String,
-    /** Query parameter: A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-*/
-    pub limit: Option<i64>,
-    /** Query parameter: A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-*/
-    pub after: Option<String>,
 }
 impl ListProjectServiceAccountsRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(project_id: impl Into<String>) -> Self {
         Self {
             project_id: project_id.into(),
-            limit: None,
-            after: None,
         }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
     }
 }
 impl From<&str> for ListProjectServiceAccountsRequest {
     fn from(param: &str) -> Self {
         Self {
             project_id: param.to_string(),
-            limit: None,
-            after: None,
         }
     }
 }
 impl From<String> for ListProjectServiceAccountsRequest {
     fn from(param: String) -> Self {
-        Self {
-            project_id: param,
-            limit: None,
-            after: None,
-        }
+        Self { project_id: param }
     }
 }
 impl schematic_runtime::EndpointSpec for ListProjectServiceAccountsRequest {
@@ -8969,13 +8122,7 @@ impl schematic_runtime::EndpointSpec for ListProjectServiceAccountsRequest {
             "/organization/projects/{}/service_accounts", urlencoding::encode(& self
             .project_id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
+        let query: Vec<(String, String)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -9239,54 +8386,27 @@ impl schematic_runtime::EndpointSpec for DeleteProjectServiceAccountRequest {
 /// use schematic_schema::openai::ListProjectSpendAlertsRequest;
 ///
 /// let request = ListProjectSpendAlertsRequest::new("project_id_value")
-///     .with_limit(/* value */)
 ///     .with_order(/* value */)
-///     .with_after(/* value */)
-///     .with_before(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListProjectSpendAlertsRequest {
     /// Path parameter: project_id
     pub project_id: String,
-    /// Query parameter: A limit on the number of spend alerts to return. Defaults to 20.
-    pub limit: Option<i64>,
     /// Query parameter: Sort order for the returned spend alerts.
     pub order: Option<String>,
-    /// Query parameter: Cursor for pagination. Provide the ID of the last spend alert from the previous response to fetch the next page.
-    pub after: Option<String>,
-    /// Query parameter: Cursor for pagination. Provide the ID of the first spend alert from the previous response to fetch the previous page.
-    pub before: Option<String>,
 }
 impl ListProjectSpendAlertsRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(project_id: impl Into<String>) -> Self {
         Self {
             project_id: project_id.into(),
-            limit: None,
             order: None,
-            after: None,
-            before: None,
         }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
         self.order = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
-    }
-    /// Sets the `before` query parameter.
-    pub fn with_before(mut self, value: String) -> Self {
-        self.before = Some(value);
         self
     }
 }
@@ -9294,10 +8414,7 @@ impl From<&str> for ListProjectSpendAlertsRequest {
     fn from(param: &str) -> Self {
         Self {
             project_id: param.to_string(),
-            limit: None,
             order: None,
-            after: None,
-            before: None,
         }
     }
 }
@@ -9305,10 +8422,7 @@ impl From<String> for ListProjectSpendAlertsRequest {
     fn from(param: String) -> Self {
         Self {
             project_id: param,
-            limit: None,
             order: None,
-            after: None,
-            before: None,
         }
     }
 }
@@ -9327,17 +8441,8 @@ impl schematic_runtime::EndpointSpec for ListProjectSpendAlertsRequest {
             .project_id.to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.before {
-            query.push(("before".to_string(), value.to_string()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -9590,57 +8695,31 @@ impl schematic_runtime::EndpointSpec for DeleteProjectSpendAlertRequest {
 /// use schematic_schema::openai::ListProjectUsersRequest;
 ///
 /// let request = ListProjectUsersRequest::new("project_id_value")
-///     .with_limit(/* value */)
-///     .with_after(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListProjectUsersRequest {
     /// Path parameter: project_id
     pub project_id: String,
-    /** Query parameter: A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-*/
-    pub limit: Option<i64>,
-    /** Query parameter: A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-*/
-    pub after: Option<String>,
 }
 impl ListProjectUsersRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(project_id: impl Into<String>) -> Self {
         Self {
             project_id: project_id.into(),
-            limit: None,
-            after: None,
         }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
     }
 }
 impl From<&str> for ListProjectUsersRequest {
     fn from(param: &str) -> Self {
         Self {
             project_id: param.to_string(),
-            limit: None,
-            after: None,
         }
     }
 }
 impl From<String> for ListProjectUsersRequest {
     fn from(param: String) -> Self {
-        Self {
-            project_id: param,
-            limit: None,
-            after: None,
-        }
+        Self { project_id: param }
     }
 }
 impl schematic_runtime::EndpointSpec for ListProjectUsersRequest {
@@ -9657,13 +8736,7 @@ impl schematic_runtime::EndpointSpec for ListProjectUsersRequest {
             "/organization/projects/{}/users", urlencoding::encode(& self.project_id
             .to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
+        let query: Vec<(String, String)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -9915,38 +8988,18 @@ impl schematic_runtime::EndpointSpec for DeleteProjectUserRequest {
 /// use schematic_schema::openai::ListRolesRequest;
 ///
 /// let request = ListRolesRequest::default()
-///     .with_limit(/* value */)
-///     .with_after(/* value */)
 ///     .with_order(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListRolesRequest {
-    /// Query parameter: A limit on the number of roles to return. Defaults to 1000.
-    pub limit: Option<i64>,
-    /// Query parameter: Cursor for pagination. Provide the value from the previous response's `next` field to continue listing roles.
-    pub after: Option<String>,
     /// Query parameter: Sort order for the returned roles.
     pub order: Option<String>,
 }
 impl ListRolesRequest {
     /// Creates a new request with default values.
     pub fn new() -> Self {
-        Self {
-            limit: None,
-            after: None,
-            order: None,
-        }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
+        Self { order: None }
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
@@ -9966,12 +9019,6 @@ impl schematic_runtime::EndpointSpec for ListRolesRequest {
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/roles".to_string();
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
         }
@@ -10226,51 +9273,22 @@ impl schematic_runtime::EndpointSpec for DeleteRoleRequest {
 /// use schematic_schema::openai::ListOrganizationSpendAlertsRequest;
 ///
 /// let request = ListOrganizationSpendAlertsRequest::default()
-///     .with_limit(/* value */)
 ///     .with_order(/* value */)
-///     .with_after(/* value */)
-///     .with_before(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListOrganizationSpendAlertsRequest {
-    /// Query parameter: A limit on the number of spend alerts to return. Defaults to 20.
-    pub limit: Option<i64>,
     /// Query parameter: Sort order for the returned spend alerts.
     pub order: Option<String>,
-    /// Query parameter: Cursor for pagination. Provide the ID of the last spend alert from the previous response to fetch the next page.
-    pub after: Option<String>,
-    /// Query parameter: Cursor for pagination. Provide the ID of the first spend alert from the previous response to fetch the previous page.
-    pub before: Option<String>,
 }
 impl ListOrganizationSpendAlertsRequest {
     /// Creates a new request with default values.
     pub fn new() -> Self {
-        Self {
-            limit: None,
-            order: None,
-            after: None,
-            before: None,
-        }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
+        Self { order: None }
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
         self.order = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
-    }
-    /// Sets the `before` query parameter.
-    pub fn with_before(mut self, value: String) -> Self {
-        self.before = Some(value);
         self
     }
 }
@@ -10286,17 +9304,8 @@ impl schematic_runtime::EndpointSpec for ListOrganizationSpendAlertsRequest {
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/spend_alerts".to_string();
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.before {
-            query.push(("before".to_string(), value.to_string()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -10561,8 +9570,6 @@ impl schematic_runtime::EndpointSpec for DeleteOrganizationSpendAlertRequest {
 ///     .with_api_key_ids(/* value */)
 ///     .with_models(/* value */)
 ///     .with_group_by(/* value */)
-///     .with_limit(/* value */)
-///     .with_page(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10583,14 +9590,6 @@ pub struct UsageAudioSpeechesRequest {
     pub models: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
     pub group_by: Option<Vec<String>>,
-    /** Query parameter: Specifies the number of buckets to return.
-- `bucket_width=1d`: default: 7, max: 31
-- `bucket_width=1h`: default: 24, max: 168
-- `bucket_width=1m`: default: 60, max: 1440
-*/
-    pub limit: Option<i64>,
-    /// Query parameter: A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
-    pub page: Option<String>,
 }
 impl UsageAudioSpeechesRequest {
     /// Creates a new request with default values.
@@ -10604,8 +9603,6 @@ impl UsageAudioSpeechesRequest {
             api_key_ids: None,
             models: None,
             group_by: None,
-            limit: None,
-            page: None,
         }
     }
     /// Sets the `start_time` query parameter.
@@ -10646,16 +9643,6 @@ impl UsageAudioSpeechesRequest {
     /// Sets the `group_by` query parameter.
     pub fn with_group_by(mut self, value: Vec<String>) -> Self {
         self.group_by = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: String) -> Self {
-        self.page = Some(value);
         self
     }
 }
@@ -10705,12 +9692,6 @@ impl schematic_runtime::EndpointSpec for UsageAudioSpeechesRequest {
                 query.push(("group_by".to_string(), value.to_string()));
             }
         }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -10737,8 +9718,6 @@ impl schematic_runtime::EndpointSpec for UsageAudioSpeechesRequest {
 ///     .with_api_key_ids(/* value */)
 ///     .with_models(/* value */)
 ///     .with_group_by(/* value */)
-///     .with_limit(/* value */)
-///     .with_page(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10759,14 +9738,6 @@ pub struct UsageAudioTranscriptionsRequest {
     pub models: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
     pub group_by: Option<Vec<String>>,
-    /** Query parameter: Specifies the number of buckets to return.
-- `bucket_width=1d`: default: 7, max: 31
-- `bucket_width=1h`: default: 24, max: 168
-- `bucket_width=1m`: default: 60, max: 1440
-*/
-    pub limit: Option<i64>,
-    /// Query parameter: A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
-    pub page: Option<String>,
 }
 impl UsageAudioTranscriptionsRequest {
     /// Creates a new request with default values.
@@ -10780,8 +9751,6 @@ impl UsageAudioTranscriptionsRequest {
             api_key_ids: None,
             models: None,
             group_by: None,
-            limit: None,
-            page: None,
         }
     }
     /// Sets the `start_time` query parameter.
@@ -10822,16 +9791,6 @@ impl UsageAudioTranscriptionsRequest {
     /// Sets the `group_by` query parameter.
     pub fn with_group_by(mut self, value: Vec<String>) -> Self {
         self.group_by = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: String) -> Self {
-        self.page = Some(value);
         self
     }
 }
@@ -10881,12 +9840,6 @@ impl schematic_runtime::EndpointSpec for UsageAudioTranscriptionsRequest {
                 query.push(("group_by".to_string(), value.to_string()));
             }
         }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -10910,8 +9863,6 @@ impl schematic_runtime::EndpointSpec for UsageAudioTranscriptionsRequest {
 ///     .with_bucket_width(/* value */)
 ///     .with_project_ids(/* value */)
 ///     .with_group_by(/* value */)
-///     .with_limit(/* value */)
-///     .with_page(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -10926,14 +9877,6 @@ pub struct UsageCodeInterpreterSessionsRequest {
     pub project_ids: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`.
     pub group_by: Option<Vec<String>>,
-    /** Query parameter: Specifies the number of buckets to return.
-- `bucket_width=1d`: default: 7, max: 31
-- `bucket_width=1h`: default: 24, max: 168
-- `bucket_width=1m`: default: 60, max: 1440
-*/
-    pub limit: Option<i64>,
-    /// Query parameter: A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
-    pub page: Option<String>,
 }
 impl UsageCodeInterpreterSessionsRequest {
     /// Creates a new request with default values.
@@ -10944,8 +9887,6 @@ impl UsageCodeInterpreterSessionsRequest {
             bucket_width: None,
             project_ids: None,
             group_by: None,
-            limit: None,
-            page: None,
         }
     }
     /// Sets the `start_time` query parameter.
@@ -10971,16 +9912,6 @@ impl UsageCodeInterpreterSessionsRequest {
     /// Sets the `group_by` query parameter.
     pub fn with_group_by(mut self, value: Vec<String>) -> Self {
         self.group_by = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: String) -> Self {
-        self.page = Some(value);
         self
     }
 }
@@ -11015,12 +9946,6 @@ impl schematic_runtime::EndpointSpec for UsageCodeInterpreterSessionsRequest {
                 query.push(("group_by".to_string(), value.to_string()));
             }
         }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -11048,8 +9973,6 @@ impl schematic_runtime::EndpointSpec for UsageCodeInterpreterSessionsRequest {
 ///     .with_models(/* value */)
 ///     .with_batch(/* value */)
 ///     .with_group_by(/* value */)
-///     .with_limit(/* value */)
-///     .with_page(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11073,14 +9996,6 @@ pub struct UsageCompletionsRequest {
     pub batch: Option<bool>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `batch`, `service_tier` or any combination of them.
     pub group_by: Option<Vec<String>>,
-    /** Query parameter: Specifies the number of buckets to return.
-- `bucket_width=1d`: default: 7, max: 31
-- `bucket_width=1h`: default: 24, max: 168
-- `bucket_width=1m`: default: 60, max: 1440
-*/
-    pub limit: Option<i64>,
-    /// Query parameter: A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
-    pub page: Option<String>,
 }
 impl UsageCompletionsRequest {
     /// Creates a new request with default values.
@@ -11095,8 +10010,6 @@ impl UsageCompletionsRequest {
             models: None,
             batch: None,
             group_by: None,
-            limit: None,
-            page: None,
         }
     }
     /// Sets the `start_time` query parameter.
@@ -11142,16 +10055,6 @@ impl UsageCompletionsRequest {
     /// Sets the `group_by` query parameter.
     pub fn with_group_by(mut self, value: Vec<String>) -> Self {
         self.group_by = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: String) -> Self {
-        self.page = Some(value);
         self
     }
 }
@@ -11204,12 +10107,6 @@ impl schematic_runtime::EndpointSpec for UsageCompletionsRequest {
                 query.push(("group_by".to_string(), value.to_string()));
             }
         }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -11236,8 +10133,6 @@ impl schematic_runtime::EndpointSpec for UsageCompletionsRequest {
 ///     .with_api_key_ids(/* value */)
 ///     .with_models(/* value */)
 ///     .with_group_by(/* value */)
-///     .with_limit(/* value */)
-///     .with_page(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11258,14 +10153,6 @@ pub struct UsageEmbeddingsRequest {
     pub models: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
     pub group_by: Option<Vec<String>>,
-    /** Query parameter: Specifies the number of buckets to return.
-- `bucket_width=1d`: default: 7, max: 31
-- `bucket_width=1h`: default: 24, max: 168
-- `bucket_width=1m`: default: 60, max: 1440
-*/
-    pub limit: Option<i64>,
-    /// Query parameter: A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
-    pub page: Option<String>,
 }
 impl UsageEmbeddingsRequest {
     /// Creates a new request with default values.
@@ -11279,8 +10166,6 @@ impl UsageEmbeddingsRequest {
             api_key_ids: None,
             models: None,
             group_by: None,
-            limit: None,
-            page: None,
         }
     }
     /// Sets the `start_time` query parameter.
@@ -11321,16 +10206,6 @@ impl UsageEmbeddingsRequest {
     /// Sets the `group_by` query parameter.
     pub fn with_group_by(mut self, value: Vec<String>) -> Self {
         self.group_by = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: String) -> Self {
-        self.page = Some(value);
         self
     }
 }
@@ -11380,12 +10255,6 @@ impl schematic_runtime::EndpointSpec for UsageEmbeddingsRequest {
                 query.push(("group_by".to_string(), value.to_string()));
             }
         }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -11412,8 +10281,6 @@ impl schematic_runtime::EndpointSpec for UsageEmbeddingsRequest {
 ///     .with_api_key_ids(/* value */)
 ///     .with_vector_store_ids(/* value */)
 ///     .with_group_by(/* value */)
-///     .with_limit(/* value */)
-///     .with_page(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11434,14 +10301,6 @@ pub struct UsageFileSearchCallsRequest {
     pub vector_store_ids: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `vector_store_id` or any combination of them.
     pub group_by: Option<Vec<String>>,
-    /** Query parameter: Specifies the number of buckets to return.
-- `bucket_width=1d`: default: 7, max: 31
-- `bucket_width=1h`: default: 24, max: 168
-- `bucket_width=1m`: default: 60, max: 1440
-*/
-    pub limit: Option<i64>,
-    /// Query parameter: A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
-    pub page: Option<String>,
 }
 impl UsageFileSearchCallsRequest {
     /// Creates a new request with default values.
@@ -11455,8 +10314,6 @@ impl UsageFileSearchCallsRequest {
             api_key_ids: None,
             vector_store_ids: None,
             group_by: None,
-            limit: None,
-            page: None,
         }
     }
     /// Sets the `start_time` query parameter.
@@ -11497,16 +10354,6 @@ impl UsageFileSearchCallsRequest {
     /// Sets the `group_by` query parameter.
     pub fn with_group_by(mut self, value: Vec<String>) -> Self {
         self.group_by = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: String) -> Self {
-        self.page = Some(value);
         self
     }
 }
@@ -11556,12 +10403,6 @@ impl schematic_runtime::EndpointSpec for UsageFileSearchCallsRequest {
                 query.push(("group_by".to_string(), value.to_string()));
             }
         }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -11590,8 +10431,6 @@ impl schematic_runtime::EndpointSpec for UsageFileSearchCallsRequest {
 ///     .with_api_key_ids(/* value */)
 ///     .with_models(/* value */)
 ///     .with_group_by(/* value */)
-///     .with_limit(/* value */)
-///     .with_page(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11616,14 +10455,6 @@ pub struct UsageImagesRequest {
     pub models: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `size`, `source` or any combination of them.
     pub group_by: Option<Vec<String>>,
-    /** Query parameter: Specifies the number of buckets to return.
-- `bucket_width=1d`: default: 7, max: 31
-- `bucket_width=1h`: default: 24, max: 168
-- `bucket_width=1m`: default: 60, max: 1440
-*/
-    pub limit: Option<i64>,
-    /// Query parameter: A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
-    pub page: Option<String>,
 }
 impl UsageImagesRequest {
     /// Creates a new request with default values.
@@ -11639,8 +10470,6 @@ impl UsageImagesRequest {
             api_key_ids: None,
             models: None,
             group_by: None,
-            limit: None,
-            page: None,
         }
     }
     /// Sets the `start_time` query parameter.
@@ -11691,16 +10520,6 @@ impl UsageImagesRequest {
     /// Sets the `group_by` query parameter.
     pub fn with_group_by(mut self, value: Vec<String>) -> Self {
         self.group_by = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: String) -> Self {
-        self.page = Some(value);
         self
     }
 }
@@ -11760,12 +10579,6 @@ impl schematic_runtime::EndpointSpec for UsageImagesRequest {
                 query.push(("group_by".to_string(), value.to_string()));
             }
         }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -11792,8 +10605,6 @@ impl schematic_runtime::EndpointSpec for UsageImagesRequest {
 ///     .with_api_key_ids(/* value */)
 ///     .with_models(/* value */)
 ///     .with_group_by(/* value */)
-///     .with_limit(/* value */)
-///     .with_page(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11814,14 +10625,6 @@ pub struct UsageModerationsRequest {
     pub models: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
     pub group_by: Option<Vec<String>>,
-    /** Query parameter: Specifies the number of buckets to return.
-- `bucket_width=1d`: default: 7, max: 31
-- `bucket_width=1h`: default: 24, max: 168
-- `bucket_width=1m`: default: 60, max: 1440
-*/
-    pub limit: Option<i64>,
-    /// Query parameter: A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
-    pub page: Option<String>,
 }
 impl UsageModerationsRequest {
     /// Creates a new request with default values.
@@ -11835,8 +10638,6 @@ impl UsageModerationsRequest {
             api_key_ids: None,
             models: None,
             group_by: None,
-            limit: None,
-            page: None,
         }
     }
     /// Sets the `start_time` query parameter.
@@ -11877,16 +10678,6 @@ impl UsageModerationsRequest {
     /// Sets the `group_by` query parameter.
     pub fn with_group_by(mut self, value: Vec<String>) -> Self {
         self.group_by = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: String) -> Self {
-        self.page = Some(value);
         self
     }
 }
@@ -11936,12 +10727,6 @@ impl schematic_runtime::EndpointSpec for UsageModerationsRequest {
                 query.push(("group_by".to_string(), value.to_string()));
             }
         }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -11965,8 +10750,6 @@ impl schematic_runtime::EndpointSpec for UsageModerationsRequest {
 ///     .with_bucket_width(/* value */)
 ///     .with_project_ids(/* value */)
 ///     .with_group_by(/* value */)
-///     .with_limit(/* value */)
-///     .with_page(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -11981,14 +10764,6 @@ pub struct UsageVectorStoresRequest {
     pub project_ids: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`.
     pub group_by: Option<Vec<String>>,
-    /** Query parameter: Specifies the number of buckets to return.
-- `bucket_width=1d`: default: 7, max: 31
-- `bucket_width=1h`: default: 24, max: 168
-- `bucket_width=1m`: default: 60, max: 1440
-*/
-    pub limit: Option<i64>,
-    /// Query parameter: A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
-    pub page: Option<String>,
 }
 impl UsageVectorStoresRequest {
     /// Creates a new request with default values.
@@ -11999,8 +10774,6 @@ impl UsageVectorStoresRequest {
             bucket_width: None,
             project_ids: None,
             group_by: None,
-            limit: None,
-            page: None,
         }
     }
     /// Sets the `start_time` query parameter.
@@ -12026,16 +10799,6 @@ impl UsageVectorStoresRequest {
     /// Sets the `group_by` query parameter.
     pub fn with_group_by(mut self, value: Vec<String>) -> Self {
         self.group_by = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: String) -> Self {
-        self.page = Some(value);
         self
     }
 }
@@ -12070,12 +10833,6 @@ impl schematic_runtime::EndpointSpec for UsageVectorStoresRequest {
                 query.push(("group_by".to_string(), value.to_string()));
             }
         }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -12103,8 +10860,6 @@ impl schematic_runtime::EndpointSpec for UsageVectorStoresRequest {
 ///     .with_models(/* value */)
 ///     .with_context_levels(/* value */)
 ///     .with_group_by(/* value */)
-///     .with_limit(/* value */)
-///     .with_page(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -12127,14 +10882,6 @@ pub struct UsageWebSearchCallsRequest {
     pub context_levels: Option<Vec<String>>,
     /// Query parameter: Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `context_level` or any combination of them.
     pub group_by: Option<Vec<String>>,
-    /** Query parameter: Specifies the number of buckets to return.
-- `bucket_width=1d`: default: 7, max: 31
-- `bucket_width=1h`: default: 24, max: 168
-- `bucket_width=1m`: default: 60, max: 1440
-*/
-    pub limit: Option<i64>,
-    /// Query parameter: A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
-    pub page: Option<String>,
 }
 impl UsageWebSearchCallsRequest {
     /// Creates a new request with default values.
@@ -12149,8 +10896,6 @@ impl UsageWebSearchCallsRequest {
             models: None,
             context_levels: None,
             group_by: None,
-            limit: None,
-            page: None,
         }
     }
     /// Sets the `start_time` query parameter.
@@ -12196,16 +10941,6 @@ impl UsageWebSearchCallsRequest {
     /// Sets the `group_by` query parameter.
     pub fn with_group_by(mut self, value: Vec<String>) -> Self {
         self.group_by = Some(value);
-        self
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: String) -> Self {
-        self.page = Some(value);
         self
     }
 }
@@ -12260,12 +10995,6 @@ impl schematic_runtime::EndpointSpec for UsageWebSearchCallsRequest {
                 query.push(("group_by".to_string(), value.to_string()));
             }
         }
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -12284,40 +11013,18 @@ impl schematic_runtime::EndpointSpec for UsageWebSearchCallsRequest {
 /// use schematic_schema::openai::ListUsersRequest;
 ///
 /// let request = ListUsersRequest::default()
-///     .with_limit(/* value */)
-///     .with_after(/* value */)
 ///     .with_emails(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListUsersRequest {
-    /** Query parameter: A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-*/
-    pub limit: Option<i64>,
-    /** Query parameter: A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-*/
-    pub after: Option<String>,
     /// Query parameter: Filter by the email address of users.
     pub emails: Option<Vec<String>>,
 }
 impl ListUsersRequest {
     /// Creates a new request with default values.
     pub fn new() -> Self {
-        Self {
-            limit: None,
-            after: None,
-            emails: None,
-        }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
+        Self { emails: None }
     }
     /// Sets the `emails` query parameter.
     pub fn with_emails(mut self, value: Vec<String>) -> Self {
@@ -12337,12 +11044,6 @@ impl schematic_runtime::EndpointSpec for ListUsersRequest {
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/organization/users".to_string();
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
         if let Some(ref values) = self.emails {
             for value in values {
                 query.push(("emails".to_string(), value.to_string()));
@@ -12537,8 +11238,6 @@ impl schematic_runtime::EndpointSpec for DeleteUserRequest {
 /// use schematic_schema::openai::ListUserRoleAssignmentsRequest;
 ///
 /// let request = ListUserRoleAssignmentsRequest::new("user_id_value")
-///     .with_limit(/* value */)
-///     .with_after(/* value */)
 ///     .with_order(/* value */)
 ///;
 /// ```
@@ -12546,10 +11245,6 @@ impl schematic_runtime::EndpointSpec for DeleteUserRequest {
 pub struct ListUserRoleAssignmentsRequest {
     /// Path parameter: user_id
     pub user_id: String,
-    /// Query parameter: A limit on the number of organization role assignments to return.
-    pub limit: Option<i64>,
-    /// Query parameter: Cursor for pagination. Provide the value from the previous response's `next` field to continue listing organization roles.
-    pub after: Option<String>,
     /// Query parameter: Sort order for the returned organization roles.
     pub order: Option<String>,
 }
@@ -12558,20 +11253,8 @@ impl ListUserRoleAssignmentsRequest {
     pub fn new(user_id: impl Into<String>) -> Self {
         Self {
             user_id: user_id.into(),
-            limit: None,
-            after: None,
             order: None,
         }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
@@ -12583,8 +11266,6 @@ impl From<&str> for ListUserRoleAssignmentsRequest {
     fn from(param: &str) -> Self {
         Self {
             user_id: param.to_string(),
-            limit: None,
-            after: None,
             order: None,
         }
     }
@@ -12593,8 +11274,6 @@ impl From<String> for ListUserRoleAssignmentsRequest {
     fn from(param: String) -> Self {
         Self {
             user_id: param,
-            limit: None,
-            after: None,
             order: None,
         }
     }
@@ -12614,12 +11293,6 @@ impl schematic_runtime::EndpointSpec for ListUserRoleAssignmentsRequest {
             .to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
         }
@@ -12808,8 +11481,6 @@ impl schematic_runtime::EndpointSpec for UnassignUserRoleRequest {
 /// use schematic_schema::openai::ListProjectGroupRoleAssignmentsRequest;
 ///
 /// let request = ListProjectGroupRoleAssignmentsRequest::new("project_id_value", "group_id_value")
-///     .with_limit(/* value */)
-///     .with_after(/* value */)
 ///     .with_order(/* value */)
 ///;
 /// ```
@@ -12819,10 +11490,6 @@ pub struct ListProjectGroupRoleAssignmentsRequest {
     pub project_id: String,
     /// Path parameter: group_id
     pub group_id: String,
-    /// Query parameter: A limit on the number of project role assignments to return.
-    pub limit: Option<i64>,
-    /// Query parameter: Cursor for pagination. Provide the value from the previous response's `next` field to continue listing project roles.
-    pub after: Option<String>,
     /// Query parameter: Sort order for the returned project roles.
     pub order: Option<String>,
 }
@@ -12832,20 +11499,8 @@ impl ListProjectGroupRoleAssignmentsRequest {
         Self {
             project_id: project_id.into(),
             group_id: group_id.into(),
-            limit: None,
-            after: None,
             order: None,
         }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
@@ -12868,12 +11523,6 @@ impl schematic_runtime::EndpointSpec for ListProjectGroupRoleAssignmentsRequest 
             .to_string()), urlencoding::encode(& self.group_id.to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
         }
@@ -13082,8 +11731,6 @@ impl schematic_runtime::EndpointSpec for UnassignProjectGroupRoleRequest {
 /// use schematic_schema::openai::ListProjectRolesRequest;
 ///
 /// let request = ListProjectRolesRequest::new("project_id_value")
-///     .with_limit(/* value */)
-///     .with_after(/* value */)
 ///     .with_order(/* value */)
 ///;
 /// ```
@@ -13091,10 +11738,6 @@ impl schematic_runtime::EndpointSpec for UnassignProjectGroupRoleRequest {
 pub struct ListProjectRolesRequest {
     /// Path parameter: project_id
     pub project_id: String,
-    /// Query parameter: A limit on the number of roles to return. Defaults to 1000.
-    pub limit: Option<i64>,
-    /// Query parameter: Cursor for pagination. Provide the value from the previous response's `next` field to continue listing roles.
-    pub after: Option<String>,
     /// Query parameter: Sort order for the returned roles.
     pub order: Option<String>,
 }
@@ -13103,20 +11746,8 @@ impl ListProjectRolesRequest {
     pub fn new(project_id: impl Into<String>) -> Self {
         Self {
             project_id: project_id.into(),
-            limit: None,
-            after: None,
             order: None,
         }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
@@ -13128,8 +11759,6 @@ impl From<&str> for ListProjectRolesRequest {
     fn from(param: &str) -> Self {
         Self {
             project_id: param.to_string(),
-            limit: None,
-            after: None,
             order: None,
         }
     }
@@ -13138,8 +11767,6 @@ impl From<String> for ListProjectRolesRequest {
     fn from(param: String) -> Self {
         Self {
             project_id: param,
-            limit: None,
-            after: None,
             order: None,
         }
     }
@@ -13158,12 +11785,6 @@ impl schematic_runtime::EndpointSpec for ListProjectRolesRequest {
             "/projects/{}/roles", urlencoding::encode(& self.project_id.to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
         }
@@ -13420,8 +12041,6 @@ impl schematic_runtime::EndpointSpec for DeleteProjectRoleRequest {
 /// use schematic_schema::openai::ListProjectUserRoleAssignmentsRequest;
 ///
 /// let request = ListProjectUserRoleAssignmentsRequest::new("project_id_value", "user_id_value")
-///     .with_limit(/* value */)
-///     .with_after(/* value */)
 ///     .with_order(/* value */)
 ///;
 /// ```
@@ -13431,10 +12050,6 @@ pub struct ListProjectUserRoleAssignmentsRequest {
     pub project_id: String,
     /// Path parameter: user_id
     pub user_id: String,
-    /// Query parameter: A limit on the number of project role assignments to return.
-    pub limit: Option<i64>,
-    /// Query parameter: Cursor for pagination. Provide the value from the previous response's `next` field to continue listing project roles.
-    pub after: Option<String>,
     /// Query parameter: Sort order for the returned project roles.
     pub order: Option<String>,
 }
@@ -13444,20 +12059,8 @@ impl ListProjectUserRoleAssignmentsRequest {
         Self {
             project_id: project_id.into(),
             user_id: user_id.into(),
-            limit: None,
-            after: None,
             order: None,
         }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
@@ -13480,12 +12083,6 @@ impl schematic_runtime::EndpointSpec for ListProjectUserRoleAssignmentsRequest {
             .to_string()), urlencoding::encode(& self.user_id.to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
         }
@@ -14569,9 +13166,7 @@ impl schematic_runtime::EndpointSpec for CancelResponseRequest {
 /// use schematic_schema::openai::ListInputItemsRequest;
 ///
 /// let request = ListInputItemsRequest::new("response_id_value")
-///     .with_limit(/* value */)
 ///     .with_order(/* value */)
-///     .with_after(/* value */)
 ///     .with_include(/* value */)
 ///;
 /// ```
@@ -14579,18 +13174,11 @@ impl schematic_runtime::EndpointSpec for CancelResponseRequest {
 pub struct ListInputItemsRequest {
     /// Path parameter: response_id
     pub response_id: String,
-    /** Query parameter: A limit on the number of objects to be returned. Limit can range between
-1 and 100, and the default is 20.
-*/
-    pub limit: Option<i64>,
     /** Query parameter: The order to return the input items in. Default is `desc`.
 - `asc`: Return the input items in ascending order.
 - `desc`: Return the input items in descending order.
 */
     pub order: Option<String>,
-    /** Query parameter: An item ID to list items after, used in pagination.
-*/
-    pub after: Option<String>,
     /** Query parameter: Additional fields to include in the response. See the `include`
 parameter for Response creation above for more information.
 */
@@ -14601,25 +13189,13 @@ impl ListInputItemsRequest {
     pub fn new(response_id: impl Into<String>) -> Self {
         Self {
             response_id: response_id.into(),
-            limit: None,
             order: None,
-            after: None,
             include: None,
         }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
         self.order = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
         self
     }
     /// Sets the `include` query parameter.
@@ -14632,9 +13208,7 @@ impl From<&str> for ListInputItemsRequest {
     fn from(param: &str) -> Self {
         Self {
             response_id: param.to_string(),
-            limit: None,
             order: None,
-            after: None,
             include: None,
         }
     }
@@ -14643,9 +13217,7 @@ impl From<String> for ListInputItemsRequest {
     fn from(param: String) -> Self {
         Self {
             response_id: param,
-            limit: None,
             order: None,
-            after: None,
             include: None,
         }
     }
@@ -14665,14 +13237,8 @@ impl schematic_runtime::EndpointSpec for ListInputItemsRequest {
             .to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref values) = self.include {
             for value in values {
@@ -14947,55 +13513,23 @@ impl schematic_runtime::EndpointSpec for AddUploadPartRequest {
 /// use schematic_schema::openai::ListVectorStoresRequest;
 ///
 /// let request = ListVectorStoresRequest::default()
-///     .with_limit(/* value */)
 ///     .with_order(/* value */)
-///     .with_after(/* value */)
-///     .with_before(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListVectorStoresRequest {
-    /** Query parameter: A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-*/
-    pub limit: Option<i64>,
     /** Query parameter: Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
 */
     pub order: Option<String>,
-    /** Query parameter: A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-*/
-    pub after: Option<String>,
-    /** Query parameter: A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
-*/
-    pub before: Option<String>,
 }
 impl ListVectorStoresRequest {
     /// Creates a new request with default values.
     pub fn new() -> Self {
-        Self {
-            limit: None,
-            order: None,
-            after: None,
-            before: None,
-        }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
+        Self { order: None }
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
         self.order = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
-    }
-    /// Sets the `before` query parameter.
-    pub fn with_before(mut self, value: String) -> Self {
-        self.before = Some(value);
         self
     }
 }
@@ -15011,17 +13545,8 @@ impl schematic_runtime::EndpointSpec for ListVectorStoresRequest {
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/vector_stores".to_string();
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.before {
-            query.push(("before".to_string(), value.to_string()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -15451,10 +13976,7 @@ impl schematic_runtime::EndpointSpec for CancelVectorStoreFileBatchRequest {
 /// use schematic_schema::openai::ListFilesInVectorStoreBatchRequest;
 ///
 /// let request = ListFilesInVectorStoreBatchRequest::new("vector_store_id_value", "batch_id_value")
-///     .with_limit(/* value */)
 ///     .with_order(/* value */)
-///     .with_after(/* value */)
-///     .with_before(/* value */)
 ///     .with_filter(/* value */)
 ///;
 /// ```
@@ -15464,18 +13986,9 @@ pub struct ListFilesInVectorStoreBatchRequest {
     pub vector_store_id: String,
     /// Path parameter: batch_id
     pub batch_id: String,
-    /** Query parameter: A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-*/
-    pub limit: Option<i64>,
     /** Query parameter: Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
 */
     pub order: Option<String>,
-    /** Query parameter: A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-*/
-    pub after: Option<String>,
-    /** Query parameter: A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
-*/
-    pub before: Option<String>,
     /// Query parameter: Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`.
     pub filter: Option<String>,
 }
@@ -15485,31 +13998,13 @@ impl ListFilesInVectorStoreBatchRequest {
         Self {
             vector_store_id: vector_store_id.into(),
             batch_id: batch_id.into(),
-            limit: None,
             order: None,
-            after: None,
-            before: None,
             filter: None,
         }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
         self.order = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
-    }
-    /// Sets the `before` query parameter.
-    pub fn with_before(mut self, value: String) -> Self {
-        self.before = Some(value);
         self
     }
     /// Sets the `filter` query parameter.
@@ -15534,17 +14029,8 @@ impl schematic_runtime::EndpointSpec for ListFilesInVectorStoreBatchRequest {
             .to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.before {
-            query.push(("before".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.filter {
             query.push(("filter".to_string(), value.to_string()));
@@ -15567,10 +14053,7 @@ impl schematic_runtime::EndpointSpec for ListFilesInVectorStoreBatchRequest {
 /// use schematic_schema::openai::ListVectorStoreFilesRequest;
 ///
 /// let request = ListVectorStoreFilesRequest::new("vector_store_id_value")
-///     .with_limit(/* value */)
 ///     .with_order(/* value */)
-///     .with_after(/* value */)
-///     .with_before(/* value */)
 ///     .with_filter(/* value */)
 ///;
 /// ```
@@ -15578,18 +14061,9 @@ impl schematic_runtime::EndpointSpec for ListFilesInVectorStoreBatchRequest {
 pub struct ListVectorStoreFilesRequest {
     /// Path parameter: vector_store_id
     pub vector_store_id: String,
-    /** Query parameter: A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-*/
-    pub limit: Option<i64>,
     /** Query parameter: Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
 */
     pub order: Option<String>,
-    /** Query parameter: A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-*/
-    pub after: Option<String>,
-    /** Query parameter: A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
-*/
-    pub before: Option<String>,
     /// Query parameter: Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`.
     pub filter: Option<String>,
 }
@@ -15598,31 +14072,13 @@ impl ListVectorStoreFilesRequest {
     pub fn new(vector_store_id: impl Into<String>) -> Self {
         Self {
             vector_store_id: vector_store_id.into(),
-            limit: None,
             order: None,
-            after: None,
-            before: None,
             filter: None,
         }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
         self.order = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
-    }
-    /// Sets the `before` query parameter.
-    pub fn with_before(mut self, value: String) -> Self {
-        self.before = Some(value);
         self
     }
     /// Sets the `filter` query parameter.
@@ -15635,10 +14091,7 @@ impl From<&str> for ListVectorStoreFilesRequest {
     fn from(param: &str) -> Self {
         Self {
             vector_store_id: param.to_string(),
-            limit: None,
             order: None,
-            after: None,
-            before: None,
             filter: None,
         }
     }
@@ -15647,10 +14100,7 @@ impl From<String> for ListVectorStoreFilesRequest {
     fn from(param: String) -> Self {
         Self {
             vector_store_id: param,
-            limit: None,
             order: None,
-            after: None,
-            before: None,
             filter: None,
         }
     }
@@ -15670,17 +14120,8 @@ impl schematic_runtime::EndpointSpec for ListVectorStoreFilesRequest {
             .to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.before {
-            query.push(("before".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.filter {
             query.push(("filter".to_string(), value.to_string()));
@@ -16748,42 +15189,22 @@ impl schematic_runtime::EndpointSpec for CreatecontentprovenancecheckRequest {
 /// use schematic_schema::openai::ListVideosRequest;
 ///
 /// let request = ListVideosRequest::default()
-///     .with_limit(/* value */)
 ///     .with_order(/* value */)
-///     .with_after(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListVideosRequest {
-    /// Query parameter: Number of items to retrieve
-    pub limit: Option<i64>,
     /// Query parameter: Sort order of results by timestamp. Use `asc` for ascending order or `desc` for descending order.
     pub order: Option<serde_json::Value>,
-    /// Query parameter: Identifier for the last item from the previous pagination request
-    pub after: Option<String>,
 }
 impl ListVideosRequest {
     /// Creates a new request with default values.
     pub fn new() -> Self {
-        Self {
-            limit: None,
-            order: None,
-            after: None,
-        }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
+        Self { order: None }
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: serde_json::Value) -> Self {
         self.order = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
         self
     }
 }
@@ -16799,14 +15220,8 @@ impl schematic_runtime::EndpointSpec for ListVideosRequest {
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/videos".to_string();
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -17509,42 +15924,22 @@ impl schematic_runtime::EndpointSpec for CompactconversationRequest {
 /// use schematic_schema::openai::ListSkillsRequest;
 ///
 /// let request = ListSkillsRequest::default()
-///     .with_limit(/* value */)
 ///     .with_order(/* value */)
-///     .with_after(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListSkillsRequest {
-    /// Query parameter: Number of items to retrieve
-    pub limit: Option<i64>,
     /// Query parameter: Sort order of results by timestamp. Use `asc` for ascending order or `desc` for descending order.
     pub order: Option<serde_json::Value>,
-    /// Query parameter: Identifier for the last item from the previous pagination request
-    pub after: Option<String>,
 }
 impl ListSkillsRequest {
     /// Creates a new request with default values.
     pub fn new() -> Self {
-        Self {
-            limit: None,
-            order: None,
-            after: None,
-        }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
+        Self { order: None }
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: serde_json::Value) -> Self {
         self.order = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
         self
     }
 }
@@ -17560,14 +15955,8 @@ impl schematic_runtime::EndpointSpec for ListSkillsRequest {
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/skills".to_string();
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -17878,45 +16267,27 @@ impl schematic_runtime::EndpointSpec for GetSkillContentRequest {
 /// use schematic_schema::openai::ListSkillVersionsRequest;
 ///
 /// let request = ListSkillVersionsRequest::new("skill_id_value")
-///     .with_limit(/* value */)
 ///     .with_order(/* value */)
-///     .with_after(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListSkillVersionsRequest {
     /// Path parameter: skill_id
     pub skill_id: String,
-    /// Query parameter: Number of versions to retrieve.
-    pub limit: Option<i64>,
     /// Query parameter: Sort order of results by version number.
     pub order: Option<serde_json::Value>,
-    /// Query parameter: The skill version ID to start after.
-    pub after: Option<String>,
 }
 impl ListSkillVersionsRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(skill_id: impl Into<String>) -> Self {
         Self {
             skill_id: skill_id.into(),
-            limit: None,
             order: None,
-            after: None,
         }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: serde_json::Value) -> Self {
         self.order = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
         self
     }
 }
@@ -17924,9 +16295,7 @@ impl From<&str> for ListSkillVersionsRequest {
     fn from(param: &str) -> Self {
         Self {
             skill_id: param.to_string(),
-            limit: None,
             order: None,
-            after: None,
         }
     }
 }
@@ -17934,9 +16303,7 @@ impl From<String> for ListSkillVersionsRequest {
     fn from(param: String) -> Self {
         Self {
             skill_id: param,
-            limit: None,
             order: None,
-            after: None,
         }
     }
 }
@@ -17954,14 +16321,8 @@ impl schematic_runtime::EndpointSpec for ListSkillVersionsRequest {
             "/skills/{}/versions", urlencoding::encode(& self.skill_id.to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -18314,54 +16675,27 @@ impl schematic_runtime::EndpointSpec for CreateChatSessionMethodRequest {
 /// use schematic_schema::openai::ListThreadItemsMethodRequest;
 ///
 /// let request = ListThreadItemsMethodRequest::new("thread_id_value")
-///     .with_limit(/* value */)
 ///     .with_order(/* value */)
-///     .with_after(/* value */)
-///     .with_before(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListThreadItemsMethodRequest {
     /// Path parameter: thread_id
     pub thread_id: String,
-    /// Query parameter: Maximum number of thread items to return. Defaults to 20.
-    pub limit: Option<i64>,
     /// Query parameter: Sort order for results by creation time. Defaults to `desc`.
     pub order: Option<serde_json::Value>,
-    /// Query parameter: List items created after this thread item ID. Defaults to null for the first page.
-    pub after: Option<String>,
-    /// Query parameter: List items created before this thread item ID. Defaults to null for the newest results.
-    pub before: Option<String>,
 }
 impl ListThreadItemsMethodRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(thread_id: impl Into<String>) -> Self {
         Self {
             thread_id: thread_id.into(),
-            limit: None,
             order: None,
-            after: None,
-            before: None,
         }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: serde_json::Value) -> Self {
         self.order = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
-    }
-    /// Sets the `before` query parameter.
-    pub fn with_before(mut self, value: String) -> Self {
-        self.before = Some(value);
         self
     }
 }
@@ -18369,10 +16703,7 @@ impl From<&str> for ListThreadItemsMethodRequest {
     fn from(param: &str) -> Self {
         Self {
             thread_id: param.to_string(),
-            limit: None,
             order: None,
-            after: None,
-            before: None,
         }
     }
 }
@@ -18380,10 +16711,7 @@ impl From<String> for ListThreadItemsMethodRequest {
     fn from(param: String) -> Self {
         Self {
             thread_id: param,
-            limit: None,
             order: None,
-            after: None,
-            before: None,
         }
     }
 }
@@ -18402,17 +16730,8 @@ impl schematic_runtime::EndpointSpec for ListThreadItemsMethodRequest {
             .to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.before {
-            query.push(("before".to_string(), value.to_string()));
         }
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
@@ -18550,55 +16869,25 @@ impl schematic_runtime::EndpointSpec for DeleteThreadMethodRequest {
 /// use schematic_schema::openai::ListThreadsMethodRequest;
 ///
 /// let request = ListThreadsMethodRequest::default()
-///     .with_limit(/* value */)
 ///     .with_order(/* value */)
-///     .with_after(/* value */)
-///     .with_before(/* value */)
 ///     .with_user(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListThreadsMethodRequest {
-    /// Query parameter: Maximum number of thread items to return. Defaults to 20.
-    pub limit: Option<i64>,
     /// Query parameter: Sort order for results by creation time. Defaults to `desc`.
     pub order: Option<serde_json::Value>,
-    /// Query parameter: List items created after this thread item ID. Defaults to null for the first page.
-    pub after: Option<String>,
-    /// Query parameter: List items created before this thread item ID. Defaults to null for the newest results.
-    pub before: Option<String>,
     /// Query parameter: Filter threads that belong to this user identifier. Defaults to null to return all users.
     pub user: Option<String>,
 }
 impl ListThreadsMethodRequest {
     /// Creates a new request with default values.
     pub fn new() -> Self {
-        Self {
-            limit: None,
-            order: None,
-            after: None,
-            before: None,
-            user: None,
-        }
-    }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
+        Self { order: None, user: None }
     }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: serde_json::Value) -> Self {
         self.order = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
-        self
-    }
-    /// Sets the `before` query parameter.
-    pub fn with_before(mut self, value: String) -> Self {
-        self.before = Some(value);
         self
     }
     /// Sets the `user` query parameter.
@@ -18619,17 +16908,8 @@ impl schematic_runtime::EndpointSpec for ListThreadsMethodRequest {
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/chatkit/threads".to_string();
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.before {
-            query.push(("before".to_string(), value.to_string()));
         }
         if let Some(ref value) = self.user {
             query.push(("user".to_string(), value.to_string()));
@@ -19127,9 +17407,7 @@ impl schematic_runtime::EndpointSpec for BetaCompactconversationRequest {
 /// use schematic_schema::openai::BetaListInputItemsRequest;
 ///
 /// let request = BetaListInputItemsRequest::new("response_id_value")
-///     .with_limit(/* value */)
 ///     .with_order(/* value */)
-///     .with_after(/* value */)
 ///     .with_include(/* value */)
 ///     .with_openai_beta(/* value */)
 ///;
@@ -19138,18 +17416,11 @@ impl schematic_runtime::EndpointSpec for BetaCompactconversationRequest {
 pub struct BetaListInputItemsRequest {
     /// Path parameter: response_id
     pub response_id: String,
-    /** Query parameter: A limit on the number of objects to be returned. Limit can range between
-1 and 100, and the default is 20.
-*/
-    pub limit: Option<i64>,
     /** Query parameter: The order to return the input items in. Default is `desc`.
 - `asc`: Return the input items in ascending order.
 - `desc`: Return the input items in descending order.
 */
     pub order: Option<String>,
-    /** Query parameter: An item ID to list items after, used in pagination.
-*/
-    pub after: Option<String>,
     /** Query parameter: Additional fields to include in the response. See the `include`
 parameter for Response creation above for more information.
 */
@@ -19163,26 +17434,14 @@ impl BetaListInputItemsRequest {
     pub fn new(response_id: impl Into<String>) -> Self {
         Self {
             response_id: response_id.into(),
-            limit: None,
             order: None,
-            after: None,
             include: None,
             openai_beta: None,
         }
     }
-    /// Sets the `limit` query parameter.
-    pub fn with_limit(mut self, value: i64) -> Self {
-        self.limit = Some(value);
-        self
-    }
     /// Sets the `order` query parameter.
     pub fn with_order(mut self, value: String) -> Self {
         self.order = Some(value);
-        self
-    }
-    /// Sets the `after` query parameter.
-    pub fn with_after(mut self, value: String) -> Self {
-        self.after = Some(value);
         self
     }
     /// Sets the `include` query parameter.
@@ -19200,9 +17459,7 @@ impl From<&str> for BetaListInputItemsRequest {
     fn from(param: &str) -> Self {
         Self {
             response_id: param.to_string(),
-            limit: None,
             order: None,
-            after: None,
             include: None,
             openai_beta: None,
         }
@@ -19212,9 +17469,7 @@ impl From<String> for BetaListInputItemsRequest {
     fn from(param: String) -> Self {
         Self {
             response_id: param,
-            limit: None,
             order: None,
-            after: None,
             include: None,
             openai_beta: None,
         }
@@ -19235,14 +17490,8 @@ impl schematic_runtime::EndpointSpec for BetaListInputItemsRequest {
             .to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.limit {
-            query.push(("limit".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.order {
             query.push(("order".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.after {
-            query.push(("after".to_string(), value.to_string()));
         }
         if let Some(ref values) = self.include {
             for value in values {
@@ -19345,6 +17594,3150 @@ impl schematic_runtime::EndpointSpec for BetaGetinputtokencountsRequest {
         })
     }
 }
+impl schematic_runtime::pager::Paginated for ListVoiceConsentsRequest {
+    type Item = VoiceConsentResource;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/audio/voice_consents";
+}
+impl schematic_runtime::pager::ResumeAfter for ListVoiceConsentsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListVoiceConsentsRequest {}
+impl schematic_runtime::pager::Paginated for ListBatchesRequest {
+    type Item = Batch;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/batches";
+}
+impl schematic_runtime::pager::ResumeAfter for ListBatchesRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListBatchesRequest {}
+impl schematic_runtime::pager::Paginated for ListChatCompletionsRequest {
+    type Item = CreateChatCompletionResponse;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: None,
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/chat/completions";
+}
+impl schematic_runtime::pager::ResumeAfter for ListChatCompletionsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListChatCompletionsRequest {}
+impl schematic_runtime::pager::Paginated for GetChatCompletionMessagesRequest {
+    type Item = serde_json::Value;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: None,
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/chat/completions/{completion_id}/messages";
+}
+impl schematic_runtime::pager::ResumeAfter for GetChatCompletionMessagesRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for GetChatCompletionMessagesRequest {}
+impl schematic_runtime::pager::Paginated for ListContainersRequest {
+    type Item = ContainerResource;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/containers";
+}
+impl schematic_runtime::pager::ResumeAfter for ListContainersRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListContainersRequest {}
+impl schematic_runtime::pager::Paginated for ListContainerFilesRequest {
+    type Item = ContainerFileResource;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/containers/{container_id}/files";
+}
+impl schematic_runtime::pager::ResumeAfter for ListContainerFilesRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListContainerFilesRequest {}
+impl schematic_runtime::pager::Paginated for ListConversationItemsRequest {
+    type Item = ConversationItem;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/conversations/{conversation_id}/items";
+}
+impl schematic_runtime::pager::ResumeAfter for ListConversationItemsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListConversationItemsRequest {}
+impl schematic_runtime::pager::Paginated for ListEvalsRequest {
+    type Item = Eval;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: None,
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/evals";
+}
+impl schematic_runtime::pager::ResumeAfter for ListEvalsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListEvalsRequest {}
+impl schematic_runtime::pager::Paginated for GetEvalRunsRequest {
+    type Item = EvalRun;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: None,
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/evals/{eval_id}/runs";
+}
+impl schematic_runtime::pager::ResumeAfter for GetEvalRunsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for GetEvalRunsRequest {}
+impl schematic_runtime::pager::Paginated for GetEvalRunOutputItemsRequest {
+    type Item = EvalRunOutputItem;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: None,
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/evals/{eval_id}/runs/{run_id}/output_items";
+}
+impl schematic_runtime::pager::ResumeAfter for GetEvalRunOutputItemsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for GetEvalRunOutputItemsRequest {}
+impl schematic_runtime::pager::Paginated for ListFilesRequest {
+    type Item = OpenAIFile;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(10000),
+            sent_default: None,
+            min: 1,
+            max: Some(10000),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/files";
+}
+impl schematic_runtime::pager::ResumeAfter for ListFilesRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListFilesRequest {}
+impl schematic_runtime::pager::Paginated for ListFineTuningCheckpointPermissionsRequest {
+    type Item = FineTuningCheckpointPermission;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: None,
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/fine_tuning/checkpoints/{fine_tuned_model_checkpoint}/permissions";
+}
+impl schematic_runtime::pager::ResumeAfter
+for ListFineTuningCheckpointPermissionsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob
+for ListFineTuningCheckpointPermissionsRequest {}
+impl schematic_runtime::pager::Paginated for ListPaginatedFineTuningJobsRequest {
+    type Item = FineTuningJob;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::LastItem(
+                            &["id"],
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: None,
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/fine_tuning/jobs";
+}
+impl schematic_runtime::pager::ResumeAfter for ListPaginatedFineTuningJobsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListPaginatedFineTuningJobsRequest {}
+impl schematic_runtime::pager::Paginated for ListFineTuningJobCheckpointsRequest {
+    type Item = FineTuningJobCheckpoint;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: None,
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/fine_tuning/jobs/{fine_tuning_job_id}/checkpoints";
+}
+impl schematic_runtime::pager::ResumeAfter for ListFineTuningJobCheckpointsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListFineTuningJobCheckpointsRequest {}
+impl schematic_runtime::pager::Paginated for ListFineTuningEventsRequest {
+    type Item = FineTuningJobEvent;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::LastItem(
+                            &["id"],
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: None,
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/fine_tuning/jobs/{fine_tuning_job_id}/events";
+}
+impl schematic_runtime::pager::ResumeAfter for ListFineTuningEventsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListFineTuningEventsRequest {}
+impl schematic_runtime::pager::Paginated for AdminApiKeysListRequest {
+    type Item = AdminApiKey;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: None,
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/admin_api_keys";
+}
+impl schematic_runtime::pager::ResumeAfter for AdminApiKeysListRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for AdminApiKeysListRequest {}
+impl schematic_runtime::pager::Paginated for ListAuditLogsRequest {
+    type Item = AuditLog;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: Some(schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("before"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["first_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            }),
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/audit_logs";
+}
+impl schematic_runtime::pager::ResumeAfter for ListAuditLogsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::ResumeBefore for ListAuditLogsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListAuditLogsRequest {}
+impl schematic_runtime::pager::HasPrev for ListAuditLogsRequest {}
+impl schematic_runtime::pager::Paginated for ListOrganizationCertificatesRequest {
+    type Item = OrganizationCertificate;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/certificates";
+}
+impl schematic_runtime::pager::ResumeAfter for ListOrganizationCertificatesRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListOrganizationCertificatesRequest {}
+impl schematic_runtime::pager::Paginated for UsageCostsRequest {
+    type Item = UsageTimeBucket;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("page"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["next_page"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(7),
+            sent_default: None,
+            min: 1,
+            max: Some(180),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/costs";
+}
+impl schematic_runtime::pager::ResumeAfter for UsageCostsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for UsageCostsRequest {}
+impl schematic_runtime::pager::Paginated for ListGroupsRequest {
+    type Item = GroupResponse;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["next"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(100),
+            sent_default: None,
+            min: 1,
+            max: Some(1000),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/groups";
+}
+impl schematic_runtime::pager::ResumeAfter for ListGroupsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListGroupsRequest {}
+impl schematic_runtime::pager::Paginated for ListGroupRoleAssignmentsRequest {
+    type Item = AssignedRoleDetails;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["next"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: Some(1000),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/groups/{group_id}/roles";
+}
+impl schematic_runtime::pager::ResumeAfter for ListGroupRoleAssignmentsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListGroupRoleAssignmentsRequest {}
+impl schematic_runtime::pager::Paginated for ListGroupUsersRequest {
+    type Item = GroupUser;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["next"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(100),
+            sent_default: None,
+            min: 1,
+            max: Some(1000),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/groups/{group_id}/users";
+}
+impl schematic_runtime::pager::ResumeAfter for ListGroupUsersRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListGroupUsersRequest {}
+impl schematic_runtime::pager::Paginated for ListInvitesRequest {
+    type Item = Invite;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/invites";
+}
+impl schematic_runtime::pager::ResumeAfter for ListInvitesRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListInvitesRequest {}
+impl schematic_runtime::pager::Paginated for ListProjectsRequest {
+    type Item = Project;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/projects";
+}
+impl schematic_runtime::pager::ResumeAfter for ListProjectsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListProjectsRequest {}
+impl schematic_runtime::pager::Paginated for ListProjectApiKeysRequest {
+    type Item = ProjectApiKey;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/projects/{project_id}/api_keys";
+}
+impl schematic_runtime::pager::ResumeAfter for ListProjectApiKeysRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListProjectApiKeysRequest {}
+impl schematic_runtime::pager::Paginated for ListProjectCertificatesRequest {
+    type Item = OrganizationProjectCertificate;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/projects/{project_id}/certificates";
+}
+impl schematic_runtime::pager::ResumeAfter for ListProjectCertificatesRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListProjectCertificatesRequest {}
+impl schematic_runtime::pager::Paginated for ListProjectGroupsRequest {
+    type Item = ProjectGroup;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["next"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/projects/{project_id}/groups";
+}
+impl schematic_runtime::pager::ResumeAfter for ListProjectGroupsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListProjectGroupsRequest {}
+impl schematic_runtime::pager::Paginated for ListProjectRateLimitsRequest {
+    type Item = ProjectRateLimit;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: Some(schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("before"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["first_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            }),
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(100),
+            sent_default: None,
+            min: 1,
+            max: None,
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/projects/{project_id}/rate_limits";
+}
+impl schematic_runtime::pager::ResumeAfter for ListProjectRateLimitsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::ResumeBefore for ListProjectRateLimitsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListProjectRateLimitsRequest {}
+impl schematic_runtime::pager::HasPrev for ListProjectRateLimitsRequest {}
+impl schematic_runtime::pager::Paginated for ListProjectServiceAccountsRequest {
+    type Item = ProjectServiceAccount;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/projects/{project_id}/service_accounts";
+}
+impl schematic_runtime::pager::ResumeAfter for ListProjectServiceAccountsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListProjectServiceAccountsRequest {}
+impl schematic_runtime::pager::Paginated for ListProjectSpendAlertsRequest {
+    type Item = ProjectSpendAlert;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: Some(schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("before"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["first_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            }),
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/projects/{project_id}/spend_alerts";
+}
+impl schematic_runtime::pager::ResumeAfter for ListProjectSpendAlertsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::ResumeBefore for ListProjectSpendAlertsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListProjectSpendAlertsRequest {}
+impl schematic_runtime::pager::HasPrev for ListProjectSpendAlertsRequest {}
+impl schematic_runtime::pager::Paginated for ListProjectUsersRequest {
+    type Item = ProjectUser;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/projects/{project_id}/users";
+}
+impl schematic_runtime::pager::ResumeAfter for ListProjectUsersRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListProjectUsersRequest {}
+impl schematic_runtime::pager::Paginated for ListRolesRequest {
+    type Item = Role;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["next"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(1000),
+            sent_default: None,
+            min: 1,
+            max: Some(1000),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/roles";
+}
+impl schematic_runtime::pager::ResumeAfter for ListRolesRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListRolesRequest {}
+impl schematic_runtime::pager::Paginated for ListOrganizationSpendAlertsRequest {
+    type Item = OrganizationSpendAlert;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: Some(schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("before"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["first_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            }),
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/spend_alerts";
+}
+impl schematic_runtime::pager::ResumeAfter for ListOrganizationSpendAlertsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::ResumeBefore for ListOrganizationSpendAlertsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListOrganizationSpendAlertsRequest {}
+impl schematic_runtime::pager::HasPrev for ListOrganizationSpendAlertsRequest {}
+impl schematic_runtime::pager::Paginated for UsageAudioSpeechesRequest {
+    type Item = UsageTimeBucket;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("page"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["next_page"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: None,
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/usage/audio_speeches";
+}
+impl schematic_runtime::pager::ResumeAfter for UsageAudioSpeechesRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for UsageAudioSpeechesRequest {}
+impl schematic_runtime::pager::Paginated for UsageAudioTranscriptionsRequest {
+    type Item = UsageTimeBucket;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("page"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["next_page"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: None,
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/usage/audio_transcriptions";
+}
+impl schematic_runtime::pager::ResumeAfter for UsageAudioTranscriptionsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for UsageAudioTranscriptionsRequest {}
+impl schematic_runtime::pager::Paginated for UsageCodeInterpreterSessionsRequest {
+    type Item = UsageTimeBucket;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("page"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["next_page"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: None,
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/usage/code_interpreter_sessions";
+}
+impl schematic_runtime::pager::ResumeAfter for UsageCodeInterpreterSessionsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for UsageCodeInterpreterSessionsRequest {}
+impl schematic_runtime::pager::Paginated for UsageCompletionsRequest {
+    type Item = UsageTimeBucket;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("page"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["next_page"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: None,
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/usage/completions";
+}
+impl schematic_runtime::pager::ResumeAfter for UsageCompletionsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for UsageCompletionsRequest {}
+impl schematic_runtime::pager::Paginated for UsageEmbeddingsRequest {
+    type Item = UsageTimeBucket;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("page"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["next_page"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: None,
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/usage/embeddings";
+}
+impl schematic_runtime::pager::ResumeAfter for UsageEmbeddingsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for UsageEmbeddingsRequest {}
+impl schematic_runtime::pager::Paginated for UsageFileSearchCallsRequest {
+    type Item = UsageTimeBucket;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("page"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["next_page"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: None,
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/usage/file_search_calls";
+}
+impl schematic_runtime::pager::ResumeAfter for UsageFileSearchCallsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for UsageFileSearchCallsRequest {}
+impl schematic_runtime::pager::Paginated for UsageImagesRequest {
+    type Item = UsageTimeBucket;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("page"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["next_page"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: None,
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/usage/images";
+}
+impl schematic_runtime::pager::ResumeAfter for UsageImagesRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for UsageImagesRequest {}
+impl schematic_runtime::pager::Paginated for UsageModerationsRequest {
+    type Item = UsageTimeBucket;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("page"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["next_page"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: None,
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/usage/moderations";
+}
+impl schematic_runtime::pager::ResumeAfter for UsageModerationsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for UsageModerationsRequest {}
+impl schematic_runtime::pager::Paginated for UsageVectorStoresRequest {
+    type Item = UsageTimeBucket;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("page"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["next_page"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: None,
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/usage/vector_stores";
+}
+impl schematic_runtime::pager::ResumeAfter for UsageVectorStoresRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for UsageVectorStoresRequest {}
+impl schematic_runtime::pager::Paginated for UsageWebSearchCallsRequest {
+    type Item = UsageTimeBucket;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("page"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["next_page"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: None,
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/usage/web_search_calls";
+}
+impl schematic_runtime::pager::ResumeAfter for UsageWebSearchCallsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for UsageWebSearchCallsRequest {}
+impl schematic_runtime::pager::Paginated for ListUsersRequest {
+    type Item = User;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/users";
+}
+impl schematic_runtime::pager::ResumeAfter for ListUsersRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListUsersRequest {}
+impl schematic_runtime::pager::Paginated for ListUserRoleAssignmentsRequest {
+    type Item = AssignedRoleDetails;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["next"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: Some(1000),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/organization/users/{user_id}/roles";
+}
+impl schematic_runtime::pager::ResumeAfter for ListUserRoleAssignmentsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListUserRoleAssignmentsRequest {}
+impl schematic_runtime::pager::Paginated for ListProjectGroupRoleAssignmentsRequest {
+    type Item = AssignedRoleDetails;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["next"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: Some(1000),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/projects/{project_id}/groups/{group_id}/roles";
+}
+impl schematic_runtime::pager::ResumeAfter for ListProjectGroupRoleAssignmentsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListProjectGroupRoleAssignmentsRequest {}
+impl schematic_runtime::pager::Paginated for ListProjectRolesRequest {
+    type Item = Role;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["next"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(1000),
+            sent_default: None,
+            min: 1,
+            max: Some(1000),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/projects/{project_id}/roles";
+}
+impl schematic_runtime::pager::ResumeAfter for ListProjectRolesRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListProjectRolesRequest {}
+impl schematic_runtime::pager::Paginated for ListProjectUserRoleAssignmentsRequest {
+    type Item = AssignedRoleDetails;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["next"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: Some(1000),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/projects/{project_id}/users/{user_id}/roles";
+}
+impl schematic_runtime::pager::ResumeAfter for ListProjectUserRoleAssignmentsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListProjectUserRoleAssignmentsRequest {}
+impl schematic_runtime::pager::Paginated for ListInputItemsRequest {
+    type Item = ItemResource;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/responses/{response_id}/input_items";
+}
+impl schematic_runtime::pager::ResumeAfter for ListInputItemsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListInputItemsRequest {}
+impl schematic_runtime::pager::Paginated for ListVectorStoresRequest {
+    type Item = VectorStoreObject;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: Some(schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("before"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["first_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            }),
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/vector_stores";
+}
+impl schematic_runtime::pager::ResumeAfter for ListVectorStoresRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::ResumeBefore for ListVectorStoresRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListVectorStoresRequest {}
+impl schematic_runtime::pager::HasPrev for ListVectorStoresRequest {}
+impl schematic_runtime::pager::Paginated for ListFilesInVectorStoreBatchRequest {
+    type Item = VectorStoreFileObject;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: Some(schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("before"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["first_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            }),
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/vector_stores/{vector_store_id}/file_batches/{batch_id}/files";
+}
+impl schematic_runtime::pager::ResumeAfter for ListFilesInVectorStoreBatchRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::ResumeBefore for ListFilesInVectorStoreBatchRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListFilesInVectorStoreBatchRequest {}
+impl schematic_runtime::pager::HasPrev for ListFilesInVectorStoreBatchRequest {}
+impl schematic_runtime::pager::Paginated for ListVectorStoreFilesRequest {
+    type Item = VectorStoreFileObject;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: Some(schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("before"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["first_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            }),
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/vector_stores/{vector_store_id}/files";
+}
+impl schematic_runtime::pager::ResumeAfter for ListVectorStoreFilesRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::ResumeBefore for ListVectorStoreFilesRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListVectorStoreFilesRequest {}
+impl schematic_runtime::pager::HasPrev for ListVectorStoreFilesRequest {}
+impl schematic_runtime::pager::Paginated for ListVideosRequest {
+    type Item = VideoResource;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/videos";
+}
+impl schematic_runtime::pager::ResumeAfter for ListVideosRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListVideosRequest {}
+impl schematic_runtime::pager::Paginated for ListSkillsRequest {
+    type Item = SkillResource;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/skills";
+}
+impl schematic_runtime::pager::ResumeAfter for ListSkillsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListSkillsRequest {}
+impl schematic_runtime::pager::Paginated for ListSkillVersionsRequest {
+    type Item = SkillVersionResource;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: None,
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/skills/{skill_id}/versions";
+}
+impl schematic_runtime::pager::ResumeAfter for ListSkillVersionsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListSkillVersionsRequest {}
+impl schematic_runtime::pager::Paginated for ListThreadItemsMethodRequest {
+    type Item = ThreadItem;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: Some(schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("before"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["first_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            }),
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/chatkit/threads/{thread_id}/items";
+}
+impl schematic_runtime::pager::ResumeAfter for ListThreadItemsMethodRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::ResumeBefore for ListThreadItemsMethodRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListThreadItemsMethodRequest {}
+impl schematic_runtime::pager::HasPrev for ListThreadItemsMethodRequest {}
+impl schematic_runtime::pager::Paginated for ListThreadsMethodRequest {
+    type Item = ThreadResource;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: Some(schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("before"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["first_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            }),
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/chatkit/threads";
+}
+impl schematic_runtime::pager::ResumeAfter for ListThreadsMethodRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::ResumeBefore for ListThreadsMethodRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for ListThreadsMethodRequest {}
+impl schematic_runtime::pager::HasPrev for ListThreadsMethodRequest {}
+impl schematic_runtime::pager::Paginated for BetaListInputItemsRequest {
+    type Item = BetaItemResource;
+    type Kind = schematic_runtime::pager::CursorKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::Cursor {
+            forward: schematic_runtime::pager::spec::CursorLeg {
+                parts: &[
+                    schematic_runtime::pager::spec::CursorPart {
+                        param: schematic_runtime::pager::spec::Input::Query("after"),
+                        source: schematic_runtime::pager::spec::CursorSource::Field(
+                            schematic_runtime::pager::spec::Source::Body(&["last_id"]),
+                        ),
+                    },
+                ],
+                boundary: schematic_runtime::pager::spec::Boundary::Exclusive,
+            },
+            backward: None,
+            more: Some(schematic_runtime::pager::spec::MoreSignal::Flag {
+                source: schematic_runtime::pager::spec::Source::Body(&["has_more"]),
+                polarity: schematic_runtime::pager::spec::Polarity::TrueMeansMore,
+            }),
+            resumable: true,
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("limit"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: None,
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[
+            schematic_runtime::pager::spec::Step::Key("data"),
+            schematic_runtime::pager::spec::Step::Each,
+        ],
+        projection: &[],
+    };
+    const PATH: &'static str = "/responses/{response_id}/input_items?beta=true";
+}
+impl schematic_runtime::pager::ResumeAfter for BetaListInputItemsRequest {
+    type Cursor = String;
+}
+impl schematic_runtime::pager::PageSizeKnob for BetaListInputItemsRequest {}
 /// A call to the `CreateSpeech` endpoint, returned by [`OpenAI::create_speech`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
@@ -19501,20 +20894,14 @@ impl<'a> ::core::future::IntoFuture for CreateTranslationCall<'a> {
 /// A call to the `ListVoiceConsents` endpoint, returned by [`OpenAI::list_voice_consents`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListVoiceConsentsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListVoiceConsentsRequest>,
 );
 impl<'a> ListVoiceConsentsCall<'a> {
-    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -19543,6 +20930,58 @@ impl<'a> ListVoiceConsentsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListVoiceConsentsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListVoiceConsentsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListVoiceConsentsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListVoiceConsentsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListVoiceConsentsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListVoiceConsentsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListVoiceConsentsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListVoiceConsentsCall<'a> {
@@ -19813,20 +21252,14 @@ impl<'a> ::core::future::IntoFuture for CreateVoiceCall<'a> {
 /// A call to the `ListBatches` endpoint, returned by [`OpenAI::list_batches`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListBatchesCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListBatchesRequest>,
 );
 impl<'a> ListBatchesCall<'a> {
-    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -19853,6 +21286,58 @@ impl<'a> ListBatchesCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListBatchesRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListBatchesRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListBatchesRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListBatchesRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListBatchesRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListBatchesRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListBatchesRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListBatchesCall<'a> {
@@ -20019,6 +21504,8 @@ impl<'a> ::core::future::IntoFuture for CancelBatchCall<'a> {
 /// A call to the `ListChatCompletions` endpoint, returned by [`OpenAI::list_chat_completions`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListChatCompletionsCall<'a>(
@@ -20032,14 +21519,6 @@ impl<'a> ListChatCompletionsCall<'a> {
     /// Sets the `metadata` query parameter (`serde_json::Value`). A list of metadata keys to filter the Chat Completions by. Example: `metadata[key1]=value1&metadata[key2]=value2`
     pub fn metadata(self, value: serde_json::Value) -> Self {
         Self(self.0.map_request(|request| request.with_metadata(value)))
-    }
-    /// Sets the `after` query parameter (`String`). Identifier for the last chat completion from the previous pagination request.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
-    /// Sets the `limit` query parameter (`i64`). Number of Chat Completions to retrieve.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
     }
     /// Sets the `order` query parameter (`String`). Sort order for Chat Completions by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
     pub fn order(self, value: String) -> Self {
@@ -20073,6 +21552,58 @@ impl<'a> ListChatCompletionsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListChatCompletionsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListChatCompletionsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListChatCompletionsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListChatCompletionsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListChatCompletionsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListChatCompletionsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListChatCompletionsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListChatCompletionsCall<'a> {
@@ -20294,20 +21825,14 @@ impl<'a> ::core::future::IntoFuture for DeleteChatCompletionCall<'a> {
 /// A call to the `GetChatCompletionMessages` endpoint, returned by [`OpenAI::get_chat_completion_messages`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetChatCompletionMessagesCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, GetChatCompletionMessagesRequest>,
 );
 impl<'a> GetChatCompletionMessagesCall<'a> {
-    /// Sets the `after` query parameter (`String`). Identifier for the last message from the previous pagination request.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
-    /// Sets the `limit` query parameter (`i64`). Number of messages to retrieve.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `order` query parameter (`String`). Sort order for messages by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
@@ -20340,6 +21865,74 @@ impl<'a> GetChatCompletionMessagesCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        GetChatCompletionMessagesRequest,
+    > {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <GetChatCompletionMessagesRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        GetChatCompletionMessagesRequest,
+    > {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        GetChatCompletionMessagesRequest,
+    > {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<
+        'a,
+        OpenAIApi,
+        GetChatCompletionMessagesRequest,
+    > {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<GetChatCompletionMessagesRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<GetChatCompletionMessagesRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for GetChatCompletionMessagesCall<'a> {
@@ -20408,23 +22001,17 @@ impl<'a> ::core::future::IntoFuture for CreateCompletionCall<'a> {
 /// A call to the `ListContainers` endpoint, returned by [`OpenAI::list_containers`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListContainersCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListContainersRequest>,
 );
 impl<'a> ListContainersCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
-    }
-    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
     }
     /// Sets the `name` query parameter (`String`). Filter results by container name.
     pub fn name(self, value: String) -> Self {
@@ -20458,6 +22045,58 @@ impl<'a> ListContainersCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListContainersRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListContainersRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListContainersRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListContainersRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListContainersRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListContainersRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListContainersRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListContainersCall<'a> {
@@ -20628,23 +22267,17 @@ impl<'a> ::core::future::IntoFuture for DeleteContainerCall<'a> {
 /// A call to the `ListContainerFiles` endpoint, returned by [`OpenAI::list_container_files`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListContainerFilesCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListContainerFilesRequest>,
 );
 impl<'a> ListContainerFilesCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
-    }
-    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
@@ -20674,6 +22307,58 @@ impl<'a> ListContainerFilesCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListContainerFilesRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListContainerFilesRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListContainerFilesRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListContainerFilesRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListContainerFilesRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListContainerFilesRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListContainerFilesRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListContainerFilesCall<'a> {
@@ -20899,23 +22584,17 @@ impl<'a> ::core::future::IntoFuture for RetrieveContainerFileContentCall<'a> {
 /// A call to the `ListConversationItems` endpoint, returned by [`OpenAI::list_conversation_items`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListConversationItemsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListConversationItemsRequest>,
 );
 impl<'a> ListConversationItemsCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `order` query parameter (`String`). The order to return the input items in. Default is `desc`. - `asc`: Return the input items in ascending order. - `desc`: Return the input items in descending order.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
-    }
-    /// Sets the `after` query parameter (`String`). An item ID to list items after, used in pagination.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
     }
     /// Sets the `include` query parameter (`Vec<serde_json::Value>`). Specify additional output data to include in the model response. Currently supported values are: - `web_search_call.action.sources`: Include the sources of the web search tool call. - `code_interpreter_call.outputs`: Includes the outputs of python code execution in code interpreter tool call items. - `computer_call_output.output.image_url`: Include image urls from the computer call output. - `file_search_call.results`: Include the search results of the file search tool call. - `message.input_image.image_url`: Include image urls from the input message. - `message.output_text.logprobs`: Include logprobs with assistant messages. - `reasoning.encrypted_content`: Includes an encrypted version of reasoning tokens in reasoning item outputs. This enables reasoning items to be used in multi-turn conversations when using the Responses API statelessly (like when the `store` parameter is set to `false`, or when an organization is enrolled in the zero data retention program).
     pub fn include(self, value: Vec<serde_json::Value>) -> Self {
@@ -20949,6 +22628,58 @@ impl<'a> ListConversationItemsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListConversationItemsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListConversationItemsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListConversationItemsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListConversationItemsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListConversationItemsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListConversationItemsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListConversationItemsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListConversationItemsCall<'a> {
@@ -21178,18 +22909,12 @@ impl<'a> ::core::future::IntoFuture for CreateEmbeddingCall<'a> {
 /// A call to the `ListEvals` endpoint, returned by [`OpenAI::list_evals`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListEvalsCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListEvalsRequest>);
 impl<'a> ListEvalsCall<'a> {
-    /// Sets the `after` query parameter (`String`). Identifier for the last eval from the previous pagination request.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
-    /// Sets the `limit` query parameter (`i64`). Number of evals to retrieve.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `order` query parameter (`String`). Sort order for evals by timestamp. Use `asc` for ascending order or `desc` for descending order.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
@@ -21224,6 +22949,58 @@ impl<'a> ListEvalsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListEvalsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListEvalsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListEvalsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListEvalsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListEvalsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListEvalsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListEvalsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListEvalsCall<'a> {
@@ -21429,20 +23206,14 @@ impl<'a> ::core::future::IntoFuture for DeleteEvalCall<'a> {
 /// A call to the `GetEvalRuns` endpoint, returned by [`OpenAI::get_eval_runs`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetEvalRunsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, GetEvalRunsRequest>,
 );
 impl<'a> GetEvalRunsCall<'a> {
-    /// Sets the `after` query parameter (`String`). Identifier for the last run from the previous pagination request.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
-    /// Sets the `limit` query parameter (`i64`). Number of runs to retrieve.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `order` query parameter (`String`). Sort order for runs by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
@@ -21477,6 +23248,58 @@ impl<'a> GetEvalRunsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, GetEvalRunsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <GetEvalRunsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, GetEvalRunsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, GetEvalRunsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, GetEvalRunsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<GetEvalRunsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<GetEvalRunsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for GetEvalRunsCall<'a> {
@@ -21694,20 +23517,14 @@ impl<'a> ::core::future::IntoFuture for DeleteEvalRunCall<'a> {
 /// A call to the `GetEvalRunOutputItems` endpoint, returned by [`OpenAI::get_eval_run_output_items`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct GetEvalRunOutputItemsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, GetEvalRunOutputItemsRequest>,
 );
 impl<'a> GetEvalRunOutputItemsCall<'a> {
-    /// Sets the `after` query parameter (`String`). Identifier for the last output item from the previous pagination request.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
-    /// Sets the `limit` query parameter (`i64`). Number of output items to retrieve.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `status` query parameter (`String`). Filter output items by status. Use `failed` to filter by failed output items or `pass` to filter by passed output items.
     pub fn status(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_status(value)))
@@ -21744,6 +23561,58 @@ impl<'a> GetEvalRunOutputItemsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, GetEvalRunOutputItemsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <GetEvalRunOutputItemsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, GetEvalRunOutputItemsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, GetEvalRunOutputItemsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, GetEvalRunOutputItemsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<GetEvalRunOutputItemsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<GetEvalRunOutputItemsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for GetEvalRunOutputItemsCall<'a> {
@@ -21812,6 +23681,8 @@ impl<'a> ::core::future::IntoFuture for GetEvalRunOutputItemCall<'a> {
 /// A call to the `ListFiles` endpoint, returned by [`OpenAI::list_files`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListFilesCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListFilesRequest>);
@@ -21820,17 +23691,9 @@ impl<'a> ListFilesCall<'a> {
     pub fn purpose(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_purpose(value)))
     }
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 10,000, and the default is 10,000.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
-    }
-    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
@@ -21858,6 +23721,58 @@ impl<'a> ListFilesCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListFilesRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListFilesRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListFilesRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListFilesRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListFilesRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListFilesRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListFilesRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListFilesCall<'a> {
@@ -22169,6 +24084,8 @@ impl<'a> ::core::future::IntoFuture for ValidateGraderCall<'a> {
 /// A call to the `ListFineTuningCheckpointPermissions` endpoint, returned by [`OpenAI::list_fine_tuning_checkpoint_permissions`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListFineTuningCheckpointPermissionsCall<'a>(
@@ -22178,14 +24095,6 @@ impl<'a> ListFineTuningCheckpointPermissionsCall<'a> {
     /// Sets the `project_id` query parameter (`String`). The ID of the project to get permissions for.
     pub fn project_id(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_project_id(value)))
-    }
-    /// Sets the `after` query parameter (`String`). Identifier for the last permission ID from the previous pagination request.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
-    /// Sets the `limit` query parameter (`i64`). Number of permissions to retrieve.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
     }
     /// Sets the `order` query parameter (`String`). The order in which to retrieve permissions.
     pub fn order(self, value: String) -> Self {
@@ -22223,6 +24132,76 @@ impl<'a> ListFineTuningCheckpointPermissionsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListFineTuningCheckpointPermissionsRequest,
+    > {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListFineTuningCheckpointPermissionsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListFineTuningCheckpointPermissionsRequest,
+    > {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListFineTuningCheckpointPermissionsRequest,
+    > {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<
+        'a,
+        OpenAIApi,
+        ListFineTuningCheckpointPermissionsRequest,
+    > {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListFineTuningCheckpointPermissionsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<
+            ListFineTuningCheckpointPermissionsRequest,
+        >,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListFineTuningCheckpointPermissionsCall<'a> {
@@ -22350,20 +24329,14 @@ impl<'a> ::core::future::IntoFuture for DeleteFineTuningCheckpointPermissionCall
 /// A call to the `ListPaginatedFineTuningJobs` endpoint, returned by [`OpenAI::list_paginated_fine_tuning_jobs`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListPaginatedFineTuningJobsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListPaginatedFineTuningJobsRequest>,
 );
 impl<'a> ListPaginatedFineTuningJobsCall<'a> {
-    /// Sets the `after` query parameter (`String`). Identifier for the last job from the previous pagination request.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
-    /// Sets the `limit` query parameter (`i64`). Number of fine-tuning jobs to retrieve.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `metadata` query parameter (`serde_json::Value`). Optional metadata filter. To filter, use the syntax `metadata[k]=v`. Alternatively, set `metadata=null` to indicate no metadata.
     pub fn metadata(self, value: serde_json::Value) -> Self {
         Self(self.0.map_request(|request| request.with_metadata(value)))
@@ -22396,6 +24369,74 @@ impl<'a> ListPaginatedFineTuningJobsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListPaginatedFineTuningJobsRequest,
+    > {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListPaginatedFineTuningJobsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListPaginatedFineTuningJobsRequest,
+    > {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListPaginatedFineTuningJobsRequest,
+    > {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<
+        'a,
+        OpenAIApi,
+        ListPaginatedFineTuningJobsRequest,
+    > {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListPaginatedFineTuningJobsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListPaginatedFineTuningJobsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListPaginatedFineTuningJobsCall<'a> {
@@ -22566,20 +24607,14 @@ impl<'a> ::core::future::IntoFuture for CancelFineTuningJobCall<'a> {
 /// A call to the `ListFineTuningJobCheckpoints` endpoint, returned by [`OpenAI::list_fine_tuning_job_checkpoints`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListFineTuningJobCheckpointsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListFineTuningJobCheckpointsRequest>,
 );
 impl<'a> ListFineTuningJobCheckpointsCall<'a> {
-    /// Sets the `after` query parameter (`String`). Identifier for the last checkpoint ID from the previous pagination request.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
-    /// Sets the `limit` query parameter (`i64`). Number of checkpoints to retrieve.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -22613,6 +24648,74 @@ impl<'a> ListFineTuningJobCheckpointsCall<'a> {
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListFineTuningJobCheckpointsRequest,
+    > {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListFineTuningJobCheckpointsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListFineTuningJobCheckpointsRequest,
+    > {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListFineTuningJobCheckpointsRequest,
+    > {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<
+        'a,
+        OpenAIApi,
+        ListFineTuningJobCheckpointsRequest,
+    > {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListFineTuningJobCheckpointsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListFineTuningJobCheckpointsRequest>,
+    > {
+        self.0.pager().collect_all()
+    }
 }
 impl<'a> ::core::future::IntoFuture for ListFineTuningJobCheckpointsCall<'a> {
     type Output = <schematic_runtime::Call<
@@ -22629,20 +24732,14 @@ impl<'a> ::core::future::IntoFuture for ListFineTuningJobCheckpointsCall<'a> {
 /// A call to the `ListFineTuningEvents` endpoint, returned by [`OpenAI::list_fine_tuning_events`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListFineTuningEventsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListFineTuningEventsRequest>,
 );
 impl<'a> ListFineTuningEventsCall<'a> {
-    /// Sets the `after` query parameter (`String`). Identifier for the last event from the previous pagination request.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
-    /// Sets the `limit` query parameter (`i64`). Number of events to retrieve.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -22671,6 +24768,58 @@ impl<'a> ListFineTuningEventsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListFineTuningEventsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListFineTuningEventsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListFineTuningEventsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListFineTuningEventsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListFineTuningEventsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListFineTuningEventsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListFineTuningEventsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListFineTuningEventsCall<'a> {
@@ -23139,23 +25288,17 @@ impl<'a> ::core::future::IntoFuture for CreateModerationCall<'a> {
 /// A call to the `AdminApiKeysList` endpoint, returned by [`OpenAI::admin_api_keys_list`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct AdminApiKeysListCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, AdminApiKeysListRequest>,
 );
 impl<'a> AdminApiKeysListCall<'a> {
-    /// Sets the `after` query parameter (`String`).
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
     /// Sets the `order` query parameter (`String`).
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
-    }
-    /// Sets the `limit` query parameter (`i64`).
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
@@ -23185,6 +25328,58 @@ impl<'a> AdminApiKeysListCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, AdminApiKeysListRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <AdminApiKeysListRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, AdminApiKeysListRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, AdminApiKeysListRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, AdminApiKeysListRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<AdminApiKeysListRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<AdminApiKeysListRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for AdminApiKeysListCall<'a> {
@@ -23355,6 +25550,8 @@ impl<'a> ::core::future::IntoFuture for AdminApiKeysDeleteCall<'a> {
 /// A call to the `ListAuditLogs` endpoint, returned by [`OpenAI::list_audit_logs`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListAuditLogsCall<'a>(
@@ -23389,18 +25586,6 @@ impl<'a> ListAuditLogsCall<'a> {
     pub fn tenant_only(self, value: bool) -> Self {
         Self(self.0.map_request(|request| request.with_tenant_only(value)))
     }
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
-    /// Sets the `before` query parameter (`String`). A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
-    pub fn before(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_before(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -23430,6 +25615,68 @@ impl<'a> ListAuditLogsCall<'a> {
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListAuditLogsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListAuditLogsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListAuditLogsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::before`](schematic_runtime::pager::Pager::before).
+    #[inline]
+    pub fn before(
+        self,
+        cursor: impl Into<
+            <ListAuditLogsRequest as schematic_runtime::pager::ResumeBefore>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListAuditLogsRequest> {
+        self.0.pager().before(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListAuditLogsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListAuditLogsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListAuditLogsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListAuditLogsRequest>,
+    > {
+        self.0.pager().collect_all()
+    }
 }
 impl<'a> ::core::future::IntoFuture for ListAuditLogsCall<'a> {
     type Output = <schematic_runtime::Call<
@@ -23446,20 +25693,14 @@ impl<'a> ::core::future::IntoFuture for ListAuditLogsCall<'a> {
 /// A call to the `ListOrganizationCertificates` endpoint, returned by [`OpenAI::list_organization_certificates`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListOrganizationCertificatesCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListOrganizationCertificatesRequest>,
 );
 impl<'a> ListOrganizationCertificatesCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
     /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
@@ -23496,6 +25737,74 @@ impl<'a> ListOrganizationCertificatesCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListOrganizationCertificatesRequest,
+    > {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListOrganizationCertificatesRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListOrganizationCertificatesRequest,
+    > {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListOrganizationCertificatesRequest,
+    > {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<
+        'a,
+        OpenAIApi,
+        ListOrganizationCertificatesRequest,
+    > {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListOrganizationCertificatesRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListOrganizationCertificatesRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListOrganizationCertificatesCall<'a> {
@@ -23831,6 +26140,8 @@ impl<'a> ::core::future::IntoFuture for DeleteCertificateCall<'a> {
 /// A call to the `UsageCosts` endpoint, returned by [`OpenAI::usage_costs`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UsageCostsCall<'a>(schematic_runtime::Call<'a, OpenAIApi, UsageCostsRequest>);
@@ -23859,14 +26170,6 @@ impl<'a> UsageCostsCall<'a> {
     pub fn group_by(self, value: Vec<String>) -> Self {
         Self(self.0.map_request(|request| request.with_group_by(value)))
     }
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of buckets to be returned. Limit can range between 1 and 180, and the default is 7.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
-    pub fn page(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -23893,6 +26196,58 @@ impl<'a> UsageCostsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageCostsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <UsageCostsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageCostsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageCostsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, UsageCostsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<UsageCostsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<UsageCostsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for UsageCostsCall<'a> {
@@ -24020,18 +26375,12 @@ impl<'a> ::core::future::IntoFuture for UpdateOrganizationDataRetentionCall<'a> 
 /// A call to the `ListGroups` endpoint, returned by [`OpenAI::list_groups`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListGroupsCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListGroupsRequest>);
 impl<'a> ListGroupsCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of groups to be returned. Limit can range between 0 and 1000, and the default is 100.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is a group ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with group_abc, your subsequent call can include `after=group_abc` in order to fetch the next page of the list.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
     /// Sets the `order` query parameter (`String`). Specifies the sort order of the returned groups.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
@@ -24062,6 +26411,58 @@ impl<'a> ListGroupsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListGroupsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListGroupsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListGroupsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListGroupsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListGroupsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListGroupsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListGroupsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListGroupsCall<'a> {
@@ -24277,20 +26678,14 @@ impl<'a> ::core::future::IntoFuture for DeleteGroupCall<'a> {
 /// A call to the `ListGroupRoleAssignments` endpoint, returned by [`OpenAI::list_group_role_assignments`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListGroupRoleAssignmentsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListGroupRoleAssignmentsRequest>,
 );
 impl<'a> ListGroupRoleAssignmentsCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of organization role assignments to return.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing organization roles.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
     /// Sets the `order` query parameter (`String`). Sort order for the returned organization roles.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
@@ -24323,6 +26718,74 @@ impl<'a> ListGroupRoleAssignmentsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListGroupRoleAssignmentsRequest,
+    > {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListGroupRoleAssignmentsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListGroupRoleAssignmentsRequest,
+    > {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListGroupRoleAssignmentsRequest,
+    > {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<
+        'a,
+        OpenAIApi,
+        ListGroupRoleAssignmentsRequest,
+    > {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListGroupRoleAssignmentsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListGroupRoleAssignmentsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListGroupRoleAssignmentsCall<'a> {
@@ -24493,20 +26956,14 @@ impl<'a> ::core::future::IntoFuture for UnassignGroupRoleCall<'a> {
 /// A call to the `ListGroupUsers` endpoint, returned by [`OpenAI::list_group_users`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListGroupUsersCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListGroupUsersRequest>,
 );
 impl<'a> ListGroupUsersCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of users to be returned. Limit can range between 0 and 1000, and the default is 100.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. Provide the ID of the last user from the previous list response to retrieve the next page.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
     /// Sets the `order` query parameter (`String`). Specifies the sort order of users in the list.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
@@ -24539,6 +26996,58 @@ impl<'a> ListGroupUsersCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListGroupUsersRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListGroupUsersRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListGroupUsersRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListGroupUsersRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListGroupUsersRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListGroupUsersRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListGroupUsersRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListGroupUsersCall<'a> {
@@ -24709,20 +27218,14 @@ impl<'a> ::core::future::IntoFuture for RemoveGroupUserCall<'a> {
 /// A call to the `ListInvites` endpoint, returned by [`OpenAI::list_invites`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListInvitesCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListInvitesRequest>,
 );
 impl<'a> ListInvitesCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -24749,6 +27252,58 @@ impl<'a> ListInvitesCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListInvitesRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListInvitesRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListInvitesRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListInvitesRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListInvitesRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListInvitesRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListInvitesRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListInvitesCall<'a> {
@@ -24915,20 +27470,14 @@ impl<'a> ::core::future::IntoFuture for DeleteInviteCall<'a> {
 /// A call to the `ListProjects` endpoint, returned by [`OpenAI::list_projects`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListProjectsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListProjectsRequest>,
 );
 impl<'a> ListProjectsCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
     /// Sets the `include_archived` query parameter (`bool`). If `true` returns all projects including those that have been `archived`. Archived projects are not included by default.
     pub fn include_archived(self, value: bool) -> Self {
         Self(self.0.map_request(|request| request.with_include_archived(value)))
@@ -24961,6 +27510,58 @@ impl<'a> ListProjectsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListProjectsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListProjectsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListProjectsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListProjectsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListProjectsCall<'a> {
@@ -25131,20 +27732,14 @@ impl<'a> ::core::future::IntoFuture for ModifyProjectCall<'a> {
 /// A call to the `ListProjectApiKeys` endpoint, returned by [`OpenAI::list_project_api_keys`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListProjectApiKeysCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListProjectApiKeysRequest>,
 );
 impl<'a> ListProjectApiKeysCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
     /// Sets the `owner_project_access` query parameter (`String`). Filter API keys by whether the owner currently has effective access to the project. Use `active` for owners with access, `inactive` for owners without access, or `any` for all enabled project API keys. If omitted, the endpoint applies its existing membership-based visibility rules, which may exclude some enabled keys.
     pub fn owner_project_access(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_owner_project_access(value)))
@@ -25177,6 +27772,58 @@ impl<'a> ListProjectApiKeysCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectApiKeysRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListProjectApiKeysRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectApiKeysRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectApiKeysRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListProjectApiKeysRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListProjectApiKeysRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListProjectApiKeysRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListProjectApiKeysCall<'a> {
@@ -25347,20 +27994,14 @@ impl<'a> ::core::future::IntoFuture for ArchiveProjectCall<'a> {
 /// A call to the `ListProjectCertificates` endpoint, returned by [`OpenAI::list_project_certificates`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListProjectCertificatesCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListProjectCertificatesRequest>,
 );
 impl<'a> ListProjectCertificatesCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
     /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
@@ -25393,6 +28034,58 @@ impl<'a> ListProjectCertificatesCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectCertificatesRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListProjectCertificatesRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectCertificatesRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectCertificatesRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListProjectCertificatesRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListProjectCertificatesRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListProjectCertificatesRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListProjectCertificatesCall<'a> {
@@ -25622,20 +28315,14 @@ impl<'a> ::core::future::IntoFuture for UpdateProjectDataRetentionCall<'a> {
 /// A call to the `ListProjectGroups` endpoint, returned by [`OpenAI::list_project_groups`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListProjectGroupsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListProjectGroupsRequest>,
 );
 impl<'a> ListProjectGroupsCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of project groups to return. Defaults to 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `after` query parameter (`String`). Cursor for pagination. Provide the ID of the last group from the previous response to fetch the next page.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
     /// Sets the `order` query parameter (`String`). Sort order for the returned groups.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
@@ -25668,6 +28355,58 @@ impl<'a> ListProjectGroupsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectGroupsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListProjectGroupsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectGroupsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectGroupsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListProjectGroupsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListProjectGroupsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListProjectGroupsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListProjectGroupsCall<'a> {
@@ -26117,24 +28856,14 @@ impl<'a> ::core::future::IntoFuture for DeleteProjectModelPermissionsCall<'a> {
 /// A call to the `ListProjectRateLimits` endpoint, returned by [`OpenAI::list_project_rate_limits`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListProjectRateLimitsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListProjectRateLimitsRequest>,
 );
 impl<'a> ListProjectRateLimitsCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. The default is 100.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
-    /// Sets the `before` query parameter (`String`). A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, beginning with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
-    pub fn before(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_before(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -26163,6 +28892,68 @@ impl<'a> ListProjectRateLimitsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectRateLimitsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListProjectRateLimitsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectRateLimitsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::before`](schematic_runtime::pager::Pager::before).
+    #[inline]
+    pub fn before(
+        self,
+        cursor: impl Into<
+            <ListProjectRateLimitsRequest as schematic_runtime::pager::ResumeBefore>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectRateLimitsRequest> {
+        self.0.pager().before(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectRateLimitsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListProjectRateLimitsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListProjectRateLimitsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListProjectRateLimitsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListProjectRateLimitsCall<'a> {
@@ -26231,20 +29022,14 @@ impl<'a> ::core::future::IntoFuture for UpdateProjectRateLimitsCall<'a> {
 /// A call to the `ListProjectServiceAccounts` endpoint, returned by [`OpenAI::list_project_service_accounts`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListProjectServiceAccountsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListProjectServiceAccountsRequest>,
 );
 impl<'a> ListProjectServiceAccountsCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -26273,6 +29058,74 @@ impl<'a> ListProjectServiceAccountsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListProjectServiceAccountsRequest,
+    > {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListProjectServiceAccountsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListProjectServiceAccountsRequest,
+    > {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListProjectServiceAccountsRequest,
+    > {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<
+        'a,
+        OpenAIApi,
+        ListProjectServiceAccountsRequest,
+    > {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListProjectServiceAccountsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListProjectServiceAccountsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListProjectServiceAccountsCall<'a> {
@@ -26498,27 +29351,17 @@ impl<'a> ::core::future::IntoFuture for DeleteProjectServiceAccountCall<'a> {
 /// A call to the `ListProjectSpendAlerts` endpoint, returned by [`OpenAI::list_project_spend_alerts`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListProjectSpendAlertsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListProjectSpendAlertsRequest>,
 );
 impl<'a> ListProjectSpendAlertsCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of spend alerts to return. Defaults to 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `order` query parameter (`String`). Sort order for the returned spend alerts.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
-    }
-    /// Sets the `after` query parameter (`String`). Cursor for pagination. Provide the ID of the last spend alert from the previous response to fetch the next page.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
-    /// Sets the `before` query parameter (`String`). Cursor for pagination. Provide the ID of the first spend alert from the previous response to fetch the previous page.
-    pub fn before(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_before(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
@@ -26548,6 +29391,68 @@ impl<'a> ListProjectSpendAlertsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectSpendAlertsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListProjectSpendAlertsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectSpendAlertsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::before`](schematic_runtime::pager::Pager::before).
+    #[inline]
+    pub fn before(
+        self,
+        cursor: impl Into<
+            <ListProjectSpendAlertsRequest as schematic_runtime::pager::ResumeBefore>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectSpendAlertsRequest> {
+        self.0.pager().before(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectSpendAlertsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListProjectSpendAlertsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListProjectSpendAlertsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListProjectSpendAlertsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListProjectSpendAlertsCall<'a> {
@@ -26769,20 +29674,14 @@ impl<'a> ::core::future::IntoFuture for DeleteProjectSpendAlertCall<'a> {
 /// A call to the `ListProjectUsers` endpoint, returned by [`OpenAI::list_project_users`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListProjectUsersCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListProjectUsersRequest>,
 );
 impl<'a> ListProjectUsersCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -26811,6 +29710,58 @@ impl<'a> ListProjectUsersCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectUsersRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListProjectUsersRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectUsersRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectUsersRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListProjectUsersRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListProjectUsersRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListProjectUsersRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListProjectUsersCall<'a> {
@@ -27032,18 +29983,12 @@ impl<'a> ::core::future::IntoFuture for DeleteProjectUserCall<'a> {
 /// A call to the `ListRoles` endpoint, returned by [`OpenAI::list_roles`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListRolesCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListRolesRequest>);
 impl<'a> ListRolesCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of roles to return. Defaults to 1000.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing roles.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
     /// Sets the `order` query parameter (`String`). Sort order for the returned roles.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
@@ -27074,6 +30019,58 @@ impl<'a> ListRolesCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListRolesRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListRolesRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListRolesRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListRolesRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListRolesRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListRolesRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListRolesRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListRolesCall<'a> {
@@ -27283,27 +30280,17 @@ impl<'a> ::core::future::IntoFuture for DeleteRoleCall<'a> {
 /// A call to the `ListOrganizationSpendAlerts` endpoint, returned by [`OpenAI::list_organization_spend_alerts`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListOrganizationSpendAlertsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListOrganizationSpendAlertsRequest>,
 );
 impl<'a> ListOrganizationSpendAlertsCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of spend alerts to return. Defaults to 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `order` query parameter (`String`). Sort order for the returned spend alerts.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
-    }
-    /// Sets the `after` query parameter (`String`). Cursor for pagination. Provide the ID of the last spend alert from the previous response to fetch the next page.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
-    /// Sets the `before` query parameter (`String`). Cursor for pagination. Provide the ID of the first spend alert from the previous response to fetch the previous page.
-    pub fn before(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_before(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
@@ -27333,6 +30320,88 @@ impl<'a> ListOrganizationSpendAlertsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListOrganizationSpendAlertsRequest,
+    > {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListOrganizationSpendAlertsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListOrganizationSpendAlertsRequest,
+    > {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::before`](schematic_runtime::pager::Pager::before).
+    #[inline]
+    pub fn before(
+        self,
+        cursor: impl Into<
+            <ListOrganizationSpendAlertsRequest as schematic_runtime::pager::ResumeBefore>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListOrganizationSpendAlertsRequest,
+    > {
+        self.0.pager().before(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListOrganizationSpendAlertsRequest,
+    > {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<
+        'a,
+        OpenAIApi,
+        ListOrganizationSpendAlertsRequest,
+    > {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListOrganizationSpendAlertsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListOrganizationSpendAlertsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListOrganizationSpendAlertsCall<'a> {
@@ -27570,6 +30639,8 @@ impl<'a> ::core::future::IntoFuture for DeleteOrganizationSpendAlertCall<'a> {
 /// A call to the `UsageAudioSpeeches` endpoint, returned by [`OpenAI::usage_audio_speeches`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UsageAudioSpeechesCall<'a>(
@@ -27608,14 +30679,6 @@ impl<'a> UsageAudioSpeechesCall<'a> {
     pub fn group_by(self, value: Vec<String>) -> Self {
         Self(self.0.map_request(|request| request.with_group_by(value)))
     }
-    /// Sets the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
-    pub fn page(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -27645,6 +30708,58 @@ impl<'a> UsageAudioSpeechesCall<'a> {
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageAudioSpeechesRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <UsageAudioSpeechesRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageAudioSpeechesRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageAudioSpeechesRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, UsageAudioSpeechesRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<UsageAudioSpeechesRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<UsageAudioSpeechesRequest>,
+    > {
+        self.0.pager().collect_all()
+    }
 }
 impl<'a> ::core::future::IntoFuture for UsageAudioSpeechesCall<'a> {
     type Output = <schematic_runtime::Call<
@@ -27661,6 +30776,8 @@ impl<'a> ::core::future::IntoFuture for UsageAudioSpeechesCall<'a> {
 /// A call to the `UsageAudioTranscriptions` endpoint, returned by [`OpenAI::usage_audio_transcriptions`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UsageAudioTranscriptionsCall<'a>(
@@ -27699,14 +30816,6 @@ impl<'a> UsageAudioTranscriptionsCall<'a> {
     pub fn group_by(self, value: Vec<String>) -> Self {
         Self(self.0.map_request(|request| request.with_group_by(value)))
     }
-    /// Sets the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
-    pub fn page(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -27736,6 +30845,74 @@ impl<'a> UsageAudioTranscriptionsCall<'a> {
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        UsageAudioTranscriptionsRequest,
+    > {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <UsageAudioTranscriptionsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        UsageAudioTranscriptionsRequest,
+    > {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        UsageAudioTranscriptionsRequest,
+    > {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<
+        'a,
+        OpenAIApi,
+        UsageAudioTranscriptionsRequest,
+    > {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<UsageAudioTranscriptionsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<UsageAudioTranscriptionsRequest>,
+    > {
+        self.0.pager().collect_all()
+    }
 }
 impl<'a> ::core::future::IntoFuture for UsageAudioTranscriptionsCall<'a> {
     type Output = <schematic_runtime::Call<
@@ -27752,6 +30929,8 @@ impl<'a> ::core::future::IntoFuture for UsageAudioTranscriptionsCall<'a> {
 /// A call to the `UsageCodeInterpreterSessions` endpoint, returned by [`OpenAI::usage_code_interpreter_sessions`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UsageCodeInterpreterSessionsCall<'a>(
@@ -27777,14 +30956,6 @@ impl<'a> UsageCodeInterpreterSessionsCall<'a> {
     /// Sets the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`.
     pub fn group_by(self, value: Vec<String>) -> Self {
         Self(self.0.map_request(|request| request.with_group_by(value)))
-    }
-    /// Sets the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
-    pub fn page(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
@@ -27819,6 +30990,74 @@ impl<'a> UsageCodeInterpreterSessionsCall<'a> {
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        UsageCodeInterpreterSessionsRequest,
+    > {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <UsageCodeInterpreterSessionsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        UsageCodeInterpreterSessionsRequest,
+    > {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        UsageCodeInterpreterSessionsRequest,
+    > {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<
+        'a,
+        OpenAIApi,
+        UsageCodeInterpreterSessionsRequest,
+    > {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<UsageCodeInterpreterSessionsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<UsageCodeInterpreterSessionsRequest>,
+    > {
+        self.0.pager().collect_all()
+    }
 }
 impl<'a> ::core::future::IntoFuture for UsageCodeInterpreterSessionsCall<'a> {
     type Output = <schematic_runtime::Call<
@@ -27835,6 +31074,8 @@ impl<'a> ::core::future::IntoFuture for UsageCodeInterpreterSessionsCall<'a> {
 /// A call to the `UsageCompletions` endpoint, returned by [`OpenAI::usage_completions`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UsageCompletionsCall<'a>(
@@ -27877,14 +31118,6 @@ impl<'a> UsageCompletionsCall<'a> {
     pub fn group_by(self, value: Vec<String>) -> Self {
         Self(self.0.map_request(|request| request.with_group_by(value)))
     }
-    /// Sets the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
-    pub fn page(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -27914,6 +31147,58 @@ impl<'a> UsageCompletionsCall<'a> {
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageCompletionsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <UsageCompletionsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageCompletionsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageCompletionsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, UsageCompletionsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<UsageCompletionsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<UsageCompletionsRequest>,
+    > {
+        self.0.pager().collect_all()
+    }
 }
 impl<'a> ::core::future::IntoFuture for UsageCompletionsCall<'a> {
     type Output = <schematic_runtime::Call<
@@ -27930,6 +31215,8 @@ impl<'a> ::core::future::IntoFuture for UsageCompletionsCall<'a> {
 /// A call to the `UsageEmbeddings` endpoint, returned by [`OpenAI::usage_embeddings`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UsageEmbeddingsCall<'a>(
@@ -27968,14 +31255,6 @@ impl<'a> UsageEmbeddingsCall<'a> {
     pub fn group_by(self, value: Vec<String>) -> Self {
         Self(self.0.map_request(|request| request.with_group_by(value)))
     }
-    /// Sets the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
-    pub fn page(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -28005,6 +31284,58 @@ impl<'a> UsageEmbeddingsCall<'a> {
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageEmbeddingsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <UsageEmbeddingsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageEmbeddingsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageEmbeddingsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, UsageEmbeddingsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<UsageEmbeddingsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<UsageEmbeddingsRequest>,
+    > {
+        self.0.pager().collect_all()
+    }
 }
 impl<'a> ::core::future::IntoFuture for UsageEmbeddingsCall<'a> {
     type Output = <schematic_runtime::Call<
@@ -28021,6 +31352,8 @@ impl<'a> ::core::future::IntoFuture for UsageEmbeddingsCall<'a> {
 /// A call to the `UsageFileSearchCalls` endpoint, returned by [`OpenAI::usage_file_search_calls`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UsageFileSearchCallsCall<'a>(
@@ -28059,14 +31392,6 @@ impl<'a> UsageFileSearchCallsCall<'a> {
     pub fn group_by(self, value: Vec<String>) -> Self {
         Self(self.0.map_request(|request| request.with_group_by(value)))
     }
-    /// Sets the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
-    pub fn page(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -28096,6 +31421,58 @@ impl<'a> UsageFileSearchCallsCall<'a> {
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageFileSearchCallsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <UsageFileSearchCallsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageFileSearchCallsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageFileSearchCallsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, UsageFileSearchCallsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<UsageFileSearchCallsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<UsageFileSearchCallsRequest>,
+    > {
+        self.0.pager().collect_all()
+    }
 }
 impl<'a> ::core::future::IntoFuture for UsageFileSearchCallsCall<'a> {
     type Output = <schematic_runtime::Call<
@@ -28112,6 +31489,8 @@ impl<'a> ::core::future::IntoFuture for UsageFileSearchCallsCall<'a> {
 /// A call to the `UsageImages` endpoint, returned by [`OpenAI::usage_images`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UsageImagesCall<'a>(
@@ -28158,14 +31537,6 @@ impl<'a> UsageImagesCall<'a> {
     pub fn group_by(self, value: Vec<String>) -> Self {
         Self(self.0.map_request(|request| request.with_group_by(value)))
     }
-    /// Sets the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
-    pub fn page(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -28193,6 +31564,58 @@ impl<'a> UsageImagesCall<'a> {
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageImagesRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <UsageImagesRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageImagesRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageImagesRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, UsageImagesRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<UsageImagesRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<UsageImagesRequest>,
+    > {
+        self.0.pager().collect_all()
+    }
 }
 impl<'a> ::core::future::IntoFuture for UsageImagesCall<'a> {
     type Output = <schematic_runtime::Call<
@@ -28209,6 +31632,8 @@ impl<'a> ::core::future::IntoFuture for UsageImagesCall<'a> {
 /// A call to the `UsageModerations` endpoint, returned by [`OpenAI::usage_moderations`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UsageModerationsCall<'a>(
@@ -28247,14 +31672,6 @@ impl<'a> UsageModerationsCall<'a> {
     pub fn group_by(self, value: Vec<String>) -> Self {
         Self(self.0.map_request(|request| request.with_group_by(value)))
     }
-    /// Sets the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
-    pub fn page(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -28284,6 +31701,58 @@ impl<'a> UsageModerationsCall<'a> {
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageModerationsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <UsageModerationsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageModerationsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageModerationsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, UsageModerationsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<UsageModerationsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<UsageModerationsRequest>,
+    > {
+        self.0.pager().collect_all()
+    }
 }
 impl<'a> ::core::future::IntoFuture for UsageModerationsCall<'a> {
     type Output = <schematic_runtime::Call<
@@ -28300,6 +31769,8 @@ impl<'a> ::core::future::IntoFuture for UsageModerationsCall<'a> {
 /// A call to the `UsageVectorStores` endpoint, returned by [`OpenAI::usage_vector_stores`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UsageVectorStoresCall<'a>(
@@ -28325,14 +31796,6 @@ impl<'a> UsageVectorStoresCall<'a> {
     /// Sets the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`.
     pub fn group_by(self, value: Vec<String>) -> Self {
         Self(self.0.map_request(|request| request.with_group_by(value)))
-    }
-    /// Sets the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
-    pub fn page(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
@@ -28363,6 +31826,58 @@ impl<'a> UsageVectorStoresCall<'a> {
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageVectorStoresRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <UsageVectorStoresRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageVectorStoresRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageVectorStoresRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, UsageVectorStoresRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<UsageVectorStoresRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<UsageVectorStoresRequest>,
+    > {
+        self.0.pager().collect_all()
+    }
 }
 impl<'a> ::core::future::IntoFuture for UsageVectorStoresCall<'a> {
     type Output = <schematic_runtime::Call<
@@ -28379,6 +31894,8 @@ impl<'a> ::core::future::IntoFuture for UsageVectorStoresCall<'a> {
 /// A call to the `UsageWebSearchCalls` endpoint, returned by [`OpenAI::usage_web_search_calls`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct UsageWebSearchCallsCall<'a>(
@@ -28421,14 +31938,6 @@ impl<'a> UsageWebSearchCallsCall<'a> {
     pub fn group_by(self, value: Vec<String>) -> Self {
         Self(self.0.map_request(|request| request.with_group_by(value)))
     }
-    /// Sets the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
-    pub fn page(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -28458,6 +31967,58 @@ impl<'a> UsageWebSearchCallsCall<'a> {
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageWebSearchCallsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <UsageWebSearchCallsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageWebSearchCallsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, UsageWebSearchCallsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, UsageWebSearchCallsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<UsageWebSearchCallsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<UsageWebSearchCallsRequest>,
+    > {
+        self.0.pager().collect_all()
+    }
 }
 impl<'a> ::core::future::IntoFuture for UsageWebSearchCallsCall<'a> {
     type Output = <schematic_runtime::Call<
@@ -28474,18 +32035,12 @@ impl<'a> ::core::future::IntoFuture for UsageWebSearchCallsCall<'a> {
 /// A call to the `ListUsers` endpoint, returned by [`OpenAI::list_users`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListUsersCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListUsersRequest>);
 impl<'a> ListUsersCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
     /// Sets the `emails` query parameter (`Vec<String>`). Filter by the email address of users.
     pub fn emails(self, value: Vec<String>) -> Self {
         Self(self.0.map_request(|request| request.with_emails(value)))
@@ -28516,6 +32071,58 @@ impl<'a> ListUsersCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListUsersRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListUsersRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListUsersRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListUsersRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListUsersRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListUsersRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListUsersRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListUsersCall<'a> {
@@ -28678,20 +32285,14 @@ impl<'a> ::core::future::IntoFuture for DeleteUserCall<'a> {
 /// A call to the `ListUserRoleAssignments` endpoint, returned by [`OpenAI::list_user_role_assignments`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListUserRoleAssignmentsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListUserRoleAssignmentsRequest>,
 );
 impl<'a> ListUserRoleAssignmentsCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of organization role assignments to return.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing organization roles.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
     /// Sets the `order` query parameter (`String`). Sort order for the returned organization roles.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
@@ -28724,6 +32325,58 @@ impl<'a> ListUserRoleAssignmentsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListUserRoleAssignmentsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListUserRoleAssignmentsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListUserRoleAssignmentsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListUserRoleAssignmentsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListUserRoleAssignmentsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListUserRoleAssignmentsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListUserRoleAssignmentsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListUserRoleAssignmentsCall<'a> {
@@ -28894,20 +32547,14 @@ impl<'a> ::core::future::IntoFuture for UnassignUserRoleCall<'a> {
 /// A call to the `ListProjectGroupRoleAssignments` endpoint, returned by [`OpenAI::list_project_group_role_assignments`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListProjectGroupRoleAssignmentsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListProjectGroupRoleAssignmentsRequest>,
 );
 impl<'a> ListProjectGroupRoleAssignmentsCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of project role assignments to return.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing project roles.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
     /// Sets the `order` query parameter (`String`). Sort order for the returned project roles.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
@@ -28944,6 +32591,74 @@ impl<'a> ListProjectGroupRoleAssignmentsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListProjectGroupRoleAssignmentsRequest,
+    > {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListProjectGroupRoleAssignmentsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListProjectGroupRoleAssignmentsRequest,
+    > {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListProjectGroupRoleAssignmentsRequest,
+    > {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<
+        'a,
+        OpenAIApi,
+        ListProjectGroupRoleAssignmentsRequest,
+    > {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListProjectGroupRoleAssignmentsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListProjectGroupRoleAssignmentsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListProjectGroupRoleAssignmentsCall<'a> {
@@ -29114,20 +32829,14 @@ impl<'a> ::core::future::IntoFuture for UnassignProjectGroupRoleCall<'a> {
 /// A call to the `ListProjectRoles` endpoint, returned by [`OpenAI::list_project_roles`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListProjectRolesCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListProjectRolesRequest>,
 );
 impl<'a> ListProjectRolesCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of roles to return. Defaults to 1000.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing roles.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
     /// Sets the `order` query parameter (`String`). Sort order for the returned roles.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
@@ -29160,6 +32869,58 @@ impl<'a> ListProjectRolesCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectRolesRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListProjectRolesRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectRolesRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListProjectRolesRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListProjectRolesRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListProjectRolesRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListProjectRolesRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListProjectRolesCall<'a> {
@@ -29381,20 +33142,14 @@ impl<'a> ::core::future::IntoFuture for DeleteProjectRoleCall<'a> {
 /// A call to the `ListProjectUserRoleAssignments` endpoint, returned by [`OpenAI::list_project_user_role_assignments`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListProjectUserRoleAssignmentsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListProjectUserRoleAssignmentsRequest>,
 );
 impl<'a> ListProjectUserRoleAssignmentsCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of project role assignments to return.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
-    /// Sets the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing project roles.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
     /// Sets the `order` query parameter (`String`). Sort order for the returned project roles.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
@@ -29431,6 +33186,74 @@ impl<'a> ListProjectUserRoleAssignmentsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListProjectUserRoleAssignmentsRequest,
+    > {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListProjectUserRoleAssignmentsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListProjectUserRoleAssignmentsRequest,
+    > {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListProjectUserRoleAssignmentsRequest,
+    > {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<
+        'a,
+        OpenAIApi,
+        ListProjectUserRoleAssignmentsRequest,
+    > {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListProjectUserRoleAssignmentsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListProjectUserRoleAssignmentsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListProjectUserRoleAssignmentsCall<'a> {
@@ -30286,23 +34109,17 @@ impl<'a> ::core::future::IntoFuture for CancelResponseCall<'a> {
 /// A call to the `ListInputItems` endpoint, returned by [`OpenAI::list_input_items`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListInputItemsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListInputItemsRequest>,
 );
 impl<'a> ListInputItemsCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `order` query parameter (`String`). The order to return the input items in. Default is `desc`. - `asc`: Return the input items in ascending order. - `desc`: Return the input items in descending order.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
-    }
-    /// Sets the `after` query parameter (`String`). An item ID to list items after, used in pagination.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
     }
     /// Sets the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for Response creation above for more information.
     pub fn include(self, value: Vec<serde_json::Value>) -> Self {
@@ -30336,6 +34153,58 @@ impl<'a> ListInputItemsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListInputItemsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListInputItemsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListInputItemsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListInputItemsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListInputItemsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListInputItemsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListInputItemsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListInputItemsCall<'a> {
@@ -30557,27 +34426,17 @@ impl<'a> ::core::future::IntoFuture for AddUploadPartCall<'a> {
 /// A call to the `ListVectorStores` endpoint, returned by [`OpenAI::list_vector_stores`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListVectorStoresCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListVectorStoresRequest>,
 );
 impl<'a> ListVectorStoresCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
-    }
-    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
-    /// Sets the `before` query parameter (`String`). A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
-    pub fn before(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_before(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
@@ -30607,6 +34466,68 @@ impl<'a> ListVectorStoresCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListVectorStoresRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListVectorStoresRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListVectorStoresRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::before`](schematic_runtime::pager::Pager::before).
+    #[inline]
+    pub fn before(
+        self,
+        cursor: impl Into<
+            <ListVectorStoresRequest as schematic_runtime::pager::ResumeBefore>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListVectorStoresRequest> {
+        self.0.pager().before(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListVectorStoresRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListVectorStoresRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListVectorStoresRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListVectorStoresRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListVectorStoresCall<'a> {
@@ -30981,27 +34902,17 @@ impl<'a> ::core::future::IntoFuture for CancelVectorStoreFileBatchCall<'a> {
 /// A call to the `ListFilesInVectorStoreBatch` endpoint, returned by [`OpenAI::list_files_in_vector_store_batch`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListFilesInVectorStoreBatchCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListFilesInVectorStoreBatchRequest>,
 );
 impl<'a> ListFilesInVectorStoreBatchCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
-    }
-    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
-    /// Sets the `before` query parameter (`String`). A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
-    pub fn before(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_before(value)))
     }
     /// Sets the `filter` query parameter (`String`). Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`.
     pub fn filter(self, value: String) -> Self {
@@ -31036,6 +34947,88 @@ impl<'a> ListFilesInVectorStoreBatchCall<'a> {
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListFilesInVectorStoreBatchRequest,
+    > {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListFilesInVectorStoreBatchRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListFilesInVectorStoreBatchRequest,
+    > {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::before`](schematic_runtime::pager::Pager::before).
+    #[inline]
+    pub fn before(
+        self,
+        cursor: impl Into<
+            <ListFilesInVectorStoreBatchRequest as schematic_runtime::pager::ResumeBefore>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListFilesInVectorStoreBatchRequest,
+    > {
+        self.0.pager().before(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<
+        'a,
+        OpenAIApi,
+        ListFilesInVectorStoreBatchRequest,
+    > {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<
+        'a,
+        OpenAIApi,
+        ListFilesInVectorStoreBatchRequest,
+    > {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListFilesInVectorStoreBatchRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListFilesInVectorStoreBatchRequest>,
+    > {
+        self.0.pager().collect_all()
+    }
 }
 impl<'a> ::core::future::IntoFuture for ListFilesInVectorStoreBatchCall<'a> {
     type Output = <schematic_runtime::Call<
@@ -31052,27 +35045,17 @@ impl<'a> ::core::future::IntoFuture for ListFilesInVectorStoreBatchCall<'a> {
 /// A call to the `ListVectorStoreFiles` endpoint, returned by [`OpenAI::list_vector_store_files`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListVectorStoreFilesCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListVectorStoreFilesRequest>,
 );
 impl<'a> ListVectorStoreFilesCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
-    }
-    /// Sets the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
-    /// Sets the `before` query parameter (`String`). A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
-    pub fn before(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_before(value)))
     }
     /// Sets the `filter` query parameter (`String`). Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`.
     pub fn filter(self, value: String) -> Self {
@@ -31106,6 +35089,68 @@ impl<'a> ListVectorStoreFilesCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListVectorStoreFilesRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListVectorStoreFilesRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListVectorStoreFilesRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::before`](schematic_runtime::pager::Pager::before).
+    #[inline]
+    pub fn before(
+        self,
+        cursor: impl Into<
+            <ListVectorStoreFilesRequest as schematic_runtime::pager::ResumeBefore>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListVectorStoreFilesRequest> {
+        self.0.pager().before(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListVectorStoreFilesRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListVectorStoreFilesRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListVectorStoreFilesRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListVectorStoreFilesRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListVectorStoreFilesCall<'a> {
@@ -32065,21 +36110,15 @@ impl<'a> ::core::future::IntoFuture for CreatecontentprovenancecheckCall<'a> {
 /// A call to the `ListVideos` endpoint, returned by [`OpenAI::list_videos`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListVideosCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListVideosRequest>);
 impl<'a> ListVideosCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). Number of items to retrieve
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `order` query parameter (`serde_json::Value`). Sort order of results by timestamp. Use `asc` for ascending order or `desc` for descending order.
     pub fn order(self, value: serde_json::Value) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
-    }
-    /// Sets the `after` query parameter (`String`). Identifier for the last item from the previous pagination request
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
@@ -32107,6 +36146,58 @@ impl<'a> ListVideosCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListVideosRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListVideosRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListVideosRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListVideosRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListVideosRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListVideosRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListVideosRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListVideosCall<'a> {
@@ -32681,21 +36772,15 @@ impl<'a> ::core::future::IntoFuture for CompactconversationCall<'a> {
 /// A call to the `ListSkills` endpoint, returned by [`OpenAI::list_skills`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListSkillsCall<'a>(schematic_runtime::Call<'a, OpenAIApi, ListSkillsRequest>);
 impl<'a> ListSkillsCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). Number of items to retrieve
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `order` query parameter (`serde_json::Value`). Sort order of results by timestamp. Use `asc` for ascending order or `desc` for descending order.
     pub fn order(self, value: serde_json::Value) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
-    }
-    /// Sets the `after` query parameter (`String`). Identifier for the last item from the previous pagination request
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
@@ -32723,6 +36808,58 @@ impl<'a> ListSkillsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListSkillsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListSkillsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListSkillsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListSkillsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListSkillsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListSkillsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListSkillsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListSkillsCall<'a> {
@@ -32987,23 +37124,17 @@ impl<'a> ::core::future::IntoFuture for GetSkillContentCall<'a> {
 /// A call to the `ListSkillVersions` endpoint, returned by [`OpenAI::list_skill_versions`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListSkillVersionsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListSkillVersionsRequest>,
 );
 impl<'a> ListSkillVersionsCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). Number of versions to retrieve.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `order` query parameter (`serde_json::Value`). Sort order of results by version number.
     pub fn order(self, value: serde_json::Value) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
-    }
-    /// Sets the `after` query parameter (`String`). The skill version ID to start after.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
@@ -33033,6 +37164,58 @@ impl<'a> ListSkillVersionsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListSkillVersionsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListSkillVersionsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListSkillVersionsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListSkillVersionsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListSkillVersionsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListSkillVersionsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListSkillVersionsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListSkillVersionsCall<'a> {
@@ -33356,27 +37539,17 @@ impl<'a> ::core::future::IntoFuture for CreateChatSessionMethodCall<'a> {
 /// A call to the `ListThreadItemsMethod` endpoint, returned by [`OpenAI::list_thread_items_method`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListThreadItemsMethodCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListThreadItemsMethodRequest>,
 );
 impl<'a> ListThreadItemsMethodCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). Maximum number of thread items to return. Defaults to 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `order` query parameter (`serde_json::Value`). Sort order for results by creation time. Defaults to `desc`.
     pub fn order(self, value: serde_json::Value) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
-    }
-    /// Sets the `after` query parameter (`String`). List items created after this thread item ID. Defaults to null for the first page.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
-    /// Sets the `before` query parameter (`String`). List items created before this thread item ID. Defaults to null for the newest results.
-    pub fn before(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_before(value)))
     }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
@@ -33406,6 +37579,68 @@ impl<'a> ListThreadItemsMethodCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListThreadItemsMethodRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListThreadItemsMethodRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListThreadItemsMethodRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::before`](schematic_runtime::pager::Pager::before).
+    #[inline]
+    pub fn before(
+        self,
+        cursor: impl Into<
+            <ListThreadItemsMethodRequest as schematic_runtime::pager::ResumeBefore>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListThreadItemsMethodRequest> {
+        self.0.pager().before(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListThreadItemsMethodRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListThreadItemsMethodRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListThreadItemsMethodRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListThreadItemsMethodRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListThreadItemsMethodCall<'a> {
@@ -33525,27 +37760,17 @@ impl<'a> ::core::future::IntoFuture for DeleteThreadMethodCall<'a> {
 /// A call to the `ListThreadsMethod` endpoint, returned by [`OpenAI::list_threads_method`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListThreadsMethodCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, ListThreadsMethodRequest>,
 );
 impl<'a> ListThreadsMethodCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). Maximum number of thread items to return. Defaults to 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `order` query parameter (`serde_json::Value`). Sort order for results by creation time. Defaults to `desc`.
     pub fn order(self, value: serde_json::Value) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
-    }
-    /// Sets the `after` query parameter (`String`). List items created after this thread item ID. Defaults to null for the first page.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
-    }
-    /// Sets the `before` query parameter (`String`). List items created before this thread item ID. Defaults to null for the newest results.
-    pub fn before(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_before(value)))
     }
     /// Sets the `user` query parameter (`String`). Filter threads that belong to this user identifier. Defaults to null to return all users.
     pub fn user(self, value: String) -> Self {
@@ -33579,6 +37804,68 @@ impl<'a> ListThreadsMethodCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListThreadsMethodRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <ListThreadsMethodRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListThreadsMethodRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::before`](schematic_runtime::pager::Pager::before).
+    #[inline]
+    pub fn before(
+        self,
+        cursor: impl Into<
+            <ListThreadsMethodRequest as schematic_runtime::pager::ResumeBefore>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListThreadsMethodRequest> {
+        self.0.pager().before(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListThreadsMethodRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, ListThreadsMethodRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListThreadsMethodRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListThreadsMethodRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListThreadsMethodCall<'a> {
@@ -33887,23 +38174,17 @@ impl<'a> ::core::future::IntoFuture for BetaCompactconversationCall<'a> {
 /// A call to the `BetaListInputItems` endpoint, returned by [`OpenAI::beta_list_input_items`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct BetaListInputItemsCall<'a>(
     schematic_runtime::Call<'a, OpenAIApi, BetaListInputItemsRequest>,
 );
 impl<'a> BetaListInputItemsCall<'a> {
-    /// Sets the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    pub fn limit(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_limit(value)))
-    }
     /// Sets the `order` query parameter (`String`). The order to return the input items in. Default is `desc`. - `asc`: Return the input items in ascending order. - `desc`: Return the input items in descending order.
     pub fn order(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_order(value)))
-    }
-    /// Sets the `after` query parameter (`String`). An item ID to list items after, used in pagination.
-    pub fn after(self, value: String) -> Self {
-        Self(self.0.map_request(|request| request.with_after(value)))
     }
     /// Sets the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for Response creation above for more information.
     pub fn include(self, value: Vec<serde_json::Value>) -> Self {
@@ -33941,6 +38222,58 @@ impl<'a> BetaListInputItemsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, BetaListInputItemsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::after`](schematic_runtime::pager::Pager::after).
+    #[inline]
+    pub fn after(
+        self,
+        cursor: impl Into<
+            <BetaListInputItemsRequest as schematic_runtime::pager::ResumeAfter>::Cursor,
+        >,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, BetaListInputItemsRequest> {
+        self.0.pager().after(cursor)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, BetaListInputItemsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, OpenAIApi, BetaListInputItemsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<BetaListInputItemsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<BetaListInputItemsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for BetaListInputItemsCall<'a> {
@@ -34063,11 +38396,6 @@ impl OpenAI {
     /// `GET /audio/voice_consents`
     ///
     /// Returns a [`ListVoiceConsentsCall`]: chain optional values and per-call settings on it, then `.await` it to send.
-    ///
-    /// ## Optional values
-    ///
-    /// - [`after`](ListVoiceConsentsCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    /// - [`limit`](ListVoiceConsentsCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
     pub fn list_voice_consents(&self) -> ListVoiceConsentsCall<'_> {
         ListVoiceConsentsCall(self.0.send(ListVoiceConsentsRequest::default()))
     }
@@ -34152,11 +38480,6 @@ impl OpenAI {
     /// `GET /batches`
     ///
     /// Returns a [`ListBatchesCall`]: chain optional values and per-call settings on it, then `.await` it to send.
-    ///
-    /// ## Optional values
-    ///
-    /// - [`after`](ListBatchesCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    /// - [`limit`](ListBatchesCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
     pub fn list_batches(&self) -> ListBatchesCall<'_> {
         ListBatchesCall(self.0.send(ListBatchesRequest::default()))
     }
@@ -34207,8 +38530,6 @@ impl OpenAI {
     ///
     /// - [`model`](ListChatCompletionsCall::model): the `model` query parameter (`String`). The model used to generate the Chat Completions.
     /// - [`metadata`](ListChatCompletionsCall::metadata): the `metadata` query parameter (`serde_json::Value`). A list of metadata keys to filter the Chat Completions by. Example: `metadata[key1]=value1&metadata[key2]=value2`
-    /// - [`after`](ListChatCompletionsCall::after): the `after` query parameter (`String`). Identifier for the last chat completion from the previous pagination request.
-    /// - [`limit`](ListChatCompletionsCall::limit): the `limit` query parameter (`i64`). Number of Chat Completions to retrieve.
     /// - [`order`](ListChatCompletionsCall::order): the `order` query parameter (`String`). Sort order for Chat Completions by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
     pub fn list_chat_completions(&self) -> ListChatCompletionsCall<'_> {
         ListChatCompletionsCall(self.0.send(ListChatCompletionsRequest::default()))
@@ -34314,8 +38635,6 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`after`](GetChatCompletionMessagesCall::after): the `after` query parameter (`String`). Identifier for the last message from the previous pagination request.
-    /// - [`limit`](GetChatCompletionMessagesCall::limit): the `limit` query parameter (`i64`). Number of messages to retrieve.
     /// - [`order`](GetChatCompletionMessagesCall::order): the `order` query parameter (`String`). Sort order for messages by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
     pub fn get_chat_completion_messages(
         &self,
@@ -34350,9 +38669,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListContainersCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
     /// - [`order`](ListContainersCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
-    /// - [`after`](ListContainersCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
     /// - [`name`](ListContainersCall::name): the `name` query parameter (`String`). Filter results by container name.
     pub fn list_containers(&self) -> ListContainersCall<'_> {
         ListContainersCall(self.0.send(ListContainersRequest::default()))
@@ -34414,9 +38731,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListContainerFilesCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
     /// - [`order`](ListContainerFilesCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
-    /// - [`after`](ListContainerFilesCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
     pub fn list_container_files(
         &self,
         container_id: impl Into<String>,
@@ -34513,9 +38828,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListConversationItemsCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
     /// - [`order`](ListConversationItemsCall::order): the `order` query parameter (`String`). The order to return the input items in. Default is `desc`. - `asc`: Return the input items in ascending order. - `desc`: Return the input items in descending order.
-    /// - [`after`](ListConversationItemsCall::after): the `after` query parameter (`String`). An item ID to list items after, used in pagination.
     /// - [`include`](ListConversationItemsCall::include): the `include` query parameter (`Vec<serde_json::Value>`). Specify additional output data to include in the model response. Currently supported values are: - `web_search_call.action.sources`: Include the sources of the web search tool call. - `code_interpreter_call.outputs`: Includes the outputs of python code execution in code interpreter tool call items. - `computer_call_output.output.image_url`: Include image urls from the computer call output. - `file_search_call.results`: Include the search results of the file search tool call. - `message.input_image.image_url`: Include image urls from the input message. - `message.output_text.logprobs`: Include logprobs with assistant messages. - `reasoning.encrypted_content`: Includes an encrypted version of reasoning tokens in reasoning item outputs. This enables reasoning items to be used in multi-turn conversations when using the Responses API statelessly (like when the `store` parameter is set to `false`, or when an organization is enrolled in the zero data retention program).
     pub fn list_conversation_items(
         &self,
@@ -34613,8 +38926,6 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`after`](ListEvalsCall::after): the `after` query parameter (`String`). Identifier for the last eval from the previous pagination request.
-    /// - [`limit`](ListEvalsCall::limit): the `limit` query parameter (`i64`). Number of evals to retrieve.
     /// - [`order`](ListEvalsCall::order): the `order` query parameter (`String`). Sort order for evals by timestamp. Use `asc` for ascending order or `desc` for descending order.
     /// - [`order_by`](ListEvalsCall::order_by): the `order_by` query parameter (`String`). Evals can be ordered by creation time or last updated time. Use `created_at` for creation time or `updated_at` for last updated time.
     pub fn list_evals(&self) -> ListEvalsCall<'_> {
@@ -34687,8 +38998,6 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`after`](GetEvalRunsCall::after): the `after` query parameter (`String`). Identifier for the last run from the previous pagination request.
-    /// - [`limit`](GetEvalRunsCall::limit): the `limit` query parameter (`i64`). Number of runs to retrieve.
     /// - [`order`](GetEvalRunsCall::order): the `order` query parameter (`String`). Sort order for runs by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
     /// - [`status`](GetEvalRunsCall::status): the `status` query parameter (`String`). Filter runs by status. One of `queued` | `in_progress` | `failed` | `completed` | `canceled`.
     pub fn get_eval_runs(&self, eval_id: impl Into<String>) -> GetEvalRunsCall<'_> {
@@ -34775,8 +39084,6 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`after`](GetEvalRunOutputItemsCall::after): the `after` query parameter (`String`). Identifier for the last output item from the previous pagination request.
-    /// - [`limit`](GetEvalRunOutputItemsCall::limit): the `limit` query parameter (`i64`). Number of output items to retrieve.
     /// - [`status`](GetEvalRunOutputItemsCall::status): the `status` query parameter (`String`). Filter output items by status. Use `failed` to filter by failed output items or `pass` to filter by passed output items.
     /// - [`order`](GetEvalRunOutputItemsCall::order): the `order` query parameter (`String`). Sort order for output items by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`.
     pub fn get_eval_run_output_items(
@@ -34820,9 +39127,7 @@ impl OpenAI {
     /// ## Optional values
     ///
     /// - [`purpose`](ListFilesCall::purpose): the `purpose` query parameter (`String`). Only return files with the given purpose.
-    /// - [`limit`](ListFilesCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 10,000, and the default is 10,000.
     /// - [`order`](ListFilesCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
-    /// - [`after`](ListFilesCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
     pub fn list_files(&self) -> ListFilesCall<'_> {
         ListFilesCall(self.0.send(ListFilesRequest::default()))
     }
@@ -34940,8 +39245,6 @@ impl OpenAI {
     /// ## Optional values
     ///
     /// - [`project_id`](ListFineTuningCheckpointPermissionsCall::project_id): the `project_id` query parameter (`String`). The ID of the project to get permissions for.
-    /// - [`after`](ListFineTuningCheckpointPermissionsCall::after): the `after` query parameter (`String`). Identifier for the last permission ID from the previous pagination request.
-    /// - [`limit`](ListFineTuningCheckpointPermissionsCall::limit): the `limit` query parameter (`i64`). Number of permissions to retrieve.
     /// - [`order`](ListFineTuningCheckpointPermissionsCall::order): the `order` query parameter (`String`). The order in which to retrieve permissions.
     pub fn list_fine_tuning_checkpoint_permissions(
         &self,
@@ -35021,8 +39324,6 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`after`](ListPaginatedFineTuningJobsCall::after): the `after` query parameter (`String`). Identifier for the last job from the previous pagination request.
-    /// - [`limit`](ListPaginatedFineTuningJobsCall::limit): the `limit` query parameter (`i64`). Number of fine-tuning jobs to retrieve.
     /// - [`metadata`](ListPaginatedFineTuningJobsCall::metadata): the `metadata` query parameter (`serde_json::Value`). Optional metadata filter. To filter, use the syntax `metadata[k]=v`. Alternatively, set `metadata=null` to indicate no metadata.
     pub fn list_paginated_fine_tuning_jobs(
         &self,
@@ -35095,11 +39396,6 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `fine_tuning_job_id: impl Into<String>`: the `{fine_tuning_job_id}` path parameter
-    ///
-    /// ## Optional values
-    ///
-    /// - [`after`](ListFineTuningJobCheckpointsCall::after): the `after` query parameter (`String`). Identifier for the last checkpoint ID from the previous pagination request.
-    /// - [`limit`](ListFineTuningJobCheckpointsCall::limit): the `limit` query parameter (`i64`). Number of checkpoints to retrieve.
     pub fn list_fine_tuning_job_checkpoints(
         &self,
         fine_tuning_job_id: impl Into<String>,
@@ -35117,11 +39413,6 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `fine_tuning_job_id: impl Into<String>`: the `{fine_tuning_job_id}` path parameter
-    ///
-    /// ## Optional values
-    ///
-    /// - [`after`](ListFineTuningEventsCall::after): the `after` query parameter (`String`). Identifier for the last event from the previous pagination request.
-    /// - [`limit`](ListFineTuningEventsCall::limit): the `limit` query parameter (`i64`). Number of events to retrieve.
     pub fn list_fine_tuning_events(
         &self,
         fine_tuning_job_id: impl Into<String>,
@@ -35262,9 +39553,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`after`](AdminApiKeysListCall::after): the `after` query parameter (`String`).
     /// - [`order`](AdminApiKeysListCall::order): the `order` query parameter (`String`).
-    /// - [`limit`](AdminApiKeysListCall::limit): the `limit` query parameter (`i64`).
     pub fn admin_api_keys_list(&self) -> AdminApiKeysListCall<'_> {
         AdminApiKeysListCall(self.0.send(AdminApiKeysListRequest::default()))
     }
@@ -35328,9 +39617,6 @@ impl OpenAI {
     /// - [`actor_emails__`](ListAuditLogsCall::actor_emails__): the `actor_emails[]` query parameter (`Vec<String>`). Return only events performed by users with these emails.
     /// - [`resource_ids__`](ListAuditLogsCall::resource_ids__): the `resource_ids[]` query parameter (`Vec<String>`). Return only events performed on these targets. For example, a project ID updated. For ChatGPT connector role events, use the workspace connector resource ID shown in `details.id`, such as `<workspace_id>__<connector_id>`.
     /// - [`tenant_only`](ListAuditLogsCall::tenant_only): the `tenant_only` query parameter (`bool`). Return only tenant-scoped events associated with this organization. Required for tenant-scoped events such as `role.bound_to_resource` and `role.unbound_from_resource`. When `true`, all supplied event types must be tenant-scoped.
-    /// - [`limit`](ListAuditLogsCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    /// - [`after`](ListAuditLogsCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    /// - [`before`](ListAuditLogsCall::before): the `before` query parameter (`String`). A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
     pub fn list_audit_logs(&self) -> ListAuditLogsCall<'_> {
         ListAuditLogsCall(self.0.send(ListAuditLogsRequest::default()))
     }
@@ -35342,8 +39628,6 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListOrganizationCertificatesCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    /// - [`after`](ListOrganizationCertificatesCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
     /// - [`order`](ListOrganizationCertificatesCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
     pub fn list_organization_certificates(
         &self,
@@ -35478,8 +39762,6 @@ impl OpenAI {
     /// - [`project_ids`](UsageCostsCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only costs for these projects.
     /// - [`api_key_ids`](UsageCostsCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only costs for these API keys.
     /// - [`group_by`](UsageCostsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the costs by the specified fields. Support fields include `project_id`, `line_item`, `api_key_id` and any combination of them.
-    /// - [`limit`](UsageCostsCall::limit): the `limit` query parameter (`i64`). A limit on the number of buckets to be returned. Limit can range between 1 and 180, and the default is 7.
-    /// - [`page`](UsageCostsCall::page): the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
     pub fn usage_costs(&self) -> UsageCostsCall<'_> {
         UsageCostsCall(self.0.send(UsageCostsRequest::default()))
     }
@@ -35520,8 +39802,6 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListGroupsCall::limit): the `limit` query parameter (`i64`). A limit on the number of groups to be returned. Limit can range between 0 and 1000, and the default is 100.
-    /// - [`after`](ListGroupsCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is a group ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with group_abc, your subsequent call can include `after=group_abc` in order to fetch the next page of the list.
     /// - [`order`](ListGroupsCall::order): the `order` query parameter (`String`). Specifies the sort order of the returned groups.
     pub fn list_groups(&self) -> ListGroupsCall<'_> {
         ListGroupsCall(self.0.send(ListGroupsRequest::default()))
@@ -35591,8 +39871,6 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListGroupRoleAssignmentsCall::limit): the `limit` query parameter (`i64`). A limit on the number of organization role assignments to return.
-    /// - [`after`](ListGroupRoleAssignmentsCall::after): the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing organization roles.
     /// - [`order`](ListGroupRoleAssignmentsCall::order): the `order` query parameter (`String`). Sort order for the returned organization roles.
     pub fn list_group_role_assignments(
         &self,
@@ -35669,8 +39947,6 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListGroupUsersCall::limit): the `limit` query parameter (`i64`). A limit on the number of users to be returned. Limit can range between 0 and 1000, and the default is 100.
-    /// - [`after`](ListGroupUsersCall::after): the `after` query parameter (`String`). A cursor for use in pagination. Provide the ID of the last user from the previous list response to retrieve the next page.
     /// - [`order`](ListGroupUsersCall::order): the `order` query parameter (`String`). Specifies the sort order of users in the list.
     pub fn list_group_users(
         &self,
@@ -35736,11 +40012,6 @@ impl OpenAI {
     /// `GET /organization/invites`
     ///
     /// Returns a [`ListInvitesCall`]: chain optional values and per-call settings on it, then `.await` it to send.
-    ///
-    /// ## Optional values
-    ///
-    /// - [`limit`](ListInvitesCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    /// - [`after`](ListInvitesCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
     pub fn list_invites(&self) -> ListInvitesCall<'_> {
         ListInvitesCall(self.0.send(ListInvitesRequest::default()))
     }
@@ -35791,8 +40062,6 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListProjectsCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    /// - [`after`](ListProjectsCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
     /// - [`include_archived`](ListProjectsCall::include_archived): the `include_archived` query parameter (`bool`). If `true` returns all projects including those that have been `archived`. Archived projects are not included by default.
     pub fn list_projects(&self) -> ListProjectsCall<'_> {
         ListProjectsCall(self.0.send(ListProjectsRequest::default()))
@@ -35853,8 +40122,6 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListProjectApiKeysCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    /// - [`after`](ListProjectApiKeysCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
     /// - [`owner_project_access`](ListProjectApiKeysCall::owner_project_access): the `owner_project_access` query parameter (`String`). Filter API keys by whether the owner currently has effective access to the project. Use `active` for owners with access, `inactive` for owners without access, or `any` for all enabled project API keys. If omitted, the endpoint applies its existing membership-based visibility rules, which may exclude some enabled keys.
     pub fn list_project_api_keys(
         &self,
@@ -35930,8 +40197,6 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListProjectCertificatesCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    /// - [`after`](ListProjectCertificatesCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
     /// - [`order`](ListProjectCertificatesCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
     pub fn list_project_certificates(
         &self,
@@ -36030,8 +40295,6 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListProjectGroupsCall::limit): the `limit` query parameter (`i64`). A limit on the number of project groups to return. Defaults to 20.
-    /// - [`after`](ListProjectGroupsCall::after): the `after` query parameter (`String`). Cursor for pagination. Provide the ID of the last group from the previous response to fetch the next page.
     /// - [`order`](ListProjectGroupsCall::order): the `order` query parameter (`String`). Sort order for the returned groups.
     pub fn list_project_groups(
         &self,
@@ -36196,12 +40459,6 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
-    ///
-    /// ## Optional values
-    ///
-    /// - [`limit`](ListProjectRateLimitsCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. The default is 100.
-    /// - [`after`](ListProjectRateLimitsCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    /// - [`before`](ListProjectRateLimitsCall::before): the `before` query parameter (`String`). A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, beginning with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
     pub fn list_project_rate_limits(
         &self,
         project_id: impl Into<String>,
@@ -36244,11 +40501,6 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
-    ///
-    /// ## Optional values
-    ///
-    /// - [`limit`](ListProjectServiceAccountsCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    /// - [`after`](ListProjectServiceAccountsCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
     pub fn list_project_service_accounts(
         &self,
         project_id: impl Into<String>,
@@ -36372,10 +40624,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListProjectSpendAlertsCall::limit): the `limit` query parameter (`i64`). A limit on the number of spend alerts to return. Defaults to 20.
     /// - [`order`](ListProjectSpendAlertsCall::order): the `order` query parameter (`String`). Sort order for the returned spend alerts.
-    /// - [`after`](ListProjectSpendAlertsCall::after): the `after` query parameter (`String`). Cursor for pagination. Provide the ID of the last spend alert from the previous response to fetch the next page.
-    /// - [`before`](ListProjectSpendAlertsCall::before): the `before` query parameter (`String`). Cursor for pagination. Provide the ID of the first spend alert from the previous response to fetch the previous page.
     pub fn list_project_spend_alerts(
         &self,
         project_id: impl Into<String>,
@@ -36471,11 +40720,6 @@ impl OpenAI {
     /// ## Arguments
     ///
     /// - `project_id: impl Into<String>`: the `{project_id}` path parameter
-    ///
-    /// ## Optional values
-    ///
-    /// - [`limit`](ListProjectUsersCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    /// - [`after`](ListProjectUsersCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
     pub fn list_project_users(
         &self,
         project_id: impl Into<String>,
@@ -36571,8 +40815,6 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListRolesCall::limit): the `limit` query parameter (`i64`). A limit on the number of roles to return. Defaults to 1000.
-    /// - [`after`](ListRolesCall::after): the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing roles.
     /// - [`order`](ListRolesCall::order): the `order` query parameter (`String`). Sort order for the returned roles.
     pub fn list_roles(&self) -> ListRolesCall<'_> {
         ListRolesCall(self.0.send(ListRolesRequest::default()))
@@ -36641,10 +40883,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListOrganizationSpendAlertsCall::limit): the `limit` query parameter (`i64`). A limit on the number of spend alerts to return. Defaults to 20.
     /// - [`order`](ListOrganizationSpendAlertsCall::order): the `order` query parameter (`String`). Sort order for the returned spend alerts.
-    /// - [`after`](ListOrganizationSpendAlertsCall::after): the `after` query parameter (`String`). Cursor for pagination. Provide the ID of the last spend alert from the previous response to fetch the next page.
-    /// - [`before`](ListOrganizationSpendAlertsCall::before): the `before` query parameter (`String`). Cursor for pagination. Provide the ID of the first spend alert from the previous response to fetch the previous page.
     pub fn list_organization_spend_alerts(&self) -> ListOrganizationSpendAlertsCall<'_> {
         ListOrganizationSpendAlertsCall(
             self.0.send(ListOrganizationSpendAlertsRequest::default()),
@@ -36736,8 +40975,6 @@ impl OpenAI {
     /// - [`api_key_ids`](UsageAudioSpeechesCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
     /// - [`models`](UsageAudioSpeechesCall::models): the `models` query parameter (`Vec<String>`). Return only usage for these models.
     /// - [`group_by`](UsageAudioSpeechesCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
-    /// - [`limit`](UsageAudioSpeechesCall::limit): the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
-    /// - [`page`](UsageAudioSpeechesCall::page): the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
     pub fn usage_audio_speeches(&self) -> UsageAudioSpeechesCall<'_> {
         UsageAudioSpeechesCall(self.0.send(UsageAudioSpeechesRequest::default()))
     }
@@ -36757,8 +40994,6 @@ impl OpenAI {
     /// - [`api_key_ids`](UsageAudioTranscriptionsCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
     /// - [`models`](UsageAudioTranscriptionsCall::models): the `models` query parameter (`Vec<String>`). Return only usage for these models.
     /// - [`group_by`](UsageAudioTranscriptionsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
-    /// - [`limit`](UsageAudioTranscriptionsCall::limit): the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
-    /// - [`page`](UsageAudioTranscriptionsCall::page): the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
     pub fn usage_audio_transcriptions(&self) -> UsageAudioTranscriptionsCall<'_> {
         UsageAudioTranscriptionsCall(
             self.0.send(UsageAudioTranscriptionsRequest::default()),
@@ -36777,8 +41012,6 @@ impl OpenAI {
     /// - [`bucket_width`](UsageCodeInterpreterSessionsCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
     /// - [`project_ids`](UsageCodeInterpreterSessionsCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
     /// - [`group_by`](UsageCodeInterpreterSessionsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`.
-    /// - [`limit`](UsageCodeInterpreterSessionsCall::limit): the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
-    /// - [`page`](UsageCodeInterpreterSessionsCall::page): the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
     pub fn usage_code_interpreter_sessions(
         &self,
     ) -> UsageCodeInterpreterSessionsCall<'_> {
@@ -36803,8 +41036,6 @@ impl OpenAI {
     /// - [`models`](UsageCompletionsCall::models): the `models` query parameter (`Vec<String>`). Return only usage for these models.
     /// - [`batch`](UsageCompletionsCall::batch): the `batch` query parameter (`bool`). If `true`, return batch jobs only. If `false`, return non-batch jobs only. By default, return both.
     /// - [`group_by`](UsageCompletionsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `batch`, `service_tier` or any combination of them.
-    /// - [`limit`](UsageCompletionsCall::limit): the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
-    /// - [`page`](UsageCompletionsCall::page): the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
     pub fn usage_completions(&self) -> UsageCompletionsCall<'_> {
         UsageCompletionsCall(self.0.send(UsageCompletionsRequest::default()))
     }
@@ -36824,8 +41055,6 @@ impl OpenAI {
     /// - [`api_key_ids`](UsageEmbeddingsCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
     /// - [`models`](UsageEmbeddingsCall::models): the `models` query parameter (`Vec<String>`). Return only usage for these models.
     /// - [`group_by`](UsageEmbeddingsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
-    /// - [`limit`](UsageEmbeddingsCall::limit): the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
-    /// - [`page`](UsageEmbeddingsCall::page): the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
     pub fn usage_embeddings(&self) -> UsageEmbeddingsCall<'_> {
         UsageEmbeddingsCall(self.0.send(UsageEmbeddingsRequest::default()))
     }
@@ -36845,8 +41074,6 @@ impl OpenAI {
     /// - [`api_key_ids`](UsageFileSearchCallsCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
     /// - [`vector_store_ids`](UsageFileSearchCallsCall::vector_store_ids): the `vector_store_ids` query parameter (`Vec<String>`). Return only usage for these vector stores.
     /// - [`group_by`](UsageFileSearchCallsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `vector_store_id` or any combination of them.
-    /// - [`limit`](UsageFileSearchCallsCall::limit): the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
-    /// - [`page`](UsageFileSearchCallsCall::page): the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
     pub fn usage_file_search_calls(&self) -> UsageFileSearchCallsCall<'_> {
         UsageFileSearchCallsCall(self.0.send(UsageFileSearchCallsRequest::default()))
     }
@@ -36868,8 +41095,6 @@ impl OpenAI {
     /// - [`api_key_ids`](UsageImagesCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
     /// - [`models`](UsageImagesCall::models): the `models` query parameter (`Vec<String>`). Return only usage for these models.
     /// - [`group_by`](UsageImagesCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `size`, `source` or any combination of them.
-    /// - [`limit`](UsageImagesCall::limit): the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
-    /// - [`page`](UsageImagesCall::page): the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
     pub fn usage_images(&self) -> UsageImagesCall<'_> {
         UsageImagesCall(self.0.send(UsageImagesRequest::default()))
     }
@@ -36889,8 +41114,6 @@ impl OpenAI {
     /// - [`api_key_ids`](UsageModerationsCall::api_key_ids): the `api_key_ids` query parameter (`Vec<String>`). Return only usage for these API keys.
     /// - [`models`](UsageModerationsCall::models): the `models` query parameter (`Vec<String>`). Return only usage for these models.
     /// - [`group_by`](UsageModerationsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them.
-    /// - [`limit`](UsageModerationsCall::limit): the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
-    /// - [`page`](UsageModerationsCall::page): the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
     pub fn usage_moderations(&self) -> UsageModerationsCall<'_> {
         UsageModerationsCall(self.0.send(UsageModerationsRequest::default()))
     }
@@ -36907,8 +41130,6 @@ impl OpenAI {
     /// - [`bucket_width`](UsageVectorStoresCall::bucket_width): the `bucket_width` query parameter (`String`). Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`.
     /// - [`project_ids`](UsageVectorStoresCall::project_ids): the `project_ids` query parameter (`Vec<String>`). Return only usage for these projects.
     /// - [`group_by`](UsageVectorStoresCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`.
-    /// - [`limit`](UsageVectorStoresCall::limit): the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
-    /// - [`page`](UsageVectorStoresCall::page): the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
     pub fn usage_vector_stores(&self) -> UsageVectorStoresCall<'_> {
         UsageVectorStoresCall(self.0.send(UsageVectorStoresRequest::default()))
     }
@@ -36929,8 +41150,6 @@ impl OpenAI {
     /// - [`models`](UsageWebSearchCallsCall::models): the `models` query parameter (`Vec<String>`). Return only usage for these models.
     /// - [`context_levels`](UsageWebSearchCallsCall::context_levels): the `context_levels` query parameter (`Vec<String>`). Return only web search usage for these context levels.
     /// - [`group_by`](UsageWebSearchCallsCall::group_by): the `group_by` query parameter (`Vec<String>`). Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `context_level` or any combination of them.
-    /// - [`limit`](UsageWebSearchCallsCall::limit): the `limit` query parameter (`i64`). Specifies the number of buckets to return. - `bucket_width=1d`: default: 7, max: 31 - `bucket_width=1h`: default: 24, max: 168 - `bucket_width=1m`: default: 60, max: 1440
-    /// - [`page`](UsageWebSearchCallsCall::page): the `page` query parameter (`String`). A cursor for use in pagination. Corresponding to the `next_page` field from the previous response.
     pub fn usage_web_search_calls(&self) -> UsageWebSearchCallsCall<'_> {
         UsageWebSearchCallsCall(self.0.send(UsageWebSearchCallsRequest::default()))
     }
@@ -36942,8 +41161,6 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListUsersCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
-    /// - [`after`](ListUsersCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
     /// - [`emails`](ListUsersCall::emails): the `emails` query parameter (`Vec<String>`). Filter by the email address of users.
     pub fn list_users(&self) -> ListUsersCall<'_> {
         ListUsersCall(self.0.send(ListUsersRequest::default()))
@@ -37001,8 +41218,6 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListUserRoleAssignmentsCall::limit): the `limit` query parameter (`i64`). A limit on the number of organization role assignments to return.
-    /// - [`after`](ListUserRoleAssignmentsCall::after): the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing organization roles.
     /// - [`order`](ListUserRoleAssignmentsCall::order): the `order` query parameter (`String`). Sort order for the returned organization roles.
     pub fn list_user_role_assignments(
         &self,
@@ -37076,8 +41291,6 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListProjectGroupRoleAssignmentsCall::limit): the `limit` query parameter (`i64`). A limit on the number of project role assignments to return.
-    /// - [`after`](ListProjectGroupRoleAssignmentsCall::after): the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing project roles.
     /// - [`order`](ListProjectGroupRoleAssignmentsCall::order): the `order` query parameter (`String`). Sort order for the returned project roles.
     pub fn list_project_group_role_assignments(
         &self,
@@ -37173,8 +41386,6 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListProjectRolesCall::limit): the `limit` query parameter (`i64`). A limit on the number of roles to return. Defaults to 1000.
-    /// - [`after`](ListProjectRolesCall::after): the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing roles.
     /// - [`order`](ListProjectRolesCall::order): the `order` query parameter (`String`). Sort order for the returned roles.
     pub fn list_project_roles(
         &self,
@@ -37273,8 +41484,6 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListProjectUserRoleAssignmentsCall::limit): the `limit` query parameter (`i64`). A limit on the number of project role assignments to return.
-    /// - [`after`](ListProjectUserRoleAssignmentsCall::after): the `after` query parameter (`String`). Cursor for pagination. Provide the value from the previous response's `next` field to continue listing project roles.
     /// - [`order`](ListProjectUserRoleAssignmentsCall::order): the `order` query parameter (`String`). Sort order for the returned project roles.
     pub fn list_project_user_role_assignments(
         &self,
@@ -37623,9 +41832,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListInputItemsCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
     /// - [`order`](ListInputItemsCall::order): the `order` query parameter (`String`). The order to return the input items in. Default is `desc`. - `asc`: Return the input items in ascending order. - `desc`: Return the input items in descending order.
-    /// - [`after`](ListInputItemsCall::after): the `after` query parameter (`String`). An item ID to list items after, used in pagination.
     /// - [`include`](ListInputItemsCall::include): the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for Response creation above for more information.
     pub fn list_input_items(
         &self,
@@ -37730,10 +41937,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListVectorStoresCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
     /// - [`order`](ListVectorStoresCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
-    /// - [`after`](ListVectorStoresCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    /// - [`before`](ListVectorStoresCall::before): the `before` query parameter (`String`). A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
     pub fn list_vector_stores(&self) -> ListVectorStoresCall<'_> {
         ListVectorStoresCall(self.0.send(ListVectorStoresRequest::default()))
     }
@@ -37875,10 +42079,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListFilesInVectorStoreBatchCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
     /// - [`order`](ListFilesInVectorStoreBatchCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
-    /// - [`after`](ListFilesInVectorStoreBatchCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    /// - [`before`](ListFilesInVectorStoreBatchCall::before): the `before` query parameter (`String`). A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
     /// - [`filter`](ListFilesInVectorStoreBatchCall::filter): the `filter` query parameter (`String`). Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`.
     pub fn list_files_in_vector_store_batch(
         &self,
@@ -37903,10 +42104,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListVectorStoreFilesCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
     /// - [`order`](ListVectorStoreFilesCall::order): the `order` query parameter (`String`). Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.
-    /// - [`after`](ListVectorStoreFilesCall::after): the `after` query parameter (`String`). A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
-    /// - [`before`](ListVectorStoreFilesCall::before): the `before` query parameter (`String`). A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
     /// - [`filter`](ListVectorStoreFilesCall::filter): the `filter` query parameter (`String`). Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`.
     pub fn list_vector_store_files(
         &self,
@@ -38256,9 +42454,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListVideosCall::limit): the `limit` query parameter (`i64`). Number of items to retrieve
     /// - [`order`](ListVideosCall::order): the `order` query parameter (`serde_json::Value`). Sort order of results by timestamp. Use `asc` for ascending order or `desc` for descending order.
-    /// - [`after`](ListVideosCall::after): the `after` query parameter (`String`). Identifier for the last item from the previous pagination request
     pub fn list_videos(&self) -> ListVideosCall<'_> {
         ListVideosCall(self.0.send(ListVideosRequest::default()))
     }
@@ -38438,9 +42634,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListSkillsCall::limit): the `limit` query parameter (`i64`). Number of items to retrieve
     /// - [`order`](ListSkillsCall::order): the `order` query parameter (`serde_json::Value`). Sort order of results by timestamp. Use `asc` for ascending order or `desc` for descending order.
-    /// - [`after`](ListSkillsCall::after): the `after` query parameter (`String`). Identifier for the last item from the previous pagination request
     pub fn list_skills(&self) -> ListSkillsCall<'_> {
         ListSkillsCall(self.0.send(ListSkillsRequest::default()))
     }
@@ -38526,9 +42720,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListSkillVersionsCall::limit): the `limit` query parameter (`i64`). Number of versions to retrieve.
     /// - [`order`](ListSkillVersionsCall::order): the `order` query parameter (`serde_json::Value`). Sort order of results by version number.
-    /// - [`after`](ListSkillVersionsCall::after): the `after` query parameter (`String`). The skill version ID to start after.
     pub fn list_skill_versions(
         &self,
         skill_id: impl Into<String>,
@@ -38657,10 +42849,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListThreadItemsMethodCall::limit): the `limit` query parameter (`i64`). Maximum number of thread items to return. Defaults to 20.
     /// - [`order`](ListThreadItemsMethodCall::order): the `order` query parameter (`serde_json::Value`). Sort order for results by creation time. Defaults to `desc`.
-    /// - [`after`](ListThreadItemsMethodCall::after): the `after` query parameter (`String`). List items created after this thread item ID. Defaults to null for the first page.
-    /// - [`before`](ListThreadItemsMethodCall::before): the `before` query parameter (`String`). List items created before this thread item ID. Defaults to null for the newest results.
     pub fn list_thread_items_method(
         &self,
         thread_id: impl Into<String>,
@@ -38707,10 +42896,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](ListThreadsMethodCall::limit): the `limit` query parameter (`i64`). Maximum number of thread items to return. Defaults to 20.
     /// - [`order`](ListThreadsMethodCall::order): the `order` query parameter (`serde_json::Value`). Sort order for results by creation time. Defaults to `desc`.
-    /// - [`after`](ListThreadsMethodCall::after): the `after` query parameter (`String`). List items created after this thread item ID. Defaults to null for the first page.
-    /// - [`before`](ListThreadsMethodCall::before): the `before` query parameter (`String`). List items created before this thread item ID. Defaults to null for the newest results.
     /// - [`user`](ListThreadsMethodCall::user): the `user` query parameter (`String`). Filter threads that belong to this user identifier. Defaults to null to return all users.
     pub fn list_threads_method(&self) -> ListThreadsMethodCall<'_> {
         ListThreadsMethodCall(self.0.send(ListThreadsMethodRequest::default()))
@@ -38838,9 +43024,7 @@ impl OpenAI {
     ///
     /// ## Optional values
     ///
-    /// - [`limit`](BetaListInputItemsCall::limit): the `limit` query parameter (`i64`). A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.
     /// - [`order`](BetaListInputItemsCall::order): the `order` query parameter (`String`). The order to return the input items in. Default is `desc`. - `asc`: Return the input items in ascending order. - `desc`: Return the input items in descending order.
-    /// - [`after`](BetaListInputItemsCall::after): the `after` query parameter (`String`). An item ID to list items after, used in pagination.
     /// - [`include`](BetaListInputItemsCall::include): the `include` query parameter (`Vec<serde_json::Value>`). Additional fields to include in the response. See the `include` parameter for Response creation above for more information.
     /// - [`openai_beta`](BetaListInputItemsCall::openai_beta): the `openai-beta` header parameter (`Vec<String>`). Optional beta features to enable for this request.
     pub fn beta_list_input_items(

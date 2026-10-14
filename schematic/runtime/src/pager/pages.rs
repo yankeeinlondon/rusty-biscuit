@@ -4,13 +4,15 @@
 use std::collections::VecDeque;
 use std::fmt;
 use std::marker::PhantomData;
+use std::time::Duration;
 
 use super::engine::{Deferred, DeferredKind, Direction, Engine, PageView, Planned, Rejected};
 use super::error::{Incomplete, Page, PagerError, PagerErrorKind};
-use super::request::{PageRequest, build_parts, decode_items};
+use super::request::{PageRequest, build_parts, decode_items, write_input};
+use super::session::{DEFAULT_CLOSE_GRACE, SessionShared};
 use super::{
-    AdjustablePageSize, HasPrev, HasTotal, PageSizeKnob, Paginated, ResumeAfter, ResumeBefore, Sessionless,
-    StartOffset, StartPage, cursor_values,
+    AdjustablePageSize, HasPrev, HasTotal, PageSizeKnob, Paginated, Partitioned, Renewable, ResumeAfter,
+    ResumeBefore, Sessionless, StartOffset, StartPage, cursor_values,
 };
 use crate::call::{Call, CallFuture};
 use crate::client::Client;
@@ -47,6 +49,8 @@ impl<'a, A: Api, R: EndpointSpec<Api = A>> Call<'a, A, R> {
             options,
             engine: Engine::new(R::STRATEGY, R::ITEMS),
             page_limit: DEFAULT_PAGE_LIMIT,
+            keep_alive: None,
+            close_grace: DEFAULT_CLOSE_GRACE,
         }
     }
 }
@@ -61,11 +65,14 @@ impl<'a, A: Api, R: EndpointSpec<Api = A>> Call<'a, A, R> {
 /// and nothing is sent.
 #[must_use = "a pager sends nothing until it is iterated or fetched"]
 pub struct Pager<'a, A: Api, R> {
-    client: &'a Client<A>,
-    request: R,
-    options: CallOptions,
-    engine: Engine,
-    page_limit: u32,
+    pub(super) client: &'a Client<A>,
+    pub(super) request: R,
+    pub(super) options: CallOptions,
+    pub(super) engine: Engine,
+    pub(super) page_limit: u32,
+    /// The caller's session keep-alive; `None` sends the authored default.
+    pub(super) keep_alive: Option<String>,
+    pub(super) close_grace: Duration,
 }
 
 impl<'a, A: Api, R: Paginated<Api = A>> Pager<'a, A, R> {
@@ -154,15 +161,36 @@ impl<'a, A: Api, R: Paginated<Api = A>> Pager<'a, A, R> {
     where
         R: Sessionless,
     {
-        Pages {
-            client: self.client,
-            base: self.request.into_parts(),
-            options: self.options,
-            engine: self.engine,
-            failed: None,
-            received: 0,
-            endpoint: PhantomData,
-        }
+        Pages::new(self.client, self.request.into_parts(), self.options, self.engine, None, None)
+    }
+
+    /// `count` independent traversals of the list's slices: traversal `i`
+    /// sends slice index `i` and the slice count `count` on every request.
+    /// The caller polls them, in any order or concurrently; nothing is
+    /// spawned.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`InvalidArgument`] when `count` is zero or above the
+    /// definition's maximum; nothing is sent.
+    pub fn partitioned(self, count: u32) -> Result<Vec<Pages<'a, A, R>>, InvalidArgument>
+    where
+        R: Partitioned + Sessionless,
+    {
+        partition_count::<R>(count)?;
+        let base = self.request.into_parts();
+        Ok((0..count)
+            .map(|index| {
+                Pages::new(
+                    self.client,
+                    base.clone(),
+                    self.options.clone(),
+                    self.engine.clone(),
+                    None,
+                    Some((index, count)),
+                )
+            })
+            .collect())
     }
 
     /// Sends exactly one request with this pager's settings and returns its
@@ -179,12 +207,7 @@ impl<'a, A: Api, R: Paginated<Api = A>> Pager<'a, A, R> {
     where
         R: Sessionless,
     {
-        let mut pages = self.pages();
-        Box::pin(async move {
-            let page = pages.next().await?;
-            // The first request of a traversal is always sent.
-            Ok(page.expect("the first page of a traversal is always requested"))
-        })
+        fetch_first(self.pages())
     }
 
     /// Fetches every page and returns all items, only after the provider
@@ -202,41 +225,71 @@ impl<'a, A: Api, R: Paginated<Api = A>> Pager<'a, A, R> {
         R: Sessionless,
     {
         let limit = self.page_limit;
-        let mut pages = self.pages();
-        if limit == 0 {
-            pages.engine_refuse("the page limit must be greater than zero");
-        }
-        Box::pin(async move {
-            let mut items = Vec::new();
-            loop {
-                let error = match pages.next().await {
-                    Ok(Some(page)) => {
-                        items.extend(page.items);
-                        if pages.is_finished() {
-                            return Ok(items);
-                        }
-                        if pages.pages_fetched() < limit || pages.has_deferred_failure() {
-                            continue;
-                        }
-                        return Err(Incomplete {
-                            reason: super::IncompleteReason::PageLimitReached,
-                            items,
-                            pages: pages.pages_fetched(),
-                            error: None,
-                        });
-                    }
-                    Ok(None) => return Ok(items),
-                    Err(error) => error,
-                };
-                return Err(Incomplete {
-                    reason: error.incomplete_reason(),
-                    items,
-                    pages: pages.pages_fetched(),
-                    error: Some(error),
-                });
-            }
-        })
+        collect(self.pages(), limit)
     }
+}
+
+/// Sends the first request of `pages` and returns its page.
+pub(super) fn fetch_first<'s, A: Api, R: Paginated<Api = A>>(mut pages: Pages<'s, A, R>) -> CallFuture<'s, PageResult<R>> {
+    Box::pin(async move {
+        let page = pages.next().await?;
+        // The first request of a traversal is always sent.
+        Ok(page.expect("the first page of a traversal is always requested"))
+    })
+}
+
+/// Walks `pages` to the provider's end, within `limit` page requests.
+pub(super) fn collect<'s, A: Api, R: Paginated<Api = A>>(
+    mut pages: Pages<'s, A, R>,
+    limit: u32,
+) -> CallFuture<'s, CollectResult<R>> {
+    if limit == 0 {
+        pages.engine_refuse("the page limit must be greater than zero");
+    }
+    Box::pin(async move {
+        let mut items = Vec::new();
+        loop {
+            let error = match pages.next().await {
+                Ok(Some(page)) => {
+                    items.extend(page.items);
+                    if pages.is_finished() {
+                        return Ok(items);
+                    }
+                    if pages.pages_fetched() < limit || pages.has_deferred_failure() {
+                        continue;
+                    }
+                    return Err(Incomplete {
+                        reason: super::IncompleteReason::PageLimitReached,
+                        items,
+                        pages: pages.pages_fetched(),
+                        error: None,
+                    });
+                }
+                Ok(None) => return Ok(items),
+                Err(error) => error,
+            };
+            return Err(Incomplete {
+                reason: error.incomplete_reason(),
+                items,
+                pages: pages.pages_fetched(),
+                error: Some(error),
+            });
+        }
+    })
+}
+
+/// Checks a partition count against the definition: at least one, at most
+/// the authored maximum.
+pub(super) fn partition_count<R: Paginated>(count: u32) -> Result<(), InvalidArgument> {
+    if count == 0 {
+        return Err(InvalidArgument::new("the partition count must be at least 1"));
+    }
+    if let Some(max) = R::STRATEGY.partition.and_then(|partition| partition.max)
+        && count > max
+    {
+        return Err(InvalidArgument::new(format!("the partition count is above the declared maximum, {max}")));
+    }
+    Ok(())
 }
 
 impl<A: Api, R: EndpointSpec + fmt::Debug> fmt::Debug for Pager<'_, A, R> {
@@ -261,12 +314,37 @@ pub struct Pages<'a, A: Api, R: EndpointSpec> {
     base: Result<RequestParts, InvalidArgument>,
     options: CallOptions,
     engine: Engine,
+    /// The scope's session, for a traversal inside `with_session`.
+    session: Option<&'a SessionShared>,
+    /// This traversal's slice index and the slice count.
+    partition: Option<(u32, u32)>,
     failed: Option<PagerErrorKind>,
     received: u32,
     endpoint: PhantomData<fn() -> R>,
 }
 
 impl<'a, A: Api, R: Paginated<Api = A>> Pages<'a, A, R> {
+    pub(super) fn new(
+        client: &'a Client<A>,
+        base: Result<RequestParts, InvalidArgument>,
+        options: CallOptions,
+        engine: Engine,
+        session: Option<&'a SessionShared>,
+        partition: Option<(u32, u32)>,
+    ) -> Self {
+        Self {
+            client,
+            base,
+            options,
+            engine,
+            session,
+            partition,
+            failed: None,
+            received: 0,
+            endpoint: PhantomData,
+        }
+    }
+
     /// The next page forward, or `None` after the provider signaled the end.
     ///
     /// ## Errors
@@ -324,13 +402,27 @@ impl<'a, A: Api, R: Paginated<Api = A>> Pages<'a, A, R> {
 
     /// The items of every remaining page, one at a time, reading each page
     /// once.
-    pub fn items(self) -> Items<'a, A, R>
-    where
-        R: Sessionless,
-    {
+    pub fn items(self) -> Items<'a, A, R> {
         Items {
             pages: self,
             buffer: VecDeque::new(),
+        }
+    }
+
+    /// See [`SessionScope::renew`](super::SessionScope::renew); available
+    /// while this traversal of the session is borrowed.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`PagerError::Transport`] or [`PagerError::Api`] when the
+    /// renew request fails.
+    pub async fn renew(&self) -> Result<bool, PagerError<R::Failure>>
+    where
+        R: Renewable,
+    {
+        match self.session {
+            Some(session) => session.renew::<A, R>(self.client, &self.base, &self.options).await,
+            None => Ok(false),
         }
     }
 
@@ -360,16 +452,38 @@ impl<'a, A: Api, R: Paginated<Api = A>> Pages<'a, A, R> {
             Planned::Send(plan) => plan,
         };
         let number = self.engine.pages();
-        if let Some(link) = &plan.link
-            && let Err(mut error) = self.client.check_link::<R>(link)
+        if let Some(session) = self.session
+            && let Err(error) = session.ensure_open::<A, R>(self.client, &self.base, &self.options).await
+        {
+            return Err(match error {
+                PagerError::Transport(error) => self.transport_error(error),
+                error => error,
+            });
+        }
+        let parts = match &self.base {
+            Ok(base) => build_parts(base, &plan, R::STRATEGY, R::PATH).and_then(|mut parts| {
+                if let Some(session) = self.session {
+                    let opening = session.opens_with(plan.follow_up);
+                    session.apply_to_page(&mut parts, opening, plan.link.is_some(), R::PATH, &base.path)?;
+                }
+                if let (Some((index, count)), Some(partition)) = (self.partition, R::STRATEGY.partition) {
+                    write_input(&mut parts, partition.index, &index.into())?;
+                    write_input(&mut parts, partition.count, &count.into())?;
+                }
+                Ok(parts)
+            }),
+            Err(argument) => Err(argument.clone()),
+        };
+        // A followed link is checked as it will be sent, after the carry rule
+        // and managed inputs changed its query.
+        if plan.link.is_some()
+            && let Ok(parts) = &parts
+            && let Ok(url) = url::Url::parse(&parts.path)
+            && let Err(mut error) = self.client.check_link::<R>(&url)
         {
             error.request.page = Some(number);
             return Err(PagerError::Transport(error));
         }
-        let parts = match &self.base {
-            Ok(base) => build_parts(base, &plan, R::STRATEGY, R::PATH),
-            Err(argument) => Err(argument.clone()),
-        };
         let request = PageRequest::<R> {
             parts,
             endpoint: PhantomData,
@@ -392,6 +506,9 @@ impl<'a, A: Api, R: Paginated<Api = A>> Pages<'a, A, R> {
                 });
             }
         };
+        if let Some(session) = self.session {
+            session.observe_page(&document.json, &document.headers);
+        }
         let view = PageView {
             body: &document.json,
             headers: &document.headers,

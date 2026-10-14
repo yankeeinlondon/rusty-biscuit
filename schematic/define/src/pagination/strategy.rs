@@ -150,7 +150,7 @@ pub enum CountUnit {
 ///
 /// `server_default` documents the provider's own default and is never sent.
 /// `sent_default` is an authored value the pager sends when the caller sets no
-/// size; it is required when the provider requires the parameter (R2a), and is
+/// size; it is required when the provider requires the parameter, and is
 /// otherwise left unset so an unset size is omitted. `adjustable` lets the
 /// caller change the size between pages.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

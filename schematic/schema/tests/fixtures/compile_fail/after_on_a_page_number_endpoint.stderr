@@ -1,0 +1,32 @@
+error[E0277]: `schematic_schema::github::ListReleasesRequest` has no resumable cursor
+ --> tests/fixtures/compile_fail/after_on_a_page_number_endpoint.rs
+  |
+  |     let _ = client.list_releases("octo", "widgets").pager().after("x");
+  |                                                             ^^^^^ `.after(..)` needs a resumable cursor in the definition
+  |
+  = help: the trait `ResumeAfter` is not implemented for `schematic_schema::github::ListReleasesRequest`
+  = note: the definition for `schematic_schema::github::ListReleasesRequest` does not mark a cursor strategy `resumable`
+  = help: the following other types implement trait `ResumeAfter`:
+            AdminApiKeysListRequest
+            BetaListInputItemsRequest
+            GetChatCompletionMessagesRequest
+            GetEvalRunOutputItemsRequest
+            GetEvalRunsRequest
+            GetHistoryRequest
+            ListAuditLogsRequest
+            ListBatchesRequest
+          and $N others
+note: required by a bound in `Pager::<'a, A, R>::after`
+ --> $SCHEMATIC_RUNTIME/src/pager/pages.rs
+  |
+  |     pub fn after(mut self, cursor: impl Into<<R as ResumeAfter>::Cursor>) -> Self
+  |            ----- required by a bound in this associated function
+  |     where
+  |         R: ResumeAfter,
+  |            ^^^^^^^^^^^ required by this bound in `Pager::<'a, A, R>::after`
+
+error[E0599]: no method named `after` found for struct `schematic_schema::github::ListReleasesCall<'a>` in the current scope
+ --> tests/fixtures/compile_fail/after_on_a_page_number_endpoint.rs
+  |
+  |     let _ = client.list_releases("octo", "widgets").after("x");
+  |                                                     ^^^^^ method not found in `schematic_schema::github::ListReleasesCall<'_>`

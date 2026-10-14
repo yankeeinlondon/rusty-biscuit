@@ -2,7 +2,10 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
+use schematic_define::pagination::ParamLocation;
 use schematic_define::{ApiRequest, Endpoint};
+
+use crate::codegen::pagination::OrdinaryDefault;
 
 use crate::codegen::request_structs::named_params::generate_headers_assembly;
 use crate::codegen::request_structs::shared::{
@@ -15,10 +18,14 @@ use crate::codegen::request_structs::shared::{
 /// body that fails to serialize, and a static `Cookie` header that cannot be
 /// merged with cookie parameters, are `InvalidArgument`s reported before any
 /// network work.
+///
+/// `defaults` are adopted parameters the endpoint declares required: they
+/// are not request fields, so their pager default is appended here.
 pub(super) fn generate_into_parts_body(
     endpoint: &Endpoint,
     path_params: &[&str],
     query_params: &[QueryParamInfo],
+    defaults: &[OrdinaryDefault],
 ) -> TokenStream {
     let path_format = generate_path_format(&endpoint.path, path_params, query_params);
 
@@ -64,9 +71,12 @@ pub(super) fn generate_into_parts_body(
         headers_statements
     };
 
+    let defaults_statements = generate_defaults(defaults);
+
     quote! {
         #path_format
         #headers_binding
+        #defaults_statements
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
             path,
@@ -75,4 +85,26 @@ pub(super) fn generate_into_parts_body(
             body: #body_expr,
         })
     }
+}
+
+/// Appends each required adopted parameter's default to the assembled query
+/// or headers.
+fn generate_defaults(defaults: &[OrdinaryDefault]) -> TokenStream {
+    let pushes = |location: ParamLocation| {
+        defaults
+            .iter()
+            .filter(move |default| default.location == location)
+            .map(|OrdinaryDefault { name, value, .. }| quote! { (#name.to_owned(), #value.to_owned()) })
+            .collect::<Vec<_>>()
+    };
+    let query = pushes(ParamLocation::Query);
+    let headers = pushes(ParamLocation::Header);
+    let mut statements = TokenStream::new();
+    if !query.is_empty() {
+        statements.extend(quote! { let mut query = query; query.extend([#(#query),*]); });
+    }
+    if !headers.is_empty() {
+        statements.extend(quote! { let mut headers = headers; headers.extend([#(#headers),*]); });
+    }
+    statements
 }

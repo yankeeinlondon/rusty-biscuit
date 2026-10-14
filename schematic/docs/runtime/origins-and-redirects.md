@@ -134,8 +134,9 @@ even though nothing has been sent yet:
   origin policy per endpoint (**planned**); today every endpoint of an API
   shares the API's policy.
 
-A same-origin URL passes under every policy, including `deny`. Pagers that
-call `check_link` with their listing request's type for every next-page
-link, and then send it through the absolute-URL path above, are
-**planned**; once they exist, ordinary callers are not expected to call
-`check_link` directly.
+A same-origin URL passes under every policy, including `deny`. A pager
+calls `check_link` with its listing request's type on every next-page link,
+as the link will be sent (after its carry rule), and then sends it through
+the absolute-URL path above, so ordinary callers are not expected to call
+`check_link` directly. A refused link is a `TransportError` of kind
+`CrossOriginRejected`: nothing is sent to that origin.

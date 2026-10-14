@@ -271,8 +271,8 @@ Every REST endpoint becomes a method on its API struct, named after the
 endpoint id in snake case (`ListReleases` becomes `list_releases`), and that
 method returns a call type named after the request type (`ListReleasesCall`
 beside `ListReleasesRequest`). Each optional parameter becomes a setter on the
-call type, named like its request field (`per_page`, matching
-`with_per_page`). A parameter that the endpoint's pagination strategy adopts
+call type, named like its request field (`state`, matching
+`with_state`). A parameter that the endpoint's pagination strategy adopts
 has no setter: its pager control (`.page_size(..)`, `.page(..)`, ...)
 replaces it.
 
@@ -283,8 +283,8 @@ type has. The generator renames the endpoint's name, never the shared one, so
 | The generated name would be | Because | It becomes |
 | --- | --- | --- |
 | an endpoint method named like an API-struct method (`new`, `send`, `base_url`, `clone`, …) | the API struct has that method | `new_endpoint` |
-| a setter named like a call-type method (`full`, `build`, `anonymous`, `credential`, `deadline`, the pager entry points `pager`, `pages`, `fetch_page`, `collect_all`, or a trait method such as `clone`) | every call type has that method | `full_param` |
-| a setter named like a pager control the endpoint's strategy authors (`page`, `offset`, `after`, `before`, `page_size`) | the endpoint's pager has a method of that name | `page_param` |
+| a setter named like a call-type method (`full`, `build`, `anonymous`, `credential`, `deadline`, the pager entry points `pager`, `pages`, `fetch_page`, `collect_all`, `with_session`, or a trait method such as `clone`) | every call type has that method | `full_param` |
+| a setter named like a pager control the endpoint's strategy authors (`page`, `offset`, `after`, `before`, `page_size`, `keep_alive`, `close_grace` on a session, or `partitioned` on a list without a session) | the endpoint's pager has a method of that name | `page_param` |
 | an endpoint method whose snake-case id is a Rust keyword | it is not an identifier | `type_`, the same rule request fields use |
 
 Each rename is reported as an `endpoint-method-rename` **warning** and never

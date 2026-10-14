@@ -12,8 +12,9 @@
 //!   reserves for its pager, gains a `_param` suffix
 //!   ([`RenameReason::SharedCallMethod`]).
 //! - A setter named like a pager control its own call type forwards
-//!   (`page`, `offset`, `after`, `before`, `page_size`) gains a `_param`
-//!   suffix ([`RenameReason::PagerMethod`]). Only paginated endpoints
+//!   (`page`, `offset`, `after`, `before`, `page_size`, `keep_alive`,
+//!   `partitioned`, `close_grace`) gains a `_param` suffix
+//!   ([`RenameReason::PagerMethod`]). Only paginated endpoints
 //!   forward controls, and only the ones their strategy authors.
 //! - A parameter the endpoint's pagination strategy adopts has no setter: the
 //!   names are resolved on the endpoint's [`pager_view`], as the request
@@ -46,7 +47,7 @@ pub const SHARED_CALL_METHODS: &[&str] = &["anonymous", "credential", "deadline"
 /// The pager entry points of a paginated endpoint's call type, reserved on
 /// every call type so that authoring pagination for an endpoint later renames
 /// no setter a caller already uses.
-pub const PLANNED_CALL_METHODS: &[&str] = &["pager", "pages", "fetch_page", "collect_all"];
+pub const PLANNED_CALL_METHODS: &[&str] = &["pager", "pages", "fetch_page", "collect_all", "with_session"];
 
 /// Methods a call type has through the traits it implements. A setter with
 /// one of these names would shadow the trait method in method-call syntax.
@@ -338,11 +339,7 @@ fn endpoint_names(
 
     let pager = pager_forwards(api, endpoint);
     let endpoint = pager_view(api, endpoint);
-    let is_pager_control = |name: &str| {
-        pager
-            .as_ref()
-            .is_some_and(|pager| pager.knobs.iter().any(|knob| knob.name() == name))
-    };
+    let is_pager_control = |name: &str| pager.as_ref().is_some_and(|pager| pager.has_control(name));
     let located = [
         (ParamLocation::Query, extract_query_params(&endpoint.params)),
         (ParamLocation::Header, extract_header_params(&endpoint.params)),

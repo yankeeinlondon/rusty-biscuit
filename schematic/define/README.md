@@ -1022,7 +1022,10 @@ let exceptions = vec![
 
 A strategy input with the same name and location as a declared parameter
 adopts it (the request struct drops the field) only when the strategy
-authors the knob that replaces it. The rules are checked by
+authors the knob that replaces it. If the endpoint declares that parameter
+required, the strategy needs a value to send when the caller sets none
+(`ManagedRole::sent_default`: the first page or offset, or the size's
+`sent_default`); ordinary sends of the request send that value too. The rules are checked by
 `pagination::validate_pagination`, which `schematic-gen` runs; see
 [generation validation](../docs/generation/validation.md#pagination-rules).
 
@@ -1030,6 +1033,9 @@ authors the knob that replaces it. The rules are checked by
 are superseded. They remain only because existing definitions still use
 `with_pagination` to add ordinary query parameters; nothing generates a pager
 from them.
+
+[Pagination](../docs/pagination.md) describes resolution, adoption, every
+strategy builder, and what the generated pager does with them.
 
 ### QueryParamType Variants
 

@@ -174,6 +174,7 @@ pub mod huggingface;
 pub mod lmstudio;
 pub mod ollama;
 pub mod openai;
+pub mod openai_pagination;
 pub mod prelude;
 pub mod registry;
 pub mod samsung_smart_tv;

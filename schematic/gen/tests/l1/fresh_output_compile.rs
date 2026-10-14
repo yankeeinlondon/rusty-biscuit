@@ -28,7 +28,8 @@ use schematic_define::{
     ParamDef, ParamStyle, PkceRequirement, QueryParamType, RestApi, RestMethod,
 };
 use schematic_define::pagination::{
-    Collection, CursorSource, LinkSource, MoreSignal, PageSize, PaginationException, Strategy,
+    Collection, CursorSource, InputParam, KeepAlive, LinkSource, MoreSignal, PageSize, PaginationException,
+    Partition, Session, SessionStep, Strategy, ValueSource,
 };
 use schematic_gen::output::{
     RustOutputRequest, Selection, generate_and_write_all, get_module_path, prepare_rust_output,
@@ -76,7 +77,13 @@ const FIXTURE_COVERAGE: &[(&str, &[&str])] = &[
     ("FixtureNames", &["endpoint-method-renames", "keyword-setter"]),
     (
         "FixturePages",
-        &["page-number-pager", "cursor-pager", "next-link-pager", "adopted-parameters"],
+        &[
+            "page-number-pager",
+            "cursor-pager",
+            "next-link-pager",
+            "adopted-parameters",
+            "required-adopted-defaults",
+        ],
     ),
 ];
 
@@ -203,7 +210,10 @@ fn located_params(query: Vec<ParamDef>, header: Vec<ParamDef>, cookie: Vec<Param
 }
 
 /// A page-number default (adopting `page` and `per_page`, keeping `state`),
-/// a resumable cursor on a wrapper list, and a body next link.
+/// a resumable cursor on a wrapper list, a body next link, a page-number
+/// list whose adopted `page` and `limit` are required (R2a, R11a), and a
+/// point-in-time-style session with a keep-alive, renew, close, and
+/// partitions (R22, R23).
 fn pages_fixture() -> RestApi {
     let int = |name| named_param(name, QueryParamType::Integer);
     let mut list_entries =
@@ -218,12 +228,17 @@ fn pages_fixture() -> RestApi {
     list_cursor.params = Some(located_params(vec![named_param("after", QueryParamType::String)], vec![], vec![]));
     let list_linked =
         endpoint("ListLinked", RestMethod::Get, "/linked", ApiResponse::json_type("EntryLinkPage"));
+    let required = |name| ParamDef { required: true, ..int(name) };
+    let mut list_required =
+        endpoint("ListRequired", RestMethod::Get, "/required", ApiResponse::json_type("Vec<Entry>"));
+    list_required.params = Some(located_params(vec![required("page"), required("limit")], vec![], vec![]));
+    let scan_entries = endpoint("ScanEntries", RestMethod::Get, "/scan", ApiResponse::json_type("Vec<Entry>"));
 
     let mut api = fixture_api(
         "FixturePages",
         "fixture_pages",
         AuthStrategy::None,
-        vec![list_entries, list_cursor, list_linked],
+        vec![list_entries, list_cursor, list_linked, list_required, scan_entries],
     );
     api.default_pagination = Some(
         Strategy::page_number("page", MoreSignal::link_rel("next"))
@@ -244,6 +259,28 @@ fn pages_fixture() -> RestApi {
             Collection::at("values")
                 .item_type("Entry")
                 .paginate(Strategy::next_link(LinkSource::body("next"))),
+        ),
+        PaginationException::new(
+            "ListRequired",
+            Collection::root().paginate(
+                Strategy::page_number("page", MoreSignal::NonEmptyPage)
+                    .page_size(PageSize::new("limit").sent_default(25)),
+            ),
+        ),
+        PaginationException::new(
+            "ScanEntries",
+            Collection::root().paginate(
+                Strategy::cursor("after", CursorSource::last_item("id"))
+                    .more_when(MoreSignal::NonEmptyPage)
+                    .session(
+                        Session::opened_by(SessionStep::new(RestMethod::Post, "/pit"), ValueSource::body("id"))
+                            .send_handle_as(InputParam::query("pit"))
+                            .keep_alive(KeepAlive::new("1m").on_open("keep_alive").on_page("keep_alive").adjustable())
+                            .renew(SessionStep::new(RestMethod::Post, "/pit/renew").handle("pit"))
+                            .close(SessionStep::new(RestMethod::Delete, "/pit").handle("pit")),
+                    )
+                    .partition(Partition::new(InputParam::query("slice"), InputParam::query("slices")).max(2)),
+            ),
         ),
     ];
     api
@@ -514,6 +551,7 @@ use schematic_schema::fixture_oauth::{FixtureOAuth, WhoAmIRequest};
 use schematic_schema::fixture_policy_key::{FixturePolicyKey, PingRequest};
 use schematic_schema::fixture_query_key::{FixtureQueryKey, ListThingsRequest};
 use schematic_schema::fixture_names::FixtureNames;
+use schematic_schema::fixture_pages::FixturePages;
 use schematic_schema::fixture_settings::{Echo, EchoRequest, FixtureSettings, MovedRequest};
 use schematic_schema::prelude::*;
 use schematic_schema::schematic_runtime::{AuthMethod, ErrorKind, Outcome, RedirectRefusal, TransportErrorKind};
@@ -1058,6 +1096,87 @@ async fn request_id_secret_names_and_cross_origin_policy_come_from_the_definitio
     );
     assert_eq!(server.received_requests().await.unwrap().len(), 2, "/echo was not requested again");
 }
+
+// ---- pagination ----
+
+#[tokio::test]
+async fn required_adopted_parameters_are_sent_once_by_an_ordinary_send_and_by_the_pager() {
+    let server = MockServer::start().await;
+    Mock::given(any())
+        .respond_with(ResponseTemplate::new(200).set_body_string("[]"))
+        .mount(&server)
+        .await;
+    let client = FixturePages::new().base_url(server.uri()).build().unwrap();
+
+    let entries = client.list_required().await.unwrap();
+    assert!(entries.is_empty(), "an ordinary send returns the endpoint's own response");
+    let page = client.list_required().page(3).page_size(5).fetch_page().await.unwrap();
+    assert_eq!(page.number, 1);
+
+    let received = server.received_requests().await.unwrap();
+    let queries: Vec<String> = received.iter().map(query).collect();
+    assert_eq!(
+        queries,
+        ["page=1&limit=25", "page=3&limit=5"],
+        "the ordinary send carries the first page and the authored size; the pager replaces both"
+    );
+}
+
+#[tokio::test]
+async fn a_generated_session_opens_pages_and_closes_inside_its_scope() {
+    use wiremock::matchers::{method, query_param};
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/pit"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"id":"pit-1"}"#))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/scan"))
+        .and(query_param("after", "a"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("[]"))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/scan"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(r#"[{"id":"a"}]"#))
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path("/pit"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    let client = FixturePages::new().base_url(server.uri()).build().unwrap();
+
+    let entries = client
+        .scan_entries()
+        .keep_alive("5m")
+        .with_session(|scope| Box::pin(async move { scope.collect_all().await }))
+        .await
+        .expect("the close succeeded")
+        .expect("the list is complete");
+    assert_eq!(entries.len(), 1);
+
+    let received: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|request| format!("{} {}?{}", request.method, request.url.path(), query(request)))
+        .collect();
+    assert_eq!(
+        received,
+        [
+            "POST /pit?keep_alive=5m",
+            "GET /scan?pit=pit-1&keep_alive=5m",
+            "GET /scan?after=a&pit=pit-1&keep_alive=5m",
+            "DELETE /pit?pit=pit-1",
+        ],
+        "one open, every page with the handle and keep-alive, one close"
+    );
+}
 "##;
 
 /// Environment for the child test process; see [`REQUEST_SIDE_TEST`].
@@ -1094,6 +1213,8 @@ const REQUEST_SIDE_TESTS: &[&str] = &[
     "an_endpoint_method_sends_its_values_and_awaits_to_the_data",
     "renamed_endpoint_methods_and_setters_send_under_their_wire_names",
     "request_id_secret_names_and_cross_origin_policy_come_from_the_definition",
+    "required_adopted_parameters_are_sent_once_by_an_ordinary_send_and_by_the_pager",
+    "a_generated_session_opens_pages_and_closes_inside_its_scope",
 ];
 
 #[test]
@@ -1340,6 +1461,14 @@ const MISUSES: &[(&str, &str, &str, &str)] = &[
         "has no authored page size",
     ),
     (
+        "pages of a session endpoint outside its scope",
+        "fn misuse(client: schematic_schema::fixture_pages::FixturePages) {
+            let _ = client.scan_entries().pages();
+        }",
+        "E0599",
+        "no method named `pages`",
+    ),
+    (
         "the removed injected-client constructor",
         "fn misuse() {
             let _ = FixtureBearer::with_client_and_base_url(todo!(), \"http://127.0.0.1:1\");
@@ -1398,6 +1527,24 @@ async fn used(client: FixturePages) {
     }
     let _: Result<Vec<Entry>, _> = client.list_linked().collect_all().await;
     let _ = client.list_entries().page(2).page_limit(3).collect_all().await;
+}
+
+fn sends<T: Send>(_: T) {}
+
+async fn scoped(client: FixturePages) {
+    let session = client.scan_entries().close_grace(std::time::Duration::from_secs(1)).keep_alive(\"5m\").with_session(|scope| Box::pin(async move {
+        let _: bool = scope.renew().await.unwrap_or_default();
+        if let Ok(slices) = scope.partitioned(2) {
+            for mut slice in slices {
+                let _ = slice.next().await;
+            }
+        }
+        scope.collect_all().await
+    }));
+    sends(client.scan_entries().with_session(|scope| Box::pin(async move {
+        scope.fetch_page().await.map(|page| page.items.len())
+    })));
+    let _: Result<Result<Vec<Entry>, _>, _> = session.await;
 }
 ";
 
@@ -1643,9 +1790,13 @@ fn offline_cache_misses_name_the_fetch_that_fills_the_cache() {
 /// Request lines the pre-split generator put on the wire, captured by a raw
 /// TCP listener so no HTTP library normalizes them. The query split, and the
 /// move of request execution into `schematic-runtime`, must leave every line
-/// byte-identical, with one recorded exception: a base URL that carries its
+/// byte-identical, with two recorded exceptions. A base URL that carries its
 /// own query (`base-url-with-query`) now gets the declared pairs after `&`,
-/// where the generated clients appended a second `?`.
+/// where the generated clients appended a second `?`. Pager-managed inputs
+/// (Gitea `page`/`limit`, OpenAI `after`/`limit`) are no longer request
+/// fields: they are sent through the pager, which appends them after the
+/// request's own pairs, so they moved to the end of their lines with their
+/// encoding unchanged.
 const WIRE_BASELINE: &str = include_str!("../fixtures/wire_baseline/query_request_lines.txt");
 
 /// Sends representative requests through the generated real clients to a
@@ -1702,12 +1853,11 @@ async fn capture_query_request_lines() {
     let key = Credential::api_key("test-key");
     let gitea = Gitea::new().base_url(format!("{base}/api/v1")).build().unwrap();
 
+    // `page` and `limit` are pager-managed, so they travel through the pager.
     let mut scalars = ListPullRequestsRequest::new("own er", "re+po%");
-    scalars.page = Some(2);
-    scalars.limit = Some(0);
     scalars.state = Some("open closed".to_string());
     scalars.sort = Some("ünï+%&=/?#".to_string());
-    let _ = gitea.send(scalars).credential(key.clone()).full().await;
+    let _ = gitea.send(scalars).credential(key.clone()).pager().page(2).page_size(1).fetch_page().await;
     record("ordered-scalars-reserved-unicode");
 
     let mut empty = ListPullRequestsRequest::new("o", "r");
@@ -1722,9 +1872,8 @@ async fn capture_query_request_lines() {
     record("legacy-embedded-literal-query");
 
     let tenant = Gitea::new().base_url(format!("{base}/api/v1?tenant=a b")).build().unwrap();
-    let mut paged = ListPullRequestsRequest::new("o", "r");
-    paged.page = Some(1);
-    let _ = tenant.send(paged).credential(key.clone()).full().await;
+    let paged = ListPullRequestsRequest::new("o", "r");
+    let _ = tenant.send(paged).credential(key.clone()).pager().page(1).fetch_page().await;
     record("base-url-with-query");
 
     let gitlab = GitLab::new().base_url(format!("{base}/api/v4")).build().unwrap();
@@ -1740,22 +1889,19 @@ async fn capture_query_request_lines() {
     let openai = OpenAI::new().base_url(format!("{base}/v1")).build().unwrap();
     let token = Credential::access_token("test-token");
     let mut items = ListConversationItemsRequest::new("conv 1");
-    items.limit = Some(5);
     items.order = Some("a+b".to_string());
-    items.after = Some("x%y".to_string());
     items.include = Some(vec![
         serde_json::json!("a b"),
         serde_json::json!("c+d"),
         serde_json::json!(""),
         serde_json::json!("é"),
     ]);
-    let _ = openai.send(items).credential(token.clone()).full().await;
+    let _ = openai.send(items).credential(token.clone()).pager().page_size(5).after("x%y").fetch_page().await;
     record("repeated-array-keys");
 
     let mut beta = BetaListInputItemsRequest::new("resp 1");
-    beta.limit = Some(3);
     beta.include = Some(vec![serde_json::json!("x y")]);
-    let _ = openai.send(beta).credential(token.clone()).full().await;
+    let _ = openai.send(beta).credential(token.clone()).pager().page_size(3).fetch_page().await;
     record("legacy-embedded-query-plus-declared");
 
     let out = std::env::var("WIRE_BASELINE_OUT").expect("WIRE_BASELINE_OUT");
@@ -1769,20 +1915,15 @@ fn pairs(list: &[(&str, &str)]) -> Vec<(String, String)> {
 #[test]
 fn into_parts_returns_unencoded_query_pairs_apart_from_the_path() {
     let mut scalars = ListPullRequestsRequest::new("own er", "re+po%");
-    scalars.page = Some(2);
-    scalars.limit = Some(0);
     scalars.state = Some("open closed".to_string());
     scalars.sort = Some("ünï+%&=/?#".to_string());
     let parts = scalars.into_parts().unwrap();
     assert_eq!(parts.method, Method::GET);
     assert_eq!(parts.path, "/repos/own%20er/re%2Bpo%25/pulls");
     assert_eq!(parts.body, RequestBody::Empty);
-    assert_eq!(
-        parts.query,
-        pairs(&[("page", "2"), ("limit", "0"), ("state", "open closed"), ("sort", "ünï+%&=/?#")])
-    );
+    assert_eq!(parts.query, pairs(&[("state", "open closed"), ("sort", "ünï+%&=/?#")]));
     assert!(
-        !parts.headers.iter().any(|(name, _)| ["page", "limit", "state", "sort"].contains(&name.as_str())),
+        !parts.headers.iter().any(|(name, _)| ["state", "sort"].contains(&name.as_str())),
         "query parameters must not travel as headers: {:?}",
         parts.headers
     );
@@ -1806,17 +1947,16 @@ fn into_parts_returns_unencoded_query_pairs_apart_from_the_path() {
     );
 
     let mut items = ListConversationItemsRequest::new("conv 1");
-    items.limit = Some(5);
     items.include = Some(vec![serde_json::json!("a b"), serde_json::json!("")]);
     let parts = items.into_parts().unwrap();
     assert_eq!(parts.path, "/conversations/conv%201/items");
-    assert_eq!(parts.query, pairs(&[("limit", "5"), ("include", "\"a b\""), ("include", "\"\"")]));
+    assert_eq!(parts.query, pairs(&[("include", "\"a b\""), ("include", "\"\"")]));
 
     let mut beta = BetaListInputItemsRequest::new("resp 1");
-    beta.limit = Some(3);
+    beta.include = Some(vec![serde_json::json!("x y")]);
     let parts = beta.into_parts().unwrap();
     assert_eq!(parts.path, "/responses/resp%201/input_items?beta=true");
-    assert_eq!(parts.query, pairs(&[("limit", "3")]));
+    assert_eq!(parts.query, pairs(&[("include", "\"x y\"")]));
 }
 "#;
 

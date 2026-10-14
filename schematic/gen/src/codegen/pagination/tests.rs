@@ -1,6 +1,6 @@
 use schematic_define::pagination::{
     Collection, CursorLeg, CursorSource, InputParam, KeepAlive, LinkSource, MoreSignal, PageSize,
-    PaginationException, Session, SessionStep, Strategy, ValueSource,
+    PaginationException, Partition, Session, SessionStep, Strategy, ValueSource,
 };
 use schematic_define::params::PaginationStyle;
 use schematic_define::{
@@ -285,6 +285,44 @@ fn only_adopted_required_parameters_keep_default() {
 }
 
 #[test]
+fn an_ordinary_send_carries_required_adopted_defaults_and_omits_optional_ones() {
+    let shelves = get(
+        "ListShelves",
+        "/shelves",
+        "Vec<Shelf>",
+        vec![param("page", true), param("per_page", true), param("draft", false)],
+    );
+    let mut books = get("ListBooks", "/books", "Vec<Book>", vec![param("offset", true), param("limit", false)]);
+    books.response = ApiResponse::json_type("BookList");
+    let mut api = api(vec![shelves, books]);
+    api.default_pagination = Some(
+        Strategy::page_number("page", MoreSignal::NonEmptyPage)
+            .page_size(PageSize::new("per_page").sent_default(50))
+            .build(),
+    );
+    api.pagination_exceptions = vec![PaginationException::new(
+        "ListBooks",
+        Collection::at("books").item_type("Book").paginate(
+            Strategy::offset("offset", MoreSignal::NonEmptyPage)
+                .page_size(PageSize::new("limit").sent_default(20)),
+        ),
+    )];
+
+    let module = module(&api);
+    let shelves = squash(item(&module, "impl schematic_runtime::EndpointSpec for ListShelvesRequest"));
+    assert!(
+        shelves.contains(r#"letmutquery=query;query.extend([("page".to_owned(),"1".to_owned()),("per_page".to_owned(),"50".to_owned())]);"#),
+        "the first page and the authored size are sent:\n{shelves}"
+    );
+    let books = squash(item(&module, "impl schematic_runtime::EndpointSpec for ListBooksRequest"));
+    assert!(
+        books.contains(r#"query.extend([("offset".to_owned(),"0".to_owned())]);"#),
+        "a zero-based offset starts at zero:\n{books}"
+    );
+    assert!(!books.contains(r#""limit".to_owned()"#), "an optional adopted size is omitted:\n{books}");
+}
+
+#[test]
 fn composite_inclusive_cursor_with_backward_leg_and_total() {
     let mut api = api(vec![get(
         "ListEvents",
@@ -391,7 +429,7 @@ fn one_based_offset_strategy() {
 }
 
 #[test]
-fn session_strategy_has_markers_but_no_outside_scope_iteration() {
+fn session_strategy_forwards_with_session_and_its_knobs_but_no_outside_scope_iteration() {
     let mut api = api(vec![get("Scroll", "/scroll", "Vec<Hit>", vec![param("keep", false)])]);
     api.default_pagination = Some(
         Strategy::cursor("cursor", CursorSource::body("next"))
@@ -429,11 +467,72 @@ fn session_strategy_has_markers_but_no_outside_scope_iteration() {
 
     let module = module(&api);
     let call = item(&module, "impl<'a> ScrollCall<'a> {");
-    assert!(call.contains("pub fn pager(") && call.contains("pub fn page_size("), "{call}");
-    for absent in ["pub fn pages(", "pub fn fetch_page(", "pub fn collect_all(", "keep_alive", "renew"] {
+    for present in ["pub fn pager(", "pub fn page_size(", "pub fn keep_alive(", "pub fn close_grace(", "pub fn with_session<"] {
+        assert!(call.contains(present), "`{present}` is missing from a session call:\n{call}");
+    }
+    let squashed_call = squash(call);
+    assert!(
+        squashed_call.contains(&squash(
+            "F: for<'s> FnOnce(&'s mut schematic_runtime::pager::SessionScope<'a, ShelfApi, ScrollRequest>) -> schematic_runtime::CallFuture<'s, O> + Send + 'a"
+        )),
+        "{call}"
+    );
+    // A session pages, renews, and partitions only inside its scope.
+    for absent in ["pub fn pages(", "pub fn fetch_page(", "pub fn collect_all(", "renew", "partitioned"] {
         assert!(!call.contains(absent), "`{absent}` is forwarded on a session call:\n{call}");
     }
     assert!(!module.contains("pub keep:"), "the adjustable keep-alive adopts `keep`");
+}
+
+#[test]
+fn a_partition_without_a_session_forwards_partitioned_and_with_one_does_not() {
+    let partitioned = |session: Option<Session>| {
+        let mut api = api(vec![get(
+            "Scan",
+            "/scan",
+            "Vec<Hit>",
+            vec![param("slice", false), param("slices", false), param("partitioned", false)],
+        )]);
+        let strategy = Strategy::cursor("cursor", CursorSource::body("next"))
+            .more_when(MoreSignal::has_more("more"))
+            .partition(Partition::new(InputParam::query("slice"), InputParam::query("slices")).max(4));
+        api.default_pagination = Some(match session {
+            Some(session) => strategy.session(session),
+            None => strategy,
+        });
+        module(&api)
+    };
+
+    let module = partitioned(None);
+    let call = item(&module, "impl<'a> ScanCall<'a> {");
+    assert!(call.contains("pub fn partitioned("), "{call}");
+    assert!(call.contains("self.0.pager().partitioned(count)"), "{call}");
+    // The setter of a plain parameter named like the forward is renamed.
+    assert!(call.contains("pub fn partitioned_param("), "{call}");
+    assert!(!call.contains("pub fn with_session<"), "{call}");
+    assert!(
+        module.contains("impl schematic_runtime::pager::Partitioned for ScanRequest {}"),
+        "{module}"
+    );
+
+    let module = partitioned(Some(
+        Session::opened_by(
+            SessionStep::new(RestMethod::Post, "/pit"),
+            ValueSource::body("id"),
+        )
+        .send_handle_as(InputParam::query("pit"))
+        .close(SessionStep::new(RestMethod::Delete, "/pit").handle("pit")),
+    ));
+    let call = item(&module, "impl<'a> ScanCall<'a> {");
+    assert!(call.contains("pub fn with_session<"), "{call}");
+    // Partitions of a session are made inside its scope, so the call type
+    // forwards none and its `partitioned` setter keeps its name.
+    assert!(!call.contains("self.0.pager().partitioned"), "{call}");
+    assert!(!call.contains("partitioned_param"), "{call}");
+    assert!(
+        module.contains("impl schematic_runtime::pager::Partitioned for ScanRequest {}"),
+        "{module}"
+    );
 }
 
 #[test]

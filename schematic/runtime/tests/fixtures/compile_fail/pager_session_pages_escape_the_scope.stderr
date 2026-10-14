@@ -1,0 +1,19 @@
+error: lifetime may not live long enough
+ --> tests/fixtures/compile_fail/pager_session_pages_escape_the_scope.rs
+  |
+  |     let _ = client.send(ListItems).pager().with_session(|scope| Box::pin(async move { scope.pages() }));
+  |                                                          ------ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ returning this value requires that `'1` must outlive `'2`
+  |                                                          |    |
+  |                                                          |    return type of closure is Pin<Box<dyn Future<Output = schematic_runtime::pager::Pages<'2, Example, ListItems>> + Send>>
+  |                                                          has type `&'1 mut SessionScope<'_, Example, ListItems>`
+
+error[E0521]: borrowed data escapes outside of closure
+ --> tests/fixtures/compile_fail/pager_session_pages_escape_the_scope.rs
+  |
+  |     let escaped = &mut slot;
+  |         ------- `escaped` declared here, outside of the closure body
+  |     let _ = client.send(ListItems).pager().with_session(|scope| {
+  |                                                          ----- `scope` is a reference that is only valid in the closure body
+  |         Box::pin(async move {
+  |             *escaped = Some(scope.pages());
+  |             ^^^^^^^^ `scope` escapes the closure body here

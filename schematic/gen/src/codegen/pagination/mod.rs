@@ -8,7 +8,7 @@
 //! marker impl per authored knob. Kind-only and session capabilities are the
 //! runtime's blanket impls over the `Kind` and `Session` associated types, so
 //! nothing is emitted for them. Unpaginated lists, non-lists, and alternates
-//! (R6) emit nothing.
+//! emit nothing.
 //!
 //! The parameters the strategy adopts (`adopted_params`) leave the request:
 //! [`pager_view`] is the one place that removes them, and request structs,
@@ -24,7 +24,7 @@ use quote::{format_ident, quote};
 use schematic_define::pagination::{
     Boundary, Carry, CountUnit, CursorLeg, CursorPart, CursorSource, Direction, FixedParam,
     FollowUp, IndexBase, InputParam, ItemSelector, KeepAlive, Knob, LinkSource, MoreSignal,
-    PageSize, PageStrategy, Partition, Polarity, Resolution, Session, SessionOpen, SessionStep,
+    PageSize, PageStrategy, ParamLocation, Partition, Polarity, Resolution, Session, SessionOpen, SessionStep,
     Step, Strategy, ValueSource, adopted_params, caller_knobs, resolve,
 };
 use schematic_define::{Endpoint, RestApi, RestMethod};
@@ -33,7 +33,7 @@ use crate::codegen::request_structs::endpoint_spec::method_tokens;
 use crate::codegen::request_structs::shared::type_name_to_tokens;
 
 /// `endpoint` as the Rust client sees it: without the query and header
-/// parameters its pagination strategy adopts (R7). Borrowed when nothing is
+/// parameters its pagination strategy adopts. Borrowed when nothing is
 /// adopted.
 pub fn pager_view<'a>(api: &RestApi, endpoint: &'a Endpoint) -> Cow<'a, Endpoint> {
     let Resolution::Paginated { strategy, .. } = resolve(api, endpoint) else {
@@ -43,7 +43,6 @@ pub fn pager_view<'a>(api: &RestApi, endpoint: &'a Endpoint) -> Cow<'a, Endpoint
     if adopted.is_empty() {
         return Cow::Borrowed(endpoint);
     }
-    use schematic_define::pagination::ParamLocation;
     let kept = |location: ParamLocation, name: &str| {
         !adopted
             .iter()
@@ -55,6 +54,40 @@ pub fn pager_view<'a>(api: &RestApi, endpoint: &'a Endpoint) -> Cow<'a, Endpoint
         params.header.retain(|def| kept(ParamLocation::Header, &def.name));
     }
     Cow::Owned(endpoint)
+}
+
+/// An adopted parameter that an ordinary send of its endpoint still sends.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrdinaryDefault {
+    /// `Query` or `Header`; adoption covers no other location.
+    pub location: ParamLocation,
+    /// The name as the endpoint declares it.
+    pub name: String,
+    pub value: String,
+}
+
+/// The adopted parameters that `endpoint` declares required, with the value
+/// the pager sends for each when the caller sets none.
+///
+/// An adopted parameter is not a request field, so an ordinary send would
+/// otherwise omit a parameter the provider requires; it sends this value
+/// instead, and the pager writes its own value over it. Validation rejects a
+/// required adopted parameter without such a value, so none is skipped here.
+pub fn ordinary_send_defaults(api: &RestApi, endpoint: &Endpoint) -> Vec<OrdinaryDefault> {
+    let Resolution::Paginated { strategy, .. } = resolve(api, endpoint) else {
+        return Vec::new();
+    };
+    adopted_params(endpoint, &strategy)
+        .into_iter()
+        .filter(|adoption| adoption.required)
+        .filter_map(|adoption| {
+            Some(OrdinaryDefault {
+                value: adoption.role.sent_default(&strategy)?,
+                location: adoption.location,
+                name: adoption.name,
+            })
+        })
+        .collect()
 }
 
 /// `api` with [`pager_view`] applied to every endpoint.
@@ -84,6 +117,8 @@ pub enum KnobForward {
     Before,
     /// `.page_size(size)`, for an authored page size.
     PageSize,
+    /// `.keep_alive(value)`, for an adjustable session keep-alive.
+    KeepAlive,
 }
 
 impl KnobForward {
@@ -95,6 +130,7 @@ impl KnobForward {
             Self::After => "after",
             Self::Before => "before",
             Self::PageSize => "page_size",
+            Self::KeepAlive => "keep_alive",
         }
     }
 }
@@ -105,8 +141,22 @@ pub struct PagerForwards {
     /// One per authored setter-like knob.
     pub knobs: Vec<KnobForward>,
     /// Whether `pages`, `fetch_page`, and `collect_all` are forwarded: only
-    /// a strategy without a session pages outside a scope.
+    /// a strategy without a session pages outside a scope. A session
+    /// strategy forwards `with_session` and `close_grace` instead.
     pub sessionless: bool,
+    /// Whether `partitioned` is forwarded: an authored partition without a
+    /// session (a session's partitions are made inside its scope).
+    pub partitioned: bool,
+}
+
+impl PagerForwards {
+    /// Whether the call type gets a pager method named `name` beyond the
+    /// entry points every call type reserves.
+    pub fn has_control(&self, name: &str) -> bool {
+        self.knobs.iter().any(|knob| knob.name() == name)
+            || (self.partitioned && name == "partitioned")
+            || (!self.sessionless && name == "close_grace")
+    }
 }
 
 /// The pager forwards of `endpoint`, or `None` when it is not paginated.
@@ -127,12 +177,14 @@ pub fn pager_forwards(api: &RestApi, endpoint: &Endpoint) -> Option<PagerForward
                 ..
             } => Some(KnobForward::Before),
             Knob::PageSize { .. } => Some(KnobForward::PageSize),
+            Knob::KeepAlive { .. } => Some(KnobForward::KeepAlive),
             _ => None,
         })
         .collect();
     Some(PagerForwards {
         knobs,
         sessionless: strategy.session.is_none(),
+        partitioned: strategy.session.is_none() && strategy.partition.is_some(),
     })
 }
 

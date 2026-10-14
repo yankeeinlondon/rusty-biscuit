@@ -10,7 +10,8 @@ Every generated client in `schematic-schema` (`GitHub`, `OpenAI`, `ElevenLabs`,
 - override the credential or deadline for one call;
 - get the whole reply (status, headers, request id) with `.full()`;
 - check a call before sending it with `.build()?`, and send a built call more
-  than once.
+  than once;
+- page through a list endpoint, or fetch one customized page, with its pager.
 
 ```rust
 use schematic_schema::github::GitHub;
@@ -18,9 +19,9 @@ use schematic_schema::github::GitHub;
 let gh = GitHub::new();
 
 // required values are arguments; optional ones are chained; `.await` sends
-let releases = gh.list_releases("yankeeinlondon", "rusty-biscuit")
-    .per_page(10)
-    .await?; // Vec<Release>
+let pulls = gh.list_pull_requests("yankeeinlondon", "rusty-biscuit")
+    .state("open".to_string())
+    .await?; // Vec<PullRequestSummary>
 ```
 
 ## The life of a call
@@ -30,7 +31,7 @@ request, and this call's settings. The call is sent when you await it.
 
 ```mermaid
 flowchart LR
-    A["gh.list_releases(owner, repo)"] --> B["chained settings:<br/>.per_page(10)<br/>.anonymous()<br/>.deadline(..)"]
+    A["gh.list_pull_requests(owner, repo)"] --> B["chained settings:<br/>.state(..)<br/>.anonymous()<br/>.deadline(..)"]
     B --> C{"optional<br/>.build()?"}
     C -->|"InvalidArgument"| X["refused, nothing sent"]
     C -->|ok| D{"how is it awaited?"}
@@ -80,7 +81,7 @@ let models = openai.list_models().await?;          // ListModelsResponse
 ```rust
 let open_prs = gh.list_pull_requests("rust-lang", "rust")
     .state("open".to_string())
-    .per_page(50)
+    .sort("updated".to_string())
     .await?;
 ```
 
@@ -217,10 +218,10 @@ with the client's own `.build()?`), a cross-origin target the policy refuses,
 and an expired deadline.
 
 ```rust
-let call = gh.list_releases("yankeeinlondon", "rusty-biscuit")
-    .per_page(10)
+let call = gh.list_pull_requests("yankeeinlondon", "rusty-biscuit")
+    .state("open".to_string())
     .build()?;   // nothing has been sent yet
-let releases = call.await?;
+let pulls = call.await?;
 ```
 
 A call can be cloned, and each await is a separate request. That makes a
@@ -239,6 +240,32 @@ let runs = match call.clone().await {
 ```
 
 The runtime itself never retries.
+
+## Paginated lists
+
+When the definition authors pagination for a list endpoint, its call also
+has a pager. Its page and page-size parameters are then not setters: the
+pager's controls (`.page(..)`, `.page_size(..)`, `.after(..)`, …) set them,
+and only the controls the definition authors exist on that call.
+
+```rust
+// every release, only after GitHub signals the end of the list
+let releases = gh.list_releases("yankeeinlondon", "rusty-biscuit")
+    .page_size(100)
+    .collect_all()
+    .await?; // Vec<Release>, or Err(Incomplete) with the items gathered so far
+
+// exactly one request with these settings
+let page = gh.list_releases("yankeeinlondon", "rusty-biscuit")
+    .page(2)
+    .page_size(10)
+    .fetch_page()
+    .await?; // Page<Release>: page.items, page.meta
+```
+
+Awaiting the call directly still sends one ordinary request and returns the
+endpoint's own response type. Iteration, completeness, and every pager
+control are described in [Pagination](../pagination.md).
 
 ## When to use request objects instead
 

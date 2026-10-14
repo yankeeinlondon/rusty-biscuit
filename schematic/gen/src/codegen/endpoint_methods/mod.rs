@@ -28,9 +28,11 @@
 //!
 //! The call type of a paginated endpoint also forwards to its
 //! `schematic_runtime::pager::Pager`: `pager()`, one method per pager control
-//! the strategy authors (`page`, `offset`, `after`, `before`, `page_size`),
-//! and, for a strategy without a session, `pages()`, `fetch_page()`, and
-//! `collect_all()`.
+//! the strategy authors (`page`, `offset`, `after`, `before`, `page_size`,
+//! `keep_alive`), and, for a strategy without a session, `pages()`,
+//! `fetch_page()`, `collect_all()`, and `partitioned()` when it authors
+//! partitions. A session strategy forwards `with_session()` and
+//! `close_grace()` instead.
 //!
 //! Names come from [`names::resolve_names`]; the method docs from [`docs`].
 
@@ -239,6 +241,7 @@ fn pager_forwards(
                 quote! { impl Into<<#request as schematic_runtime::pager::ResumeBefore>::Cursor> },
             ),
             KnobForward::PageSize => (quote! { size }, quote! { u32 }),
+            KnobForward::KeepAlive => (quote! { value }, quote! { impl Into<String> }),
         };
         quote! {
             #[doc = #doc]
@@ -273,6 +276,52 @@ fn pager_forwards(
             }
         }
     });
+    let partitioned = forwards.partitioned.then(|| {
+        quote! {
+            /// See [`Pager::partitioned`](schematic_runtime::pager::Pager::partitioned).
+            ///
+            /// ## Errors
+            ///
+            /// Returns `InvalidArgument` when `count` is zero or above the
+            /// definition's maximum.
+            #[inline]
+            pub fn partitioned(
+                self,
+                count: u32,
+            ) -> Result<
+                Vec<schematic_runtime::pager::Pages<'a, #tag, #request>>,
+                schematic_runtime::InvalidArgument,
+            > {
+                self.0.pager().partitioned(count)
+            }
+        }
+    });
+    let session = (!forwards.sessionless).then(|| {
+        quote! {
+            /// See [`Pager::close_grace`](schematic_runtime::pager::Pager::close_grace).
+            #[inline]
+            pub fn close_grace(self, grace: ::core::time::Duration) -> #pager {
+                self.0.pager().close_grace(grace)
+            }
+
+            /// See [`Pager::with_session`](schematic_runtime::pager::Pager::with_session).
+            #[inline]
+            pub fn with_session<F, O>(
+                self,
+                scope: F,
+            ) -> schematic_runtime::CallFuture<'a, schematic_runtime::pager::SessionResult<O, #request>>
+            where
+                F: for<'s> FnOnce(
+                        &'s mut schematic_runtime::pager::SessionScope<'a, #tag, #request>,
+                    ) -> schematic_runtime::CallFuture<'s, O>
+                    + Send
+                    + 'a,
+                O: Send + 'a,
+            {
+                self.0.pager().with_session(scope)
+            }
+        }
+    });
 
     quote! {
         /// See [`Call::pager`](schematic_runtime::Call::pager).
@@ -284,6 +333,10 @@ fn pager_forwards(
         #(#knobs)*
 
         #iteration
+
+        #partitioned
+
+        #session
     }
 }
 

@@ -11,8 +11,6 @@ use super::{GitLab, GitLabApi};
 /// use schematic_schema::gitlab::ListRepositoryTreeRequest;
 ///
 /// let request = ListRepositoryTreeRequest::new("id_value")
-///     .with_page(/* value */)
-///     .with_per_page(/* value */)
 ///     .with_recursive(/* value */)
 ///     .with_git_ref(/* value */)
 ///     .with_path(/* value */)
@@ -22,10 +20,6 @@ use super::{GitLab, GitLabApi};
 pub struct ListRepositoryTreeRequest {
     /// Path parameter: id
     pub id: String,
-    /// Query parameter: Page number (1-indexed, default: 1)
-    pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 100, max: 100)
-    pub per_page: Option<i64>,
     /// Query parameter: Include files from subdirectories recursively
     pub recursive: Option<bool>,
     /// Query parameter: Branch, tag, or commit SHA to list tree for
@@ -38,22 +32,10 @@ impl ListRepositoryTreeRequest {
     pub fn new(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
-            page: None,
-            per_page: None,
             recursive: None,
             git_ref: None,
             path: None,
         }
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: i64) -> Self {
-        self.page = Some(value);
-        self
-    }
-    /// Sets the `per_page` query parameter.
-    pub fn with_per_page(mut self, value: i64) -> Self {
-        self.per_page = Some(value);
-        self
     }
     /// Sets the `recursive` query parameter.
     pub fn with_recursive(mut self, value: bool) -> Self {
@@ -75,8 +57,6 @@ impl From<&str> for ListRepositoryTreeRequest {
     fn from(param: &str) -> Self {
         Self {
             id: param.to_string(),
-            page: None,
-            per_page: None,
             recursive: None,
             git_ref: None,
             path: None,
@@ -87,8 +67,6 @@ impl From<String> for ListRepositoryTreeRequest {
     fn from(param: String) -> Self {
         Self {
             id: param,
-            page: None,
-            per_page: None,
             recursive: None,
             git_ref: None,
             path: None,
@@ -109,12 +87,6 @@ impl schematic_runtime::EndpointSpec for ListRepositoryTreeRequest {
             "/projects/{}/repository/tree", urlencoding::encode(& self.id.to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.per_page {
-            query.push(("per_page".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.recursive {
             query.push(("recursive".to_string(), value.to_string()));
         }
@@ -254,8 +226,6 @@ impl schematic_runtime::EndpointSpec for GetProjectRequest {
 /// use schematic_schema::gitlab::ListGroupProjectsRequest;
 ///
 /// let request = ListGroupProjectsRequest::new("id_value")
-///     .with_page(/* value */)
-///     .with_per_page(/* value */)
 ///     .with_archived(/* value */)
 ///     .with_visibility(/* value */)
 ///     .with_order_by(/* value */)
@@ -267,10 +237,6 @@ impl schematic_runtime::EndpointSpec for GetProjectRequest {
 pub struct ListGroupProjectsRequest {
     /// Path parameter: id
     pub id: String,
-    /// Query parameter: Page number (1-indexed, default: 1)
-    pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 100, max: 100)
-    pub per_page: Option<i64>,
     /// Query parameter: Filter by archived status
     pub archived: Option<bool>,
     /// Query parameter: Filter by visibility level
@@ -287,24 +253,12 @@ impl ListGroupProjectsRequest {
     pub fn new(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
-            page: None,
-            per_page: None,
             archived: None,
             visibility: None,
             order_by: None,
             sort: None,
             include_subgroups: None,
         }
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: i64) -> Self {
-        self.page = Some(value);
-        self
-    }
-    /// Sets the `per_page` query parameter.
-    pub fn with_per_page(mut self, value: i64) -> Self {
-        self.per_page = Some(value);
-        self
     }
     /// Sets the `archived` query parameter.
     pub fn with_archived(mut self, value: bool) -> Self {
@@ -336,8 +290,6 @@ impl From<&str> for ListGroupProjectsRequest {
     fn from(param: &str) -> Self {
         Self {
             id: param.to_string(),
-            page: None,
-            per_page: None,
             archived: None,
             visibility: None,
             order_by: None,
@@ -350,8 +302,6 @@ impl From<String> for ListGroupProjectsRequest {
     fn from(param: String) -> Self {
         Self {
             id: param,
-            page: None,
-            per_page: None,
             archived: None,
             visibility: None,
             order_by: None,
@@ -374,12 +324,6 @@ impl schematic_runtime::EndpointSpec for ListGroupProjectsRequest {
             "/groups/{}/projects", urlencoding::encode(& self.id.to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.per_page {
-            query.push(("per_page".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.archived {
             query.push(("archived".to_string(), value.to_string()));
         }
@@ -464,8 +408,6 @@ impl schematic_runtime::EndpointSpec for GetBranchRequest {
 /// use schematic_schema::gitlab::ListMergeRequestsRequest;
 ///
 /// let request = ListMergeRequestsRequest::new("id_value")
-///     .with_page(/* value */)
-///     .with_per_page(/* value */)
 ///     .with_state(/* value */)
 ///;
 /// ```
@@ -473,32 +415,13 @@ impl schematic_runtime::EndpointSpec for GetBranchRequest {
 pub struct ListMergeRequestsRequest {
     /// Path parameter: id
     pub id: String,
-    /// Query parameter: Page number (1-indexed, default: 1)
-    pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 100, max: 100)
-    pub per_page: Option<i64>,
     /// Query parameter: Filter by merge request state
     pub state: Option<String>,
 }
 impl ListMergeRequestsRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(id: impl Into<String>) -> Self {
-        Self {
-            id: id.into(),
-            page: None,
-            per_page: None,
-            state: None,
-        }
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: i64) -> Self {
-        self.page = Some(value);
-        self
-    }
-    /// Sets the `per_page` query parameter.
-    pub fn with_per_page(mut self, value: i64) -> Self {
-        self.per_page = Some(value);
-        self
+        Self { id: id.into(), state: None }
     }
     /// Sets the `state` query parameter.
     pub fn with_state(mut self, value: String) -> Self {
@@ -510,20 +433,13 @@ impl From<&str> for ListMergeRequestsRequest {
     fn from(param: &str) -> Self {
         Self {
             id: param.to_string(),
-            page: None,
-            per_page: None,
             state: None,
         }
     }
 }
 impl From<String> for ListMergeRequestsRequest {
     fn from(param: String) -> Self {
-        Self {
-            id: param,
-            page: None,
-            per_page: None,
-            state: None,
-        }
+        Self { id: param, state: None }
     }
 }
 impl schematic_runtime::EndpointSpec for ListMergeRequestsRequest {
@@ -540,12 +456,6 @@ impl schematic_runtime::EndpointSpec for ListMergeRequestsRequest {
             "/projects/{}/merge_requests", urlencoding::encode(& self.id.to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.per_page {
-            query.push(("per_page".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.state {
             query.push(("state".to_string(), value.to_string()));
         }
@@ -618,8 +528,6 @@ impl schematic_runtime::EndpointSpec for GetMergeRequestRequest {
 /// use schematic_schema::gitlab::ListMergeRequestCommitsRequest;
 ///
 /// let request = ListMergeRequestCommitsRequest::new("id_value", "merge_request_iid_value")
-///     .with_page(/* value */)
-///     .with_per_page(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -628,10 +536,6 @@ pub struct ListMergeRequestCommitsRequest {
     pub id: String,
     /// Path parameter: merge_request_iid
     pub merge_request_iid: String,
-    /// Query parameter: Page number (1-indexed, default: 1)
-    pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 100, max: 100)
-    pub per_page: Option<i64>,
 }
 impl ListMergeRequestCommitsRequest {
     /// Creates a new request with the required path parameters.
@@ -639,19 +543,7 @@ impl ListMergeRequestCommitsRequest {
         Self {
             id: id.into(),
             merge_request_iid: merge_request_iid.into(),
-            page: None,
-            per_page: None,
         }
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: i64) -> Self {
-        self.page = Some(value);
-        self
-    }
-    /// Sets the `per_page` query parameter.
-    pub fn with_per_page(mut self, value: i64) -> Self {
-        self.per_page = Some(value);
-        self
     }
 }
 impl schematic_runtime::EndpointSpec for ListMergeRequestCommitsRequest {
@@ -668,13 +560,7 @@ impl schematic_runtime::EndpointSpec for ListMergeRequestCommitsRequest {
             "/projects/{}/merge_requests/{}/commits", urlencoding::encode(& self.id
             .to_string()), urlencoding::encode(& self.merge_request_iid.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.per_page {
-            query.push(("per_page".to_string(), value.to_string()));
-        }
+        let query: Vec<(String, String)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -744,8 +630,6 @@ impl schematic_runtime::EndpointSpec for ListMergeRequestChangesRequest {
 /// use schematic_schema::gitlab::ListIssuesRequest;
 ///
 /// let request = ListIssuesRequest::new("id_value")
-///     .with_page(/* value */)
-///     .with_per_page(/* value */)
 ///     .with_state(/* value */)
 ///;
 /// ```
@@ -753,32 +637,13 @@ impl schematic_runtime::EndpointSpec for ListMergeRequestChangesRequest {
 pub struct ListIssuesRequest {
     /// Path parameter: id
     pub id: String,
-    /// Query parameter: Page number (1-indexed, default: 1)
-    pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 100, max: 100)
-    pub per_page: Option<i64>,
     /// Query parameter: Filter by issue state
     pub state: Option<String>,
 }
 impl ListIssuesRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(id: impl Into<String>) -> Self {
-        Self {
-            id: id.into(),
-            page: None,
-            per_page: None,
-            state: None,
-        }
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: i64) -> Self {
-        self.page = Some(value);
-        self
-    }
-    /// Sets the `per_page` query parameter.
-    pub fn with_per_page(mut self, value: i64) -> Self {
-        self.per_page = Some(value);
-        self
+        Self { id: id.into(), state: None }
     }
     /// Sets the `state` query parameter.
     pub fn with_state(mut self, value: String) -> Self {
@@ -790,20 +655,13 @@ impl From<&str> for ListIssuesRequest {
     fn from(param: &str) -> Self {
         Self {
             id: param.to_string(),
-            page: None,
-            per_page: None,
             state: None,
         }
     }
 }
 impl From<String> for ListIssuesRequest {
     fn from(param: String) -> Self {
-        Self {
-            id: param,
-            page: None,
-            per_page: None,
-            state: None,
-        }
+        Self { id: param, state: None }
     }
 }
 impl schematic_runtime::EndpointSpec for ListIssuesRequest {
@@ -820,12 +678,6 @@ impl schematic_runtime::EndpointSpec for ListIssuesRequest {
             "/projects/{}/issues", urlencoding::encode(& self.id.to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.per_page {
-            query.push(("per_page".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.state {
             query.push(("state".to_string(), value.to_string()));
         }
@@ -898,8 +750,6 @@ impl schematic_runtime::EndpointSpec for GetIssueRequest {
 /// use schematic_schema::gitlab::ListIssueNotesRequest;
 ///
 /// let request = ListIssueNotesRequest::new("id_value", "issue_iid_value")
-///     .with_page(/* value */)
-///     .with_per_page(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -908,10 +758,6 @@ pub struct ListIssueNotesRequest {
     pub id: String,
     /// Path parameter: issue_iid
     pub issue_iid: String,
-    /// Query parameter: Page number (1-indexed, default: 1)
-    pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 100, max: 100)
-    pub per_page: Option<i64>,
 }
 impl ListIssueNotesRequest {
     /// Creates a new request with the required path parameters.
@@ -919,19 +765,7 @@ impl ListIssueNotesRequest {
         Self {
             id: id.into(),
             issue_iid: issue_iid.into(),
-            page: None,
-            per_page: None,
         }
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: i64) -> Self {
-        self.page = Some(value);
-        self
-    }
-    /// Sets the `per_page` query parameter.
-    pub fn with_per_page(mut self, value: i64) -> Self {
-        self.per_page = Some(value);
-        self
     }
 }
 impl schematic_runtime::EndpointSpec for ListIssueNotesRequest {
@@ -948,13 +782,7 @@ impl schematic_runtime::EndpointSpec for ListIssueNotesRequest {
             "/projects/{}/issues/{}/notes", urlencoding::encode(& self.id.to_string()),
             urlencoding::encode(& self.issue_iid.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.per_page {
-            query.push(("per_page".to_string(), value.to_string()));
-        }
+        let query: Vec<(String, String)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1024,55 +852,27 @@ impl schematic_runtime::EndpointSpec for ListIssueParticipantsRequest {
 /// use schematic_schema::gitlab::ListTagsRequest;
 ///
 /// let request = ListTagsRequest::new("id_value")
-///     .with_page(/* value */)
-///     .with_per_page(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListTagsRequest {
     /// Path parameter: id
     pub id: String,
-    /// Query parameter: Page number (1-indexed, default: 1)
-    pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 100, max: 100)
-    pub per_page: Option<i64>,
 }
 impl ListTagsRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(id: impl Into<String>) -> Self {
-        Self {
-            id: id.into(),
-            page: None,
-            per_page: None,
-        }
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: i64) -> Self {
-        self.page = Some(value);
-        self
-    }
-    /// Sets the `per_page` query parameter.
-    pub fn with_per_page(mut self, value: i64) -> Self {
-        self.per_page = Some(value);
-        self
+        Self { id: id.into() }
     }
 }
 impl From<&str> for ListTagsRequest {
     fn from(param: &str) -> Self {
-        Self {
-            id: param.to_string(),
-            page: None,
-            per_page: None,
-        }
+        Self { id: param.to_string() }
     }
 }
 impl From<String> for ListTagsRequest {
     fn from(param: String) -> Self {
-        Self {
-            id: param,
-            page: None,
-            per_page: None,
-        }
+        Self { id: param }
     }
 }
 impl schematic_runtime::EndpointSpec for ListTagsRequest {
@@ -1088,13 +888,7 @@ impl schematic_runtime::EndpointSpec for ListTagsRequest {
         let path = format!(
             "/projects/{}/repository/tags", urlencoding::encode(& self.id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.per_page {
-            query.push(("per_page".to_string(), value.to_string()));
-        }
+        let query: Vec<(String, String)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1164,55 +958,27 @@ impl schematic_runtime::EndpointSpec for GetTagRequest {
 /// use schematic_schema::gitlab::ListReleasesRequest;
 ///
 /// let request = ListReleasesRequest::new("id_value")
-///     .with_page(/* value */)
-///     .with_per_page(/* value */)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListReleasesRequest {
     /// Path parameter: id
     pub id: String,
-    /// Query parameter: Page number (1-indexed, default: 1)
-    pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 100, max: 100)
-    pub per_page: Option<i64>,
 }
 impl ListReleasesRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(id: impl Into<String>) -> Self {
-        Self {
-            id: id.into(),
-            page: None,
-            per_page: None,
-        }
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: i64) -> Self {
-        self.page = Some(value);
-        self
-    }
-    /// Sets the `per_page` query parameter.
-    pub fn with_per_page(mut self, value: i64) -> Self {
-        self.per_page = Some(value);
-        self
+        Self { id: id.into() }
     }
 }
 impl From<&str> for ListReleasesRequest {
     fn from(param: &str) -> Self {
-        Self {
-            id: param.to_string(),
-            page: None,
-            per_page: None,
-        }
+        Self { id: param.to_string() }
     }
 }
 impl From<String> for ListReleasesRequest {
     fn from(param: String) -> Self {
-        Self {
-            id: param,
-            page: None,
-            per_page: None,
-        }
+        Self { id: param }
     }
 }
 impl schematic_runtime::EndpointSpec for ListReleasesRequest {
@@ -1228,13 +994,7 @@ impl schematic_runtime::EndpointSpec for ListReleasesRequest {
         let path = format!(
             "/projects/{}/releases", urlencoding::encode(& self.id.to_string())
         );
-        let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.per_page {
-            query.push(("per_page".to_string(), value.to_string()));
-        }
+        let query: Vec<(String, String)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1360,8 +1120,6 @@ impl schematic_runtime::EndpointSpec for GetLatestReleaseRequest {
 /// use schematic_schema::gitlab::ListProjectPipelinesRequest;
 ///
 /// let request = ListProjectPipelinesRequest::new("id_value")
-///     .with_page(/* value */)
-///     .with_per_page(/* value */)
 ///     .with_status(/* value */)
 ///     .with_source(/* value */)
 ///     .with_git_ref(/* value */)
@@ -1372,10 +1130,6 @@ impl schematic_runtime::EndpointSpec for GetLatestReleaseRequest {
 pub struct ListProjectPipelinesRequest {
     /// Path parameter: id
     pub id: String,
-    /// Query parameter: Page number (1-indexed, default: 1)
-    pub page: Option<i64>,
-    /// Query parameter: Items per page (default: 100, max: 100)
-    pub per_page: Option<i64>,
     /// Query parameter: Filter by pipeline status
     pub status: Option<String>,
     /// Query parameter: Filter by pipeline source (e.g., push, merge_request_event, schedule)
@@ -1390,23 +1144,11 @@ impl ListProjectPipelinesRequest {
     pub fn new(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
-            page: None,
-            per_page: None,
             status: None,
             source: None,
             git_ref: None,
             sha: None,
         }
-    }
-    /// Sets the `page` query parameter.
-    pub fn with_page(mut self, value: i64) -> Self {
-        self.page = Some(value);
-        self
-    }
-    /// Sets the `per_page` query parameter.
-    pub fn with_per_page(mut self, value: i64) -> Self {
-        self.per_page = Some(value);
-        self
     }
     /// Sets the `status` query parameter.
     pub fn with_status(mut self, value: String) -> Self {
@@ -1433,8 +1175,6 @@ impl From<&str> for ListProjectPipelinesRequest {
     fn from(param: &str) -> Self {
         Self {
             id: param.to_string(),
-            page: None,
-            per_page: None,
             status: None,
             source: None,
             git_ref: None,
@@ -1446,8 +1186,6 @@ impl From<String> for ListProjectPipelinesRequest {
     fn from(param: String) -> Self {
         Self {
             id: param,
-            page: None,
-            per_page: None,
             status: None,
             source: None,
             git_ref: None,
@@ -1469,12 +1207,6 @@ impl schematic_runtime::EndpointSpec for ListProjectPipelinesRequest {
             "/projects/{}/pipelines", urlencoding::encode(& self.id.to_string())
         );
         let mut query: Vec<(String, String)> = Vec::new();
-        if let Some(ref value) = self.page {
-            query.push(("page".to_string(), value.to_string()));
-        }
-        if let Some(ref value) = self.per_page {
-            query.push(("per_page".to_string(), value.to_string()));
-        }
         if let Some(ref value) = self.status {
             query.push(("status".to_string(), value.to_string()));
         }
@@ -1497,23 +1229,332 @@ impl schematic_runtime::EndpointSpec for ListProjectPipelinesRequest {
         })
     }
 }
+impl schematic_runtime::pager::Paginated for ListRepositoryTreeRequest {
+    type Item = TreeItem;
+    type Kind = schematic_runtime::pager::PageNumberKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::PageNumber {
+            page: schematic_runtime::pager::spec::Input::Query("page"),
+            base: schematic_runtime::pager::spec::IndexBase::OneBased,
+            more: schematic_runtime::pager::spec::MoreSignal::Present {
+                source: schematic_runtime::pager::spec::Source::Header("X-Next-Page"),
+            },
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("per_page"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Header("X-Total")),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[schematic_runtime::pager::spec::Step::Each],
+        projection: &[],
+    };
+    const PATH: &'static str = "/projects/{id}/repository/tree";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListRepositoryTreeRequest {}
+impl schematic_runtime::pager::HasTotal for ListRepositoryTreeRequest {}
+impl schematic_runtime::pager::Paginated for ListGroupProjectsRequest {
+    type Item = Project;
+    type Kind = schematic_runtime::pager::PageNumberKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::PageNumber {
+            page: schematic_runtime::pager::spec::Input::Query("page"),
+            base: schematic_runtime::pager::spec::IndexBase::OneBased,
+            more: schematic_runtime::pager::spec::MoreSignal::Present {
+                source: schematic_runtime::pager::spec::Source::Header("X-Next-Page"),
+            },
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("per_page"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Header("X-Total")),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[schematic_runtime::pager::spec::Step::Each],
+        projection: &[],
+    };
+    const PATH: &'static str = "/groups/{id}/projects";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListGroupProjectsRequest {}
+impl schematic_runtime::pager::HasTotal for ListGroupProjectsRequest {}
+impl schematic_runtime::pager::Paginated for ListMergeRequestsRequest {
+    type Item = MergeRequest;
+    type Kind = schematic_runtime::pager::PageNumberKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::PageNumber {
+            page: schematic_runtime::pager::spec::Input::Query("page"),
+            base: schematic_runtime::pager::spec::IndexBase::OneBased,
+            more: schematic_runtime::pager::spec::MoreSignal::Present {
+                source: schematic_runtime::pager::spec::Source::Header("X-Next-Page"),
+            },
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("per_page"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Header("X-Total")),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[schematic_runtime::pager::spec::Step::Each],
+        projection: &[],
+    };
+    const PATH: &'static str = "/projects/{id}/merge_requests";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListMergeRequestsRequest {}
+impl schematic_runtime::pager::HasTotal for ListMergeRequestsRequest {}
+impl schematic_runtime::pager::Paginated for ListMergeRequestCommitsRequest {
+    type Item = Commit;
+    type Kind = schematic_runtime::pager::PageNumberKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::PageNumber {
+            page: schematic_runtime::pager::spec::Input::Query("page"),
+            base: schematic_runtime::pager::spec::IndexBase::OneBased,
+            more: schematic_runtime::pager::spec::MoreSignal::Present {
+                source: schematic_runtime::pager::spec::Source::Header("X-Next-Page"),
+            },
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("per_page"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Header("X-Total")),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[schematic_runtime::pager::spec::Step::Each],
+        projection: &[],
+    };
+    const PATH: &'static str = "/projects/{id}/merge_requests/{merge_request_iid}/commits";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListMergeRequestCommitsRequest {}
+impl schematic_runtime::pager::HasTotal for ListMergeRequestCommitsRequest {}
+impl schematic_runtime::pager::Paginated for ListIssuesRequest {
+    type Item = Issue;
+    type Kind = schematic_runtime::pager::PageNumberKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::PageNumber {
+            page: schematic_runtime::pager::spec::Input::Query("page"),
+            base: schematic_runtime::pager::spec::IndexBase::OneBased,
+            more: schematic_runtime::pager::spec::MoreSignal::Present {
+                source: schematic_runtime::pager::spec::Source::Header("X-Next-Page"),
+            },
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("per_page"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Header("X-Total")),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[schematic_runtime::pager::spec::Step::Each],
+        projection: &[],
+    };
+    const PATH: &'static str = "/projects/{id}/issues";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListIssuesRequest {}
+impl schematic_runtime::pager::HasTotal for ListIssuesRequest {}
+impl schematic_runtime::pager::Paginated for ListIssueNotesRequest {
+    type Item = Note;
+    type Kind = schematic_runtime::pager::PageNumberKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::PageNumber {
+            page: schematic_runtime::pager::spec::Input::Query("page"),
+            base: schematic_runtime::pager::spec::IndexBase::OneBased,
+            more: schematic_runtime::pager::spec::MoreSignal::Present {
+                source: schematic_runtime::pager::spec::Source::Header("X-Next-Page"),
+            },
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("per_page"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Header("X-Total")),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[schematic_runtime::pager::spec::Step::Each],
+        projection: &[],
+    };
+    const PATH: &'static str = "/projects/{id}/issues/{issue_iid}/notes";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListIssueNotesRequest {}
+impl schematic_runtime::pager::HasTotal for ListIssueNotesRequest {}
+impl schematic_runtime::pager::Paginated for ListTagsRequest {
+    type Item = Tag;
+    type Kind = schematic_runtime::pager::PageNumberKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::PageNumber {
+            page: schematic_runtime::pager::spec::Input::Query("page"),
+            base: schematic_runtime::pager::spec::IndexBase::OneBased,
+            more: schematic_runtime::pager::spec::MoreSignal::Present {
+                source: schematic_runtime::pager::spec::Source::Header("X-Next-Page"),
+            },
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("per_page"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Header("X-Total")),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[schematic_runtime::pager::spec::Step::Each],
+        projection: &[],
+    };
+    const PATH: &'static str = "/projects/{id}/repository/tags";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListTagsRequest {}
+impl schematic_runtime::pager::HasTotal for ListTagsRequest {}
+impl schematic_runtime::pager::Paginated for ListReleasesRequest {
+    type Item = Release;
+    type Kind = schematic_runtime::pager::PageNumberKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::PageNumber {
+            page: schematic_runtime::pager::spec::Input::Query("page"),
+            base: schematic_runtime::pager::spec::IndexBase::OneBased,
+            more: schematic_runtime::pager::spec::MoreSignal::Present {
+                source: schematic_runtime::pager::spec::Source::Header("X-Next-Page"),
+            },
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("per_page"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Header("X-Total")),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[schematic_runtime::pager::spec::Step::Each],
+        projection: &[],
+    };
+    const PATH: &'static str = "/projects/{id}/releases";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListReleasesRequest {}
+impl schematic_runtime::pager::HasTotal for ListReleasesRequest {}
+impl schematic_runtime::pager::Paginated for ListProjectPipelinesRequest {
+    type Item = Pipeline;
+    type Kind = schematic_runtime::pager::PageNumberKind;
+    type Session = schematic_runtime::pager::NoSession;
+    const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
+        kind: schematic_runtime::pager::spec::Kind::PageNumber {
+            page: schematic_runtime::pager::spec::Input::Query("page"),
+            base: schematic_runtime::pager::spec::IndexBase::OneBased,
+            more: schematic_runtime::pager::spec::MoreSignal::Present {
+                source: schematic_runtime::pager::spec::Source::Header("X-Next-Page"),
+            },
+        },
+        size: Some(schematic_runtime::pager::spec::PageSize {
+            param: schematic_runtime::pager::spec::Input::Query("per_page"),
+            server_default: Some(20),
+            sent_default: None,
+            min: 1,
+            max: Some(100),
+            adjustable: false,
+        }),
+        constants: &[],
+        total: Some(schematic_runtime::pager::spec::Source::Header("X-Total")),
+        terminal_values: &[],
+        follow_up: None,
+        session: None,
+        partition: None,
+    };
+    const ITEMS: &'static schematic_runtime::pager::ItemSelector = &schematic_runtime::pager::spec::ItemSelector {
+        record: &[schematic_runtime::pager::spec::Step::Each],
+        projection: &[],
+    };
+    const PATH: &'static str = "/projects/{id}/pipelines";
+}
+impl schematic_runtime::pager::PageSizeKnob for ListProjectPipelinesRequest {}
+impl schematic_runtime::pager::HasTotal for ListProjectPipelinesRequest {}
 /// A call to the `ListRepositoryTree` endpoint, returned by [`GitLab::list_repository_tree`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListRepositoryTreeCall<'a>(
     schematic_runtime::Call<'a, GitLabApi, ListRepositoryTreeRequest>,
 );
 impl<'a> ListRepositoryTreeCall<'a> {
-    /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    pub fn page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `per_page` query parameter (`i64`). Items per page (default: 100, max: 100)
-    pub fn per_page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_per_page(value)))
-    }
     /// Sets the `recursive` query parameter (`bool`). Include files from subdirectories recursively
     pub fn recursive(self, value: bool) -> Self {
         Self(self.0.map_request(|request| request.with_recursive(value)))
@@ -1554,6 +1595,56 @@ impl<'a> ListRepositoryTreeCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListRepositoryTreeRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page`](schematic_runtime::pager::Pager::page).
+    #[inline]
+    pub fn page(
+        self,
+        number: u64,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListRepositoryTreeRequest> {
+        self.0.pager().page(number)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListRepositoryTreeRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, GitLabApi, ListRepositoryTreeRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListRepositoryTreeRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListRepositoryTreeRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListRepositoryTreeCall<'a> {
@@ -1669,20 +1760,14 @@ impl<'a> ::core::future::IntoFuture for GetProjectCall<'a> {
 /// A call to the `ListGroupProjects` endpoint, returned by [`GitLab::list_group_projects`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListGroupProjectsCall<'a>(
     schematic_runtime::Call<'a, GitLabApi, ListGroupProjectsRequest>,
 );
 impl<'a> ListGroupProjectsCall<'a> {
-    /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    pub fn page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `per_page` query parameter (`i64`). Items per page (default: 100, max: 100)
-    pub fn per_page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_per_page(value)))
-    }
     /// Sets the `archived` query parameter (`bool`). Filter by archived status
     pub fn archived(self, value: bool) -> Self {
         Self(self.0.map_request(|request| request.with_archived(value)))
@@ -1731,6 +1816,56 @@ impl<'a> ListGroupProjectsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListGroupProjectsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page`](schematic_runtime::pager::Pager::page).
+    #[inline]
+    pub fn page(
+        self,
+        number: u64,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListGroupProjectsRequest> {
+        self.0.pager().page(number)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListGroupProjectsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, GitLabApi, ListGroupProjectsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListGroupProjectsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListGroupProjectsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListGroupProjectsCall<'a> {
@@ -1795,20 +1930,14 @@ impl<'a> ::core::future::IntoFuture for GetBranchCall<'a> {
 /// A call to the `ListMergeRequests` endpoint, returned by [`GitLab::list_merge_requests`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListMergeRequestsCall<'a>(
     schematic_runtime::Call<'a, GitLabApi, ListMergeRequestsRequest>,
 );
 impl<'a> ListMergeRequestsCall<'a> {
-    /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    pub fn page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `per_page` query parameter (`i64`). Items per page (default: 100, max: 100)
-    pub fn per_page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_per_page(value)))
-    }
     /// Sets the `state` query parameter (`String`). Filter by merge request state
     pub fn state(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_state(value)))
@@ -1841,6 +1970,56 @@ impl<'a> ListMergeRequestsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListMergeRequestsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page`](schematic_runtime::pager::Pager::page).
+    #[inline]
+    pub fn page(
+        self,
+        number: u64,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListMergeRequestsRequest> {
+        self.0.pager().page(number)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListMergeRequestsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, GitLabApi, ListMergeRequestsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListMergeRequestsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListMergeRequestsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListMergeRequestsCall<'a> {
@@ -1909,20 +2088,14 @@ impl<'a> ::core::future::IntoFuture for GetMergeRequestCall<'a> {
 /// A call to the `ListMergeRequestCommits` endpoint, returned by [`GitLab::list_merge_request_commits`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListMergeRequestCommitsCall<'a>(
     schematic_runtime::Call<'a, GitLabApi, ListMergeRequestCommitsRequest>,
 );
 impl<'a> ListMergeRequestCommitsCall<'a> {
-    /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    pub fn page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `per_page` query parameter (`i64`). Items per page (default: 100, max: 100)
-    pub fn per_page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_per_page(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -1951,6 +2124,56 @@ impl<'a> ListMergeRequestCommitsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListMergeRequestCommitsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page`](schematic_runtime::pager::Pager::page).
+    #[inline]
+    pub fn page(
+        self,
+        number: u64,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListMergeRequestCommitsRequest> {
+        self.0.pager().page(number)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListMergeRequestCommitsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, GitLabApi, ListMergeRequestCommitsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListMergeRequestCommitsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListMergeRequestCommitsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListMergeRequestCommitsCall<'a> {
@@ -2019,18 +2242,12 @@ impl<'a> ::core::future::IntoFuture for ListMergeRequestChangesCall<'a> {
 /// A call to the `ListIssues` endpoint, returned by [`GitLab::list_issues`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListIssuesCall<'a>(schematic_runtime::Call<'a, GitLabApi, ListIssuesRequest>);
 impl<'a> ListIssuesCall<'a> {
-    /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    pub fn page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `per_page` query parameter (`i64`). Items per page (default: 100, max: 100)
-    pub fn per_page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_per_page(value)))
-    }
     /// Sets the `state` query parameter (`String`). Filter by issue state
     pub fn state(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_state(value)))
@@ -2061,6 +2278,56 @@ impl<'a> ListIssuesCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListIssuesRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page`](schematic_runtime::pager::Pager::page).
+    #[inline]
+    pub fn page(
+        self,
+        number: u64,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListIssuesRequest> {
+        self.0.pager().page(number)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListIssuesRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, GitLabApi, ListIssuesRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListIssuesRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListIssuesRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListIssuesCall<'a> {
@@ -2125,20 +2392,14 @@ impl<'a> ::core::future::IntoFuture for GetIssueCall<'a> {
 /// A call to the `ListIssueNotes` endpoint, returned by [`GitLab::list_issue_notes`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListIssueNotesCall<'a>(
     schematic_runtime::Call<'a, GitLabApi, ListIssueNotesRequest>,
 );
 impl<'a> ListIssueNotesCall<'a> {
-    /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    pub fn page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `per_page` query parameter (`i64`). Items per page (default: 100, max: 100)
-    pub fn per_page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_per_page(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -2167,6 +2428,56 @@ impl<'a> ListIssueNotesCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListIssueNotesRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page`](schematic_runtime::pager::Pager::page).
+    #[inline]
+    pub fn page(
+        self,
+        number: u64,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListIssueNotesRequest> {
+        self.0.pager().page(number)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListIssueNotesRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, GitLabApi, ListIssueNotesRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListIssueNotesRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListIssueNotesRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListIssueNotesCall<'a> {
@@ -2235,18 +2546,12 @@ impl<'a> ::core::future::IntoFuture for ListIssueParticipantsCall<'a> {
 /// A call to the `ListTags` endpoint, returned by [`GitLab::list_tags`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListTagsCall<'a>(schematic_runtime::Call<'a, GitLabApi, ListTagsRequest>);
 impl<'a> ListTagsCall<'a> {
-    /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    pub fn page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `per_page` query parameter (`i64`). Items per page (default: 100, max: 100)
-    pub fn per_page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_per_page(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -2273,6 +2578,56 @@ impl<'a> ListTagsCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListTagsRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page`](schematic_runtime::pager::Pager::page).
+    #[inline]
+    pub fn page(
+        self,
+        number: u64,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListTagsRequest> {
+        self.0.pager().page(number)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListTagsRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, GitLabApi, ListTagsRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListTagsRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListTagsRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListTagsCall<'a> {
@@ -2337,20 +2692,14 @@ impl<'a> ::core::future::IntoFuture for GetTagCall<'a> {
 /// A call to the `ListReleases` endpoint, returned by [`GitLab::list_releases`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListReleasesCall<'a>(
     schematic_runtime::Call<'a, GitLabApi, ListReleasesRequest>,
 );
 impl<'a> ListReleasesCall<'a> {
-    /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    pub fn page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `per_page` query parameter (`i64`). Items per page (default: 100, max: 100)
-    pub fn per_page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_per_page(value)))
-    }
     /// See [`Call::anonymous`](schematic_runtime::Call::anonymous).
     pub fn anonymous(self) -> Self {
         Self(self.0.anonymous())
@@ -2379,6 +2728,56 @@ impl<'a> ListReleasesCall<'a> {
     /// or the credential cannot be placed.
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
+    }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListReleasesRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page`](schematic_runtime::pager::Pager::page).
+    #[inline]
+    pub fn page(
+        self,
+        number: u64,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListReleasesRequest> {
+        self.0.pager().page(number)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListReleasesRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, GitLabApi, ListReleasesRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListReleasesRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListReleasesRequest>,
+    > {
+        self.0.pager().collect_all()
     }
 }
 impl<'a> ::core::future::IntoFuture for ListReleasesCall<'a> {
@@ -2494,20 +2893,14 @@ impl<'a> ::core::future::IntoFuture for GetLatestReleaseCall<'a> {
 /// A call to the `ListProjectPipelines` endpoint, returned by [`GitLab::list_project_pipelines`].
 ///
 /// Chain optional values and per-call settings, then `.await` it: the result is the endpoint's data or a [`CallError`](schematic_runtime::CallError). [`full`](Self::full), chained after the optional values, returns the whole response instead, and [`build`](Self::build) checks the call without sending it.
+///
+/// The list is paginated: [`pager`](Self::pager) returns a [`Pager`](schematic_runtime::pager::Pager) over its pages.
 #[derive(Clone, Debug)]
 #[must_use = "a call sends nothing until it is awaited"]
 pub struct ListProjectPipelinesCall<'a>(
     schematic_runtime::Call<'a, GitLabApi, ListProjectPipelinesRequest>,
 );
 impl<'a> ListProjectPipelinesCall<'a> {
-    /// Sets the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    pub fn page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_page(value)))
-    }
-    /// Sets the `per_page` query parameter (`i64`). Items per page (default: 100, max: 100)
-    pub fn per_page(self, value: i64) -> Self {
-        Self(self.0.map_request(|request| request.with_per_page(value)))
-    }
     /// Sets the `status` query parameter (`String`). Filter by pipeline status
     pub fn status(self, value: String) -> Self {
         Self(self.0.map_request(|request| request.with_status(value)))
@@ -2553,6 +2946,56 @@ impl<'a> ListProjectPipelinesCall<'a> {
     pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
         self.0.build().map(Self)
     }
+    /// See [`Call::pager`](schematic_runtime::Call::pager).
+    #[inline]
+    pub fn pager(
+        self,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListProjectPipelinesRequest> {
+        self.0.pager()
+    }
+    /// See [`Pager::page`](schematic_runtime::pager::Pager::page).
+    #[inline]
+    pub fn page(
+        self,
+        number: u64,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListProjectPipelinesRequest> {
+        self.0.pager().page(number)
+    }
+    /// See [`Pager::page_size`](schematic_runtime::pager::Pager::page_size).
+    #[inline]
+    pub fn page_size(
+        self,
+        size: u32,
+    ) -> schematic_runtime::pager::Pager<'a, GitLabApi, ListProjectPipelinesRequest> {
+        self.0.pager().page_size(size)
+    }
+    /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+    #[inline]
+    pub fn pages(
+        self,
+    ) -> schematic_runtime::pager::Pages<'a, GitLabApi, ListProjectPipelinesRequest> {
+        self.0.pager().pages()
+    }
+    /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+    #[inline]
+    pub fn fetch_page(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::PageResult<ListProjectPipelinesRequest>,
+    > {
+        self.0.pager().fetch_page()
+    }
+    /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+    #[inline]
+    pub fn collect_all(
+        self,
+    ) -> schematic_runtime::CallFuture<
+        'a,
+        schematic_runtime::pager::CollectResult<ListProjectPipelinesRequest>,
+    > {
+        self.0.pager().collect_all()
+    }
 }
 impl<'a> ::core::future::IntoFuture for ListProjectPipelinesCall<'a> {
     type Output = <schematic_runtime::Call<
@@ -2579,8 +3022,6 @@ impl GitLab {
     ///
     /// ## Optional values
     ///
-    /// - [`page`](ListRepositoryTreeCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`per_page`](ListRepositoryTreeCall::per_page): the `per_page` query parameter (`i64`). Items per page (default: 100, max: 100)
     /// - [`recursive`](ListRepositoryTreeCall::recursive): the `recursive` query parameter (`bool`). Include files from subdirectories recursively
     /// - [`git_ref`](ListRepositoryTreeCall::git_ref): the `git_ref` query parameter (`String`). Branch, tag, or commit SHA to list tree for
     /// - [`path`](ListRepositoryTreeCall::path): the `path` query parameter (`String`). Subdirectory path to list
@@ -2635,8 +3076,6 @@ impl GitLab {
     ///
     /// ## Optional values
     ///
-    /// - [`page`](ListGroupProjectsCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`per_page`](ListGroupProjectsCall::per_page): the `per_page` query parameter (`i64`). Items per page (default: 100, max: 100)
     /// - [`archived`](ListGroupProjectsCall::archived): the `archived` query parameter (`bool`). Filter by archived status
     /// - [`visibility`](ListGroupProjectsCall::visibility): the `visibility` query parameter (`String`). Filter by visibility level
     /// - [`order_by`](ListGroupProjectsCall::order_by): the `order_by` query parameter (`String`). Sort field
@@ -2677,8 +3116,6 @@ impl GitLab {
     ///
     /// ## Optional values
     ///
-    /// - [`page`](ListMergeRequestsCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`per_page`](ListMergeRequestsCall::per_page): the `per_page` query parameter (`i64`). Items per page (default: 100, max: 100)
     /// - [`state`](ListMergeRequestsCall::state): the `state` query parameter (`String`). Filter by merge request state
     pub fn list_merge_requests(
         &self,
@@ -2715,11 +3152,6 @@ impl GitLab {
     ///
     /// - `id: impl Into<String>`: the `{id}` path parameter
     /// - `merge_request_iid: impl Into<String>`: the `{merge_request_iid}` path parameter
-    ///
-    /// ## Optional values
-    ///
-    /// - [`page`](ListMergeRequestCommitsCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`per_page`](ListMergeRequestCommitsCall::per_page): the `per_page` query parameter (`i64`). Items per page (default: 100, max: 100)
     pub fn list_merge_request_commits(
         &self,
         id: impl Into<String>,
@@ -2760,8 +3192,6 @@ impl GitLab {
     ///
     /// ## Optional values
     ///
-    /// - [`page`](ListIssuesCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`per_page`](ListIssuesCall::per_page): the `per_page` query parameter (`i64`). Items per page (default: 100, max: 100)
     /// - [`state`](ListIssuesCall::state): the `state` query parameter (`String`). Filter by issue state
     pub fn list_issues(&self, id: impl Into<String>) -> ListIssuesCall<'_> {
         ListIssuesCall(self.0.send(ListIssuesRequest::new(id)))
@@ -2793,11 +3223,6 @@ impl GitLab {
     ///
     /// - `id: impl Into<String>`: the `{id}` path parameter
     /// - `issue_iid: impl Into<String>`: the `{issue_iid}` path parameter
-    ///
-    /// ## Optional values
-    ///
-    /// - [`page`](ListIssueNotesCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`per_page`](ListIssueNotesCall::per_page): the `per_page` query parameter (`i64`). Items per page (default: 100, max: 100)
     pub fn list_issue_notes(
         &self,
         id: impl Into<String>,
@@ -2833,11 +3258,6 @@ impl GitLab {
     /// ## Arguments
     ///
     /// - `id: impl Into<String>`: the `{id}` path parameter
-    ///
-    /// ## Optional values
-    ///
-    /// - [`page`](ListTagsCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`per_page`](ListTagsCall::per_page): the `per_page` query parameter (`i64`). Items per page (default: 100, max: 100)
     pub fn list_tags(&self, id: impl Into<String>) -> ListTagsCall<'_> {
         ListTagsCall(self.0.send(ListTagsRequest::new(id)))
     }
@@ -2867,11 +3287,6 @@ impl GitLab {
     /// ## Arguments
     ///
     /// - `id: impl Into<String>`: the `{id}` path parameter
-    ///
-    /// ## Optional values
-    ///
-    /// - [`page`](ListReleasesCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`per_page`](ListReleasesCall::per_page): the `per_page` query parameter (`i64`). Items per page (default: 100, max: 100)
     pub fn list_releases(&self, id: impl Into<String>) -> ListReleasesCall<'_> {
         ListReleasesCall(self.0.send(ListReleasesRequest::new(id)))
     }
@@ -2916,8 +3331,6 @@ impl GitLab {
     ///
     /// ## Optional values
     ///
-    /// - [`page`](ListProjectPipelinesCall::page): the `page` query parameter (`i64`). Page number (1-indexed, default: 1)
-    /// - [`per_page`](ListProjectPipelinesCall::per_page): the `per_page` query parameter (`i64`). Items per page (default: 100, max: 100)
     /// - [`status`](ListProjectPipelinesCall::status): the `status` query parameter (`String`). Filter by pipeline status
     /// - [`source`](ListProjectPipelinesCall::source): the `source` query parameter (`String`). Filter by pipeline source (e.g., push, merge_request_event, schedule)
     /// - [`git_ref`](ListProjectPipelinesCall::git_ref): the `git_ref` query parameter (`String`). Filter by branch or tag name

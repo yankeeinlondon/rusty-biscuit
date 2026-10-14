@@ -12,10 +12,10 @@ use quote::{format_ident, quote};
 use schematic_define::{Endpoint, RestApi};
 
 use crate::codegen::api_struct::api_tag_name;
-use crate::codegen::pagination::api_pager_view;
+use crate::codegen::pagination::{api_pager_view, ordinary_send_defaults};
 use crate::codegen::{
     ModuleDocBuilder, generate_api_struct, generate_endpoint_methods, generate_pagination_impls,
-    generate_request_struct_with_options,
+    generate_request_struct_with_defaults,
 };
 
 use super::helpers::{build_definitions_import, get_module_path, get_request_suffix};
@@ -50,6 +50,9 @@ pub struct SplitApiParts {
 /// parameters into one `Cookie` header. `generate_api_struct` leaves them out
 /// of the default headers.
 fn api_requests(api: &RestApi, module_path: &str) -> TokenStream {
+    // The view keeps the API's endpoints in order, so the original endpoint
+    // at the same index still declares what the view removed.
+    let declared = api;
     let api = api_pager_view(api);
     let api = api.as_ref();
     let suffix = get_request_suffix(api);
@@ -61,13 +64,14 @@ fn api_requests(api: &RestApi, module_path: &str) -> TokenStream {
         .collect();
 
     let mut tokens = TokenStream::new();
-    for endpoint in &api.endpoints {
+    for (endpoint, original) in api.endpoints.iter().zip(&declared.endpoints) {
         let endpoint = with_api_cookies(endpoint, &api_cookies);
-        tokens.extend(generate_request_struct_with_options(
+        tokens.extend(generate_request_struct_with_defaults(
             &endpoint,
             &suffix,
             Some(module_path),
             &api_tag_name(api),
+            &ordinary_send_defaults(declared, original),
         ));
     }
     tokens.extend(generate_pagination_impls(api, &suffix));

@@ -25,16 +25,17 @@
 //!
 //! ## Pagination
 //!
-//! Bitbucket uses page-based pagination with `page` and `pagelen` parameters.
 //! Most list endpoints return `PaginatedResponse<T>` with a `values` array and
-//! optional `next` URL for the next page.
-//!
-//! Use the builder pattern to set pagination:
+//! optional `next` and `previous` URLs. The generated pager follows those
+//! links; the `pagelen` page size is a pager control, not a request setter,
+//! and `page` stays an ordinary request field:
 //!
 //! ```text
-//! let request = ListPullRequestsRequest::new("workspace", "repo")
-//!     .with_page(2)
-//!     .with_pagelen(100);
+//! let pull_requests = bitbucket
+//!     .list_pull_requests("workspace", "repo")
+//!     .page_size(100)
+//!     .collect_all()
+//!     .await?;
 //! ```
 //!
 //! ## Endpoint Coverage (15 endpoints)
@@ -58,6 +59,7 @@ use crate::registry::SchemaRegistry;
 use schematic_define::{
     ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EndpointParams, EnvList, EnvMapping,
     PaginationStyle, RestApi, RestMethod,
+    pagination::{Collection, LinkSource, PageSize, PaginationException, Strategy, ValueSource},
 };
 
 /// Creates a schema registry containing all Bitbucket response types.
@@ -104,6 +106,36 @@ pub fn openapi_registry() -> SchemaRegistry {
 /// Creates Bitbucket-style pagination parameters.
 fn bitbucket_pagination() -> EndpointParams {
     EndpointParams::default().with_pagination(PaginationStyle::bitbucket())
+}
+
+/// Bitbucket's next-link pagination: the body's `next` and `previous` URLs,
+/// a `pagelen` size, and the item count in the body's `size`.
+fn bitbucket_next_link() -> Strategy {
+    Strategy::next_link(LinkSource::body("next"))
+        .prev(LinkSource::body("previous"))
+        .page_size(PageSize::new("pagelen").server_default(10).max(100))
+        .total(ValueSource::body("size"))
+}
+
+/// One `PaginatedResponse<T>` list per endpoint, inheriting
+/// [`bitbucket_next_link`]. `page` stays a request field: a next link has no
+/// page input.
+fn bitbucket_lists() -> Vec<PaginationException> {
+    [
+        ("ListPullRequests", "PullRequest"),
+        ("ListPullRequestComments", "PullRequestComment"),
+        ("ListIssues", "Issue"),
+        ("ListIssueComments", "IssueComment"),
+        ("ListIssueChanges", "IssueChange"),
+        ("ListTags", "Tag"),
+        ("ListDownloads", "Download"),
+        ("ListWorkspaceRepos", "Repository"),
+    ]
+    .into_iter()
+    .map(|(endpoint, item)| {
+        PaginationException::new(endpoint, Collection::at("values").item_type(item))
+    })
+    .collect()
 }
 
 /// Creates the Bitbucket Cloud REST API definition.
@@ -368,8 +400,8 @@ pub fn define_bitbucket_api() -> RestApi {
         cross_origin: CrossOrigin::same_origin(),
         request_id_header: None,
         secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
+        default_pagination: Some(bitbucket_next_link()),
+        pagination_exceptions: bitbucket_lists(),
     }
 }
 

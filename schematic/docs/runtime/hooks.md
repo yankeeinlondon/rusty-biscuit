@@ -49,6 +49,13 @@ error bodies), text, binary, and empty endpoints, and every
 [raw send](./sending-and-responses.md#the-raw-send). The global hook
 therefore only ever sees a body that parsed as JSON.
 
+A **pager's page** runs the global hook but not the endpoint's mutator. The
+pager reads items and next-page cursors from the body the global hook
+returns, which is the body the endpoint's definition describes. The mutator
+is typed by the endpoint's own response, and a page is decoded as a
+`Page<Item>` instead, so it never sees one. A global hook that refuses a
+page fails it with `ErrorKind::Hook` and the original bytes.
+
 ## Misuse does not compile
 
 A mutator is typed by its endpoint's success type and requires the

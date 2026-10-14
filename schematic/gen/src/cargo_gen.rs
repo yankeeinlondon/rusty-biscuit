@@ -43,6 +43,7 @@ urlencoding = "2.1"
 
 [dev-dependencies]
 serial_test = "3"
+trybuild = "1.0"
 wiremock = "0.6"
 "#;
 
@@ -333,6 +334,22 @@ mod tests {
         assert!(
             dev_deps.contains_key("serial_test"),
             "serial_test dev-dependency is required by generated env-mutating tests"
+        );
+    }
+
+    #[test]
+    fn generate_cargo_toml_includes_trybuild_dev_dependency() {
+        let content = generate_cargo_toml(None);
+        let parsed: toml_crate::Table = toml_crate::from_str(&content).unwrap();
+
+        let dev_deps = parsed
+            .get("dev-dependencies")
+            .unwrap()
+            .as_table()
+            .unwrap();
+        assert!(
+            dev_deps.contains_key("trybuild"),
+            "trybuild dev-dependency is required by the generated surface's compile-fail tests"
         );
     }
 

@@ -141,8 +141,9 @@ struct Sent {
     size: Option<u32>,
 }
 
-/// Configuration and iteration state of one traversal.
-#[derive(Debug)]
+/// Configuration and iteration state of one traversal. A clone starts an
+/// independent traversal from the same configuration (a partition).
+#[derive(Debug, Clone)]
 pub(crate) struct Engine {
     strategy: &'static Strategy,
     selector: &'static ItemSelector,
@@ -464,8 +465,8 @@ impl Engine {
                 self.next_positions(view, &records, sent, more, &meta)?
             }
         };
-        // A deliberate step in one direction is not a cycle of the other
-        // (R14): each run in a direction starts its own history.
+        // A deliberate step in one direction is not a cycle of the other:
+        // each run in a direction starts its own history.
         match sent.direction {
             Direction::Forward => {
                 self.forward = next;

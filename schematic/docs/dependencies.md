@@ -254,9 +254,9 @@ stream, not a library response.
 
 - [tokio](https://github.com/tokio-rs/tokio) _v1_ [📄](https://docs.rs/tokio)
 
-    _`time` feature only: the monotonic `Instant` of the shared `Deadline`, and `timeout_at` bounding each send's head wait and body reads by one expiration._
+    _`time` and `sync` features: the monotonic `Instant` of the shared `Deadline`, and `timeout_at` bounding each send's head wait and body reads by one expiration; an async `Mutex` so the partitions of one pager session send its open request once._
 
-    _Tags: async, time_
+    _Tags: async, time, sync_
 
 - [url](https://github.com/servo/rust-url) _v2_ [📄](https://docs.rs/url)
 
@@ -419,3 +419,9 @@ stream, not a library response.
     _Serializes tests that share process state._
 
     _Tags: testing_
+
+- [trybuild](https://github.com/dtolnay/trybuild) _v1.0_ [📄](https://docs.rs/trybuild)
+
+    _Compile-fail cases of the generated pager surface, run on the real generated endpoints and checked against their expected diagnostics. The generator writes this dev-dependency into the crate's manifest._
+
+    _Tags: testing, compile-fail_

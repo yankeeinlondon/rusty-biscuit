@@ -50,5 +50,6 @@ pub use request_structs::{
     PLACEHOLDER_API_MARKER, generate_request_struct, generate_request_struct_with_options,
     generate_request_struct_with_suffix,
 };
+pub(crate) use request_structs::generate_request_struct_with_defaults;
 pub use shared::generate_request_helpers;
 pub use pagination::generate_pagination_impls;

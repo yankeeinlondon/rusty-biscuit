@@ -33,11 +33,28 @@
 //! | `Pages::prev()` | [`HasPrev`] |
 //! | `Pages::total()` | [`HasTotal`] |
 //! | `Pages::set_page_size(n)` | [`AdjustablePageSize`] |
+//! | `.partitioned(n)` | [`Partitioned`] |
 //! | `.pages()`, `.fetch_page()`, `.collect_all()` | [`Sessionless`] |
+//! | `.with_session(..)`, `.close_grace(..)` | [`Sessioned`] |
+//! | `.keep_alive(..)` | [`KeepAliveKnob`] |
+//! | `SessionScope::renew()`, `Pages::renew()` | [`Renewable`] |
 //!
 //! Configuration happens on the [`Pager`], before iteration starts; [`Pages`]
 //! has no configuration method, so a control called after `.pages()` does
 //! not compile either.
+//!
+//! ## Sessions and partitions
+//!
+//! A strategy with a server-side session (a scroll or point in time) is
+//! iterated only inside [`Pager::with_session`]: the closure gets a
+//! [`SessionScope`] to page, collect, partition, and renew, and one close
+//! request is sent when it ends, bounded by its own grace. See the
+//! `with_session` documentation for what cancellation and panics leave to
+//! the server's lease.
+//!
+//! [`Pager::partitioned`] and [`SessionScope::partitioned`] give `n`
+//! independent traversals, each sending its slice index and the slice count
+//! on every request; the caller polls them, and nothing is spawned.
 //!
 //! ## Completeness
 //!
@@ -54,6 +71,7 @@ mod link;
 mod pages;
 mod progress;
 mod request;
+mod session;
 pub mod spec;
 
 use serde::de::DeserializeOwned;
@@ -61,8 +79,9 @@ use serde_json::Value;
 
 use crate::endpoint::EndpointSpec;
 
-pub use error::{ContinuationProblem, Incomplete, IncompleteReason, Page, PagerError, PagerErrorKind};
+pub use error::{ContinuationProblem, Incomplete, IncompleteReason, Page, PagerError, PagerErrorKind, SessionError};
 pub use pages::{CollectResult, DEFAULT_PAGE_LIMIT, Items, PageResult, Pager, Pages};
+pub use session::{DEFAULT_CLOSE_GRACE, SessionResult, SessionScope};
 pub use spec::{ItemSelector, Strategy};
 
 /// A request of a paginated list endpoint.
@@ -231,7 +250,8 @@ pub trait HasTotal: Paginated {}
 )]
 pub trait AdjustablePageSize: PageSizeKnob {}
 
-/// `.keep_alive(duration)` on a session.
+/// `.keep_alive(value)` on a session: the keep-alive sent instead of the
+/// authored default.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` has no adjustable keep-alive",
     label = "`.keep_alive(..)` needs an adjustable `KeepAlive` in the definition",
