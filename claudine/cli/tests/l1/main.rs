@@ -93,6 +93,8 @@ mod inline_compose_cli;
 mod inline_compose_hash;
 mod inline_compose_sequence_mismatch;
 #[cfg(unix)]
+mod launch_trigger_schemas;
+#[cfg(unix)]
 mod level1_compose_autocomplete_failure_pty;
 #[cfg(unix)]
 mod level1_dry_run_pty;
