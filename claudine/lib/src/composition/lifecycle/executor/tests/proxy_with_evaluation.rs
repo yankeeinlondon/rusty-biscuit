@@ -369,9 +369,6 @@ fn malformed_expression_and_unknown_function_raise() {
         // Unknown function, whole-value and mixed.
         json!({"x": "{{ nope(1) }}"}),
         json!({"x": "prefix {{ nope(1) }}"}),
-        // Malformed span inside a mixed string: parsing is deferred to DM2, so
-        // unlike a whole-value span this only fails at event time.
-        json!({"x": "prefix {{ 1 + }}"}),
     ] {
         let outcome = run_failure(proxy_stack(with.clone()), json!({}), None);
         assert!(outcome.control.is_none(), "{with}: no handoff");
@@ -384,6 +381,18 @@ fn malformed_expression_and_unknown_function_raise() {
             "{with}"
         );
     }
+}
+
+#[test]
+fn a_malformed_span_in_mixed_text_is_a_parse_error() {
+    // Like a whole-value span, a mixed string's spans are parsed when the
+    // stack is, so the typo never waits for the event to fire.
+    let error = parse_lifecycle_config(&proxy_stack(json!({"x": "prefix {{ 1 + }}"})), Path::new("router.md"))
+        .expect_err("malformed span rejected");
+    let CompositionError::LifecycleActionInvalidLongForm { message, .. } = &error else {
+        panic!("expected LifecycleActionInvalidLongForm, got {error:?}");
+    };
+    assert!(message.contains("failure[0].proxy.with.x"), "{message}");
 }
 
 #[test]

@@ -18,6 +18,7 @@ use std::fmt;
 use serde_json::Value;
 
 use super::LifecycleSignal;
+use super::action_shape::positional_operand_field;
 use super::actions::{CommunicationChannel, expression_function_signature, side_effect_signature};
 use super::parse::LOOP_ITERATION_KEYS;
 
@@ -231,16 +232,7 @@ impl LifecycleSourceMap {
             Value::Array(items) => items.iter().collect(),
             scalar => vec![scalar],
         };
-        let single_field = match verb {
-            "error" => Some("reason"),
-            "proxy" => Some("target"),
-            "retry" => Some("max_attempts"),
-            "resume" => Some("message"),
-            "defer" => Some("delay"),
-            "shell" => Some("command"),
-            _ if CommunicationChannel::from_verb(verb).is_some() => Some("text"),
-            _ => None,
-        };
+        let single_field = positional_operand_field(verb);
         for (k, arg) in args.into_iter().enumerate() {
             let path = match single_field {
                 Some(field) => prefix.field(field),

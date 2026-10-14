@@ -297,9 +297,10 @@ fn event_surfaces(config: &LifecycleConfig) -> Vec<(LifecycleSignal, LifecyclePa
 /// `group` is deferred to runtime. `fm.err` reads the document everywhere.
 /// Nothing is evaluated and no provider runs.
 ///
-/// A surface whose authored text does not parse is left to the event-time
-/// failure that reports it; an unknown function is likewise reported when the
-/// event evaluates it.
+/// Expression syntax is not this check's concern: the parser has already
+/// rejected every guard, whole-value operand, and mixed-text span that does
+/// not parse, in both branches. An unknown function is reported when the event
+/// evaluates it.
 ///
 /// ## Errors
 ///
@@ -330,6 +331,8 @@ pub fn validate_no_err_in_no_error_events(
             }
         }
         for (property, text, mode) in authored {
+            // Unreachable for a parsed config (see above); a syntax failure is
+            // the parser's to report, not a missing-`err` diagnostic.
             let Ok(prepared) = prepare_value(&serde_json::Value::String(text.to_string()), mode)
             else {
                 continue;

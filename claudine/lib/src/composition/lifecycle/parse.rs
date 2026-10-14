@@ -870,7 +870,7 @@ impl StackParser<'_> {
                     source_path: self.source_file.to_path_buf(),
                     property: property.clone(),
                     action: verb.to_string(),
-                    message: format!("`{key}` is not a valid value: {source}"),
+                    message: format!("`{property}.{key}` is not a valid value: {source}"),
                     source: Some(source),
                 }
             })?;

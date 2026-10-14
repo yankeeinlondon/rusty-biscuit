@@ -131,6 +131,8 @@ mod mcp_cli;
 mod override_boundary_guard;
 mod path_lookup_guard;
 mod preflight_execution_parity;
+#[cfg(unix)]
+mod lifecycle_mixed_span_validation;
 mod lifecycle_set_shell_values;
 mod literal_glob_hint;
 #[cfg(unix)]

@@ -2789,7 +2789,8 @@ pub enum LoopExpressionCause {
 /// Carried as the optional typed `#[source]` of
 /// [`CompositionError::LifecycleActionInvalidLongForm`] so a handler can
 /// recover the concrete Darkmatter [`ParseError`] through
-/// [`std::error::Error::source`] instead of re-parsing the flattened message.
+/// [`std::error::Error::source`] instead of re-parsing the flattened message,
+/// whether the failing expression was a whole value or one span of mixed text.
 /// The [`Invalid`](ActionExprError::Invalid) arm carries the genuinely-prose
 /// rejections (a null, an unsupported number, or object/array scalar data)
 /// that never had a typed lower cause.
@@ -2807,6 +2808,17 @@ pub enum ActionExprError {
     /// payload keeps `CompositionError` under `clippy::result_large_err`.
     #[error("whole-value expression is not valid: {0}")]
     Parse(#[from] Box<ParseError>),
+    /// A `{{ … }}` span inside mixed text (`"status {{ fm. }}"`) did not
+    /// parse. The text stays a literal template; only its spans' syntax is
+    /// checked, so nothing is evaluated.
+    #[error("interpolation span `{{{{ {expression} }}}}` is not valid: {source}")]
+    SpanParse {
+        /// The span's inner expression text, as authored.
+        expression: String,
+        /// The Darkmatter parse failure.
+        #[source]
+        source: Box<ParseError>,
+    },
     /// A scalar shape that cannot become an action expression at all.
     #[error("{0}")]
     Invalid(String),

@@ -189,10 +189,11 @@ fn an_unavailable_global_fails_with_its_reason_and_never_reads_the_document() {
 
 #[test]
 fn malformed_expressions_and_unknown_functions_halt_before_side_effects() {
-    // A malformed whole value or guard cannot even be parsed: preparation
-    // refuses it, so no event ever runs.
+    // A malformed whole value, mixed-text span, or guard cannot even be
+    // parsed: preparation refuses it, so no event ever runs.
     for item in [
         json!({"message": "{{ spec ? }}"}),
+        json!({"message": "x {{ spec ? }}"}),
         json!({"when": "spec ==", "then": [{"message": "guarded"}]}),
     ] {
         assert!(
@@ -203,7 +204,6 @@ fn malformed_expressions_and_unknown_functions_halt_before_side_effects() {
     // Anything that parses but fails at event time halts the stack before the
     // action it guards, and before every later one.
     for (when, message) in [
-        (None, "x {{ spec ? }}"),
         (None, "{{ no_such_fn(spec) }}"),
         (None, "x {{ no_such_fn(spec) }}"),
         (Some("no_such_fn(spec)"), "guarded"),

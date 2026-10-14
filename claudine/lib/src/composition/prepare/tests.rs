@@ -430,12 +430,10 @@ fn invalid_lifecycle_config_fails_preparation() {
 }
 
 #[test]
-fn lifecycle_malformed_span_is_deferred_raw_through_prepare() {
-    // C1: lifecycle communication strings are deferred from compose-time
-    // resolution, so their authored `{{ }}` spans survive prepare intact.
-    // A malformed span is no longer a prepare-time leak — it is resolved
-    // (and fails closed) at event-time via DM2 (C2). Prepare keeps the raw
-    // span verbatim.
+fn lifecycle_malformed_mixed_span_is_rejected_at_prepare() {
+    // C1 defers lifecycle communication strings from compose-time
+    // resolution, but not from syntax checking: a span that does not parse is
+    // an authoring error, reported at prepare with the operand's path.
     let dir = TempDir::new().unwrap();
     let source = make_source(
         &dir,
@@ -446,10 +444,11 @@ fn lifecycle_malformed_span_is_deferred_raw_through_prepare() {
         "Content",
     );
 
-    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
-    let message = communication_text(&prepared.lifecycle, crate::composition::lifecycle::LifecycleSignal::Start, "message")
-        .expect("message action");
-    assert_eq!(message, "leak {{ parent_dir(review)) }}");
+    let err = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
+    let CompositionError::LifecycleActionInvalidLongForm { message, .. } = &err else {
+        panic!("expected LifecycleActionInvalidLongForm, got {err:?}");
+    };
+    assert!(message.contains("`start.message.text`"), "{message}");
 }
 
 #[test]
@@ -547,14 +546,15 @@ fn lifecycle_ctx_interpolation_is_deferred_unresolved() {
 #[test]
 fn multiple_lifecycle_spans_all_deferred_raw() {
     // Every lifecycle communication string is deferred; none trips a
-    // prepare-time leak. They all resolve at event-time.
+    // prepare-time leak, even a span that can only fail when evaluated. They
+    // all resolve at event-time.
     let dir = TempDir::new().unwrap();
     let source = make_source(
         &dir,
         &[
             ("title", json!("Test")),
-            ("start", json!({"message": "leak {{ parent_dir(review)) }}"})),
-            ("failure", json!({"say": "leak {{ broken( }}"})),
+            ("start", json!({"message": "leak {{ parent_dir(review) }}"})),
+            ("failure", json!({"say": "leak {{ no_such_fn(1) }}"})),
         ],
         "Content",
     );
@@ -562,11 +562,11 @@ fn multiple_lifecycle_spans_all_deferred_raw() {
     let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert_eq!(
         communication_text(&prepared.lifecycle, crate::composition::lifecycle::LifecycleSignal::Start, "message").as_deref(),
-        Some("leak {{ parent_dir(review)) }}")
+        Some("leak {{ parent_dir(review) }}")
     );
     assert_eq!(
         communication_text(&prepared.lifecycle, crate::composition::lifecycle::LifecycleSignal::Failure, "say").as_deref(),
-        Some("leak {{ broken( }}")
+        Some("leak {{ no_such_fn(1) }}")
     );
 }
 

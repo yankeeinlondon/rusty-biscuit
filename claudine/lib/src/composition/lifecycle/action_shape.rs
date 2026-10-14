@@ -23,34 +23,33 @@ fn classify_positional_value(
     source_file: &Path,
     property_name: &str,
 ) -> Result<Vec<Expr>, CompositionError> {
-    match value {
-        serde_json::Value::Null => Ok(Vec::new()),
-        serde_json::Value::String(_)
-        | serde_json::Value::Number(_)
-        | serde_json::Value::Bool(_) => Ok(vec![action_value_to_expr(value).map_err(|source| {
+    // The message names the operand the way the expression walker does
+    // (`start[0].info.text`, `start[1].ensure_file.arg[1]`).
+    let convert = |index: usize, item: &serde_json::Value| {
+        action_value_to_expr(item).map_err(|source| {
+            let operand = match positional_operand_field(verb) {
+                Some(field) => format!("{property_name}.{field}"),
+                None => format!("{property_name}.arg[{index}]"),
+            };
             CompositionError::LifecycleActionInvalidLongForm {
                 source_path: source_file.to_path_buf(),
                 property: property_name.to_string(),
                 action: verb.to_string(),
-                message: source.to_string(),
+                message: format!("`{operand}` is not a valid value: {source}"),
                 source: Some(source),
             }
-        })?]),
-        serde_json::Value::Array(items) => {
-            let mut args = Vec::with_capacity(items.len());
-            for item in items {
-                args.push(action_value_to_expr(item).map_err(|source| {
-                    CompositionError::LifecycleActionInvalidLongForm {
-                        source_path: source_file.to_path_buf(),
-                        property: property_name.to_string(),
-                        action: verb.to_string(),
-                        message: source.to_string(),
-                        source: Some(source),
-                    }
-                })?);
-            }
-            Ok(args)
-        }
+        })
+    };
+    match value {
+        serde_json::Value::Null => Ok(Vec::new()),
+        serde_json::Value::String(_)
+        | serde_json::Value::Number(_)
+        | serde_json::Value::Bool(_) => Ok(vec![convert(0, value)?]),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| convert(index, item))
+            .collect(),
         serde_json::Value::Object(_) => Err(
             CompositionError::LifecycleObjectDataThroughInterpolationPositional {
                 source_path: source_file.to_path_buf(),
@@ -58,6 +57,22 @@ fn classify_positional_value(
                 verb: verb.to_string(),
             },
         ),
+    }
+}
+
+/// The named field a short-form verb's single positional operand fills, or
+/// `None` when its operands are numbered `arg[k]` (side effects and
+/// expression functions).
+pub(super) fn positional_operand_field(verb: &str) -> Option<&'static str> {
+    match verb {
+        "error" => Some("reason"),
+        "proxy" => Some("target"),
+        "retry" => Some("max_attempts"),
+        "resume" => Some("message"),
+        "defer" => Some("delay"),
+        "shell" => Some("command"),
+        _ if CommunicationChannel::from_verb(verb).is_some() => Some("text"),
+        _ => None,
     }
 }
 
@@ -305,6 +320,10 @@ pub(super) fn did_you_mean_verb(verb: &str) -> Option<&'static str> {
 ///   expression is parsed and its typed result is preserved (e.g. `{{ true }}`
 ///   becomes a bool, `{{ 3 }}` a number, `{{ payload }}` a variable reference
 ///   whose runtime value may be an object/array).
+/// - Mixed text (`"status {{ fm.title }}"`) stays a literal template, but every
+///   span in it is parsed here, so a syntax error is an authoring error in any
+///   branch rather than an event-time surprise. Spans are never evaluated: a
+///   span that parses but would fail to evaluate is accepted.
 /// - YAML numeric and boolean scalars become [`Expr::NumberLiteral`] and
 ///   [`Expr::BoolLiteral`].
 /// - Direct YAML objects and arrays are rejected; object/array data must be
@@ -330,7 +349,12 @@ pub(crate) fn action_value_to_expr(value: &serde_json::Value) -> Result<Expr, Ac
                 // and its typed parse error when it fails.
                 Ok(parse(&span.expression).map_err(|e| ActionExprError::Parse(Box::new(e)))?)
             } else {
-                // Literal text, including mixed interpolation.
+                for span in spans {
+                    parse(&span.expression).map_err(|source| ActionExprError::SpanParse {
+                        expression: span.expression.trim().to_string(),
+                        source: Box::new(source),
+                    })?;
+                }
                 Ok(Expr::StringLiteral(s.clone()))
             }
         }

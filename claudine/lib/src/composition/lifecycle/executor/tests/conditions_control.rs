@@ -398,6 +398,41 @@ fn an_unselected_raising_operand_is_never_evaluated() {
     }
 }
 
+/// Mixed text is parsed with the stack but never evaluated there: a span that
+/// parses and fails only when evaluated is accepted in an unselected branch,
+/// and nothing in that branch runs. Selecting it shows the failure is real.
+#[test]
+fn an_unselected_mixed_span_that_fails_only_at_evaluation_is_accepted_and_skipped() {
+    for flag in [true, false] {
+        let raising = json!([
+            { "say": "status {{ no_such_fn(1) }}" },
+            { "info": "deep {{ fm.missing.deep }}" },
+            { "set": { "note": "status {{ no_such_fn(2) }}" } },
+            { "shell": "never.sh" },
+        ]);
+        let clean = json!([{ "info": "selected" }]);
+        let (then_body, else_body) = if flag { (clean, raising) } else { (raising, clean) };
+        let (outcome, events, commands) = run_stack(
+            json!({ "start": [{ "when": "flag", "then": then_body, "else": else_body }] }),
+            LifecycleSignal::Start,
+            json!({ "flag": flag }),
+            0,
+        );
+        assert_eq!(outcome, LifecycleEventOutcome::default(), "flag={flag}");
+        assert_eq!(events, vec![info("selected")], "flag={flag}");
+        assert!(commands.is_empty(), "flag={flag}: {commands:?}");
+    }
+
+    let (outcome, events, _) = run_stack(
+        json!({ "start": [{ "when": "true", "then": [{ "say": "status {{ no_such_fn(1) }}" }] }] }),
+        LifecycleSignal::Start,
+        json!({}),
+        0,
+    );
+    assert!(outcome.evaluation_error.is_some(), "selected, the span fails at evaluation");
+    assert!(events.is_empty(), "{events:?}");
+}
+
 /// A guard is evaluated exactly once, when its item is reached: a `set` in the
 /// selected body that falsifies the guard neither aborts the body nor runs
 /// `else`, while the next guard over the same property sees the mutation, as
