@@ -208,6 +208,10 @@ pub(crate) struct ResolvedPayload {
     /// The resolved JSON Schema (guaranteed simple-object by the gate),
     /// shared by every effective schema layered from it.
     pub json_schema: std::sync::Arc<Value>,
+    /// The payload's SimplifiedSchema object shape, retained so editor
+    /// projections see the properties validation layers in. `None` for a raw
+    /// JSON Schema payload, which has no SimplifiedSchema projection.
+    pub shape: Option<std::sync::Arc<crate::markdown::schemas::SchemaShape>>,
     /// Dependency edges: the payload file + its imports + its examples
     /// (sorted, deduplicated). Empty for an embedded trigger.
     pub dependencies: Vec<PathBuf>,
@@ -282,10 +286,23 @@ pub(crate) fn resolve_trigger_payload(
     deps.dedup();
 
     Ok(ResolvedPayload {
+        shape: payload_shape(resolved.simplified),
         json_schema: std::sync::Arc::new(resolved.json_schema),
         dependencies: deps,
         advisories: resolved.advisories,
     })
+}
+
+/// The object shape of a payload that passed the merge-compatibility gate.
+/// A gated payload is never a root union, so only a single-object projection
+/// is kept.
+fn payload_shape(
+    simplified: Option<crate::markdown::schemas::SimplifiedSchema>,
+) -> Option<std::sync::Arc<crate::markdown::schemas::SchemaShape>> {
+    match simplified? {
+        crate::markdown::schemas::SimplifiedSchema::Single(shape) => Some(std::sync::Arc::new(shape)),
+        crate::markdown::schemas::SimplifiedSchema::Union(_) => None,
+    }
 }
 
 /// [`resolve_trigger_payload`] for an embedded trigger, which needs neither
@@ -364,6 +381,7 @@ fn resolve_embedded_payload(
     })?;
     enforce_merge_compatible(&importer_path, payload, &resolved.json_schema)?;
     Ok(ResolvedPayload {
+        shape: payload_shape(resolved.simplified),
         json_schema: std::sync::Arc::new(resolved.json_schema),
         dependencies: Vec::new(),
         advisories: resolved.advisories,

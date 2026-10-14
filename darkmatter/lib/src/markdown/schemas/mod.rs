@@ -296,6 +296,8 @@ struct TriggerLayer {
     /// The resolved payload JSON Schema (guaranteed simple-object), shared
     /// with the registry that resolved it.
     json_schema: Arc<Value>,
+    /// The payload's SimplifiedSchema object shape, when it has one.
+    shape: Option<Arc<SchemaShape>>,
     /// Payload dependency edges (referenced files + imports + examples).
     dependencies: Vec<PathBuf>,
     advisories: Vec<SchemaAdvisory>,
@@ -630,6 +632,7 @@ impl DarkmatterSchemas {
         );
         Ok(Some(EffectiveSchema {
             simplified: resolved.and_then(|r| r.simplified),
+            trigger_shapes: trigger_layers.iter().filter_map(|layer| layer.shape.clone()).collect(),
             json_schema: merged_json,
             origins,
             validators,
@@ -679,10 +682,11 @@ impl DarkmatterSchemas {
             if !eval.matched {
                 continue;
             }
-            let (json_schema, dependencies, advisories) = if pre_resolved {
+            let (json_schema, shape, dependencies, advisories) = if pre_resolved {
                 let payload = &registry.payloads[idx];
                 (
                     payload.json_schema.clone(),
+                    payload.shape.clone(),
                     payload.dependencies.clone(),
                     payload.advisories.clone(),
                 )
@@ -692,11 +696,12 @@ impl DarkmatterSchemas {
                     registry.roots.search_paths(),
                     &self.file_resolution_context,
                 )?;
-                (payload.json_schema, payload.dependencies, payload.advisories)
+                (payload.json_schema, payload.shape, payload.dependencies, payload.advisories)
             };
             layers.push(TriggerLayer {
                 source: eval.trigger.source.clone(),
                 json_schema,
+                shape,
                 dependencies,
                 advisories,
             });
@@ -822,10 +827,21 @@ fn schema_declares_property(root: &Value, schema: &Value, name: &str, depth: usi
 /// The fully-resolved schema for a document.
 #[derive(Clone)]
 pub struct EffectiveSchema {
-    /// The SimplifiedSchema projection, when the document schema came from
-    /// SimplifiedSchema input. `None` when the schema was a raw JSON Schema
-    /// or when a root union mixed SimplifiedSchema and JSON Schema arms.
+    /// The SimplifiedSchema projection of the **authored** document schema
+    /// (`$schema`, or the operator override) alone. `None` when there is no
+    /// document schema, when it was a raw JSON Schema, or when a root union
+    /// mixed SimplifiedSchema and JSON Schema arms.
+    ///
+    /// Baseline and trigger layers are not in it: consumers that mean "the
+    /// author's own parameters" (Claudine's prompt parameters, expression
+    /// property names, optional-binding materialization) read this field. The
+    /// editor's full property shape, with matching trigger payloads layered
+    /// in, is [`Self::property_shape`].
     pub simplified: Option<SimplifiedSchema>,
+    /// The object shapes of the matching trigger payloads that have a
+    /// SimplifiedSchema projection, in layering order (a later shape wins a
+    /// shared top-level property, as it does in [`Self::json_schema`]).
+    trigger_shapes: Vec<Arc<SchemaShape>>,
     /// The final Draft 2020-12 JSON Schema used by the validator.
     ///
     /// Held as `Arc<Value>` so the common baseline-only effective schema is
@@ -890,6 +906,31 @@ impl EffectiveSchema {
     /// Non-fatal findings discovered while resolving this effective schema.
     pub fn advisories(&self) -> &[SchemaAdvisory] {
         &self.advisories
+    }
+
+    /// The object shapes of the matching trigger payloads, in layering order.
+    /// A raw JSON Schema payload has no shape and is absent here, though it
+    /// still validates through [`Self::json_schema`].
+    pub fn trigger_shapes(&self) -> &[Arc<SchemaShape>] {
+        &self.trigger_shapes
+    }
+
+    /// The top-level property shape an editor projects for this document: the
+    /// Darkmatter base properties, then each `extension_shapes` entry, then
+    /// the matching trigger payloads, then the authored document schema.
+    ///
+    /// A later layer replaces an earlier layer's whole definition of a shared
+    /// top-level property — the per-property precedence validation applies
+    /// when it merges the same layers into [`Self::json_schema`], so an
+    /// authored redeclaration wins over a trigger's. Root unions and
+    /// `frontmatter` behave as in [`effective_property_shape`].
+    pub fn property_shape(&self, extension_shapes: &[SchemaShape], frontmatter: &Value) -> SchemaShape {
+        frontmatter_shape::layered_property_shape(
+            extension_shapes,
+            &self.trigger_shapes,
+            self.simplified.as_ref(),
+            frontmatter,
+        )
     }
 
     /// Validates a frontmatter JSON value against this schema. Equivalent to
@@ -969,6 +1010,7 @@ impl EffectiveSchema {
             CompiledValidators::build(&json_schema, &cache, self.base_dir.as_deref(), &self.file_resolution_context)?;
         let projected = Self {
             simplified: projected,
+            trigger_shapes: self.trigger_shapes.clone(),
             json_schema,
             origins: self.origins.clone(),
             validators,
@@ -3923,5 +3965,117 @@ mod phase4_trigger_assembly {
         // Validates — model is supplied.
         let report = api.validate(&md_from_file(&doc_path)).unwrap();
         assert!(report.valid, "expected valid: {:?}", report.problems);
+    }
+
+    // ── Editor property shape: trigger layers ───────────────────────────
+
+    /// A repository whose `schemas/` root holds three triggers: `a` and `b`
+    /// match `prompt` (in that registry order) and both declare `shared`;
+    /// `c` matches only `sequence`.
+    fn three_trigger_repo() -> TempDir {
+        let repo = repo_fixture();
+        let root = repo.path();
+        let trigger = |payload: &str, key: &str| {
+            format!("kind: trigger-schema\nmatch:\n  {key}: string(required)\n$schema: {payload}\n")
+        };
+        write(&root.join("schemas/a.trigger.yaml"), &trigger("a.yaml", "prompt"));
+        write(&root.join("schemas/b.trigger.yaml"), &trigger("b.yaml", "prompt"));
+        write(&root.join("schemas/c.trigger.yaml"), &trigger("c.yaml", "sequence"));
+        write(
+            &root.join("schemas/a.yaml"),
+            "$schema:\n  alpha: 'string -> from a'\n  shared: 'number -> from a'\n",
+        );
+        write(
+            &root.join("schemas/b.yaml"),
+            "$schema:\n  beta: 'boolean -> from b'\n  shared: 'string -> from b'\n",
+        );
+        write(&root.join("schemas/c.yaml"), "$schema:\n  gamma: 'string -> from c'\n");
+        repo
+    }
+
+    fn effective_of(root: &Path, frontmatter: &str) -> (EffectiveSchema, Value) {
+        let doc_path = root.join("doc.md");
+        write(&doc_path, &format!("---\n{frontmatter}---\nbody\n"));
+        let md = md_from_file(&doc_path);
+        let effective = DarkmatterSchemas::new(doc_context(root, &doc_path))
+            .with_trigger_discovery()
+            .unwrap()
+            .effective_for(&md)
+            .unwrap()
+            .expect("an effective schema");
+        (effective, frontmatter_as_json(&md))
+    }
+
+    /// `(type keyword, description)` of a single-atom primitive property.
+    fn declared(shape: &SchemaShape, name: &str) -> Option<(&'static str, String)> {
+        match shape.properties.get(name)? {
+            PropertyDef::Single(PropertyAtom { ty: TypeExpr::Primitive(ty), description, .. }) => {
+                Some((ty.as_keyword(), description.clone().unwrap_or_default()))
+            }
+            other => panic!("`{name}` is not a single primitive: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn property_shape_layers_matching_triggers_in_registry_order() {
+        let repo = three_trigger_repo();
+        let (effective, frontmatter) = effective_of(repo.path(), "prompt: hi\n");
+
+        let shape = effective.property_shape(&[], &frontmatter);
+
+        assert!(effective.simplified.is_none(), "no authored `$schema`");
+        assert_eq!(effective.trigger_shapes().len(), 2, "a and b match; c does not");
+        assert_eq!(declared(&shape, "alpha"), Some(("string", "from a".into())));
+        assert_eq!(declared(&shape, "beta"), Some(("boolean", "from b".into())));
+        assert_eq!(declared(&shape, "shared"), Some(("string", "from b".into())), "the later trigger wins");
+        assert!(!shape.properties.contains_key("gamma"), "a non-matching trigger contributes nothing");
+        let validates = |shared: Value| effective.validate_raw(&serde_json::json!({ "prompt": "hi", "shared": shared })).valid;
+        assert!(validates("x".into()) && !validates(3.into()), "validation applies the same precedence");
+    }
+
+    #[test]
+    fn property_shape_lets_an_authored_redeclaration_win_per_property() {
+        let repo = three_trigger_repo();
+        let (effective, frontmatter) =
+            effective_of(repo.path(), "$schema:\n  shared: 'boolean -> authored'\nprompt: hi\n");
+
+        let shape = effective.property_shape(&[], &frontmatter);
+
+        assert_eq!(declared(&shape, "shared"), Some(("boolean", "authored".into())));
+        assert_eq!(declared(&shape, "alpha"), Some(("string", "from a".into())));
+        assert_eq!(declared(&shape, "beta"), Some(("boolean", "from b".into())));
+        let Some(SimplifiedSchema::Single(authored)) = &effective.simplified else {
+            panic!("the authored `$schema` is a single object");
+        };
+        let authored_keys: Vec<&str> = authored.properties.keys().map(String::as_str).collect();
+        assert_eq!(authored_keys, ["shared"], "`simplified` stays the authored declaration alone");
+        let validates = |shared: Value| effective.validate_raw(&serde_json::json!({ "prompt": "hi", "shared": shared })).valid;
+        assert!(validates(true.into()) && !validates("x".into()), "validation applies the same precedence");
+    }
+
+    #[test]
+    fn property_shape_puts_triggers_over_the_base_and_extension_layers() {
+        let repo = three_trigger_repo();
+        let (effective, frontmatter) = effective_of(repo.path(), "prompt: hi\n");
+        let SimplifiedSchema::Single(extension) =
+            simplified::parse_yaml_schema(
+                &serde_yaml_ng::from_str("alpha: 'number -> extension'\ndelta: 'string -> extension'\n").unwrap(),
+            )
+            .unwrap()
+        else {
+            panic!("a single-object extension");
+        };
+        let SimplifiedSchema::Single(base) = darkmatter_base_schema() else {
+            panic!("the base is a single object");
+        };
+
+        let shape = effective.property_shape(&[extension], &frontmatter);
+
+        assert_eq!(declared(&shape, "alpha"), Some(("string", "from a".into())), "trigger over extension");
+        assert_eq!(declared(&shape, "delta"), Some(("string", "extension".into())));
+        for name in base.properties.keys() {
+            assert!(shape.properties.contains_key(name), "base property `{name}` kept");
+        }
+        assert!(!shape.properties.contains_key("gamma"));
     }
 }

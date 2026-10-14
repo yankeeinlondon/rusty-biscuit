@@ -75,7 +75,7 @@ Claudine's schemas need no extension entry. They are trigger schemas, which
 reaches `claudine/schemas/` automatically, and a document elsewhere needs the
 complete five-file bundle in the repository root's `schemas/`, an absolute
 `SCHEMAS_DIR`, or `~/schemas`. `dmls` reads them from disk only and uses them
-for diagnostics, not for completion or hover. See
+for diagnostics, completion, and hover. See
 [DMLS Schema Support](../../../docs/topics/schemas/dmls-schema-support.md#claudine-documents).
 
 The older `formatting.cleanup` (`compact` → `list-item-padding = "none"`,

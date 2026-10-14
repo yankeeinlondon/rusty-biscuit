@@ -62,9 +62,9 @@ flowchart TD
     EFFECTIVE --> DIAG["diagnostics"]
     EFFECTIVE --> ACTION["code actions"]
     EFFECTIVE --> FOLD["folding & symbols"]
-    BASE --> SHAPE["completion shape<br/>(no trigger payloads)"]
+    BASE --> SHAPE["property shape<br/>base → extensions → matching triggers → $schema"]
     EXT --> SHAPE
-    DOC --> SHAPE
+    EFFECTIVE --> SHAPE
     SHAPE --> COMP["completion"]
     SHAPE --> HOV["hover"]
 ```
@@ -74,7 +74,8 @@ A few details worth knowing:
 - the base baseline always applies, so a document with no `$schema` of its own still gets schema-driven completion and hover for keys like `title` or `style`
 - the base baseline is the [built-in baseline](./definition.md#the-built-in-baseline) compiled into the server, including the Content Policy schema it imports to type `content_policy`. Those compiled-in documents are never read from disk and never become watched dependencies, so the server needs no schema files to type a document. An extension, trigger, or document schema that declares `content_policy` replaces the built-in typing, as for any other baseline property
 - extension baselines whose activation globs match the document contribute their shapes even when the document declares no `$schema`, so their keys are completed and hovered "for free"
-- **trigger payloads drive diagnostics only.** Completion and hover read the base baseline, the matched extension baselines, and the document's own `$schema`; a matching trigger's payload is not part of that shape. A document typed only by a trigger therefore gets diagnostics from it but no completion or hover for its keys. Declaring a key in the document's `$schema` (or an extension baseline) brings completion and hover back for that key
+- **matching trigger payloads feed completion and hover as well as diagnostics.** The property shape the editor completes and hovers from layers the base baseline, the matched extension baselines, each matching trigger payload in registry order, and then the document's own `$schema`. A later layer replaces an earlier layer's whole definition of a top-level property, exactly as validation merges them, so a document typed only by a trigger gets key, value, and nested completion and hover from it, and a property the document's `$schema` redeclares is completed and hovered from the author's declaration. For example, with a trigger that declares `mode: "enum(append, replace)"`, an empty `mode:` value offers `append` and `replace`; add `$schema: { mode: "enum(fast, slow)" }` to the document and it offers `fast` and `slow` instead. A trigger payload written as raw JSON Schema has no SimplifiedSchema shape: it still validates, but contributes no completion or hover
+- trigger-declared properties count as declared for the undeclared-property advisory on `{{ … }}` expressions, as they do in `md compose`. Completion of property names *inside* an expression still offers only the document's keys and the parameters its own `$schema` declares; baseline, extension, and trigger properties are host controls, not parameters
 - the effective schema (and every file it depends on — the referenced `$schema` file, its imports, its examples, and each matched extension baseline) is content-hash cached per document; editing any dependency invalidates the bundle immediately
 - the cache is also keyed on the document's file-resolution context: its repository, its folder, its tree root and how that was chosen, the home folder, the environment (so `SCHEMAS_DIR`), and the extra `@` roots. A `$schema: ^shape.yaml` that resolves to a package's `shape.yaml` is never served to the same text once the package root changes; the schema is assembled again for the new context
 - a failed assembly is cached together with the files its error names, so fixing an imported schema file clears the error without reopening the document
@@ -108,7 +109,10 @@ DMLS reads these files **only from disk**: it has no Claudine dependency and
 registers no embedded bundle. The `claudine` binary carries its own embedded
 copy, so a document outside the Claudine area can pass or fail `claudine
 compose` while the editor, with no disk bundle in reach, says nothing about
-it. As above, the triggers drive diagnostics but not completion or hover.
+it. When the bundle is reachable, its triggers drive completion and hover as
+well as diagnostics, with no `$schema` in the document: `start:` items complete
+to the action verbs, `mode:` to `append`/`replace`, and hovering `max_turns`
+describes it.
 [Claudine's Schemas](../../../../claudine/docs/topics/schemas.md) describes
 what the files check and how the CLI resolves them.
 
@@ -357,7 +361,7 @@ The scorecard: one dimension is the LSP capability, the other is the Darkmatter 
 13. Path completions and scaffolds for the reference itself.
 14. The schema file owns its problems (`invalid_suggestion`, `document_malformed`); they never duplicate onto consumers.
 15. Reserved in the semantic-token legend for a future expression phase; not emitted in V1.
-16. The matched payload merges into the effective schema and drives diagnostics on consuming documents; it does not feed their completion or hover (see [How DMLS Assembles the Effective Schema](#how-dmls-assembles-the-effective-schema)). A malformed envelope is diagnosed on the envelope file.
+16. The matched payload merges into the effective schema and drives diagnostics, completion, and hover on consuming documents (see [How DMLS Assembles the Effective Schema](#how-dmls-assembles-the-effective-schema)). A malformed envelope is diagnosed on the envelope file.
 17. A union property lists its alternatives; a list item names its alternative only when exactly one accepts it.
 
 The short version: **the read/analyze half of the LSP surface (diagnostics, completion, hover, navigation, structure) is broadly shipped for schemas, while the styling-and-refactor half (semantic tokens, rename, references-on-keys, lenses, hints) is still ahead of us.**
@@ -414,7 +418,7 @@ debounce_ms = 200
 
 The `[schema.extensions.*]` table is the workhorse. Each entry is a **pure-data baseline extension**: point `path` at a SimplifiedSchema YAML file (relative paths resolve against the workspace root) and list `globs` that select the documents it applies to. The path is loaded as a `$schema` reference is, so it names a document schema, never a trigger envelope. The extension's shape merges over the base baseline with compose precedence, and its keys participate in completion and hover exactly like built-in ones — even for documents that declare no `$schema` of their own. Editing an extension's file (or any type it imports) content-hash-invalidates every bundle that matched it, so the change is visible on the next keystroke.
 
-Extensions and trigger schemas are the two data-only ways a tool built on Darkmatter teaches DMLS its document vocabulary without the server ever learning a tool-specific code path. An extension is selected by path globs and feeds completion and hover; a trigger is selected by the frontmatter it matches and feeds diagnostics. These settings configure only the editor: `md` and other hosts never read `.dmls.toml`.
+Extensions and trigger schemas are the two data-only ways a tool built on Darkmatter teaches DMLS its document vocabulary without the server ever learning a tool-specific code path. An extension is selected by path globs and a trigger by the frontmatter it matches; both feed diagnostics, completion, and hover. These settings configure only the editor: `md` and other hosts never read `.dmls.toml`.
 
 ## Extensibility Programmatically
 

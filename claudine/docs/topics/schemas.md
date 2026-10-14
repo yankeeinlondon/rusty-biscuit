@@ -370,14 +370,23 @@ when a disk bundle is reachable.
 ### In the editor
 
 DMLS has no Claudine dependency and reads the schemas only from disk, through
-the same five locations. Two limits follow:
+the same five locations. When the bundle is reachable, a Claudine prompt with
+no `$schema` gets diagnostics, completion, and hover from the matching
+triggers:
 
-- A document outside the Claudine area gets editor diagnostics only when a
-  complete bundle is reachable on disk, even though the CLI validates it.
-- DMLS **validates** with trigger payloads but builds **completion and hover**
-  from the Darkmatter baseline, `.dmls.toml` extensions, and the authored
-  `$schema` only. A Claudine prompt with no `$schema` gets diagnostics from
-  `claudine.yaml`, but no completion or hover from it.
+- top-level keys (`mod` completes to `mode` and `model`) and their values
+  (`mode:` offers `append` and `replace`, `interactive:` offers `true` and
+  `false`);
+- lifecycle items (`- sa` completes to `say`; an empty `- ` offers the action
+  keys and the bare verbs such as `stop`), long-form parameters (`text` under
+  `say:`), and `loop:` keys (`max`);
+- hover on a property describes its type and purpose; hovering `text` in a
+  `say` item also names the communication alternative the item matches.
+
+A property the document's own `$schema` redeclares is completed and hovered
+from the author's declaration, as it is validated (see below). One limit
+remains: a document outside the Claudine area gets editor help only when a
+complete bundle is reachable on disk, even though the CLI validates it.
 
 See [DMLS Schema Support](../../../darkmatter/docs/topics/schemas/dmls-schema-support.md).
 

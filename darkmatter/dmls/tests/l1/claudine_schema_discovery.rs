@@ -6,6 +6,9 @@
 //! `$schema` is typed by the `claudine.yaml` trigger's payload, read from disk
 //! through the document's schema roots. DMLS has no Claudine dependency, so
 //! nothing else could supply it.
+//!
+//! The same trigger payloads drive completion and hover: every editor request
+//! below runs against a document with no `$schema`.
 
 use crate::common;
 
@@ -300,4 +303,186 @@ fn dmls_has_no_claudine_dependency() {
             assert!(!path.contains("claudine"), "{section}.{name} = {path}");
         }
     }
+}
+
+
+/// One editor request against a document opened in an editor session.
+enum Ask {
+    /// Completion labels just past the needle.
+    Complete,
+    /// Hover Markdown at the start of the needle (empty when there is none).
+    Hover,
+}
+
+/// Opens each `(name, text, needle, ask)` under the Claudine package in one
+/// session, answers it, closes it, and returns the answers in order.
+/// Documents named with a `docs/` prefix are written outside the Claudine area.
+fn editor_answers(cases: &[(&str, &str, &str, Ask)]) -> Vec<Vec<String>> {
+    let workspace = LspWorkspace::new();
+    let fixture = Fixture::new(workspace.path());
+    let mut session = LspFixture::start_with_snapshot(&workspace, fixture.snapshot());
+    session.initialize(initialize_params(&fixture.repo()));
+    let answers = cases
+        .iter()
+        .map(|(name, text, needle, ask)| {
+            let path = match name.strip_prefix("docs/") {
+                Some(outside) => {
+                    let path = fixture.repo().join("docs").join(outside);
+                    write(&path, text);
+                    path
+                }
+                None => fixture.document(name, text),
+            };
+            let uri = uri_of(&path);
+            open(&session, &uri, text);
+            session.wait_for_diagnostics(&uri);
+            let start = text.find(needle).unwrap_or_else(|| panic!("`{needle}` in {text:?}"));
+            let (method, offset) = match ask {
+                Ask::Complete => ("textDocument/completion", start + needle.len()),
+                Ask::Hover => ("textDocument/hover", start),
+            };
+            let before = &text[..offset];
+            let line = before.matches('\n').count();
+            let character = offset - before.rfind('\n').map_or(0, |index| index + 1);
+            let result = session
+                .request(
+                    method,
+                    json!({ "textDocument": { "uri": uri }, "position": { "line": line, "character": character } }),
+                )
+                .result
+                .unwrap_or(Value::Null);
+            session.notify("textDocument/didClose", json!({ "textDocument": { "uri": uri } }));
+            match ask {
+                Ask::Complete => {
+                    let items = result.as_array().or_else(|| result["items"].as_array()).cloned().unwrap_or_default();
+                    items.iter().map(|item| item["label"].as_str().unwrap_or_default().to_string()).collect()
+                }
+                Ask::Hover => vec![result["contents"]["value"].as_str().unwrap_or_default().to_string()],
+            }
+        })
+        .collect();
+    session.shutdown();
+    answers
+}
+
+fn has(labels: &[String], label: &str) -> bool {
+    labels.iter().any(|candidate| candidate == label)
+}
+
+/// Top-level, nested-parameter, lifecycle-item, and loop keys complete from
+/// the trigger payloads; the same top-level text outside the Claudine area,
+/// where no trigger matches, offers none of them.
+#[test]
+fn trigger_payload_keys_complete_without_a_schema() {
+    let found = editor_answers(&[
+        ("keys.md", "---\nprompt: hi\nmod:\n---\n", "mod", Ask::Complete),
+        ("nested.md", "---\nprompt: hi\nstart:\n  - say:\n      te: null\n---\n", "      te", Ask::Complete),
+        ("item.md", "---\nprompt: hi\nstart:\n  - sa\n---\n", "  - sa", Ask::Complete),
+        ("loop.md", "---\nprompt: hi\nloop:\n  ma: null\n---\n", "  ma", Ask::Complete),
+        ("docs/keys.md", "---\nprompt: hi\nmod:\n---\n", "mod", Ask::Complete),
+    ]);
+    let [top, nested, item, loop_keys, outside] = &found[..] else { panic!("{found:?}") };
+
+    let mut top_sorted = top.clone();
+    top_sorted.sort();
+    assert_eq!(top_sorted, ["mode", "model"], "the payload keys starting `mod`");
+    assert_eq!(nested, &["text"], "the long-form parameter of `say`");
+    assert!(has(item, "say"), "{item:?}");
+    assert!(item.iter().all(|label| label.starts_with("sa")), "only the verbs starting `sa`: {item:?}");
+    assert!(has(loop_keys, "max"), "{loop_keys:?}");
+    assert!(!has(loop_keys, "mode") && !has(loop_keys, "model"), "no top-level keys inside `loop`: {loop_keys:?}");
+    assert!(!has(outside, "mode") && !has(outside, "model"), "no Claudine trigger applies outside the area: {outside:?}");
+}
+
+/// An empty lifecycle item offers the action keys and the bare verbs, and an
+/// empty enum or boolean value offers exactly its candidates.
+#[test]
+fn trigger_payload_items_and_values_complete_without_a_schema() {
+    let found = editor_answers(&[
+        ("union.md", "---\nprompt: hi\nstart:\n  - \n---\n", "  - ", Ask::Complete),
+        ("mode.md", "---\nprompt: hi\nmode: \n---\n", "mode: ", Ask::Complete),
+        ("interactive.md", "---\nprompt: hi\ninteractive: \n---\n", "interactive: ", Ask::Complete),
+    ]);
+    let [union, mode, interactive] = &found[..] else { panic!("{found:?}") };
+
+    for label in ["say", "notify", "shell", "set", "when", "stop", "skip", "retry"] {
+        assert!(has(union, label), "`{label}` among the item's alternatives: {union:?}");
+    }
+    assert!(!has(union, "prompt") && !has(union, "mode"), "no top-level keys inside an item: {union:?}");
+    assert_eq!(mode, &["append", "replace"]);
+    assert_eq!(interactive, &["true", "false"]);
+}
+
+/// Hover describes trigger-declared top-level, lifecycle-parameter, loop, and
+/// linking properties.
+#[test]
+fn trigger_payload_properties_hover_without_a_schema() {
+    let found = editor_answers(&[
+        ("mode.md", "---\nprompt: hi\nmode: append\n---\n", "mode", Ask::Hover),
+        ("text.md", "---\nprompt: hi\nstart:\n  - say:\n      text: hi\n---\n", "text", Ask::Hover),
+        ("max.md", "---\nprompt: hi\nloop:\n  max: 3\n---\n", "max", Ask::Hover),
+        ("turns.md", "---\nprompt: hi\nmax_turns: 3\n---\n", "max_turns", Ask::Hover),
+    ]);
+    let hovers: Vec<&str> = found.iter().map(|answer| answer[0].as_str()).collect();
+    let [mode, text, max, turns] = hovers[..] else { panic!("{hovers:?}") };
+
+    for expected in ["**`mode`**", "Type: **enum**", "_append_, _replace_", "appends to or replaces the provider's own"] {
+        assert!(mode.contains(expected), "`{expected}` in {mode:?}");
+    }
+    // The single-verb item matches the communication category, named by its verbs.
+    for expected in ["**`text`**", "Type: **string**", "Required", "matches alternative", "`say`, `speak`, `effect`, `message`, `notify`"] {
+        assert!(text.contains(expected), "`{expected}` in {text:?}");
+    }
+    assert!(!text.contains("`shell`"), "only the communication alternative is named: {text:?}");
+    for expected in ["**`max`**", "Type: **number**", "the most iterations to run"] {
+        assert!(max.contains(expected), "`{expected}` in {max:?}");
+    }
+    for expected in ["**`max_turns`**", "Type: **number**", "the most agent turns the resource may take"] {
+        assert!(turns.contains(expected), "`{expected}` in {turns:?}");
+    }
+}
+
+/// An authored `$schema` that redeclares a trigger property wins that property
+/// in completion and hover; the trigger's other properties are still offered.
+#[test]
+fn an_authored_redeclaration_wins_over_the_trigger_per_property() {
+    let schema = "$schema:\n  mode: 'enum(fast, slow) -> the authored mode'\n";
+    let found = editor_answers(&[
+        ("values.md", &format!("---\n{schema}prompt: hi\nmode: \n---\n"), "\nmode: ", Ask::Complete),
+        ("hover.md", &format!("---\n{schema}prompt: hi\nmode: fast\n---\n"), "mode: fast", Ask::Hover),
+        ("other.md", &format!("---\n{schema}prompt: hi\ninteractive: \n---\n"), "interactive: ", Ask::Complete),
+        ("keys.md", &format!("---\n{schema}prompt: hi\nmod:\n---\n"), "\nmod", Ask::Complete),
+    ]);
+    let [values, hover, other, keys] = &found[..] else { panic!("{found:?}") };
+
+    assert_eq!(values, &["fast", "slow"], "the authored enum, not the trigger's");
+    let hover = &hover[0];
+    assert!(hover.contains("the authored mode") && hover.contains("_fast_, _slow_"), "{hover:?}");
+    assert!(!hover.contains("append"), "the trigger's definition is replaced: {hover:?}");
+    assert_eq!(other, &["true", "false"], "a trigger property the author did not redeclare");
+    assert!(has(keys, "model"), "trigger keys are still offered: {keys:?}");
+}
+
+/// An expression naming an unset property the trigger payload declares is
+/// not undeclared, as compose judges it; an undeclared name still is.
+#[test]
+fn a_trigger_declared_property_is_not_an_undeclared_expression_root() {
+    let workspace = LspWorkspace::new();
+    let fixture = Fixture::new(workspace.path());
+    let text = "---\nprompt: hi\n---\n\n{{ max_turns }} and {{ nowhere_declared }}\n";
+    let path = fixture.document("roots.md", text);
+    let mut session = LspFixture::start_with_snapshot(&workspace, fixture.snapshot());
+    session.initialize(initialize_params(&fixture.repo()));
+    let uri = uri_of(&path);
+    open(&session, &uri, text);
+    let diagnostics = session.wait_for_diagnostics(&uri);
+    session.shutdown();
+
+    let undeclared: Vec<&str> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic["code"] == "dm.expression.undeclared_property")
+        .map(|diagnostic| diagnostic["message"].as_str().unwrap_or_default())
+        .collect();
+    assert_eq!(undeclared.len(), 1, "{undeclared:?}");
+    assert!(undeclared[0].contains("nowhere_declared"), "{undeclared:?}");
 }

@@ -2624,7 +2624,7 @@ A hit needs the whole resolution context to match, and the built-in baseline dec
 
 ## Shell-Completion Integration
 
-The `completion` module is a read-only consumer of an `EffectiveSchema`. It exposes:
+The `completion` module is a read-only consumer of an `EffectiveSchema`. It reads the authored document schema alone (`EffectiveSchema::simplified`): its properties are the parameters a caller may supply, while baseline and trigger properties are host controls and are not offered. The editor's full property shape, with matching trigger payloads, is `EffectiveSchema::property_shape`. It exposes:
 
 - `completion::completable_properties(&effective) -> Vec<String>` — properties whose declared type is completable, in declaration order.
 - `completion::for_property(&effective, "name") -> Option<CompletionSuggestion>` — completion data for a single property.

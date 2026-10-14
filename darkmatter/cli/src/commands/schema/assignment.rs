@@ -151,11 +151,15 @@ fn coerce_value(assignment: &Assignment, schema: Option<&EffectiveSchema>) -> Va
 /// Returns `true` when `schema` declares `path` as a string-shaped scalar
 /// (string, date, datetime, time, url, email, enum, file, or alphanumeric).
 ///
+/// The declaration is the authored `$schema`'s, else the last matching
+/// trigger payload's that declares the property — the per-property
+/// precedence validation applies to the same layers.
+///
 /// Coercion only applies to **top-level** scalar property paths. Nested
 /// `user.email=...` paths land inside `object` typed properties which are
-/// opaque in v1, so the original YAML parse is used. Root unions and raw
-/// JSON Schema inputs lack a SimplifiedSchema projection and likewise fall
-/// back to YAML.
+/// opaque in v1, so the original YAML parse is used. An authored root union
+/// and raw JSON Schema inputs lack a SimplifiedSchema projection and likewise
+/// fall back to YAML.
 fn force_string_for_path(path: &[String], schema: Option<&EffectiveSchema>) -> bool {
     if path.len() != 1 {
         return false;
@@ -163,13 +167,18 @@ fn force_string_for_path(path: &[String], schema: Option<&EffectiveSchema>) -> b
     let Some(effective) = schema else {
         return false;
     };
-    let Some(simplified) = effective.simplified.as_ref() else {
-        return false;
+    let authored = match effective.simplified.as_ref() {
+        Some(SimplifiedSchema::Single(shape)) => lookup_property(shape, &path[0]),
+        Some(SimplifiedSchema::Union(_)) => return false,
+        None => None,
     };
-    let SimplifiedSchema::Single(shape) = simplified else {
-        return false;
-    };
-    let Some(def) = lookup_property(shape, &path[0]) else {
+    let Some(def) = authored.or_else(|| {
+        effective
+            .trigger_shapes()
+            .iter()
+            .rev()
+            .find_map(|shape| lookup_property(shape, &path[0]))
+    }) else {
         return false;
     };
     match def {
@@ -437,6 +446,56 @@ mod tests {
             .effective_for(&md)
             .expect("effective_for")
             .expect("schema present")
+    }
+
+    /// A trigger in the document's `schemas/` root declares `version` as a
+    /// string and `count` as a number; an authored `$schema` may redeclare.
+    fn effective_with_trigger(yaml_body: &str) -> darkmatter::markdown::schemas::EffectiveSchema {
+        let repo = tempfile::TempDir::new().unwrap();
+        let root = repo.path();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join("schemas")).unwrap();
+        std::fs::write(
+            root.join("schemas/app.trigger.yaml"),
+            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: app.yaml\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("schemas/app.yaml"), "$schema:\n  version: string\n  count: number\n").unwrap();
+        let md: Markdown = format!("---\nprompt: hi\n{yaml_body}---\n").as_str().into();
+        let context = biscuit_file::FileResolutionContext::from_snapshot(root, None, std::collections::HashMap::new())
+            .with_repository_root(root);
+        DarkmatterSchemas::new(context)
+            .with_trigger_discovery()
+            .expect("trigger discovery")
+            .effective_for(&md)
+            .expect("effective_for")
+            .expect("schema present")
+    }
+
+    #[test]
+    fn coerces_to_string_when_a_matching_trigger_says_string() {
+        let eff = effective_with_trigger("");
+        let mut map: FrontmatterMap = FrontmatterMap::new();
+        let assignments = [
+            make_assignment(&["version"], json!(1.2), "1.20"),
+            make_assignment(&["count"], json!(3), "3"),
+        ];
+        apply_all(&mut map, &assignments, Some(&eff));
+        assert_eq!(map["version"], json!("1.20"));
+        assert_eq!(map["count"], json!(3));
+    }
+
+    #[test]
+    fn an_authored_declaration_outranks_the_trigger_for_coercion() {
+        let eff = effective_with_trigger("$schema:\n  version: number\n  count: string\n");
+        let mut map: FrontmatterMap = FrontmatterMap::new();
+        let assignments = [
+            make_assignment(&["version"], json!(1.2), "1.20"),
+            make_assignment(&["count"], json!(3), "3"),
+        ];
+        apply_all(&mut map, &assignments, Some(&eff));
+        assert_eq!(map["version"], json!(1.2));
+        assert_eq!(map["count"], json!("3"));
     }
 
     #[test]
