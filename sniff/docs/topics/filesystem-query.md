@@ -12,14 +12,10 @@ if report.outcome != Outcome::Usable {
 }
 ```
 
-**Status.** The library entry point, report contract, platform-neutral
-matching, the [Linux/WSL2 backend](#linux-and-wsl2), the
-[macOS backend](#macos), and the [Windows loaded-module backend](#windows)
-are built, as is the [`sniff filesystem query`](../cli/filesystem_query.md)
-command. Windows does not yet report open files: its `open_handles`
-mechanism reports `unsupported`. **Planned:** Windows will report open
-handles by asking which processes hold each path (see
-[Windows](#windows)).
+The library and CLI support Linux/WSL2 descriptors, working directories, and
+inotify registrations; macOS vnode descriptors and working directories; and
+Windows file and directory handle owners and loaded modules. Each report
+states which mechanisms ran and what discovery could not observe.
 
 A directory query includes descendants by default;
 `PathUsageOptions::default().target_only()` inspects the target alone. Normal
@@ -37,7 +33,9 @@ flowchart LR
     A[validate options] --> B[resolve root<br/>capture identity]
     B --> C[walk tree once<br/>collect identities]
     C --> D[enumerate processes]
-    D --> E[inspect each process<br/>match by identity]
+    D --> P[Windows: query holders<br/>of each walked path]
+    P --> E[inspect process mechanisms<br/>match by identity]
+    D --> E
     E --> F[recheck root]
     F --> G[enrich identity]
     G --> H[coverage + outcome]
@@ -53,6 +51,16 @@ returns what it collected, with `budget_exhausted: true` and incomplete
 coverage. A native call already running can overrun the budget, so the
 deadline is not a guarantee of when the function returns.
 
+The budget is also checked between the mechanisms of one process. On Linux
+and macOS, a process's working directory is read only after its descriptors,
+and only while the budget lasts. If the budget runs out during the descriptor
+scan, the descriptors already read stay in the report, the working directory
+is not read, and that process counts toward a `budget_exhausted` limitation
+on `working_directories`. The coverage record is `not_attempted` when no
+process's working directory was read, and `partial` otherwise. Each process's
+start time is still rechecked after an expired inspection, because that check
+is what attributes the evidence already read to the right process.
+
 ## Errors versus reports
 
 `query_path_usage` returns `Err(PathUsageError)` only when it cannot build a
@@ -62,7 +70,7 @@ report about a verified target. Each error has a stable `kind()`:
 | --- | --- |
 | `invalid_option` | Zero deadline, or one too large to form a deadline |
 | `missing_target` | The path, or a root symlink's target, does not exist |
-| `unsupported_target_kind` | A socket, FIFO, or device, rejected before it is opened |
+| `unsupported_target_kind` | A socket, FIFO, or device; Windows pipe namespaces are rejected before metadata lookup, which could connect to a waiting server |
 | `root_identity` | The root's identity cannot be read |
 | `root_validation_timeout` | The budget expired before the root identity was captured |
 
@@ -88,6 +96,11 @@ serial plus 128-bit file ID on Windows.
   Windows the lookup, not text comparison, settles drive/UNC/`\\?\`
   spellings, 8.3 short names, and case-sensitive directories. An object known
   to be deleted is never matched by its former path.
+- That lookup runs as the backend reads each object, and the match travels
+  with the evidence; building the report never looks a path up. So a budget
+  that runs out later keeps every match already made, and an object the
+  budget stopped before its lookup is counted as a `budget_exhausted` gap
+  rather than reported unverified.
 
 ## Process identity
 
@@ -125,7 +138,7 @@ Prerequisites never make an outcome `usable` on their own.
 | --- | --- | --- |
 | Linux/WSL2 | Open descriptors, cwd, inotify registrations | Permissions; fanotify and polling are `unsupported` |
 | macOS | Vnode descriptors and cwd, including observable event-only opens | Permissions (another user's processes are denied without root); FSEvents and polling are `unsupported` |
-| Windows | Loaded modules (executables and DLLs); **planned:** open handles on files and directories | Permissions and protected processes; open handles (until built), cwd, `ReadDirectoryChangesW` subscriptions, and polling are `unsupported` |
+| Windows | File and directory handle owners; loaded modules (executables and DLLs) | Delete-pending paths, permissions, protected processes; cwd, `ReadDirectoryChangesW` subscriptions, and polling are `unsupported` |
 
 For example, a Node process with its cwd in a checkout will appear as working
 directory evidence. A Node process watching that checkout through FSEvents may
@@ -157,12 +170,14 @@ Linux processes, never native Windows ones.
   registration, kept separately even when several share a descriptor:
 
   ```text
-  inotify wd:3 ino:b84b5 sdev:800011 mask:fff ignored_mask:0
+  inotify wd:1a ino:b84b5 sdev:800011 mask:fff ignored_mask:0
   ```
 
-  becomes watch evidence with `descriptor`, `watch.watch_id: 3`,
+  becomes watch evidence with `descriptor`, `watch.watch_id: 26`,
   `watch.mask`, and `watch.recursive: false` (inotify has no recursive
-  watches). `sdev` is the kernel's device number (`major << 20 | minor`, here
+  watches). Every field of the line is hexadecimal, `wd` included: the
+  kernel writes watch descriptor 16 as `wd:10`, and `watch_id` reports the
+  number, not the text. `sdev` is the kernel's device number (`major << 20 | minor`, here
   8:17) and is converted to the `st_dev` encoding before it is compared, so
   `sdev:800011` matches `st_dev` `0x811`. A watch has no path of its own:
   `observed_path` is always `null`.
@@ -253,12 +268,16 @@ Problems stay visible instead of reading as "no matches":
 ## Windows
 
 The backend lists processes with `EnumProcesses` and reads each one through
-a process handle; it runs no subprocess and starts no thread. It reports one
-usage mechanism, `loaded_modules`: every executable and DLL a process has
-mapped. A module is observed by path only, so its path is looked up and
+a process handle. It runs no subprocess; the file-side scan uses scoped
+workers. It reports file and directory handle owners, and `loaded_modules`
+for every executable and DLL a process has mapped. A module is observed by path only, so its path is looked up and
 matched by identity (`match_basis: path_lookup`). That settles `\\?\`,
 8.3 short-name, and case spellings, and a case-sensitive directory keeps
-`Module.dll` and `module.dll` apart.
+`Module.dll` and `module.dll` apart. Each module is looked up as soon as its
+path is read: if the budget runs out after `tool.exe` matched but before
+`helper.dll` was read, the report keeps the `tool.exe` evidence and its
+process, and `loaded_modules` is `partial` with a `budget_exhausted`
+limitation.
 
 For example, a build tool started from `C:\work\app\bin\tool.exe` that has
 also loaded `C:\work\app\bin\helper.dll` yields, for a query of
@@ -278,7 +297,7 @@ Matched paths sit under the canonical root, which on Windows is the verbatim
   process's creation `FILETIME`, which also gives `start_time`; the image path
   gives `name` and `executable`. While that handle is open the PID cannot be
   reused.
-- **Handle lifetime.** A process with no in-scope module has its handle
+- **Handle lifetime.** A process with no in-scope module or file-side handle evidence has its handle
   closed as soon as it has been inspected. A process holding something in
   scope keeps its handle until the query returns, so `user` (the account SID
   from its token) and the creation-time recheck are read through the same
@@ -288,7 +307,8 @@ Matched paths sit under the canonical root, which on Windows is the verbatim
 flowchart LR
     A[EnumProcesses] --> B[OpenProcess per PID]
     B -->|denied| D[candidate without a token]
-    B --> C[inspect modules]
+    B --> P[query file-side holders]
+    P --> C[inspect modules]
     C -->|nothing in scope| E[close handle]
     C -->|in scope| F[enrich through the handle]
     F --> G[close when the query returns]
@@ -298,22 +318,34 @@ flowchart LR
   larger than the buffer is read again at the reported size, so no module is
   dropped; a list that keeps outgrowing its buffer, or reports more than
   65,536 modules, fails that process instead.
-- **Unsupported mechanisms.** Reading the identity of another process's
-  handle can block until that process's pending I/O on the file completes,
-  and nothing can cancel the wait, so `open_handles` is `unsupported`. A
-  working directory and a `ReadDirectoryChangesW` subscription are directory
-  handles that cannot be told apart from any other, so both are
-  `unsupported` too.
-- **Planned: open handles from the path side.** Sniff will not resolve
-  another process's handle. It will open each entry in the queried tree itself,
-  with attribute-only access, and ask Windows which processes hold it
-  (`NtQueryInformationFile` with `FileProcessIdsUsingFileInformation`). That
-  call returns even while the holder is blocked on the file. It needs no
-  elevation and no access to the holding process. Each holder becomes
-  `open_handle` evidence on that path. A working directory or a directory
-  watcher shows up this way as a holder of its directory, but the cwd and
-  subscription mechanisms stay `unsupported`, because the handle kind
-  cannot be told apart.
+- **Module paths** are the loader's own record of each module, the string
+  `GetModuleFileNameExW` returns. That call walks the process's loader list
+  from its head for every module, about 130 µs each, which was 90% of a
+  query on a host with 130 processes and 5,300 modules (750 ms). Sniff reads
+  the list once per process instead (`PEB.Ldr`, then each entry's
+  `FullDllName`, the documented `winternl.h` fields): about 70 ms for the
+  same host. A module the walk does not cover is read with
+  `GetModuleFileNameExW` as before: a 32-bit process's own modules (only its
+  64-bit loader list is walked), or every module of a process whose list
+  could not be read whole (one still starting, or one loading a module
+  during the walk). A module unloaded between the walk and its turn is still
+  matched by the path the walk read, so evidence can only grow.
+- **Unsupported mechanisms.** A working directory and a
+  `ReadDirectoryChangesW` subscription are directory handles that cannot
+  be distinguished from other directory handles, so those two mechanisms
+  stay `unsupported`.
+- **Open handles from the path side.** Sniff opens regular files and
+  directories from the existing tree walk with attribute-only access and
+  full sharing, and asks Windows which processes hold each path
+  (`NtQueryInformationFile`, `FileProcessIdsUsingFileInformation`). It never
+  duplicates another process's handles. The call returns even while a holder
+  waits on a file lock or synchronous directory-change notification. Each
+  holder becomes `open_handle` evidence matched by the identity read from
+  the same file handle. Its `observed_path` is the queried path; Windows does
+  not report which spelling the holder used. Replacement after the walk is
+  reported as a gap.
+  The kernel excludes the calling process from this mechanism. Loaded modules
+  can still identify the querying process's own mapped files.
 
   For example, a query of `C:\work\app` while a dev server watches
   `C:\work\app\src` reports:
@@ -325,9 +357,26 @@ flowchart LR
   Each call costs a few milliseconds, and more on a host with many open
   handles. Sniff therefore visits directories first, then files, and
   visits `target`, `node_modules`, and git-ignored entries last. It uses
-  at most 8 threads, and stops scheduling when the query's budget runs
+  at most 8 scoped threads, joins them before returning, and stops scheduling when the query's budget runs
   out. Entries it did not reach make the mechanism `partial`. A file
-  waiting to be deleted cannot be opened, so its holders cannot be seen.
+  waiting to be deleted cannot be opened, so its holders cannot be seen;
+  the failure is reported as `delete_pending`, with `STATUS_DELETE_PENDING`
+  in the limitation detail.
+  `open_handles.attempted` and `succeeded` count paths, including paths with
+  no holders, rather than processes. A completed empty path query is usable.
+
+  Process handles captured before the scan preserve each known holder's
+  lifetime through enrichment. A holder absent from enumeration is opened
+  and confirmed by a second query of its path while that process handle is
+  retained. Evidence without a confirmed lifetime stays separate and has
+  `identity_uncertain: true`; it never borrows a later process's identity.
+  Only the confirmed path is associated with a newly acquired lifetime;
+  other earlier evidence is kept in a separate, uncertain record.
+
+  Scheduling uses `.gitignore` files inside the queried tree, without
+  excluding any entries or performing repository inventory. Ignore files
+  outside that tree and global Git exclusions do not affect scheduling.
+  Sorting and a native operation already running can overrun the budget.
 
 A loaded module or an open handle shows that a process uses a file. It does
 not establish that deleting or renaming the file will fail. A handle opened
@@ -372,7 +421,7 @@ Under a performance collector the query records these
 `performance::counters`: `filesystem.query.tree_walks` (one per recursive
 directory query), `tree_identity_reads`, `process_enumerations`,
 `process_inspections`, `descriptor_inspections`, `watch_registration_reads`,
-`module_inspections`, `identity_enrichments`, and `path_lookups`, all under
+`module_inspections`, `path_holder_inspections`, `identity_enrichments`, and `path_lookups`, all under
 `filesystem.query.`.
 On Linux, `descriptor_inspections` counts each `/proc/<pid>/fd/<n>` entry and
 `watch_registration_reads` each `fdinfo` read of an anonymous-inode
@@ -380,6 +429,9 @@ descriptor, failures included. On macOS, `descriptor_inspections` counts
 each listed descriptor, vnode or not; `watch_registration_reads` stays zero.
 On Windows, `module_inspections` counts each module path read, failures
 included, and `path_lookups` counts only modules whose path could lie inside
-the target; the descriptor and watch counters stay zero.
+the target; `path_holder_inspections` counts scheduled file-side path inspections
+(including failures), and worker counts are attributed to the same request.
+Buffer retries and lifetime-confirmation queries do not add scheduled paths.
+The descriptor and watch counters stay zero.
 Root resolution also records `filesystem.io.metadata_probes` and
 `filesystem.io.canonicalizations`.

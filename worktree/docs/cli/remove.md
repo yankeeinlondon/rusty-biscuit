@@ -1,51 +1,5 @@
 # `wt remove`
 
-## Planned: process usage and recoverable removal
-
-**Planned:** the behavior in this section is not implemented yet. The remaining
-sections describe current behavior.
-
-Before changing a checkout, `wt remove` will query Sniff for observable processes
-using its directory tree. A matching watcher registration, open handle, working
-directory, or loaded module will pause removal and show the PID, available
-identity, matched paths, and evidence. Stop the relevant work and retry the same
-command. Existing force flags will not bypass this refusal. Observed usage does
-not necessarily mean a handle prevents deletion; the refusal is conservative.
-
-When no usage is observed, `wt remove` will move the checkout to a unique hidden
-sibling on the same filesystem, then delete there while observing both paths.
-Discovery is incomplete on some platforms, and a rename does not revoke existing
-handles or prevent a process from recreating the original path.
-
-If unexpected writes appear at either location, removal will stop at the next
-safe boundary, preserve remaining files, and keep pending branch operations
-from running. The report will identify the original and moved locations,
-observed activity, files already deleted, remaining content, Git registration,
-branch outcomes, and a saved report containing full detail. A recreated original
-will never be automatically deleted or overwritten.
-
-For example, a writer may recreate `checkout/.gitnexus/index.db` after the
-checkout has moved to `.wt-remove-checkout-<token>`. The report will direct you
-to stop tasks using either path, inspect both directories, and save new work.
-Retry by the original worktree name will use a verified recovery record even
-when Git has already unregistered it, reassessing usage and consent for retained
-content. New files will not inherit earlier discard approval.
-
-Deletion and observation cannot be atomic with all possible writers. A report
-will identify partial deletion and coverage limits rather than promise that
-every concurrent write was preserved.
-
-```mermaid
-flowchart LR
-    A[Query usage] -->|Usage found| B[Pause; show processes]
-    A -->|No usage observed| C[Move checkout]
-    C --> D[Delete while observing both paths]
-    D -->|Unexpected activity or failure| E[Preserve remnants; report recovery]
-    D -->|Removal verified| F[Finish branch operations]
-```
-
-## Current behavior
-
 Removes a worktree, by branch or directory name, and its local branch when that branch's commits are safe elsewhere. Every decision comes from one question: **would removing this lose work?** If it would, `wt remove` asks first, or refuses when it can't ask.
 
 ```bash
@@ -77,7 +31,7 @@ flowchart TD
   C -- anything else --> X
 ```
 
-Nothing is ever deleted before the report has been printed and every needed consent has been given.
+Nothing is ever deleted before the report has been printed and every needed consent has been given. A checkout that exists is then moved aside and deleted under watch, as described in [Deleting the checkout](#deleting-the-checkout).
 
 ### The report
 
@@ -125,16 +79,89 @@ With `--force-remote`, the branch on origin is deleted through origin's push URL
 
 ### Background programs writing into the worktree
 
-Stop file watchers or indexers for the target before removing it. A program
-that recreates files while Git deletes them can make removal fail with
-`Directory not empty`. Git may already have unregistered the worktree even
-though the directory remains; `wt` then stops and keeps the local branch.
+After the report and the questions, and immediately before anything moves,
+`wt remove` checks whether another process is using the checkout (see
+[Deleting the checkout](#deleting-the-checkout)).
+A process standing in the worktree, holding a file open in it, watching it, or
+running a program from it pauses the removal with exit 3. No flag overrides
+this. Your own shell and the programs that started `wt` are never listed.
 
-For example, a GitNexus watcher can recreate `.gitnexus/` during deletion.
-Stop that worktree's watcher using the stop command printed when it started,
-then inspect the remaining directory before deleting leftovers. Check
-`git worktree list` to see whether Git still registers the target. If it no
-longer does, another `wt remove` cannot resolve it by its worktree name.
+```text
+Removal paused: another process is using feat-x.
+
+PID 39871  rust-analyzer /opt/bin/rust-analyzer
+  Watching: /code/wts/repo/feat-x/src
+
+Stop the relevant process or task, then rerun:
+  wt remove feat-x
+
+The checkout and branches were kept.
+```
+
+**Windows Search gets one recheck.** On Windows, Windows Search opens files
+for a few milliseconds soon after they are written, to index them, so a
+check that lands at that moment would pause a removal no program of yours is
+involved in. When every process the check finds is one of Windows Search's
+own, `SearchProtocolHost.exe`, `SearchFilterHost.exe`, or
+`SearchIndexer.exe` running from the Windows system directory (normally
+`C:\Windows\System32`), `wt remove` waits 500 ms and checks exactly once
+more. That second check decides:
+
+- nothing found: the removal goes ahead, with nothing extra on screen;
+- anything found, Windows Search included: the removal pauses as above, and
+  the message ends with
+  `The first check found only Windows Search, so wt waited 500 ms and checked once more; the processes above are from that second check.`
+
+The recheck never happens when the first check also finds any other process,
+or a program with one of those names running from anywhere else; the removal
+pauses at once. A removal that went ahead after a recheck records it in its
+saved report (see [Recovery records and retry](#recovery-records-and-retry)):
+both checks under `discovery`, and the `discovery` step of the `timeline`
+reads `Windows Search held 1 file(s); rechecked after 500 ms; released`.
+
+A program the check cannot see can still write while the checkout is
+deleted. Deletion then stops, keeps what is left, runs no branch step, and
+exits 1 with a report on stderr:
+
+```text
+Removal stopped: new files appeared at the original path.
+
+Original: /code/wts/repo/feat-x (something new is here; it was not touched)
+Moved to: /code/wts/repo/.wt-remove-feat-x-a91c0d2e4f6b8a10
+Deleted before stopping: 124 files (listed in the saved report)
+Remaining: 6 entries in the moved directory
+Observed: /code/wts/repo/feat-x/.gitnexus/index.db was created (reported at 14:03:07 UTC)
+Git registration: now points to the moved directory
+Branch feat/x: kept (not attempted)
+Before the move: Discovery is partial; FSEvents subscriptions cannot be listed on this system; open handles were only partly read.
+
+Stop any tasks using either path. Inspect both locations and save new work.
+Retry: wt remove feat-x
+  Run it from the base checkout at /code/repo.
+Full report: /code/repo/.git/wt-removal/<operation-id>/report.json
+```
+
+A removal goes ahead when the usage check found nothing, even if it could
+not see everything, so a stop report says what each check missed:
+
+- `Before the move:` the check that let the removal start. A retry that
+  checks again before deleting from the moved directory reports
+  `Before deleting from the moved directory:` instead; a retry that made no
+  check of its own repeats the earlier one, marked `(earlier attempt)`.
+- `After the stop, at <path>:` the check `wt` makes at each location that
+  is still a real directory once deletion stops, including
+  `Discovery could not run (<error>).` when that check failed.
+
+A check that saw everything adds no line, and a removal that finishes never
+mentions the usage check.
+
+`Retry` runs the same command again. It finds the stopped removal by the name
+you typed, shows what is left, and asks again about anything that needs
+consent. While something new is at the original path, the retry refuses with
+exit 3 and changes nothing, so move or save that content first. When the
+checkout was removed but a branch step failed, the report says so, tells
+"kept" from "already deleted" for each branch, and the retry only asks about
+the branches again.
 
 ### Standing in the worktree you remove
 
@@ -147,18 +174,314 @@ With the wrapper, removal happens in two runs:
 
 The second run deletes nothing when anything approved has changed in between: protected files, the include rules, the copy record, the branch tip, the worktree's `.git` link (where it leads, or whether Git can still read it), the worktree's path (a link now standing [in its place](#a-link-in-place-of-the-worktree)), or the branch on origin. It also refuses when the handoff is more than a minute old. A changed state is exit 3; a file it can't read, a shell still inside the worktree, or an expired or unknown handoff is exit 4. The second run never repairs anything. It asks the network only for what the approvals still need: a branch approved because a PR or an `origin/*` copy held its commits is checked live again.
 
-On Windows a worktree folder another program holds (a terminal tab opened in it, an open file) is detected before anything is deleted and refused with exit 4.
+The first run does not check whether other processes use the worktree, because the shell it is about to move would always be found. The second run, after the shell has moved, makes that check: a program still using the worktree pauses the removal there with exit 3 (see [Background programs writing into the worktree](#background-programs-writing-into-the-worktree)), and no `cd:` or `remove-handoff:` line is printed after a failure. A retry of a stopped removal is never handed off: run it from outside the moved checkout, for example from the base checkout.
 
-On every OS, `wt remove` also refuses with exit 4, before the report and again right before deleting, while another program's current directory is inside the worktree (your own shell and its ancestors are exempt). A program writing into the folder while git deletes it would leave it half deleted, so no flag overrides this. The refusal lists each program once, by its full command line, so a shell script shows as the script it runs rather than as `bash`. Processes a listed program started are counted, not listed. Each entry gives the program's age and says `orphaned` when its parent has exited, which usually means a leaked script. The last line is a command that ends them all:
+## Deleting the checkout
 
-```text
-Error: Nothing was removed: the folder /…/fix-x is in use by 2 other programs (and 2 processes they started):
-  - pid 11231, started 3 days ago, orphaned: /bin/sh /tmp/.tmpNwXLnV/bin/opencode run -- Body
-  - pid 39871, started 12 min ago: rust-analyzer
-Close them, or move them out of it, and run wt remove again. To end them: kill 11231 39871
+A checkout that exists is never deleted in place. After the report, the
+questions, and the [usage check](#background-programs-writing-into-the-worktree),
+`wt remove` moves it to a unique hidden sibling on the same filesystem
+(`.wt-remove-<name>-<token>`, beside the original), deletes it there while
+watching both paths, and only then unregisters it and runs the branch steps:
+
+```mermaid
+flowchart LR
+    W[Start watching for changes] --> A[Check usage]
+    A -->|Usage found| B[Pause, exit 3; show processes]
+    A -->|Only Windows Search, on Windows| R[Wait 500 ms; check once more]
+    R -->|Usage found| B
+    R -->|No usage observed| C
+    A -->|No usage observed| C[Move checkout]
+    C --> D[Delete while watching both paths]
+    D -->|Unexpected activity or failure| E[Keep what is left, exit 1; report recovery]
+    D -->|Removal verified| F[Unregister; run branch steps]
 ```
 
-On Windows the last command is `Stop-Process -Id …`. On macOS and Linux only current directories are visible: a program holding an open file in the folder without standing in it is not detected.
+The usage check is conservative: observed usage does not necessarily mean a
+handle would prevent deletion, but it always refuses. It is also incomplete:
+some platforms cannot see every kind of usage, and a move does not revoke a
+handle that is already open or stop a process from recreating the original
+path. That is why the deletion itself is watched. If unexpected writes appear
+at either location, removal stops at the next safe point, keeps what is left,
+and runs no branch step. A recreated original is never deleted or
+overwritten.
+
+For example, a writer may recreate `checkout/.gitnexus/index.db` after the
+checkout has moved to `.wt-remove-checkout-<token>`. The report then tells
+you to stop tasks using either path, inspect both directories, and save new
+work before you [retry](#recovery-records-and-retry).
+
+While the checkout is moved, Git keeps it registered as the same worktree at
+the hidden path: `git worktree list` shows it at the new path with its branch,
+`git status` works inside it, and `git worktree prune` leaves it alone. Only
+Git's record of the location changes. If that record cannot be updated, the
+checkout is moved back when nothing has appeared at the original path and no
+activity was seen; otherwise it stays at the hidden path and the report says
+so.
+
+### Watching for changes
+
+Watching covers three places: the folder holding the checkout (only the
+checkout's own name and the hidden name, so busy sibling worktrees never stop a
+removal), every directory in the checkout, and the files in Git's record of the
+worktree that hold its identity and staged changes (`HEAD`, `gitdir`,
+`locked`, `index`, `index.lock`, and split-index `sharedindex.*` files). If
+the system drops change notifications, or a watch ends unexpectedly, coverage
+is lost and removal stops; it never continues on partial watching. On Linux,
+each directory in the checkout uses one inotify watch, so a checkout with more
+directories than `fs.inotify.max_user_watches` allows, or a user already at
+`fs.inotify.max_user_instances`, cannot be watched and exits 4.
+
+On macOS, watching uses FSEvents, which watches paths rather than folders: it
+watches the checkout's path and the hidden path (each with everything below
+it) instead of the folder holding them, with the same effect. Each check for
+new activity first writes a marker file into a private folder in your
+per-user temporary directory (`wt-observe-<random>`, removed when the
+removal ends) and waits until the system reports it, because only then has
+every earlier change been reported. A check that is not confirmed within 5
+seconds counts as lost coverage, and so does the folder holding the checkout,
+or Git's record of the worktree, being moved or deleted while watching runs.
+macOS can report a folder's removal or rename in place of changes inside it
+that happened just before, so `wt` checks for activity after deleting a
+folder's contents and before removing the folder itself.
+
+On Windows, watching uses one watch on the folder holding the checkout,
+covering everything below it, and one on Git's record of the worktree.
+Changes in sibling worktrees still reach `wt` there, which ignores them. Each
+check for new activity creates a hidden marker file
+(`.wt-observe-<random>-<number>`) in each of those two folders and waits until
+Windows reports it, because Windows reports each folder's changes in order. The
+marker deletes itself when `wt` closes it, even if `wt` crashes. As on macOS,
+a check that is not confirmed within 5 seconds counts as lost coverage, and
+so does either folder being moved or deleted. So does Windows reporting that
+it dropped changes because too many arrived at once. `wt` stops watching
+Git's record before the step that removes it, so that step is never blocked.
+Windows reports a change to a file's attributes the same way as a change to its
+content. On a ReFS volume (such as a Dev Drive), a folder deleted by some
+tools is not reported at all. `wt` therefore checks every entry again
+before deleting it.
+
+### Checked deletion
+
+Before moving anything, `wt` lists everything it is about to delete,
+including ignored build output: each file, folder, and link with its identity
+on disk, size, modification time, and permissions, and a link's target. Only
+the files you were asked about (changed, untracked, and protected included
+files) are also hashed; ignored output is never read. If anything changes
+while the list is taken, or an entry is a FIFO, socket, device, mount point,
+or unsupported reparse point, nothing is moved and `wt` exits 3. The list is
+saved in the removal's recovery record before the move, so a later retry can
+compare what is left with what was approved.
+
+Deletion then works from the deepest folders up, `.git` last:
+
+```mermaid
+flowchart TD
+    L[Next level, deepest first] --> R[Recheck each entry against the list]
+    R -->|Matches| U[Delete it; record the result]
+    R -->|Changed, new, or gone| S[Stop; keep it and everything not yet deleted]
+    U --> C[After the level: check every reported change]
+    C -->|Only its own deletions| L
+    C -->|Anything else| S
+    L -->|No levels left| F[Remove the hidden folder; confirm both paths are empty]
+```
+
+- Every entry is compared with the list immediately before it is deleted, by
+  identity and metadata, and a hashed file by its content. A file that grew,
+  was rewritten, or was replaced stops removal and is kept. So does a file
+  that someone else already deleted: it is recorded as already absent, never
+  as deleted by `wt`.
+- Folders are opened one at a time from the checkout down, and each is checked
+  to be the folder in the list. A folder replaced by a link is never entered,
+  so nothing outside the checkout is deleted. A link in the checkout is
+  deleted itself; its target is untouched.
+- Reported changes are checked after each level (and after every 2,048
+  entries): a change at a path `wt` deleted must still be a deletion, a
+  change to an entry not yet reached must leave it matching the list, and
+  anything else at either location, or in Git's record of the worktree, stops
+  removal. A folder whose contents are gone but which cannot be removed (a new
+  file appeared in it) also stops removal.
+- Each batch of up to 256 entries from one folder is written to the
+  recovery record before it is deleted, and its results after. A crash between
+  the two leaves those entries marked uncertain, not deleted.
+- When the hidden folder is gone, `wt` confirms that nothing exists at either
+  path, stops watching Git's record of the worktree, checks that the record
+  still has the index and `HEAD` that were approved (a change staged after
+  you answered is new work), and only then unregisters the worktree with
+  `git worktree remove`.
+
+For example, if an editor still running in `checkout/target` writes
+`build.log` after the move, the file appears in
+`.wt-remove-checkout-<token>/target/`; the next check finds it, and removal
+stops with `target/build.log` and every entry not yet deleted still in place.
+
+Deletion and observation cannot be atomic with all possible writers: a write
+that lands between an entry's last check and its deletion is deleted with it,
+and a writer can start after the final check. Every report of a removal that
+deleted anything states this limit and lists the entries it deleted, rather
+than promise that every concurrent write was preserved.
+
+### Interrupting a removal
+
+Pressing Ctrl-C (or Ctrl-Break on Windows, or sending `SIGTERM` or `SIGHUP`)
+while `wt remove` is checking usage, moving, or deleting does not kill it.
+`wt` prints `Interrupted: stopping at the next safe point; files not yet
+deleted are kept.` and then:
+
+- **Before the move**, it moves nothing, discards the removal's record, and
+  exits 1 with `Nothing was removed.` Run the command again when you are
+  ready.
+- **After the move**, it finishes the entry it is deleting, deletes nothing
+  more, and exits 1 with the same report as any other stop: both locations,
+  what was deleted and what is left, Git's registration, each branch (kept),
+  `Retry: wt remove <name>`, and `Full report:` with the saved report's path.
+  The removal stays pending, and running `wt remove <name>` again continues
+  it, as in [Recovery records and retry](#recovery-records-and-retry).
+
+```text
+$ wt remove feat-x
+^C
+Interrupted: stopping at the next safe point; files not yet deleted are kept.
+Removal stopped: a step failed (the removal was interrupted).
+
+Original: /work/feat-x
+Moved to: /work/.wt-remove-feat-x-<token>
+Deleted before stopping: nothing
+Remaining: 2 entries in the moved directory
+Git registration: now points to the moved directory
+Branch feat/x: kept (not attempted)
+Error: the removal was interrupted
+
+Stop any tasks using either path. Inspect both locations and save new work.
+Retry: wt remove feat-x
+  Run it from the base checkout at /work/repo.
+Full report: /work/repo/.git/wt-removal/<operation-id>/report.json
+```
+
+The questions before a removal keep their usual Ctrl-C behavior (the
+removal is cancelled and nothing changes), and an interrupt after the
+checkout is removed, while branch steps run, does not stop those steps.
+Ctrl-C in a terminal also reaches a `git` process `wt` is running at that
+moment; if that call fails, the report names it. A removal killed outright
+(`SIGKILL`, power loss) leaves the same pending record, and a retry by name
+continues it.
+
+## What `wt remove` refuses to move
+
+These checkouts are refused before anything changes:
+
+- A checkout containing submodules, or holding a FIFO, a device, a nested
+  mount, or an unsupported reparse point, exits 3.
+- A locked worktree (`git worktree lock`) exits 3. `wt` never unlocks it; run
+  `git worktree unlock <path>` yourself if the lock is stale.
+- A checkout whose `.git` file uses a relative link that would break after
+  the move (anything other than leading `..` steps) exits 3.
+- A checkout that can no longer be identified when usage is checked (it
+  vanished, or its path is no longer a directory) exits 3; run the command
+  again.
+- A checkout on a filesystem that cannot move a directory without risking
+  replacement exits 4. One example is a WSL checkout under `/mnt/<drive>`;
+  remove it from Windows instead. The same applies when change watching
+  cannot be started, or the recovery record cannot be written.
+- On Windows, a move blocked by a file open anywhere in the checkout exits 4.
+
+Exits 3 and 4 always mean "nothing removed". A stop after the checkout
+has moved exits 1, even if no file was deleted yet.
+
+## Recovery records and retry
+
+Each removal keeps its state in `<git-common-dir>/wt-removal/<operation-id>/`:
+`record.json` (what the removal set out to do), `journal.jsonl` (the list of
+approved entries, then each deletion batch), and `report.json` (the full
+report). While the record is pending, starting another removal of the same
+worktree exits 3. A completed record keeps `record.json` and `report.json`
+for reference and never authorizes another removal. Its journals are deleted
+once `report.json` lists every journal entry; if the entries could not be
+read, the journals are kept and `wt remove` warns.
+
+`report.json` describes the whole removal, not only the last run of it:
+
+- `journal` counts and `journal_entries` cover every attempt. Each entry
+  names its `attempt`, its path relative to the moved checkout, its kind, and
+  its state: `deleted`, `externally_absent` (already gone), `uncertain` (gone,
+  but the run stopped before recording who removed it), `kept`, or `planned`.
+  A retry never counts an entry twice and never turns an uncertain entry into
+  a deleted one.
+- `deleted` names at most 200 deleted paths, with the rest counted in
+  `truncation.deleted_omitted`; `journal_entries` is never cut short.
+- `discovery` lists the run's process checks by `purpose`: `preflight` (the
+  check that let the move or the deletion start), `diagnostic` (a check of
+  each location after a stop), and `windows_search_hold` (a first check that
+  found only Windows Search; the `preflight` after it is the one recheck that
+  decided).
+- `earlier_attempts` keeps what each earlier run reported when it stopped:
+  its outcome, both locations, timeline, process checks, observed activity,
+  branch results, and errors. The top-level fields describe the last run.
+
+For example, a removal interrupted after deleting 4 files, then retried to
+completion, ends with a report like this (abridged):
+
+```json
+{
+  "outcome": "removed",
+  "journal": { "deleted": { "files": 7, "directories": 3, "links": 0 }, "...": "..." },
+  "journal_entries": [
+    { "attempt": 1, "batch": 1, "path": { "display": "target/debug/a.o" }, "kind": "file", "state": "deleted" },
+    { "attempt": 2, "batch": 1, "path": { "display": "README.md" }, "kind": "file", "state": "deleted" }
+  ],
+  "earlier_attempts": [{ "outcome": "cleanup_failed", "errors": ["the removal was interrupted"], "...": "..." }]
+}
+```
+
+A retry keeps the earlier journal as `journal-<n>.jsonl` and starts a new
+`journal.jsonl`. The new journal is written in full under a hidden name and
+only then takes the old one's place, so a retry that crashes or cannot write
+before then leaves the earlier attempt's record and journal exactly as they
+were: the next retry reads them and has deleted nothing more.
+
+A stopped removal is continued by running the same command again, from
+outside the moved checkout; the base checkout always works. A retry is never
+[handed off](#standing-in-the-worktree-you-remove): a shell standing inside
+the moved checkout gets exit 4 and this instruction.
+
+A retry uses the name you removed, even when Git no longer lists anything by
+that name (while the checkout is moved, Git lists it at the hidden path; after
+the checkout is gone, not at all). The name is matched against live worktrees
+and pending removals together. If it matches a pending removal and a
+different live worktree, for example a new worktree created at the original
+path or one that now has the old branch checked out, `wt` lists both and
+exits 3 rather than choose. The hidden folder's own name reaches the same
+pending removal, never a second way around it.
+
+What the retry does depends on what it finds on disk and in Git, never on the
+step the record says was last finished:
+
+```mermaid
+flowchart TD
+    P[Pending removal] --> O{Something new at the original path?}
+    O -->|Yes| K[Keep both locations; exit 3 until you resolve it]
+    O -->|No| M{Where is the checkout?}
+    M -->|Never moved| N[Close the record; remove as usual]
+    M -->|Moved, Git still records the original path| B[Move it back; remove as usual]
+    M -->|Moved, Git follows it| Q[Check usage, list what is left, ask again, delete]
+    M -->|Moved, its .git link already deleted| X[Keep everything; show what is left]
+    M -->|Gone, Git still lists the hidden path| R[Check its staged changes, ask again, remove the record]
+    M -->|Gone and unregistered| BR[Ask again about the branches, then finish]
+```
+
+- A retry approves everything again: it lists what is left, asks about
+  changed and untracked files (a file written after the stop is new work and
+  needs your answer), checks usage, and reassesses branch safety and the
+  remote branch. No earlier answer is reused.
+- Something new at the original path is never deleted or entered, and the
+  moved checkout is left as it is until you have moved or saved that content.
+- If the hidden folder is no longer the moved checkout, or what is left of it
+  has lost its `.git` link, nothing is cleaned up or repaired; the report lists
+  what remains so you can save it and delete the folder yourself.
+- When a pending removal cannot continue, its report also repeats what the
+  saved check before the move could not see, as
+  `Saved from before the move: Discovery is partial; …`, and names the
+  recovery record's folder.
 
 ## Worktrees Git can't read
 
@@ -291,9 +614,9 @@ The path is checked before anything else, again after a [repair](#the-directory-
 | Code | Meaning |
 |---|---|
 | 0 | Done, including a question you declined or cancelled |
-| 1 | Something failed. Git failures name the worktree, its path, and what was being done (`could not check the files of worktree …`). When a later step fails, the message says what was already removed (`removed worktree X, but could not delete branch B`) |
+| 1 | Something failed, or the removal was [interrupted](#interrupting-a-removal). Git failures name the worktree, its path, and what was being done (`could not check the files of worktree …`). A removal that stopped after the checkout was moved exits 1 even if nothing was deleted yet, with both locations and the saved report; when a branch step fails after the checkout was removed, the report says which branches were deleted and which were kept |
 | 2 | Invalid arguments |
-| 3 | Refused, to avoid losing work. **No working files, branches, or worktree records were removed**, but a repair attempt may have changed Git's link metadata, and the message says so when it might have |
-| 4 | Blocked by the environment (no shell wrapper, a folder another program is using, an expired handoff); nothing was removed, and no flag helps |
+| 3 | Refused, to avoid losing work: another process is using the checkout, approved files or the branch changed, the checkout holds something it cannot safely delete, or a pending removal or a name matching it and another worktree needs resolving. **No working files, branches, or worktree records were removed**, but a repair attempt may have changed Git's link metadata, and the message says so when it might have |
+| 4 | Blocked by the environment (no shell wrapper, an expired handoff, a filesystem that cannot move the checkout without risking replacement, change watching that cannot start, a recovery record that cannot be written, another `wt remove` of the same worktree running, or on Windows a file held open that blocks the move); nothing was removed, and no flag helps |
 
 Exit 3 means "nothing removed", not "nothing changed": `wt remove` never prints "nothing was changed" after a repair attempt.

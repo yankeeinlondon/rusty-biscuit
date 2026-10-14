@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::WorktreeError;
-use crate::git::{git_command, repo_info};
+use crate::git::repo_info;
 
 pub const CACHE_FORMAT_VERSION: u32 = 2;
 
@@ -130,7 +130,7 @@ impl Cache {
 }
 
 pub(crate) fn main_worktree_path() -> Option<PathBuf> {
-    let output = git_command(&["worktree", "list", "--porcelain"]).ok()?;
+    let output = crate::git::worktree_list().ok()?;
     output
         .lines()
         .find_map(|line| line.strip_prefix("worktree "))

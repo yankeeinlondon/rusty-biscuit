@@ -10,6 +10,10 @@ sniff filesystem query ./checkout --plain
 sniff filesystem query ./checkout --target-only --timeout 500
 ```
 
+On Windows, file and directory holders are reported as `open_handle` evidence.
+A directory watcher or working directory can appear as a directory holder,
+but its purpose cannot be identified. See the library topic for coverage limits.
+
 The command is a thin front end over the library query described in
 [Filesystem process usage queries](../topics/filesystem-query.md). It runs
 that query once and prints the captured report; it never stops processes or

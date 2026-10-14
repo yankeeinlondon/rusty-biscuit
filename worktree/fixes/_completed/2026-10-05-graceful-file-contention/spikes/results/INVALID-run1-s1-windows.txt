@@ -1,0 +1,51 @@
+** This session may be vulnerable to "store now, decrypt later" attacks.
+
+Length LastWriteTime        
+------ -------------        
+580608 10/11/2026 8:50:27 PM
+                            
+                            
+S1 os=windows base=B:\coding\gfc-run\gfc-s1
+S1 absent-dest result=Ok identity_before=[legacy(ok=1 vsn=66c9d8b2 idx=600000000018e57b) id128(ok=1 vsn=3c66ca1e66c9d8b2 id=00000000000000007be5180000000000)] identity_after=[legacy(ok=1 vsn=66c9d8b2 idx=600000000018e57b) id128(ok=1 vsn=3c66ca1e66c9d8b2 id=00000000000000007be5180000000000)] same=true child_kept=true
+S1 dest-empty-dir noreplace=Err(kind=AlreadyExists, os=Some(183), msg=Cannot create a file when that file already exists. (os error 183)) src_kept=true dest_identity_unchanged=true
+S1 dest-empty-dir MoveFileExW(no flags)=Err(kind=AlreadyExists, os=Some(183), msg=Cannot create a file when that file already exists. (os error 183)) src_kept=true dest_identity_unchanged=true
+S1 dest-empty-dir std::fs::rename=Ok src_still_there=false dest_replaced=true
+S1 dest-file noreplace=Err(kind=AlreadyExists, os=Some(183), msg=Cannot create a file when that file already exists. (os error 183)) src_kept=true dest_identity_unchanged=true
+S1 dest-file MoveFileExW(no flags)=Err(kind=AlreadyExists, os=Some(183), msg=Cannot create a file when that file already exists. (os error 183)) src_kept=true dest_identity_unchanged=true
+S1 dest-file std::fs::rename=Ok src_still_there=false dest_replaced=true
+S1 dest-nonempty-dir noreplace=Err(kind=AlreadyExists, os=Some(183), msg=Cannot create a file when that file already exists. (os error 183)) src_kept=true dest_identity_unchanged=true
+S1 dest-nonempty-dir MoveFileExW(no flags)=Err(kind=AlreadyExists, os=Some(183), msg=Cannot create a file when that file already exists. (os error 183)) src_kept=true dest_identity_unchanged=true
+S1 dest-nonempty-dir std::fs::rename=Err(kind=DirectoryNotEmpty, os=Some(145), msg=The directory is not empty. (os error 145)) src_still_there=true dest_replaced=false
+S1 dest-dangling-link noreplace=Err(kind=AlreadyExists, os=Some(183), msg=Cannot create a file when that file already exists. (os error 183)) link_kept=true nowhere_created=false
+S1 missing-src noreplace=Err(kind=NotFound, os=Some(2), msg=The system cannot find the file specified. (os error 2))
+S1 cross-device to=C:\Users\ken\AppData\Local\Temp\gfc-run\gfc-s1-xdev-dst noreplace=Err(kind=CrossesDevices, os=Some(17), msg=The system cannot move the file to a different disk drive. (os error 17)) src_kept=true dest_exists=false
+S1 in-use child-cwd-in-subdir noreplace=Err(kind=PermissionDenied, os=Some(5), msg=Access is denied. (os error 5)) src_kept=true
+S1 in-use open-file-no-share-delete noreplace=Err(kind=PermissionDenied, os=Some(5), msg=Access is denied. (os error 5)) src_kept=true
+S1 in-use open-file-std-default-share noreplace=Err(kind=PermissionDenied, os=Some(5), msg=Access is denied. (os error 5)) src_kept=true
+S1 in-use own-notify-watcher noreplace=Err(kind=PermissionDenied, os=Some(5), msg=Access is denied. (os error 5)) src_kept=true
+S1 in-use handle-on-subdir noreplace=Err(kind=PermissionDenied, os=Some(5), msg=Access is denied. (os error 5)) src_kept=true
+S1 in-use handle-on-root-dir noreplace=Err(kind=PermissionDenied, os=Some(5), msg=Access is denied. (os error 5)) src_kept=true
+S1 permission-like-failure icacls_ok=true noreplace=Err(kind=PermissionDenied, os=Some(5), msg=Access is denied. (os error 5)) src_kept=true
+S1 os=windows base=C:\Users\ken\AppData\Local\Temp\gfc-run\gfc-s1
+S1 absent-dest result=Ok identity_before=[legacy(ok=1 vsn=76cb0a8b idx=5900000003391a) id128(ok=1 vsn=1e76cb3376cb0a8b id=1a390300000059000000000000000000)] identity_after=[legacy(ok=1 vsn=76cb0a8b idx=5900000003391a) id128(ok=1 vsn=1e76cb3376cb0a8b id=1a390300000059000000000000000000)] same=true child_kept=true
+S1 dest-empty-dir noreplace=Err(kind=AlreadyExists, os=Some(183), msg=Cannot create a file when that file already exists. (os error 183)) src_kept=true dest_identity_unchanged=true
+S1 dest-empty-dir MoveFileExW(no flags)=Err(kind=AlreadyExists, os=Some(183), msg=Cannot create a file when that file already exists. (os error 183)) src_kept=true dest_identity_unchanged=true
+S1 dest-empty-dir std::fs::rename=Ok src_still_there=false dest_replaced=true
+S1 dest-file noreplace=Err(kind=AlreadyExists, os=Some(183), msg=Cannot create a file when that file already exists. (os error 183)) src_kept=true dest_identity_unchanged=true
+S1 dest-file MoveFileExW(no flags)=Err(kind=AlreadyExists, os=Some(183), msg=Cannot create a file when that file already exists. (os error 183)) src_kept=true dest_identity_unchanged=true
+S1 dest-file std::fs::rename=Ok src_still_there=false dest_replaced=true
+S1 dest-nonempty-dir noreplace=Err(kind=AlreadyExists, os=Some(183), msg=Cannot create a file when that file already exists. (os error 183)) src_kept=true dest_identity_unchanged=true
+S1 dest-nonempty-dir MoveFileExW(no flags)=Err(kind=AlreadyExists, os=Some(183), msg=Cannot create a file when that file already exists. (os error 183)) src_kept=true dest_identity_unchanged=true
+S1 dest-nonempty-dir std::fs::rename=Err(kind=DirectoryNotEmpty, os=Some(145), msg=The directory is not empty. (os error 145)) src_still_there=true dest_replaced=false
+S1 dest-dangling-link noreplace=Err(kind=AlreadyExists, os=Some(183), msg=Cannot create a file when that file already exists. (os error 183)) link_kept=true nowhere_created=false
+S1 missing-src noreplace=Err(kind=NotFound, os=Some(2), msg=The system cannot find the file specified. (os error 2))
+S1 cross-device to=B:\coding\gfc-run\gfc-s1-xdev-dst noreplace=Err(kind=CrossesDevices, os=Some(17), msg=The system cannot move the file to a different disk drive. (os error 17)) src_kept=true dest_exists=false
+S1 in-use child-cwd-in-subdir noreplace=Err(kind=PermissionDenied, os=Some(5), msg=Access is denied. (os error 5)) src_kept=true
+S1 in-use open-file-no-share-delete noreplace=Err(kind=PermissionDenied, os=Some(5), msg=Access is denied. (os error 5)) src_kept=true
+S1 in-use open-file-std-default-share noreplace=Err(kind=PermissionDenied, os=Some(5), msg=Access is denied. (os error 5)) src_kept=true
+S1 in-use own-notify-watcher noreplace=Err(kind=PermissionDenied, os=Some(5), msg=Access is denied. (os error 5)) src_kept=true
+S1 in-use handle-on-subdir noreplace=Err(kind=PermissionDenied, os=Some(5), msg=Access is denied. (os error 5)) src_kept=true
+S1 in-use handle-on-root-dir noreplace=Err(kind=PermissionDenied, os=Some(5), msg=Access is denied. (os error 5)) src_kept=true
+S1 permission-like-failure icacls_ok=true noreplace=Err(kind=PermissionDenied, os=Some(5), msg=Access is denied. (os error 5)) src_kept=true
+
+

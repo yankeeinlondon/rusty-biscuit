@@ -3,12 +3,11 @@
 //! process's current directory).
 
 use std::path::Path;
-use std::process::Command;
 
 mod pipeline;
 
 fn run_git(repo: &Path, args: &[&str]) {
-    let status = Command::new("git").current_dir(repo).args(args).status().expect("git should be installed");
+    let status = crate::git::command().current_dir(repo).args(args).status().expect("git should be installed");
     assert!(status.success(), "git {args:?} failed in {repo:?}");
 }
 

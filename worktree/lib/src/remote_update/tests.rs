@@ -220,7 +220,7 @@ fn no_variance_is_in_sync_with_no_fetch() {
 fn variance_fetches_and_publishes_the_fetched_tip() {
     let repo = TestRepo::with_origin();
     let before = repo.sha("origin/main");
-    let pushed = repo.push_commit_to_origin("main", "upstream.txt");
+    let pushed = crate::test_support::commit_to_origin(&repo.origin_path(), "main", "upstream.txt");
     let clock = Clock::new();
     // The check takes 1 s, so the fetch starts later than it.
     let mut api = Api::new(&clock, [Ok(pushed.clone())]);
@@ -245,7 +245,7 @@ fn variance_fetches_and_publishes_the_fetched_tip() {
 #[test]
 fn a_fetching_attempt_starts_only_ls_remote_and_fetch() {
     let repo = TestRepo::with_origin();
-    let pushed = repo.push_commit_to_origin("main", "upstream.txt");
+    let pushed = crate::test_support::commit_to_origin(&repo.origin_path(), "main", "upstream.txt");
     let clock = Clock::new();
     let api = Api::unsupported(&clock);
     let git = Git::real(&repo.path());
@@ -263,12 +263,12 @@ fn a_fetching_attempt_starts_only_ls_remote_and_fetch() {
 #[test]
 fn a_remote_move_between_check_and_fetch_is_reported_from_the_fetched_tip() {
     let repo = TestRepo::with_origin();
-    let checked = repo.push_commit_to_origin("main", "first.txt");
+    let checked = crate::test_support::commit_to_origin(&repo.origin_path(), "main", "first.txt");
     let clock = Clock::new();
     let api = Api::new(&clock, [Ok(checked.clone())]);
     let later = RefCell::new(None);
     let git = Git::real(&repo.path()).before_fetch(|| {
-        *later.borrow_mut() = Some(repo.push_commit_to_origin("main", "second.txt"));
+        *later.borrow_mut() = Some(crate::test_support::commit_to_origin(&repo.origin_path(), "main", "second.txt"));
     });
 
     assert_eq!(run(&repo, &api, &git, &clock), AttemptEnd::Finished(Outcome::Fetched));
@@ -284,7 +284,7 @@ fn a_fetch_timeout_keeps_the_new_answer_and_the_tracking_ref() {
     let repo = TestRepo::with_origin();
     seed_old_answer(&repo);
     let before = repo.sha("origin/main");
-    let pushed = repo.push_commit_to_origin("main", "upstream.txt");
+    let pushed = crate::test_support::commit_to_origin(&repo.origin_path(), "main", "upstream.txt");
     let clock = Clock::new();
     let api = Api::new(&clock, [Ok(pushed.clone())]);
     let git = Git::real(&repo.path()).fetch_fails(GitFailure::Timeout);
@@ -366,70 +366,113 @@ fn an_unsupported_remote_is_checked_by_ls_remote_in_phase_checking() {
     assert_eq!(finished(&state), (Phase::Checking, Some(Outcome::InSync), None), "no fallback, no note");
 }
 
-#[test]
-fn each_fallback_reason_and_condition_is_recorded() {
+/// The fallback rows, one test each: every row builds its own repository
+/// and runs real Git, which on Windows took 11 s as one sequential test.
+const FALLBACK_ROWS: [&str; 10] = [
+    "credentials_required",
+    "not_found_without_a_key",
+    "not_found_with_a_derived_key",
+    "rate_limited_anonymously",
+    "rate_limited_with_a_key",
+    "credentials_rejected",
+    "credentials_insufficient",
+    "timeout",
+    "network",
+    "other",
+];
+
+/// The provider error for `row`, the fallback reason it records, and the
+/// note it leaves.
+fn fallback_row(row: &str) -> (PrUnavailable, FallbackReason, Option<ApiNote>) {
     let key = || "GITHUB_TOKEN".to_string();
     // The 404's key is the one its own request sent, as sniff reports it.
     let not_found = |key| PrUnavailable::NotFoundOrNotPermitted { message: "404".into(), key };
     let note = |condition, key: Option<String>| Some(ApiNote { condition, key, fallback_answered: true });
-    let cases: Vec<(PrUnavailable, FallbackReason, Option<ApiNote>)> = vec![
-        (
+    match row {
+        "credentials_required" => (
             PrUnavailable::CredentialsRequired { key: None },
             FallbackReason::NoKey,
             note(ApiCondition::CredentialsRequired, None),
         ),
-        (not_found(None), FallbackReason::NotVisible, note(ApiCondition::NotFoundOrNotPermitted, None)),
-        (
+        "not_found_without_a_key" => (not_found(None), FallbackReason::NotVisible, note(ApiCondition::NotFoundOrNotPermitted, None)),
+        "not_found_with_a_derived_key" => (
             not_found(Some("SNIFF_GITHUB_GIT_2E_EXAMPLE_TOKEN".into())),
             FallbackReason::Other,
             note(ApiCondition::NotFoundOrNotPermitted, Some("SNIFF_GITHUB_GIT_2E_EXAMPLE_TOKEN".into())),
         ),
-        (
+        "rate_limited_anonymously" => (
             PrUnavailable::RateLimited { authenticated: false, key: None },
             FallbackReason::RateLimited,
             note(ApiCondition::RateLimited { authenticated: false }, None),
         ),
-        (
+        "rate_limited_with_a_key" => (
             PrUnavailable::RateLimited { authenticated: true, key: Some(key()) },
             FallbackReason::RateLimited,
             note(ApiCondition::RateLimited { authenticated: true }, Some(key())),
         ),
-        (
+        "credentials_rejected" => (
             PrUnavailable::CredentialsRejected { key: key() },
             FallbackReason::Rejected,
             note(ApiCondition::CredentialsRejected, Some(key())),
         ),
-        (
+        "credentials_insufficient" => (
             PrUnavailable::CredentialsInsufficient { key: key() },
             FallbackReason::Rejected,
             note(ApiCondition::CredentialsInsufficient, Some(key())),
         ),
-        (PrUnavailable::Timeout { deadline: Duration::from_secs(1) }, FallbackReason::Other, None),
-        (PrUnavailable::Network { message: "reset".into() }, FallbackReason::Other, None),
-        (PrUnavailable::Other { message: "odd".into() }, FallbackReason::Other, None),
-    ];
-    for (error, reason, expected_note) in cases {
-        let repo = TestRepo::with_origin();
-        let clock = Clock::new();
-        let label = format!("{error:?}");
-        // The phase is written before the fallback's request.
-        let seen = RefCell::new(None);
-        let api = Api::new(&clock, [Err(error)]);
-        let git = Git::real(&repo.path());
-        let store_path = store(&repo);
-        let wrapped = WatchPhase { git: &git, store: &store_path, seen: &seen };
-
-        assert_eq!(run(&repo, &api, &wrapped, &clock), AttemptEnd::Finished(Outcome::InSync), "{label}");
-
-        assert_eq!(*seen.borrow(), Some(Phase::CheckingFallback { reason }), "{label}");
-        let state = stored(&repo);
-        assert_eq!(state.answer.clone().unwrap().source, AnswerSource::Git, "{label}");
-        assert_eq!(
-            finished(&stored(&repo)),
-            (Phase::CheckingFallback { reason }, Some(Outcome::InSync), expected_note),
-            "{label}"
-        );
+        "timeout" => (PrUnavailable::Timeout { deadline: Duration::from_secs(1) }, FallbackReason::Other, None),
+        "network" => (PrUnavailable::Network { message: "reset".into() }, FallbackReason::Other, None),
+        "other" => (PrUnavailable::Other { message: "odd".into() }, FallbackReason::Other, None),
+        _ => panic!("no fallback row {row:?}"),
     }
+}
+
+fn assert_fallback_reason_and_condition_are_recorded(row: &str) {
+    let (error, reason, expected_note) = fallback_row(row);
+    let repo = TestRepo::with_origin();
+    let clock = Clock::new();
+    let label = format!("{error:?}");
+    // The phase is written before the fallback's request.
+    let seen = RefCell::new(None);
+    let api = Api::new(&clock, [Err(error)]);
+    let git = Git::real(&repo.path());
+    let store_path = store(&repo);
+    let wrapped = WatchPhase { git: &git, store: &store_path, seen: &seen };
+
+    assert_eq!(run(&repo, &api, &wrapped, &clock), AttemptEnd::Finished(Outcome::InSync), "{label}");
+
+    assert_eq!(*seen.borrow(), Some(Phase::CheckingFallback { reason }), "{label}");
+    let state = stored(&repo);
+    assert_eq!(state.answer.clone().unwrap().source, AnswerSource::Git, "{label}");
+    assert_eq!(
+        finished(&stored(&repo)),
+        (Phase::CheckingFallback { reason }, Some(Outcome::InSync), expected_note),
+        "{label}"
+    );
+}
+
+macro_rules! fallback_tests {
+    ($($test:ident => $row:literal),* $(,)?) => {
+        $(#[test] fn $test() { assert_fallback_reason_and_condition_are_recorded($row); })*
+
+        #[test]
+        fn every_fallback_row_has_a_test() {
+            assert_eq!([$($row),*], FALLBACK_ROWS);
+        }
+    };
+}
+
+fallback_tests! {
+    a_missing_key_falls_back_as_no_key => "credentials_required",
+    a_keyless_404_falls_back_as_not_visible => "not_found_without_a_key",
+    a_keyed_404_falls_back_as_other_and_names_its_key => "not_found_with_a_derived_key",
+    an_anonymous_rate_limit_falls_back_as_rate_limited => "rate_limited_anonymously",
+    a_keyed_rate_limit_falls_back_as_rate_limited_and_names_its_key => "rate_limited_with_a_key",
+    rejected_credentials_fall_back_as_rejected => "credentials_rejected",
+    insufficient_credentials_fall_back_as_rejected => "credentials_insufficient",
+    an_api_timeout_falls_back_as_other_without_a_note => "timeout",
+    a_network_failure_falls_back_as_other_without_a_note => "network",
+    any_other_failure_falls_back_as_other_without_a_note => "other",
 }
 
 /// Records the stored phase when `ls-remote` starts.
@@ -453,7 +496,7 @@ impl GitRemote for WatchPhase<'_> {
 #[test]
 fn an_ignored_repository_makes_no_provider_request() {
     let repo = TestRepo::with_origin();
-    let pushed = repo.push_commit_to_origin("main", "upstream.txt");
+    let pushed = crate::test_support::commit_to_origin(&repo.origin_path(), "main", "upstream.txt");
     let clock = Clock::new();
     let api = Api::new(&clock, []);
     let git = Git::real(&repo.path());
@@ -533,7 +576,7 @@ fn an_origin_or_default_branch_change_during_the_check_publishes_nothing() {
 #[test]
 fn an_origin_change_during_the_fetch_keeps_the_check_and_ends_unavailable() {
     let repo = TestRepo::with_origin();
-    let pushed = repo.push_commit_to_origin("main", "upstream.txt");
+    let pushed = crate::test_support::commit_to_origin(&repo.origin_path(), "main", "upstream.txt");
     let clock = Clock::new();
     let api = Api::new(&clock, [Ok(pushed.clone())]);
     let git = Git::real(&repo.path())
@@ -550,7 +593,7 @@ fn an_origin_change_during_the_fetch_keeps_the_check_and_ends_unavailable() {
 #[test]
 fn a_concurrent_fetch_that_reached_the_current_remote_head_counts_as_fetched() {
     let repo = TestRepo::with_origin();
-    let pushed = repo.push_commit_to_origin("main", "upstream.txt");
+    let pushed = crate::test_support::commit_to_origin(&repo.origin_path(), "main", "upstream.txt");
     let clock = Clock::new();
     // The check, then the recheck after the failed fetch.
     let api = Api::new(&clock, [Ok(pushed.clone()), Ok(pushed.clone())]);
@@ -571,7 +614,7 @@ fn a_concurrent_fetch_that_reached_the_current_remote_head_counts_as_fetched() {
 #[test]
 fn a_concurrent_fetch_of_an_older_head_is_not_labeled_current() {
     let repo = TestRepo::with_origin();
-    let checked = repo.push_commit_to_origin("main", "first.txt");
+    let checked = crate::test_support::commit_to_origin(&repo.origin_path(), "main", "first.txt");
     let clock = Clock::new();
     let newer = RefCell::new(String::new());
     let git = Git::real(&repo.path())
@@ -579,7 +622,7 @@ fn a_concurrent_fetch_of_an_older_head_is_not_labeled_current() {
             // Another fetch lands the SHA this attempt checked, and then the
             // remote moves on.
             repo.git(&["fetch", "-q", "origin"]);
-            *newer.borrow_mut() = repo.push_commit_to_origin("main", "second.txt");
+            *newer.borrow_mut() = crate::test_support::commit_to_origin(&repo.origin_path(), "main", "second.txt");
         })
         .fetch_fails(GitFailure::Other);
     let recheck = RefCell::new(None);
@@ -711,12 +754,12 @@ fn a_store_that_cannot_be_written_ends_the_attempt_before_any_request() {
 #[test]
 fn a_non_main_default_branch_is_checked_and_fetched() {
     let repo = TestRepo::with_origin();
-    repo.git(&["push", "-q", "origin", "main:refs/heads/trunk"]);
+    crate::test_support::fast_import(&repo.origin_path(), "reset refs/heads/trunk\nfrom refs/heads/main^0\n\n");
     repo.git(&["fetch", "-q", "origin"]);
     repo.git(&["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk"]);
     let main_before = repo.sha("origin/main");
-    let pushed = repo.push_commit_to_origin("trunk", "trunk.txt");
-    repo.push_commit_to_origin("main", "main.txt");
+    let pushed = crate::test_support::commit_to_origin(&repo.origin_path(), "trunk", "trunk.txt");
+    crate::test_support::commit_to_origin(&repo.origin_path(), "main", "main.txt");
     let clock = Clock::new();
     let git = Git::real(&repo.path());
 
@@ -752,7 +795,7 @@ fn successive_attempts_replace_the_answer_read_write_read() {
     let first = stored(&repo).answer.unwrap();
 
     clock.advance(Duration::from_secs(30));
-    let pushed = repo.push_commit_to_origin("main", "upstream.txt");
+    let pushed = crate::test_support::commit_to_origin(&repo.origin_path(), "main", "upstream.txt");
     // A second attempt with a fresh answer still asks: listing has no
     // freshness skip for the head (Rule 7).
     assert_eq!(run(&repo, &SniffBranchHeads, &git, &clock), AttemptEnd::Finished(Outcome::Fetched));
@@ -790,7 +833,7 @@ fn credentials(repo: &TestRepo) -> CredentialEvidence {
 #[test]
 fn an_api_answer_records_its_credentials_before_the_answer_and_through_the_fetch() {
     let repo = TestRepo::with_origin();
-    let pushed = repo.push_commit_to_origin("main", "upstream.txt");
+    let pushed = crate::test_support::commit_to_origin(&repo.origin_path(), "main", "upstream.txt");
     let clock = Clock::new();
     let mut api = Api::new(&clock, [Ok(pushed.clone())]);
     api.credentials = CredentialEvidence::Keyed { variables: vec!["SNIFF_GITHUB_GIT_2E_EXAMPLE_TOKEN".into()] };
@@ -808,18 +851,25 @@ fn an_api_answer_records_its_credentials_before_the_answer_and_through_the_fetch
 }
 
 #[test]
-fn an_anonymous_api_answer_survives_a_fetch_failure_or_timeout() {
-    for failure in [GitFailure::Timeout, GitFailure::Other] {
-        let repo = TestRepo::with_origin();
-        let pushed = repo.push_commit_to_origin("main", "upstream.txt");
-        let clock = Clock::new();
-        let api = Api::new(&clock, [Ok(pushed)]);
-        let git = Git::real(&repo.path()).fetch_fails(failure);
+fn an_anonymous_api_answer_survives_a_fetch_timeout() {
+    assert_an_anonymous_api_answer_survives(GitFailure::Timeout);
+}
 
-        assert!(matches!(run(&repo, &api, &git, &clock), AttemptEnd::Finished(Outcome::FetchFailed { .. })));
+#[test]
+fn an_anonymous_api_answer_survives_a_fetch_failure() {
+    assert_an_anonymous_api_answer_survives(GitFailure::Other);
+}
 
-        assert_eq!(credentials(&repo), CredentialEvidence::Anonymous, "{failure:?}");
-    }
+fn assert_an_anonymous_api_answer_survives(failure: GitFailure) {
+    let repo = TestRepo::with_origin();
+    let pushed = crate::test_support::commit_to_origin(&repo.origin_path(), "main", "upstream.txt");
+    let clock = Clock::new();
+    let api = Api::new(&clock, [Ok(pushed)]);
+    let git = Git::real(&repo.path()).fetch_fails(failure);
+
+    assert!(matches!(run(&repo, &api, &git, &clock), AttemptEnd::Finished(Outcome::FetchFailed { .. })));
+
+    assert_eq!(credentials(&repo), CredentialEvidence::Anonymous, "{failure:?}");
 }
 
 #[test]

@@ -86,6 +86,9 @@ pub const QUERY_WATCH_REGISTRATION_READS: &str = "filesystem.query.watch_registr
 /// reads.
 pub const QUERY_MODULE_INSPECTIONS: &str = "filesystem.query.module_inspections";
 
+/// File-side Windows handle-owner queries, excluding native buffer retries.
+pub const QUERY_PATH_HOLDER_INSPECTIONS: &str = "filesystem.query.path_holder_inspections";
+
 /// Process identity enrichments attempted for matching processes.
 pub const QUERY_IDENTITY_ENRICHMENTS: &str = "filesystem.query.identity_enrichments";
 

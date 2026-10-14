@@ -51,7 +51,7 @@ impl RepairGit for Git {
     }
 
     fn worktree_list(&self, base: &Path) -> Result<String, WorktreeError> {
-        git_from(base, base, &["worktree", "list", "--porcelain"])
+        crate::git::worktree_list_from(base, base)
     }
 }
 

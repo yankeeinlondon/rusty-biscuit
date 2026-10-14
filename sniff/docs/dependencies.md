@@ -47,7 +47,12 @@ loaded-module backend; with `Win32_System_Threading` (`OpenProcess`,
 `GetProcessTimes`, `QueryFullProcessImageNameW`, `GetExitCodeProcess`) it
 reads each process's creation time, image, and modules, and the
 `Win32_Security` token calls above read the account of a process holding
-something in the queried tree.
+something in the queried tree. `Wdk_System_Threading`
+(`NtQueryInformationProcess`), `Win32_System_Diagnostics_Debug`
+(`ReadProcessMemory`), `Win32_System_Kernel`, and
+`Win32_System_WindowsProgramming` (the `winternl.h` `PEB`, `PEB_LDR_DATA`,
+and `LDR_DATA_TABLE_ENTRY` layouts) let the backend read a process's whole
+loader list once instead of calling `GetModuleFileNameExW` per module.
 
 Note that the Rendezvous daemon declares its **own** `windows` features for the
 DACL work (`Win32_Storage_FileSystem`, and `Win32_Security_Authorization` for
@@ -158,3 +163,24 @@ whether a recreated file should be analyzed.
   `manifest_dir!()` so fixture lookups resolve against the run-time manifest
   directory, which is what makes a nextest archive built elsewhere find its
   fixtures in the executing checkout.
+
+## Filesystem Usage Queries
+
+The focused query adds no runtime crates. Linux/WSL2 read `/proc` with `std`
+and existing `libc`; macOS uses direct `libproc` FFI through the system library,
+without a bindgen/libclang build requirement. Windows uses existing `windows`
+bindings plus the system `ntdll` file-side query (class 47); no helper program,
+Restart Manager, elevation, or `filelocksmith` dependency is required.
+
+| Crate | Version / license | Native requirements and usage |
+| --- | --- | --- |
+| `walkdir` | 2.5 / MIT OR Unlicense | No native build; one tree walk on every OS |
+| `ignore` | 0.4 / MIT OR Unlicense | No native build; in-tree Git ignore rules prioritize Windows paths, without excluding them |
+| `sysinfo` | 0.38 / MIT | Existing platform bindings; candidate-only identity enrichment where the backend does not supply it |
+| `libc` | 0.2 / MIT OR Apache-2.0 | System ABI on Unix; Linux device encoding and macOS process inspection |
+| `windows` | 0.62 / MIT OR Apache-2.0 | Windows SDK/system libraries; native Windows process, file identity, and module inspection |
+
+Live Linux watch fixtures use existing `libc::inotify_init1` and
+`inotify_add_watch`; there is no `inotify` crate dependency.
+
+WSL2 exercises the Linux backend and never inventories native Windows processes.

@@ -131,7 +131,7 @@ pub fn new_token() -> Result<String, WorktreeError> {
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
-fn is_token(token: &str) -> bool {
+pub(crate) fn is_token(token: &str) -> bool {
     token.len() == 32 && token.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 

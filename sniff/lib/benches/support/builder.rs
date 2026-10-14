@@ -13,6 +13,7 @@
 
 use git2::{IndexAddOption, Repository, Signature};
 use std::fs;
+use std::io::Write as _;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -184,6 +185,13 @@ pub fn build_small_git_repo(root: &Path) -> Repository {
 /// Returns the opened `Repository` handle.
 pub fn build_large_monorepo(root: &Path) -> Repository {
     let repo = init_repo(root);
+    // Hold every object this fixture writes in memory and store them as one
+    // pack: written as several hundred loose-object files they took about
+    // 1.9 s on native Windows.
+    let odb = repo.odb().expect("open object database");
+    let mempack = odb
+        .add_new_mempack_backend(1000)
+        .expect("add mempack backend");
 
     let rust_pkgs = LARGE_MONOREPO_RUST_PKGS;
     let js_pkgs = LARGE_MONOREPO_JS_PKGS;
@@ -242,15 +250,39 @@ pub fn build_large_monorepo(root: &Path) -> Repository {
     commit_all(&repo, "c1: initial monorepo layout");
 
     // Churn commits touching different packages to create a deep-ish history.
+    // Each round changes one file, so it stages just that path, and the index
+    // and branch are written once after the loop: per round, `commit_all`'s
+    // full restage, index write, and ref update cost ~50 ms on native Windows.
+    // The commits are identical to what `commit_all` would create.
+    let mut index = repo.index().expect("load repo index");
+    let sig = Signature::new("Bench Runner", "bench@sniff.test", &git2::Time::new(0, 0))
+        .expect("build signature");
+    let mut tip = repo
+        .head()
+        .and_then(|head| head.peel_to_commit())
+        .expect("initial commit");
     for round in 0..LARGE_MONOREPO_CHURN_COMMITS {
         let pkg_idx = (round as usize) % rust_pkgs;
-        let pkg = root.join(format!("crates/pkg{pkg_idx:02}"));
+        let lib = format!("crates/pkg{pkg_idx:02}/src/lib.rs");
         write_file(
-            &pkg.join("src/lib.rs"),
+            &root.join(&lib),
             &format!("pub fn n() -> u32 {{ {pkg_idx} }}\npub const ROUND: u32 = {round};\n"),
         );
-        commit_all(&repo, &format!("c{}: churn round {round}", round + 2));
+        index.add_path(Path::new(&lib)).expect("stage file");
+        let tree = repo
+            .find_tree(index.write_tree().expect("write tree"))
+            .expect("resolve tree");
+        let message = format!("c{}: churn round {round}", round + 2);
+        let id = repo
+            .commit(None, &sig, &sig, &message, &tree, &[&tip])
+            .expect("create commit");
+        tip = repo.find_commit(id).expect("resolve commit");
     }
+    index.write().expect("write index");
+    repo.head()
+        .expect("resolve HEAD")
+        .set_target(tip.id(), "churn")
+        .expect("advance branch");
 
     // Leave dirty paths so git status has work to do.
     write_file(
@@ -262,7 +294,16 @@ pub fn build_large_monorepo(root: &Path) -> Repository {
         "export const name = 'dirty';\n",
     );
 
-    repo
+    let mut pack = git2::Buf::new();
+    mempack
+        .dump(&repo, &mut pack)
+        .expect("dump in-memory objects");
+    let mut writer = odb.packwriter().expect("open pack writer");
+    writer.write_all(&pack).expect("write pack");
+    writer.commit().expect("store pack");
+    // The mempack stays attached to this handle's object database and would
+    // swallow any later write, so the caller gets a fresh handle.
+    Repository::open(root).expect("reopen fixture repository")
 }
 
 /// Build a huge synthetic monorepo rooted at `root`:

@@ -40,6 +40,9 @@ pub struct ReportInput<'a> {
     pub missing: Option<&'a MissingCheckout>,
     /// The `.git` file was missing and `wt` restored it to check the files.
     pub relinked: bool,
+    /// A retried removal already removed the checkout and its record; only
+    /// branch actions are left.
+    pub checkout_removed: bool,
     /// `None` for a detached worktree.
     pub safety: Option<&'a BranchSafety>,
     pub has_origin: bool,
@@ -59,6 +62,7 @@ pub fn render(terminal: &Terminal, input: &ReportInput<'_>) -> String {
     let mut blocks = vec![lines(heading)];
     let files = match input.missing {
         Some(missing) => missing_markup(missing),
+        None if input.checkout_removed => CHECKOUT_REMOVED_MARKUP.to_string(),
         None => files_markup(input.inventory),
     };
     blocks.push(lines(files));
@@ -106,6 +110,9 @@ pub fn heading_markup(input: &ReportInput<'_>) -> String {
 /// line does not claim to have touched only this one.
 pub const RELINKED_MARKUP: &str = "<yellow>Its .git file was missing</yellow><dim>; wt restored it to check the \
     files (Git may restore other worktrees' broken links too).</dim>";
+
+/// The files block for a retry whose checkout is already gone.
+pub const CHECKOUT_REMOVED_MARKUP: &str = "<dim>The checkout and Git's record of it were already removed.</dim>";
 
 /// Dirty and protected included files that need consent, plus inventory warnings.
 pub fn files_markup(inventory: &Inventory) -> String {
@@ -585,6 +592,7 @@ mod tests {
             inventory: &inventory,
             missing: None,
             relinked: true,
+            checkout_removed: false,
             safety: Some(&facts),
             has_origin: false,
             remote: None,

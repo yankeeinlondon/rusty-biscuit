@@ -223,6 +223,10 @@
   `test-toolkit` and also declares it as a development dependency, for the
   `test_layout` gate in its consolidated `l1` test binary. It adds no crate to
   the workspace: every crate it brings is already in `Cargo.lock`.
+- `worktree/lib` uses `test-toolkit` only as a development dependency, for
+  `EnvGuard`, which restores `WT`, `HOME`, and `USERPROFILE` after the
+  base-directory precedence tests even when one panics. It adds no crate to the
+  workspace: every crate it brings is already in `Cargo.lock`.
 - `tree-hugger` uses `test-toolkit` only as a development dependency, for the
   `test_layout` gate in its consolidated `l1` test binary. It adds no crate to
   the workspace: every crate it brings is already in `Cargo.lock`.
@@ -275,15 +279,51 @@
   `getrandom` 0.4, and the record's dirty-file fingerprint is BLAKE3 through
   `biscuit-hash`'s `blake3` feature. `worktree/lib` also enables `sniff`'s
   `remote` feature for the blocking PR lookup behind `wt remove`'s Safe tier,
-  and uses `biscuit-file` (no default features) for `canonicalize_simplified`.
+  and uses `biscuit-file` (no default features, `file-reference` only) for
+  `canonicalize_simplified` and for `home_dir()`, the environment-first home
+  lookup behind `~/.worktree.json` and the setup candidates. Both crates pin
+  `gix = "=0.84.0"`, so the feature builds no second `gix`.
   It uses `fs4` 0.13 (already in the workspace graph through `playa`) for the
   nonblocking lock on `<repo hash>.prs.lock`, which lets only one background
   refresh of the PR store make a request; the PR store binds its answer to a
   `biscuit-hash` BLAKE3 digest of `origin`'s URL.
+  `wt remove`'s recovery store (`<common-git-dir>/wt-removal/`) reuses `fs4`
+  for its per-worktree operation lock, `getrandom` for its operation IDs, and
+  `sniff`'s `NativeString`, `FileIdentity`, and `PathUsageReport` for lossless
+  paths, native identities, and the saved discovery report. On Unix it adds a
+  direct `libc` 0.2 dependency (already in the workspace graph) for `geteuid`
+  in the store's owner check, `O_NOFOLLOW` when reading a record, and plain
+  `fsync` on Apple platforms, where std's `sync_all` issues the much slower
+  `F_FULLFSYNC`. The same `libc` supplies the quarantine move's
+  no-replacement renames, `renameat2(RENAME_NOREPLACE)` on Linux and
+  `renamex_np(RENAME_EXCL)` on macOS. On Windows the move uses `windows-sys`
+  0.61 (the workspace's version; `Win32_Foundation` and
+  `Win32_Storage_FileSystem`) for `SetFileInformationByHandle(FileRenameInfo)`
+  without replacement and `FileIdInfo` directory identities.
+  `std::fs::rename` is not used for it because it may replace an existing
+  destination.
+  `wt remove`'s activity observer uses `inotify` 0.11 (ISC, no default
+  features, so no tokio stream) on Linux only, and `fsevent-sys` 4.1 (MIT,
+  FSEvents and Core Foundation declarations, including
+  `FSEventStreamFlushSync`) on macOS only; both are the crates `notify` builds
+  on. On Windows it calls `ReadDirectoryChangesW` through the same
+  `windows-sys`, adding `Win32_Security`, `Win32_System_IO`, and
+  `Win32_System_Threading` for overlapped reads and their events. The usage
+  check adds `Win32_System_SystemInformation` for `GetSystemDirectoryW`, the
+  directory Windows Search's processes must run from for its one recheck. `notify` itself is not used: it hides overflow and lost watches on
+  Windows, drops the watch on a directory `wt` moves on Linux, and offers no
+  flush on macOS, so it cannot report lost coverage.
 - `worktree/lib` uses `gix` (pinned `=0.84.0`, the version `sniff` builds, with
-  only `sha1` and `revision`) to read repository metadata in-process: `origin`'s
-  URL, the default branch, branch-name validity, `core.sshCommand`, and ref
-  targets. Each read replaced a git process, which costs ~47 ms on Windows.
+  `sha1`, `revision`, and `parallel`, all of which `sniff` already enables) to
+  read repository metadata in-process: `origin`'s URL, the default branch,
+  branch-name validity, `core.sshCommand`, ref targets, every branch tip, and
+  the `wt list` graph's commit history (shared by the gather's threads, hence
+  `parallel`). Each read replaced a git process, which costs ~47 ms on Windows.
+- `worktree/cli` uses `ctrlc` 3.4 (already built for `repo-deps`), with its
+  `termination` feature, so Ctrl-C, Ctrl-Break, `SIGTERM`, or `SIGHUP` stops
+  `wt remove` at the next deletion entry boundary with a saved
+  report instead of killing it. `signal-hook` (used by `claudine-cli`) was
+  not chosen because it does not handle Windows console control events.
 - `worktree/cli` uses `insta` as a development dependency to snapshot the shell
   wrappers `wt --completions` generates and the `wt list` table, and
   `serde_json` (development) to seed the PR store and edit a handoff record in
@@ -810,6 +850,12 @@ This is a Rust workspace with the following modules:
 
     _Tags: table, terminal, formatting_
 
+- [ctrlc](https://github.com/Detegr/rust-ctrlc) _v3.4_ [📄](https://docs.rs/ctrlc)
+
+    _Cross-platform Ctrl-C handler (one per process, run on its own thread). `worktree-cli` enables `termination` so `SIGTERM` and `SIGHUP` are caught too, and installs it only when `wt remove` starts its destructive steps; `repo-deps` uses it in its local tools._
+
+    _Tags: cli, signals, cross-platform_
+
 - [crossterm](https://github.com/crossterm-rs/crossterm) _v0.29_ [📄](https://docs.rs/crossterm)
 
     _Cross-platform terminal manipulation library for colors, cursor movement, keyboard input, and terminal control._
@@ -1181,9 +1227,21 @@ This is a Rust workspace with the following modules:
 
     _Tags: audio, macos, platform_
 
+- [fsevent-sys](https://github.com/octplane/fsevent-rust) _v4.1_ [📄](https://docs.rs/fsevent-sys)
+
+    _Raw FSEvents and Core Foundation declarations. `worktree` uses it (macOS only) for `wt remove`'s activity observer, including `FSEventStreamFlushSync` for its marker-confirmed checks._
+
+    _Tags: ffi, macos, filesystem, watch_
+
+- [inotify](https://github.com/hannobraun/inotify) _v0.11_ [📄](https://docs.rs/inotify)
+
+    _Linux inotify bindings (default features off, so no tokio stream). `worktree` uses it (Linux only) for `wt remove`'s activity observer, one watch per checkout directory._
+
+    _Tags: linux, filesystem, watch_
+
 - [libc](https://github.com/rust-lang/libc) _v0.2_ [📄](https://docs.rs/libc)
 
-    _Raw FFI bindings to platform APIs and C standard library._
+    _Raw FFI bindings to platform APIs and C standard library. `worktree` uses it (Unix only) for the removal recovery store's owner check, no-follow reads, and Apple `fsync`, and for the quarantine move's no-replacement renames (`renameat2`, `renamex_np`)._
 
     _Tags: ffi, bindings, system_
 
@@ -1195,7 +1253,7 @@ This is a Rust workspace with the following modules:
 
 - [windows-sys](https://github.com/microsoft/windows-rs) _v0.61_ [📄](https://docs.rs/windows-sys)
 
-    _Raw Win32 console API bindings (`CreateFileW`, `GetStdHandle`, `SetStdHandle`, `CloseHandle`) used by `biscuit-tui` to redirect captured stdout to `CONOUT$` for interactive prompts on Windows. Console detection gates on `GetConsoleMode` via `std::io::IsTerminal`. Target-scoped to `[target.'cfg(windows)'.dependencies]`; Unix builds never pull it in._
+    _Raw Win32 console API bindings (`CreateFileW`, `GetStdHandle`, `SetStdHandle`, `CloseHandle`) used by `biscuit-tui` to redirect captured stdout to `CONOUT$` for interactive prompts on Windows. Console detection gates on `GetConsoleMode` via `std::io::IsTerminal`. `worktree` uses it for `wt remove`'s no-replacement quarantine move (`SetFileInformationByHandle` with `FileRenameInfo`), `FileIdInfo` directory identities, and its `ReadDirectoryChangesW` activity observer. Target-scoped to `[target.'cfg(windows)'.dependencies]`; Unix builds never pull it in._
 
     _Tags: ffi, windows, platform_
 
@@ -1223,7 +1281,7 @@ This is a Rust workspace with the following modules:
 
 - [getrandom](https://github.com/rust-random/getrandom) _v0.4_ [📄](https://docs.rs/getrandom)
 
-    _Operating-system CSPRNG access with a typed error. Draws `darkmatter`'s per-execution `ctx.id`/`ctx.sid` nonce and `worktree`'s `wt remove` handoff token._
+    _Operating-system CSPRNG access with a typed error. Draws `darkmatter`'s per-execution `ctx.id`/`ctx.sid` nonce and `worktree`'s `wt remove` handoff token and removal operation IDs._
 
     _Tags: random, csprng, system_
 

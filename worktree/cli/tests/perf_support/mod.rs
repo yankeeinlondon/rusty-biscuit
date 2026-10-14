@@ -72,6 +72,24 @@ type TeardownNudge = Mutex<Option<Box<dyn FnMut() + Send>>>;
 
 impl MixedFixture {
     pub fn new() -> Self {
+        Self::with_branches(BEHIND_BRANCHES, DIVERGENT_BRANCHES, FAST_FORWARD_BRANCHES)
+    }
+
+    /// The shape the PR-badge tests need: one behind-only, three divergent
+    /// (`divergent-0..2`, the ones they badge), and one fast-forward branch,
+    /// each in its own worktree. Every listing measures each checkout, so this
+    /// halves the git processes per `wt list` of [`MixedFixture::new`].
+    pub fn small() -> Self {
+        Self::with_branches(1, 3, 1)
+    }
+
+    /// Only the main checkout: for listings whose assertions read no branch
+    /// row (notices, the caption, the wait, the worker's lifecycle).
+    pub fn main_only() -> Self {
+        Self::with_branches(0, 0, 0)
+    }
+
+    fn with_branches(behind: usize, divergent: usize, fast_forward: usize) -> Self {
         let repo = tempfile::tempdir().expect("create temp repo");
         let home = tempfile::tempdir().expect("create temp home");
         let xdg_cache = tempfile::tempdir().expect("create temp xdg cache");
@@ -83,58 +101,29 @@ impl MixedFixture {
             .to_string_lossy()
             .into_owned();
 
-        run_git(&main, &["init", "-b", "main"]);
-        append_git_config(
-            &main.join(".git").join("config"),
-            &[
-                ("user.email", "test@example.com"),
-                ("user.name", "Test User"),
-                ("commit.gpgsign", "false"),
-                ("gc.auto", "0"),
-                ("core.untrackedCache", "true"),
-            ],
-        );
-
-        // One `git fast-import` writes every commit and branch below, in
-        // place of a checkout, add, and commit process per commit.
-        let mut history = FastImport::default();
-        let base = history.commit("refs/heads/main", None, "base.txt", "base", "base");
-
-        // Behind-only branches: forked at base and never advanced.
-        let mut branches = Vec::new();
-        for i in 0..BEHIND_BRANCHES {
-            let name = format!("behind-{i}");
-            history.branch(&name, &base);
-            branches.push(name);
-        }
-
-        // Divergent branches: one commit on the branch (ahead); `main` advances
-        // below (behind).
-        for i in 0..DIVERGENT_BRANCHES {
-            let name = format!("divergent-{i}");
-            history.commit(&format!("refs/heads/{name}"), Some(&base), &format!("{name}.txt"), "x", "divergent commit");
-            branches.push(name);
-        }
-
-        // Advance `main`: behind-* are now behind by one; divergent-* diverge.
-        let advanced = history.commit("refs/heads/main", Some(&base), "main-advance.txt", "advance", "advance main");
-
-        // Fast-forward branches: forked at the advanced `main` tip with one
-        // commit (ahead, not behind). `main` does not move afterward.
-        for i in 0..FAST_FORWARD_BRANCHES {
-            let name = format!("fast-forward-{i}");
-            history.commit(&format!("refs/heads/{name}"), Some(&advanced), &format!("{name}.txt"), "x", "fast-forward commit");
-            branches.push(name);
-        }
-        history.run(&main);
-        // The main checkout, still on `main`, takes its files and index.
-        run_git(&main, &["reset", "-q", "--hard", "main"]);
-
+        let template = mixed_template(behind, divergent, fast_forward);
+        copy_tree(&template.join(TEMPLATE_MAIN), &main);
         let mut worktrees = Vec::new();
-        for name in &branches {
-            let path = parent.join(format!("{repo_name}-{name}"));
-            run_git(&main, &["worktree", "add", path.to_str().unwrap(), name]);
+        for name in branch_names(behind, divergent, fast_forward) {
+            // Git names a worktree's admin directory after the checkout's
+            // directory, as `worktree add` would have here.
+            let id = format!("{repo_name}-{name}");
+            let path = parent.join(&id);
+            copy_tree(&template.join(format!("{TEMPLATE_MAIN}-{name}")), &path);
+            let admin = main.join(".git").join("worktrees").join(&id);
+            fs::rename(main.join(".git").join("worktrees").join(format!("{TEMPLATE_MAIN}-{name}")), &admin)
+                .expect("rename the copied admin directory");
+            // Both links point at the copy, never back at the template;
+            // `worktree repair` below then rewrites them in Git's own
+            // spelling (its realpath, as `worktree add` writes them).
+            fs::write(admin.join("gitdir"), format!("{}/.git\n", git_spelling(&path))).expect("write gitdir");
+            fs::write(path.join(".git"), format!("gitdir: {}\n", git_spelling(&admin))).expect("write .git");
             worktrees.push(path);
+        }
+        if !worktrees.is_empty() {
+            let mut args = vec!["worktree".to_string(), "repair".to_string()];
+            args.extend(worktrees.iter().map(|path| path.to_string_lossy().into_owned()));
+            run_git(&main, &args.iter().map(String::as_str).collect::<Vec<_>>());
         }
 
         Self {
@@ -228,9 +217,16 @@ impl MixedFixture {
 
     /// [`MixedFixture::wt_command`] with every plain-HTTP request sent to
     /// `gitea`, and no provider token.
+    ///
+    /// The worker's PR request deadline is raised past every wait a test
+    /// makes ([`HELD_REQUEST_DEADLINE`]), so a request [`FakeGitea`] holds
+    /// ends only when the test releases it.
     pub fn wt_command_via_gitea(&self, gitea: &FakeGitea) -> Command {
         let mut command = self.wt_command_without_network();
-        command.env("HTTP_PROXY", gitea.url()).env("http_proxy", gitea.url());
+        command
+            .env("HTTP_PROXY", gitea.url())
+            .env("http_proxy", gitea.url())
+            .env(worktree_cli::env::TEST_REFRESH_DEADLINE_VAR, HELD_REQUEST_DEADLINE.as_millis().to_string());
         command
     }
 
@@ -244,11 +240,19 @@ impl MixedFixture {
     pub fn serve_gitea_origin_one_commit_ahead(&self, gitea: &FakeGitea) -> String {
         let root = self.home.path().join("gitea");
         let bare = root.join("o").join("r.git");
-        fs::create_dir_all(&bare).expect("create the served repository");
-        run_git(&bare, &["init", "--bare", "--quiet", "-b", "main"]);
-        run_git(&self.main, &["push", "--quiet", bare.to_str().unwrap(), "main:refs/heads/main"]);
-        run_git(&self.main, &["update-ref", "refs/remotes/origin/main", "main"]);
-        let output = Command::new("git")
+        fs::create_dir_all(bare.parent().expect("o")).expect("create the served repository's parent");
+        // A local bare clone takes two processes; `init --bare` and a push
+        // took eight (the push's receive-pack and its helpers among them).
+        run_git(&self.main, &["clone", "--bare", "--quiet", ".", bare.to_str().unwrap()]);
+        let main_tip = fs::read_to_string(self.main.join(".git").join("refs").join("heads").join("main"))
+            .map(|sha| sha.trim().to_string())
+            .unwrap_or_else(|_| {
+                let output = worktree::git::command().current_dir(&self.main).args(["rev-parse", "main"]).output().expect("git rev-parse");
+                assert!(output.status.success(), "rev-parse main: {output:?}");
+                String::from_utf8(output.stdout).expect("utf-8").trim().to_string()
+            });
+        write_loose_ref(&self.main.join(".git"), "refs/remotes/origin/main", &main_tip);
+        let output = worktree::git::command()
             .current_dir(&bare)
             .args(["-c", "user.name=Someone Else", "-c", "user.email=else@example.com"])
             .args(["commit-tree", "main^{tree}", "-p", "main", "-m", "pushed by someone else"])
@@ -256,7 +260,7 @@ impl MixedFixture {
             .expect("git commit-tree");
         assert!(output.status.success(), "commit-tree: {output:?}");
         let pushed = String::from_utf8(output.stdout).expect("utf-8").trim().to_string();
-        run_git(&bare, &["update-ref", "refs/heads/main", &pushed]);
+        write_loose_ref(&bare, "refs/heads/main", &pushed);
         gitea.serve_repositories(&root);
         pushed
     }
@@ -512,6 +516,14 @@ impl Drop for MixedFixture {
 /// the ones still running.
 pub const TEARDOWN_WAIT: Duration = Duration::from_secs(20);
 
+/// The worker's PR request deadline under [`FakeGitea`], set through
+/// `worktree_cli::env::TEST_REFRESH_DEADLINE_VAR`: past [`TEARDOWN_WAIT`]
+/// and every test's own wait for its worker, so a held request is ended by
+/// the test or [`WorkerReaper`], never by the production 10 s deadline. A
+/// test that held the worker once failed under heavy load when the
+/// production deadline ran out before it probed the worker's lock.
+pub const HELD_REQUEST_DEADLINE: Duration = Duration::from_secs(60);
+
 /// A repository's main checkout and the stores (as the spawned `wt` resolves
 /// them) whose locks its refresh workers hold. A store is `None` where the
 /// library could not name it.
@@ -727,12 +739,23 @@ fn try_refresh_workers(main: &Path) -> Option<Vec<RefreshWorker>> {
     Some(workers)
 }
 
+/// Every process, with the command line and working directory read only
+/// for `wt` processes. Reading those means opening the process (on Windows,
+/// its memory), so reading them for every process on the host made each
+/// 20 ms poll of a waiting test cost a full enumeration.
 fn worker_processes() -> sysinfo::System {
-    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
     let mut system = System::new();
+    system.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
+    let wt: Vec<Pid> = system
+        .processes()
+        .iter()
+        .filter(|(_, process)| Path::new(process.name()).file_stem() == Some(std::ffi::OsStr::new("wt")))
+        .map(|(pid, _)| *pid)
+        .collect();
     system.refresh_processes_specifics(
-        ProcessesToUpdate::All,
+        ProcessesToUpdate::Some(&wt),
         true,
         ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always).with_cwd(UpdateKind::Always),
     );
@@ -834,7 +857,7 @@ impl FastImport {
     }
 
     fn run(self, repo: &Path) {
-        let mut child = Command::new("git")
+        let mut child = worktree::git::command()
             .current_dir(repo)
             .args(["fast-import", "--quiet"])
             .stdin(Stdio::piped())
@@ -844,6 +867,140 @@ impl FastImport {
         let status = child.wait().expect("fast-import ran");
         assert!(status.success(), "git fast-import failed in {repo:?}:\n{}", self.stream);
     }
+}
+
+/// How long one [`mixed_template`] is reused.
+const TEMPLATE_LIFETIME: Duration = Duration::from_secs(30);
+
+/// The main checkout's directory name in a [`mixed_template`]; each linked
+/// worktree sits beside it as `<TEMPLATE_MAIN>-<branch>`.
+const TEMPLATE_MAIN: &str = "m";
+
+/// The branches of a mixed fixture, in the order their worktrees are added.
+fn branch_names(behind: usize, divergent: usize, fast_forward: usize) -> Vec<String> {
+    (0..behind)
+        .map(|i| format!("behind-{i}"))
+        .chain((0..divergent).map(|i| format!("divergent-{i}")))
+        .chain((0..fast_forward).map(|i| format!("fast-forward-{i}")))
+        .collect()
+}
+
+/// A finished mixed fixture of this shape, built once per test binary build
+/// and copied by every [`MixedFixture`] (test-speed.md, pattern 4). Building
+/// one starts about fifteen Git processes (`init`, `fast-import` and its
+/// `unpack-objects`, `reset`, and a `worktree add` plus its `reset` child per
+/// branch); a copy starts one, `worktree repair`.
+///
+/// It lives beside the binary, keyed by the binary's path, size, and
+/// modification time, by the shape, and by the current
+/// [`TEMPLATE_LIFETIME`] window; a process that finds none builds one in a
+/// temporary directory and renames it into place (a racing process's copy is
+/// discarded).
+///
+/// The window keeps the commits recent: `wt list` dates the tracking ref
+/// from its commit's committer date, and the tests read that age ("less
+/// than 1 min ago"). Templates from windows long past are removed; none a
+/// running test could still be copying.
+fn mixed_template(behind: usize, divergent: usize, fast_forward: usize) -> PathBuf {
+    use std::hash::{Hash, Hasher};
+    let exe = std::env::current_exe().expect("test binary path");
+    let metadata = fs::metadata(&exe).expect("test binary metadata");
+    let mut key = std::collections::hash_map::DefaultHasher::new();
+    (&exe, metadata.len(), metadata.modified().expect("mtime"), behind, divergent, fast_forward).hash(&mut key);
+    let window = unix_now() / TEMPLATE_LIFETIME.as_secs();
+    let parent = exe.parent().expect("binary directory").join("wt-mixed-fixture-templates");
+    let template = parent.join(format!("{window}-{:016x}", key.finish()));
+    if template.is_dir() {
+        return template;
+    }
+    fs::create_dir_all(&parent).expect("create the template directory");
+    for entry in fs::read_dir(&parent).expect("read the template directory").flatten() {
+        let name = entry.file_name();
+        let built = name.to_str().and_then(|name| name.split_once('-')).and_then(|(window, _)| window.parse::<u64>().ok());
+        if built.is_some_and(|built| built + 10 < window) {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
+    let building = tempfile::tempdir_in(&parent).expect("create a template build directory");
+    let main = building.path().join(TEMPLATE_MAIN);
+    fs::create_dir(&main).expect("create the template checkout");
+
+    run_git(&main, &["init", "-b", "main"]);
+    append_git_config(
+        &main.join(".git").join("config"),
+        &[
+            ("user.email", "test@example.com"),
+            ("user.name", "Test User"),
+            ("commit.gpgsign", "false"),
+            ("gc.auto", "0"),
+            ("core.untrackedCache", "true"),
+        ],
+    );
+
+    // One `git fast-import` writes every commit and branch below, in
+    // place of a checkout, add, and commit process per commit.
+    let mut history = FastImport::default();
+    let base = history.commit("refs/heads/main", None, "base.txt", "base", "base");
+
+    // Behind-only branches: forked at base and never advanced.
+    for i in 0..behind {
+        history.branch(&format!("behind-{i}"), &base);
+    }
+
+    // Divergent branches: one commit on the branch (ahead); `main` advances
+    // below (behind).
+    for i in 0..divergent {
+        let name = format!("divergent-{i}");
+        history.commit(&format!("refs/heads/{name}"), Some(&base), &format!("{name}.txt"), "x", "divergent commit");
+    }
+
+    // Advance `main`: behind-* are now behind by one; divergent-* diverge.
+    let advanced = history.commit("refs/heads/main", Some(&base), "main-advance.txt", "advance", "advance main");
+
+    // Fast-forward branches: forked at the advanced `main` tip with one
+    // commit (ahead, not behind). `main` does not move afterward.
+    for i in 0..fast_forward {
+        let name = format!("fast-forward-{i}");
+        history.commit(&format!("refs/heads/{name}"), Some(&advanced), &format!("{name}.txt"), "x", "fast-forward commit");
+    }
+    history.run(&main);
+    // The main checkout, still on `main`, takes its files and index.
+    run_git(&main, &["reset", "-q", "--hard", "main"]);
+
+    for name in branch_names(behind, divergent, fast_forward) {
+        let path = building.path().join(format!("{TEMPLATE_MAIN}-{name}"));
+        run_git(&main, &["worktree", "add", path.to_str().unwrap(), &name]);
+    }
+
+    let built = building.keep();
+    if fs::rename(&built, &template).is_err() {
+        assert!(template.is_dir(), "the template could not be put in place at {template:?}");
+        let _ = fs::remove_dir_all(&built);
+    }
+    template
+}
+
+/// Copies the directory `from` to the new directory `to`, leaving out
+/// `git init`'s `*.sample` hooks, which nothing here runs.
+fn copy_tree(from: &Path, to: &Path) {
+    if !to.exists() {
+        fs::create_dir(to).expect("create a copied directory");
+    }
+    for entry in fs::read_dir(from).expect("read a template directory") {
+        let entry = entry.expect("template entry");
+        let target = to.join(entry.file_name());
+        if entry.file_type().expect("entry type").is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else if !entry.file_name().to_string_lossy().ends_with(".sample") {
+            fs::copy(entry.path(), &target).expect("copy a template file");
+        }
+    }
+}
+
+/// `path` with `/` separators, as Git writes paths into a worktree's link
+/// files on every platform.
+fn git_spelling(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }
 
 /// Appends `entries` (`section[.subsection].name`, value) to the git config
@@ -872,8 +1029,17 @@ pub fn append_git_config(config: &Path, entries: &[(&str, &str)]) {
     file.write_all(text.as_bytes()).expect("append git config");
 }
 
+/// What `git update-ref <name> <commit>` writes in the repository at
+/// `git_dir` when no reflog is kept: one loose ref, which overrides a packed
+/// one.
+fn write_loose_ref(git_dir: &Path, name: &str, commit: &str) {
+    let reference = git_dir.join(name);
+    fs::create_dir_all(reference.parent().expect("a ref has a parent")).expect("create the ref's directory");
+    fs::write(reference, format!("{commit}\n")).expect("write the ref");
+}
+
 fn run_git(repo: &Path, args: &[&str]) {
-    let status = Command::new("git")
+    let status = worktree::git::command()
         .current_dir(repo)
         .args(args)
         .status()
@@ -1166,6 +1332,9 @@ struct GiteaState {
     git_waiting: usize,
     git_hold: GitHold,
     git_root: Option<PathBuf>,
+    /// The first protocol-v2 `info/refs` response, whole: it advertises
+    /// capabilities only, never refs, so every later one is the same bytes.
+    git_advertisement: Option<Vec<u8>>,
     waiting: usize,
     held: bool,
     branches_held: bool,
@@ -1216,6 +1385,7 @@ impl FakeGitea {
                 git_waiting: 0,
                 git_hold: GitHold::None,
                 git_root: None,
+                git_advertisement: None,
                 waiting: 0,
                 held: false,
                 branches_held: false,
@@ -1474,9 +1644,9 @@ fn serve_git(mut stream: TcpStream, line: &str, mut head: Vec<u8>, shared: &(Mut
         }
         state.git_waiting -= 1;
         changed.notify_all();
-        state.git_root.clone()
+        state.git_root.clone().map(|root| (root, state.git_advertisement.clone()))
     };
-    let Some(root) = root else {
+    let Some((root, advertised)) = root else {
         let _ = stream.write_all(b"HTTP/1.1 503 Fake\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
         return;
     };
@@ -1487,7 +1657,31 @@ fn serve_git(mut stream: TcpStream, line: &str, mut head: Vec<u8>, shared: &(Mut
     let target = words.next().unwrap_or_default();
     let path = target.split_once("://").map_or(target, |(_, rest)| rest.find('/').map_or("/", |at| &rest[at..]));
     let (path, query) = path.split_once('?').unwrap_or((path, ""));
-    let mut backend = Command::new("git");
+    // A protocol-v2 advertisement is answered from the first one: on
+    // Windows each `http-backend` run is three processes (git, the backend,
+    // and its `upload-pack`).
+    let advertisement = method == "GET"
+        && query == "service=git-upload-pack"
+        && header("git-protocol").is_some_and(|protocol| protocol.contains("version=2"));
+    if advertisement && let Some(response) = advertised {
+        let _ = stream.write_all(&response);
+        return;
+    }
+    if method == "POST"
+        && let Some(repo) = path.strip_suffix("/git-upload-pack")
+        && let Some(answer) = ls_refs_answer(&root.join(repo.trim_start_matches('/')), &body)
+    {
+        let head = format!(
+            "HTTP/1.1 200 OK\r\nExpires: Fri, 01 Jan 1980 00:00:00 GMT\r\nPragma: no-cache\r\n\
+             Cache-Control: no-cache, max-age=0, must-revalidate\r\n\
+             Content-Type: application/x-git-upload-pack-result\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+            answer.len()
+        );
+        let _ = stream.write_all(head.as_bytes());
+        let _ = stream.write_all(&answer);
+        return;
+    }
+    let mut backend = worktree::git::command();
     backend
         .arg("http-backend")
         .env("GIT_PROJECT_ROOT", &root)
@@ -1531,8 +1725,103 @@ fn serve_git(mut stream: TcpStream, line: &str, mut head: Vec<u8>, shared: &(Mut
     }
     let response =
         format!("HTTP/1.1 {status}\r\n{response}content-length: {}\r\nconnection: close\r\n\r\n", cgi_body.len());
-    let _ = stream.write_all(response.as_bytes());
-    let _ = stream.write_all(cgi_body);
+    let mut whole = response.into_bytes();
+    whole.extend_from_slice(cgi_body);
+    if advertisement && status.starts_with("200") && cgi_body.windows(9).any(|window| window == b"version 2") {
+        let (lock, _) = shared;
+        lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).git_advertisement.get_or_insert_with(|| whole.clone());
+    }
+    let _ = stream.write_all(&whole);
+}
+
+/// What `git upload-pack` answers a protocol-v2 `ls-refs` request `body`
+/// with, for the bare repository `repo`, read from its files: `HEAD` first
+/// when a prefix asks for it, then every matching ref in name order, each
+/// `<oid> <name>` with `HEAD`'s `symref-target` when asked, and a flush.
+/// A `fetch` (or any other command), an argument it does not know, an
+/// unborn `HEAD`, a symbolic ref under `refs/`, or a tag (which `peel`
+/// would need to read) is `None`, and `git http-backend` answers.
+///
+/// It spares `wt`'s live-head checks three processes per request on Windows
+/// (git, the backend, and its `upload-pack`); the fetch's pack still comes
+/// from Git.
+pub fn ls_refs_answer(repo: &Path, body: &[u8]) -> Option<Vec<u8>> {
+    let mut lines = Vec::new();
+    let mut rest = body;
+    while rest.len() >= 4 {
+        let length = usize::from_str_radix(std::str::from_utf8(&rest[..4]).ok()?, 16).ok()?;
+        match length {
+            0 => break,
+            1 => {
+                lines.push(None);
+                rest = &rest[4..];
+            }
+            2 | 3 => return None,
+            _ => {
+                let line = std::str::from_utf8(rest.get(4..length)?).ok()?;
+                lines.push(Some(line.trim_end_matches('\n')));
+                rest = &rest[length..];
+            }
+        }
+    }
+    let delimiter = lines.iter().position(Option::is_none)?;
+    let (capabilities, arguments) = lines.split_at(delimiter);
+    if !capabilities.contains(&Some("command=ls-refs")) {
+        return None;
+    }
+    let (mut symrefs, mut prefixes) = (false, Vec::new());
+    for argument in arguments[1..].iter().map(|line| line.unwrap_or_default()) {
+        match argument {
+            "peel" | "unborn" => {}
+            "symrefs" => symrefs = true,
+            _ => prefixes.push(argument.strip_prefix("ref-prefix ")?),
+        }
+    }
+
+    let mut refs = std::collections::BTreeMap::new();
+    if let Ok(packed) = fs::read_to_string(repo.join("packed-refs")) {
+        for line in packed.lines().filter(|line| !line.starts_with('#')) {
+            let (oid, name) = line.split_once(' ')?;
+            refs.insert(name.to_string(), oid.to_string());
+        }
+    }
+    fn loose(dir: &Path, name: &str, refs: &mut std::collections::BTreeMap<String, String>) -> Option<()> {
+        for entry in fs::read_dir(dir).ok()? {
+            let entry = entry.ok()?;
+            let name = format!("{name}/{}", entry.file_name().to_str()?);
+            if entry.file_type().ok()?.is_dir() {
+                loose(&entry.path(), &name, refs)?;
+            } else {
+                let target = fs::read_to_string(entry.path()).ok()?;
+                let target = target.trim();
+                if target.len() != 40 || !target.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                    return None;
+                }
+                refs.insert(name, target.to_string());
+            }
+        }
+        Some(())
+    }
+    loose(&repo.join("refs"), "refs", &mut refs)?;
+    if refs.keys().any(|name| name.starts_with("refs/tags/")) {
+        return None;
+    }
+    let head = fs::read_to_string(repo.join("HEAD")).ok()?;
+    let head_target = head.trim().strip_prefix("ref: ")?.to_string();
+
+    let wanted = |name: &str| prefixes.is_empty() || prefixes.iter().any(|prefix| name.starts_with(prefix));
+    let pkt = |line: String| format!("{:04x}{line}", line.len() + 4);
+    let mut answer = String::new();
+    if wanted("HEAD") {
+        let oid = refs.get(&head_target)?;
+        let symref = if symrefs { format!(" symref-target:{head_target}") } else { String::new() };
+        answer.push_str(&pkt(format!("{oid} HEAD{symref}\n")));
+    }
+    for (name, oid) in refs.iter().filter(|(name, _)| wanted(name)) {
+        answer.push_str(&pkt(format!("{oid} {name}\n")));
+    }
+    answer.push_str("0000");
+    Some(answer.into_bytes())
 }
 
 fn gitea_pulls_json(prs: &[(u64, &str)]) -> String {

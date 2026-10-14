@@ -20,6 +20,18 @@ the `rust-testing` skill; graph tests are in [git-graph.md](git-graph.md#tests).
 - On Windows the user cache ignores `HOME`, so tests that seed a store use the
   real per-user path there. `--ignore-api` binary tests are Unix-only (native
   Windows resolves the home directory without `HOME`).
+- `~/.worktree.json` and the setup candidates are different: `config_path()`
+  and `considered_dirs()` use biscuit-file's `home_dir()`, which reads `HOME`
+  on Unix and `USERPROFILE` on Windows. Set **both** for a `wt` child or an
+  `EnvGuard`-scoped test, and the config never touches the real user's file.
+  Library tests reach the resolver through `config::resolve_with(wt,
+  config_path, probe)`, so only precedence tests mutate the environment.
+- **A `wt create` child must `env_remove("WT")`** unless the test sets it. The
+  developer's shell usually exports a real `WT`, which outranks the fixture's
+  `~/.worktree.json`, so a hand-run or forgotten child creates a real worktree
+  under it. `cli/tests/base_dir_fixture` does this and closes stdin; with a
+  closed stdin `wt create` never runs setup, so the setup loop is tested
+  in-process through `choose_base_dir` and a scripted `SetupPrompt`.
 - Inside tmux `wt` cannot query the background: pass `COLORFGBG` (`15;0` dark,
   `0;15` light), or the row highlight follows the host's appearance.
 
@@ -52,12 +64,14 @@ The variable turns a missing-backend skip into a failure.
     (`$Host.UI.RawUI.GetBufferContents`), since ConPTY's output stream is a
     repaint, not text in order;
   - a third case runs `wt remove --force-worktree` from the base repo while a
-    windowless `ping` stands in the worktree, and asserts exit 4 with files,
-    registration, and branch intact.
+    windowless `ping` stands in the worktree, and asserts the usage refusal
+    (exit 3, naming `PING.EXE`; Sniff reports the held directory as an open
+    handle there) with files, registration, and branch intact.
   - It needs no terminal backend, so **CI never runs it**: `windows-latest`
     hosts none of `l2-backends` and the L2 cell is an accepted gap. Run it with
     `./scripts/cross-check.sh --os windows worktree-cli --features terminal-tests level2_powershell`
-    and read the durations (about 5 s each; a skip is 0.0x s).
+    and read the durations (7–8 s each since the removal lifecycle, measured
+    2026-10-12; a skip is 0.0x s).
 
 ## `wt list`
 
@@ -116,8 +130,9 @@ The variable turns a missing-backend skip into a failure.
   a finished attempt and receipt in the real per-user stores, or stays silent
   (`finishes: false`) for timeout cases. `Repo` removes every
   `<repo hash>.*` cache file on drop.
-- Assert through the returned `Listing` and counters: `git status` walks,
-  `for-each-ref` reads, `merge-tree` calls (via `recorder`), and
+- Assert through the returned `Listing` and counters: `git status` walks and
+  `merge-tree` calls (via `recorder`), ref reads and history questions (via
+  `crate::questions`, since both are answered in-process), and
   `Listing::regathered`; never a timing. The timing shape per path, the
   `git_calls` coverage, and timings on/off doing the same work live in
   `pipeline/timings.rs` (stage paths, decoded through `Timings::from_json`).
@@ -125,7 +140,12 @@ The variable turns a missing-backend skip into a failure.
   dirtiness, graph, and verbose labels with a from-scratch gather after the
   run.
 - Fail the Nth ref read with `recorder::fail_matching` plus an `AtomicUsize`
-  (`for-each-ref` is the only call it matches in a listing).
+  (`for-each-ref` is the only question it matches in a listing).
+- A table of cases that each build a repository and list it is one `#[test]`
+  per case (`pipeline.rs`'s `case_tests!`, `list::wait`'s
+  `receipt_matrix_tests!`, `commands::list`'s `origin_change_tests!`), with a
+  guard test comparing the listed labels with the table, so a new row cannot
+  go untested. A loop over them took 5–16 s on Windows.
 - `recorder` and `git::calls` are different counts. The recorder logs every
   **requested** call into one process-global log, *before* spawning, so an
   injected failure or a failed spawn is still logged; it needs `count-git`
@@ -157,6 +177,20 @@ nudge sets answers only then
 A teardown that skips the wait never releases the reply, so the worker
 outlives the fixture and the test fails. Never use a fixed sleep there.
 
+### Holding the worker's request
+
+`FakeGitea::hold` keeps the worker's PR request open until the test
+releases it (or `WorkerReaper` does at teardown). The worker's own request
+deadline (`REFRESH_DEADLINE`, 10 s) would otherwise end the hold on a
+loaded host before the test probed the worker's lock:
+`a_detached_workers_answer_replaces_the_stale_one_on_the_next_list` once
+got `Failed(Other)` instead of `Contended` at load average 63 on macOS.
+`MixedFixture::wt_command_via_gitea` (and every builder on it) therefore
+sets `WT_TEST_REFRESH_DEADLINE_MS` to `HELD_REQUEST_DEADLINE` (60 s), past
+`TEARDOWN_WAIT` and every test's own wait. Never set it lower than the
+production deadline: a test that needs a request to time out belongs with
+the perf gates.
+
 ### Shortening a held listing's wait
 
 A listing whose worker is held past the wait would otherwise sit out the
@@ -177,9 +211,12 @@ on that one command: `list_prs::held(command)`,
   first (`gate.wait_for_runs(1)`, `origin.wait_for_requests`). With 300 ms
   the worker may not have recorded its attempt by the time the listing
   returns.
-- Keep `a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint`
-  on the real 3 s path. Never set the variable in a `perf_` test: the
-  held-worker gates assert a wait of at least 3 s.
+- `a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint`
+  waits 2.5 s (`HELD_BUDGET`): its head half must finish inside the wait
+  under suite load. The release wiring (real launch, 3 s, forced wait) is
+  pinned by `commands::list::tests::a_listing_launches_the_real_worker_and_waits_the_real_budgets`,
+  and the perf gates run the real 3 s. Never set the variable in a `perf_`
+  test: the held-worker gates assert a wait of at least 3 s.
 - A release-profile test run ignores the variable. Those tests then pass
   on the 3 s wait, only more slowly.
 

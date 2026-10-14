@@ -83,7 +83,29 @@ WSL2 follows these Linux code paths; its archive-mode traps are in
   beside other sessions' builds). It is not a code error.
 - Retry once with fewer parallel builds; extra arguments go to
   `cargo nextest run`: `just cross-check <package> --os linux --build-jobs 2`.
+  The flag must follow the package name; before it the script exits 2 with
+  `unknown flag --build-jobs`.
   The retry reused the cached build and passed.
+
+## inotify through `notify`: a renamed watch root goes quiet
+
+Measured 2026-10-11 with `notify` 8.2 on `BUILD_LINUX` (ZFS) and the WSL
+guest (ext4):
+
+- When a directory watched recursively is renamed, the kernel watch follows
+  the inode. `notify` instead emits `Modify(Name(From))` for the root and
+  drops the watch: a later `unwatch` returns `WatchNotFound`, and writes
+  under the new name produce **no events**.
+- A recursive watch on the parent keeps both names covered, because
+  `notify` re-adds watches for the moved-in subtree. That costs one watch
+  per directory of everything else under the parent.
+- Files created in a new directory before `notify` adds its watch are
+  missed (the recursive-add race).
+- `renameat2(RENAME_NOREPLACE)` works on ZFS, ext4, and tmpfs. Limits on
+  `BUILD_LINUX`: `max_user_watches` 4194304, `max_user_instances` 65536,
+  `max_queued_events` 8388608, so a blocked reader did not overflow at
+  40,000 events there. The WSL guest's much lower limits are in
+  [wsl.md](wsl.md).
 
 ## Reading `/proc` for another process's descriptors
 

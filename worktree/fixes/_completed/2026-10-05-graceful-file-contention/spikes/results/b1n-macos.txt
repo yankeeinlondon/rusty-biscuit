@@ -1,0 +1,29 @@
+--- n=64
+   1 S2 B1 round=0 files=64 distinct-before-marker=65 marker-latency-ms=Some(3) new-paths-after-marker=0
+   1 S2 B1 round=1 files=64 distinct-before-marker=65 marker-latency-ms=Some(4) new-paths-after-marker=0
+   1 S2 B1 round=2 files=64 distinct-before-marker=69 marker-latency-ms=Some(1) new-paths-after-marker=0
+--- n=256
+   1 S2 B1 round=0 files=256 distinct-before-marker=256 marker-latency-ms=Some(8) new-paths-after-marker=0
+   1 S2 B1 round=1 files=256 distinct-before-marker=357 marker-latency-ms=Some(11) new-paths-after-marker=0
+   1 S2 B1 round=2 files=256 distinct-before-marker=318 marker-latency-ms=Some(32) new-paths-after-marker=18
+--- n=512
+   1 S2 B1 round=0 files=512 distinct-before-marker=513 marker-latency-ms=Some(78) new-paths-after-marker=0
+   1 S2 B1 round=1 files=512 distinct-before-marker=522 marker-latency-ms=Some(20) new-paths-after-marker=16
+   1 S2 B1 round=2 files=512 distinct-before-marker=518 marker-latency-ms=Some(30) new-paths-after-marker=0
+--- n=1000
+   1 S2 B1 round=0 files=1000 distinct-before-marker=1001 marker-latency-ms=Some(55) new-paths-after-marker=0
+   1 S2 B1 round=1 files=1000 distinct-before-marker=1277 marker-latency-ms=Some(85) new-paths-after-marker=0
+   1 S2 B1 round=2 files=1000 distinct-before-marker=1073 marker-latency-ms=Some(135) new-paths-after-marker=18
+S2 B1 round=0 files=256 distinct-before-marker=257 marker-latency-ms=Some(8) new-paths-after-marker=0
+S2 B1 round=1 files=256 distinct-before-marker=258 marker-latency-ms=Some(8) new-paths-after-marker=0
+S2 B1 round=2 files=256 distinct-before-marker=268 marker-latency-ms=Some(9) new-paths-after-marker=0
+S2 B1 round=0 files=256 distinct-before-marker=256 marker-latency-ms=Some(2) new-paths-after-marker=0
+S2 B1 after-marker Create(File) "r1-f93"
+S2 B1 after-marker Modify(Data(Content)) "r1-f93"
+S2 B1 after-marker Create(File) "r1-f94"
+S2 B1 after-marker Modify(Data(Content)) "r1-f94"
+S2 B1 round=1 files=256 distinct-before-marker=255 marker-latency-ms=Some(5) new-paths-after-marker=16
+S2 B1 round=2 files=256 distinct-before-marker=261 marker-latency-ms=Some(4) new-paths-after-marker=0
+S2 B1 round=0 files=256 distinct-before-marker=257 marker-latency-ms=Some(7) new-paths-after-marker=0
+S2 B1 round=1 files=256 distinct-before-marker=256 marker-latency-ms=Some(128) new-paths-after-marker=0
+S2 B1 round=2 files=256 distinct-before-marker=256 marker-latency-ms=Some(7) new-paths-after-marker=0

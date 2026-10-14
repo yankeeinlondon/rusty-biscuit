@@ -48,6 +48,11 @@ schematic-fresh-output = { max-threads = 1 }
 # the developer's desktop. Parallel L2 runs them one at a time so at most one
 # window is open, while the rest of the tier keeps its parallel workers.
 apple-terminal-l2 = { max-threads = 1 }
+# Every FSEvents stream registers with the one fseventsd, which serves those
+# registrations one after another: fifteen `wt remove` observer tests starting
+# streams together each waited up to 5s, while one alone starts in about 20ms.
+# macOS runs them one at a time; the rest of the suite keeps its workers.
+fsevents-l1 = { max-threads = 1 }
 
 [profile.default]
 # Direct local nextest invocations also leave capacity for other host work.
@@ -171,6 +176,11 @@ test-group = 'apple-terminal-l2'
 # nothing is actually hung. Raise the termination ceiling to 30s×3 = 90s so a
 # contended run is governed by its own 40s deadline + assertion, while a
 # genuine deadlock still trips the longer window.
+[[profile.default.overrides]]
+platform = { host = "cfg(target_os = \"macos\")" }
+filter = 'package(worktree) & (test(/^remove::.*::native_/) | test(/^remove::observation::fsevents::/))'
+test-group = 'fsevents-l1'
+
 [[profile.default.overrides]]
 filter = 'package(claudine-cli) & test(/level2_/)'
 slow-timeout = { period = "30s", terminate-after = 3 }

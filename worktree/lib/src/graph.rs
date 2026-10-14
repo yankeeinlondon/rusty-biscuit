@@ -17,7 +17,9 @@
 //! `worktree/docs/git-graph.md`.
 //!
 //! Every Git call runs in [`GatherInput::repo`], never in the process's
-//! current directory.
+//! current directory. The history questions are answered in-process when
+//! `gix` can read the repository ([`crate::questions`] names each one by the
+//! Git command that answers it otherwise).
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -32,7 +34,7 @@ use crate::worktree::WorktreeList;
 
 mod topology;
 
-use topology::{Boundary, Extent, GatherGap, History, Integration, LaneHistory, LaneWindow};
+use topology::{Boundary, Commits, Extent, GatherGap, History, Integration, LaneHistory, LaneWindow};
 
 /// One entry on a line of work.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -364,13 +366,15 @@ fn gather_steps(
     if !needs_graph && !(needs_verbose && input.has_verbose()) {
         return (None, None);
     }
+    let commits = open_commits(&input.repo);
     // Verbose details alone never tell a shallow "no" from a real one, so
     // only the graph pays for the check.
     let (history, history_gap) = if needs_graph {
-        let (history, read) = timing::record(steps.as_deref_mut(), Stage::ShallowCheck, || History::read(&input.repo));
+        let (history, read) =
+            timing::record(steps.as_deref_mut(), Stage::ShallowCheck, || History::read(&input.repo, commits.as_ref()));
         (history, read.is_err())
     } else {
-        (History::complete(&input.repo), false)
+        (History::complete(&input.repo, commits.as_ref()), false)
     };
     let Some((tips, tips_gap)) =
         timing::record(steps.as_deref_mut(), Stage::DefaultTips, || DefaultTips::read(input, &history))
@@ -412,6 +416,44 @@ fn gather_steps(
         })
     });
     (graph, verbose)
+}
+
+/// The in-process commit reader for `repo`, unless a test asked for Git.
+fn open_commits(repo: &std::path::Path) -> Option<Commits> {
+    #[cfg(any(test, feature = "count-git"))]
+    if history_through_git::active() {
+        return None;
+    }
+    Commits::open(repo)
+}
+
+/// Makes every gather answer its history questions by running Git, as when
+/// `gix` cannot read the repository, so tests can cover that path and compare
+/// the two.
+#[cfg(any(test, feature = "count-git"))]
+pub mod history_through_git {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static HELD: AtomicUsize = AtomicUsize::new(0);
+
+    pub(super) fn active() -> bool {
+        HELD.load(Ordering::SeqCst) > 0
+    }
+
+    /// Git answers while the guard lives, on every thread.
+    #[must_use = "Git answers only while the guard is held"]
+    pub struct Guard(());
+
+    pub fn enter() -> Guard {
+        HELD.fetch_add(1, Ordering::SeqCst);
+        Guard(())
+    }
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            HELD.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
 }
 
 /// The fork parent recorded for `branch`, when it is another existing branch

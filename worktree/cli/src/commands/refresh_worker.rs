@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 
 use sniff::remote::blocking::PrUnavailable;
 use worktree::api_preference;
-use worktree::git::git_from;
+use worktree::git::calls;
 use worktree::live_remote::GitFailure;
 use worktree::pull_requests::{
     FetchedPrs, OpenPrSource, PrRequestError, REFRESH_DEADLINE, RefreshOutcome, SniffOpenPrSource, origin_digest,
@@ -79,6 +79,7 @@ fn worker_command(exe: &Path, main: &Path, args: &LaunchArgs) -> Command {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    worktree::git::forget_installation_hint(&mut command);
     sniff::process::configure_detached_child(&mut command);
     command
 }
@@ -241,16 +242,19 @@ fn run_and_record(
 /// with `None` for a half that panicked.
 ///
 /// Each half is joined separately and a panic is discarded, so one half's
-/// panic neither stops nor hides the other's publication.
+/// panic neither stops nor hides the other's publication. The Git processes
+/// each half starts count into the caller's [`calls`] scope, except those of
+/// a half that panicked.
 fn run_halves<P: Send, H: Send>(
     main: &Path,
     pr: impl FnOnce(&Path) -> P + Send,
     head: impl FnOnce(&Path) -> H + Send,
 ) -> (Option<P>, Option<H>) {
+    let counted = calls::TaskHandle::current();
     std::thread::scope(|scope| {
-        let pr = scope.spawn(|| pr(main));
-        let head = scope.spawn(|| head(main));
-        (pr.join().ok(), head.join().ok())
+        let pr = scope.spawn(move || counted.run(|| pr(main)));
+        let head = scope.spawn(move || counted.run(|| head(main)));
+        (pr.join().ok().map(calls::joined), head.join().ok().map(calls::joined))
     })
 }
 
@@ -359,9 +363,13 @@ impl GitRemote for TimedGit<'_> {
 }
 
 fn worker_source(origin: &str) -> Box<dyn OpenPrSource> {
+    #[cfg(debug_assertions)]
+    let deadline = crate::env::test_refresh_deadline().unwrap_or(REFRESH_DEADLINE);
+    #[cfg(not(debug_assertions))]
+    let deadline = REFRESH_DEADLINE;
     Box::new(SniffOpenPrSource {
         remote_url: origin.to_string(),
-        deadline: REFRESH_DEADLINE,
+        deadline,
     })
 }
 
@@ -369,16 +377,7 @@ fn worker_source(origin: &str) -> Box<dyn OpenPrSource> {
 /// (not a linked worktree, not a subdirectory).
 fn main_checkout(repo: &Path) -> Option<PathBuf> {
     let canonical = std::fs::canonicalize(repo).ok()?;
-    let out = git_from(
-        &canonical,
-        &canonical,
-        &["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir"],
-    )
-    .ok()?;
-    let mut lines = out.lines().map(|line| std::fs::canonicalize(line.trim()).ok());
-    let (Some(Some(top)), Some(Some(git_dir)), Some(Some(common))) = (lines.next(), lines.next(), lines.next()) else {
-        return None;
-    };
+    let [top, git_dir, common] = worktree::git::checkout_layout(&canonical)?;
     (top == canonical && git_dir == common).then_some(canonical)
 }
 
@@ -402,7 +401,7 @@ mod tests {
     const WAIT: Duration = Duration::from_secs(10);
 
     fn git(dir: &Path, args: &[&str]) {
-        let status = Command::new("git").current_dir(dir).args(args).status().expect("git");
+        let status = worktree::git::command().current_dir(dir).args(args).status().expect("git");
         assert!(status.success(), "git {args:?}");
     }
 
@@ -1076,5 +1075,90 @@ mod tests {
         let halves = worker.span(&[Stage::WorkerHalves]).expect("halves");
         assert_eq!(stages(halves.children()), [Stage::HeadRefresh], "the panicked half is unknown, not zero");
         assert_eq!(stages(halves.find(&[Stage::HeadRefresh]).unwrap().children()), [Stage::HeadCheck, Stage::HeadFetch]);
+    }
+
+    fn git_stdout(dir: &Path, args: &[&str]) -> String {
+        let output = worktree::git::command().current_dir(dir).args(args).output().expect("git");
+        assert!(output.status.success(), "git {args:?}");
+        String::from_utf8(output.stdout).expect("utf-8").trim().to_string()
+    }
+
+    /// Points `HOME` and `XDG_CACHE_HOME` into `home` until dropped, then
+    /// removes every store, lock, and receipt the worker made for `main`.
+    /// Native Windows resolves the user cache without either variable, so
+    /// there the worker's files land in the real cache under `main`'s own
+    /// hash, and only the removal keeps it clean.
+    struct IsolatedWorker {
+        main: PathBuf,
+        previous: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl IsolatedWorker {
+        fn new(home: &Path, main: &Path) -> Self {
+            let vars = [("HOME", home.to_path_buf()), ("XDG_CACHE_HOME", home.join("cache"))];
+            let previous = vars.iter().map(|(name, _)| (*name, std::env::var_os(name))).collect();
+            for (name, value) in vars {
+                // SAFETY: the test is serial and restores the variables on drop.
+                unsafe { std::env::set_var(name, value) };
+            }
+            Self { main: main.to_path_buf(), previous }
+        }
+    }
+
+    impl Drop for IsolatedWorker {
+        fn drop(&mut self) {
+            if let Ok(store) = remote_head_store_path(&self.main)
+                && let (Some(dir), Some(name)) = (store.parent(), store.file_name().and_then(|name| name.to_str()))
+                && let Some((hash, _)) = name.split_once('.')
+                && let Ok(entries) = std::fs::read_dir(dir)
+            {
+                let prefix = format!("{hash}.");
+                for entry in entries.flatten() {
+                    if entry.file_name().to_string_lossy().starts_with(&prefix) {
+                        let _ = std::fs::remove_file(entry.path());
+                    }
+                }
+            }
+            for (name, value) in self.previous.drain(..) {
+                // SAFETY: as in `IsolatedWorker::new`.
+                match value {
+                    Some(value) => unsafe { std::env::set_var(name, value) },
+                    None => unsafe { std::env::remove_var(name) },
+                }
+            }
+        }
+    }
+
+    /// The whole worker, both halves on their threads, starts git only to
+    /// check the remote head and fetch: each process costs about 47 ms on
+    /// Windows, inside `wt list`'s 3 s wait. The checkout is located
+    /// in-process. A local origin has no PR provider and no branch-head API,
+    /// so the PR half asks nothing and the check falls back to `ls-remote`.
+    #[test]
+    #[serial_test::serial]
+    fn a_fetching_worker_starts_only_ls_remote_and_fetch() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let origin = root.path().join("origin.git");
+        let main = root.path().join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        git(root.path(), &["init", "-q", "--bare", "-b", "main", origin.to_str().unwrap()]);
+        git(&main, &["init", "-q", "-b", "main"]);
+        git(&main, &["remote", "add", "origin", origin.to_str().unwrap()]);
+        let commit = ["-c", "user.email=t@example.com", "-c", "user.name=T", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m"];
+        git(&main, &[&commit[..], &["first"]].concat());
+        git(&main, &["push", "-q", "origin", "main"]);
+        let first = git_stdout(&main, &["rev-parse", "HEAD"]);
+        git(&main, &[&commit[..], &["second"]].concat());
+        git(&main, &["push", "-q", "origin", "main"]);
+        let pushed = git_stdout(&main, &["rev-parse", "HEAD"]);
+        git(&main, &["update-ref", "refs/remotes/origin/main", &first]);
+        let _isolated = IsolatedWorker::new(&root.path().join("home"), &main);
+
+        let scope = calls::CallScope::enter();
+        run(&main, Some(ID), false);
+        let started = scope.finish();
+
+        assert_eq!(git_stdout(&main, &["rev-parse", "refs/remotes/origin/main"]), pushed, "the worker fetched");
+        assert_eq!(started, 2, "ls-remote and fetch, nothing else");
     }
 }
