@@ -581,6 +581,8 @@ pub fn run_compose(
                 // Frontmatter drives the pipeline; once composition is complete, discard it.
                 composed.content().to_string()
             };
+            let content =
+                darkmatter::markdown::render_tree::embedded::without_embedded_metadata(&content);
             if show {
                 let artifact = OutputArtifact {
                     content: content.clone(),

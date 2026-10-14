@@ -68,6 +68,7 @@ pub mod code_renderer;
 // lib-side dead-code lint stays silenced.
 #[allow(dead_code)]
 pub(crate) mod inline_extension;
+pub mod embedded;
 pub mod entrypoints;
 pub mod fold;
 pub mod inventory;

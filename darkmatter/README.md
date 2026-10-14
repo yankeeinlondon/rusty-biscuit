@@ -7,6 +7,7 @@ last_updated: 2026-09-17
 <img src="../assets/darkmatter.png" style="width: 250px" />
 
 - [Compose](./docs/topics/what-is-composition.md) documents together dynamically
+    - Export readable Markdown with portable file links; see [compose output](./docs/cli/compose.md)
 - Render to [multiple output formats](./docs/topics/output-formats.md)
 - Compose supports body `::shell` expansion, `::shell-block` / `::end-block` multi-command blocks, and top-level frontmatter `$(...)` shell expansion with shared approval and timeout controls
 - YAML frontmatter rejects duplicate keys at every mapping depth; explicit

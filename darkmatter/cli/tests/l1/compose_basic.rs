@@ -4,6 +4,33 @@ use common::CliProcessFixture;
 use predicates::prelude::*;
 
 #[test]
+fn compose_file_links_exports_portable_markdown_without_render_metadata() {
+    let fixture = CliProcessFixture::named("compose_file_links_portable_markdown");
+    assert!(fixture.initialize_repository());
+    fixture.write_file("cwd/standards/modes/mode-1004.md", "# Focus\n");
+    fixture.write_file("cwd/standards/osc/osc 8.md", "# Hyperlinks\n");
+    let source = fixture.write_file(
+        "cwd/research/terminals/_fleet.md",
+        "---\ntitle: Fleet\n---\n# Resources\n\n### Modes\n\n::file-links &standards/modes/*.md\n\n### OSC\n\n::file-links --dir ../../standards/osc\n",
+    );
+
+    for frontmatter in [false, true] {
+        let mut command = fixture.command();
+        command.arg("compose").arg(&source);
+        if frontmatter {
+            command.arg("--frontmatter");
+        }
+        let result = command.assert().success();
+        let output = String::from_utf8_lossy(&result.get_output().stdout);
+        assert!(!output.contains("bt:render-tree"), "{output}");
+        assert!(!output.contains("file://"), "{output}");
+        assert!(output.contains("[mode-1004.md](&standards/modes/mode-1004.md)"), "{output}");
+        assert!(output.contains("[osc 8.md](<&standards/osc/osc 8.md>)"), "{output}");
+        assert!(output.contains("title: Fleet") == frontmatter, "{output}");
+    }
+}
+
+#[test]
 fn test_compose_basic() {
     let fixture = CliProcessFixture::named("test_compose_basic");
     fixture

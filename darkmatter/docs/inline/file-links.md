@@ -154,6 +154,19 @@ all. Consumers that render the composed Markdown without darkmatter's fold see
 the embedded **portable fallback**: a plain nested link list between the
 embedding markers.
 
+`md compose` exports just the readable fallback in Markdown output, omitting
+the internal marker comments. Both glob and directory listings use the normal
+link normalization rules: nearby paths are relative to the source document,
+and more distant targets in the same repository use `&` references, for example:
+
+```md
+- 📄 [mode-1004.md](&biscuit-terminal/docs/research/terminal-standards/modes/mode-1004.md)
+```
+
+The in-memory composed document retains the styled subtree for terminal,
+HTML, and JSON rendering. Its fallback links are normalized independently of
+the subtree's absolute hyperlink targets.
+
 ## Empty Results
 
 When no files match, the behavior depends on the compose strictness:

@@ -1,7 +1,7 @@
 //! Link Normalization operation for the compose pipeline.
 //!
-//! Converts the absolute destinations [`link_resolve`](super::link_resolve)
-//! wrote back into portable references in the Finalization stage, through
+//! Converts absolute destinations, including generated local `file:` URLs,
+//! into portable references in the Finalization stage, through
 //! [`biscuit_file::PortablePath`] and its default strategy. Runs only on the
 //! root document.
 
@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use crate::markdown::Markdown;
 use crate::markdown::compose::{ComposeReport, ComposeWarning};
 use crate::markdown::reference::{
-    ReferenceKind, ReferenceTarget,
+    ReferenceKind, ReferenceSyntax, ReferenceTarget,
     html::{
         extract_html_audio, extract_html_iframes, extract_html_images, extract_html_link_tags,
         extract_html_links, extract_html_script_blocks, extract_html_sources,
@@ -98,7 +98,7 @@ fn compose_spelling(reference: &str, strategy: &PortabilityPreference) -> String
     reference.to_string()
 }
 
-/// Normalizes absolute link destinations back into portable references.
+/// Normalizes absolute paths and local `file:` URLs into portable references.
 ///
 /// This operation is the inverse of [`link_resolve`](super::link_resolve::link_resolve).
 /// It runs during the Finalization phase on the root document only, with the
@@ -146,15 +146,35 @@ pub fn normalize_links(
 
     let mut to_normalize = Vec::new();
     for record in records {
-        let ReferenceTarget::LocalPath { raw } = &record.target else {
+        let Some(destination) = record.target.raw().map(str::to_string) else {
             continue;
         };
-        let Some(destination) = raw.to_str().map(str::to_string) else {
-            continue;
+        let path_text = split_suffix(&destination).0;
+        let target = match &record.target {
+            ReferenceTarget::LocalPath { .. } if Path::new(path_text).is_absolute() => {
+                PathBuf::from(path_text)
+            }
+            ReferenceTarget::OtherScheme { scheme, .. } if scheme == "file" => {
+                let Some(path) = url::Url::parse(path_text)
+                    .ok()
+                    .and_then(|url| url.to_file_path().ok())
+                else {
+                    continue;
+                };
+                // A decoded filename must not become a link-layer suffix.
+                if let Some(text) = try_portable_string(&path)
+                    && split_suffix(&text).0 != text
+                {
+                    report.add_warning(ComposeWarning::new(
+                        STAGE,
+                        format!("the destination <blue>{destination}</blue> was left as a file URL because its filename contains link-suffix syntax"),
+                    ));
+                    continue;
+                }
+                path
+            }
+            _ => continue,
         };
-        if !Path::new(split_suffix(&destination).0).is_absolute() {
-            continue;
-        }
         match record.kind {
             ReferenceKind::Hyperlink
             | ReferenceKind::Image
@@ -164,7 +184,7 @@ pub fn normalize_links(
             | ReferenceKind::HtmlIframe
             | ReferenceKind::ScriptImport
             | ReferenceKind::CssImport
-            | ReferenceKind::FontImport => to_normalize.push((record, destination)),
+            | ReferenceKind::FontImport => to_normalize.push((record, destination, target)),
             _ => {}
         }
     }
@@ -174,7 +194,7 @@ pub fn normalize_links(
     }
 
     // Sort by span start descending for safe in-place replacement
-    to_normalize.sort_by_key(|(r, _)| std::cmp::Reverse(r.origin.span.start));
+    to_normalize.sort_by_key(|(r, _, _)| std::cmp::Reverse(r.origin.span.start));
 
     // One context for the whole document: the request's, derived for the
     // source. `PortablePath` never captures process state itself.
@@ -183,9 +203,9 @@ pub fn normalize_links(
     let mut applied_count = 0;
     let mut reported_names = BTreeSet::new();
 
-    for (record, destination) in to_normalize {
+    for (record, destination, target) in to_normalize {
         let (path_text, suffix) = split_suffix(&destination);
-        let target = in_context_spelling(Path::new(path_text), &ctx);
+        let target = in_context_spelling(&target, &ctx);
         let portable = PortablePath::from_path(target)
             .with_portable_env(options.portable_env.iter().cloned())
             .with_ctx(&ctx);
@@ -207,8 +227,7 @@ pub fn normalize_links(
         };
         report_invalid_names(result.findings(), &mut reported_names, report);
 
-        // The absolute fallback rewrites nothing: the destination already is
-        // the absolute path.
+        // Preserve the authored absolute spelling, including a file URL.
         if *result.strategy() == PortabilityPreference::AbsolutePath {
             if options.absolute_fallback_warning {
                 report.add_warning(absolute_fallback_warning(&destination, path_text));
@@ -216,11 +235,25 @@ pub fn normalize_links(
             continue;
         }
 
-        let replacement = format!(
+        let mut replacement = format!(
             "{}{suffix}",
             compose_spelling(result.reference().raw(), result.strategy())
         );
         if let Some((start, end)) = super::find_target_range(&new_content, &record, &destination) {
+            // A decoded file URL can introduce whitespace or delimiters into a
+            // destination that was safe to write without angle brackets.
+            if matches!(record.target, ReferenceTarget::OtherScheme { .. })
+                && matches!(
+                    record.origin.syntax,
+                    ReferenceSyntax::MarkdownLink | ReferenceSyntax::MarkdownImage
+                )
+                && new_content.as_bytes().get(start.wrapping_sub(1)) != Some(&b'<')
+                && replacement.chars().any(|ch| {
+                    ch.is_ascii_whitespace() || matches!(ch, '(' | ')' | '<' | '>')
+                })
+            {
+                replacement = format!("<{}>", replacement.replace('<', "\\<").replace('>', "\\>"));
+            }
             new_content.replace_range(start..end, &replacement);
             applied_count += 1;
         }
@@ -367,6 +400,36 @@ mod tests {
         assert_eq!(output, "![img](../assets/image.png)\n");
         assert_eq!(report.link_normalizations_applied, 1);
         assert!(link_warnings(&report).is_empty(), "{:?}", report.warnings);
+    }
+
+    #[test]
+    fn local_file_urls_become_portable_without_losing_spaces_or_suffixes() {
+        let fixture = RepoFixture::new(&["image name.png"]);
+        let target = url::Url::from_file_path(fixture.repo.join("assets/image name.png")).unwrap();
+        let content = format!("[image]({target}#details)\n[web](https://example.com/image.png)\n");
+
+        let (output, report) = normalize(&content, &options_with_repo(&fixture.source));
+
+        assert_eq!(output, "[image](<../assets/image name.png#details>)\n[web](https://example.com/image.png)\n");
+        assert_eq!(
+            extract_markdown_links(&output, &crate::markdown::compose::ComposeSource::Unknown).len(),
+            2
+        );
+        assert_eq!(report.link_normalizations_applied, 1);
+        assert!(link_warnings(&report).is_empty(), "{:?}", report.warnings);
+    }
+
+    #[test]
+    fn local_file_urls_preserve_encoded_filename_delimiters() {
+        let fixture = RepoFixture::new(&["section#one.md"]);
+        let target = url::Url::from_file_path(fixture.repo.join("assets/section#one.md")).unwrap();
+        let content = format!("[section]({target})\n");
+
+        let (output, report) = normalize(&content, &options_with_repo(&fixture.source));
+
+        assert_eq!(output, content);
+        assert_eq!(report.link_normalizations_applied, 0);
+        assert_eq!(link_warnings(&report).len(), 1);
     }
 
     /// The document's own directory is the route's origin, whatever the

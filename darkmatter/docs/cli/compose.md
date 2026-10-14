@@ -12,6 +12,12 @@ It is used for document assembly workflows like:
 
 Unlike `read`, `compose` focuses on transformed content, not display rendering defaults.
 
+Markdown output exports `::file-links` as readable linked lists without internal
+render-tree metadata comments. Local `file:` URLs use the same portable-link
+normalization as absolute paths: nearby relative links first, then repository
+references such as `&docs/standards/mode-1004.md`. Terminal, HTML, and JSON
+output retain the component's styling and absolute hyperlink targets.
+
 ## Reporting
 
 ### Usage
