@@ -14,7 +14,6 @@ docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
 packages:
     - claudine
-human_review: false
 source_files_during_phase_2:
     - claudine/lib/src/config/tts.rs
     - claudine/lib/src/config/claudine_config/tests.rs
@@ -44,28 +43,71 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - claudine/lib/src/composition/lifecycle/prewarm/mod.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/classify.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/worker.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/worker/tests.rs
+    - claudine/lib/src/composition/lifecycle/tests/audio_emission.rs
+    - claudine/lib/tests/l1/context_construction_guard.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/mod.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/worker.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/classify.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/fixture.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/sequence.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/sequence/tests.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/tests.rs
+    - claudine/lib/src/invocation_context.rs
+    - claudine/lib/tests/l1/context_construction_guard.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/tts_prewarm.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/SKILL.md
+human_review: false
 message_to_agent: |-
-    Phase 3 notes for the next phase:
-    - Entry points (all crate-private, re-exported from
-      composition::lifecycle::prewarm): lifecycle_phrases(&LifecycleConfig)
-      and stack_phrases(scope, &[LifecycleNode]) return Vec<Phrase>
-      { scope, path, text: &Expr }; classify(scope, &Expr, &PrewarmInputs)
-      returns Classification::Early(resolved_text) or Skip(reason);
-      PrewarmKey::new(&text, &TtsConfig) is the dedup key.
-    - PrewarmInputs is { frontmatter: Map, context: DocumentContext,
-      sequence_injected_keys: BTreeSet<String> }. DocumentContext::Captured(cc)
-      is the document's own ComposeContext (prepared.compose_context with
-      env_overrides applied); use Pending(cc) in sequence preflight, where any
-      ctx/env phrase is skipped. Never build one with ComposeContext::capture*
-      in production; it reads the process environment.
-    - classify does no I/O and runs no function or shell, but it does build an
-      EffectiveState and evaluate. It is cheap, but call it on the worker side
-      or after the launch-critical path, per the spec's "never delay launch".
-    - Playback and pre-warm share lifecycle::executor::evaluate_operand_in.
-      The single SubtreeCompose owner is now interpolate_text_in (the guard
-      baseline in cli/tests/l1/composition_seams.rs names it).
-    - The prewarm module still carries #![allow(dead_code, unused_imports)];
-      remove it once the worker uses these functions (Phase 4).
+    Phase 5 notes for Phase 6 (docs, skill, audit):
+    - Behavior to document: one deferred worker per top-level command
+      (compose, inline-compose, sequence, provider wrapper). It starts on the
+      first submission that speaks, using that document's lifecycle
+      settings, so the first speaking document's `tts` config and `prewarm`
+      decide for the whole invocation. Submission points: the bootstrap
+      before `initialize` (staged and loop), every prepared document before
+      launch (stabilized reread, loop iteration, proxy target, sequence step
+      or task), harness retry/resume/adoption, and sequence preflight before
+      step one.
+    - Limit to state plainly: a lifecycle mapping `set` in `initialize` (or
+      any event) changes runtime state, not the reread's frontmatter. A
+      phrase reading a `set` key is pre-warmed with its earlier text and
+      misses the cache at event time (never wrong audio). A document that
+      rewrites itself (`set_frontmatter`) is re-read and warmed with the new
+      text.
+    - In a sequence, the per-step overlay keys (state, previous, next,
+      outputs, sequence_id), the caller's setters, and a prompt task's
+      `params` are late. Preflight also leaves late any frontmatter value
+      still holding `{{`, `$(`, or a backtick, plus `ctx`/`env` reads.
+    - The CLI test seam is CLAUDINE_TEST_PREWARM=record:<path> or
+      block:<path> (test-fixtures only). The SKILL.md now has a short
+      pre-warm wiring paragraph; add the `tts` keys and shape table there.
+    - Fixture gaps (Phase 6 task): the criterion-10 test sets
+      TMPDIR/TMP/TEMP and BISCUIT_SPEAKS_CACHE on its own builder.
+      CliProcessFixture still does not set them by default; decide whether to
+      move them into the fixture.
 ---
 # Implementation Log for 2026-10-22-tts-prewarm (6 phases)
 
@@ -388,3 +430,260 @@ format or configuration.
 - No `cfg(windows)`, path comparison, new dependency, or CI cell; the one
   temp path in a test is never executed or compared, so no cross-OS rig run
   was needed.
+
+## Phase 4
+
+### What changed
+
+- New `lib/src/composition/lifecycle/prewarm/worker.rs`:
+  - `PrewarmWorker` is the invocation-owned guard. `start(&GlobalSettings,
+    dry_run)` checks the gates, builds the candidate config with
+    `tts_config_from_settings(settings.tts)` (the exact config lifecycle
+    `say` plays with, R1), and starts one worker with `SpeakPreparer`.
+    `start_gated` is the same with the preparer injected; `start_with` skips
+    the gates (tests); `disabled()` is the zero-cost no-op.
+  - `disabled_by(dry_run, prewarm_setting, playa_dry_run)` is the pure gate:
+    `--dry-run`, then `prewarm: false`, then `PLAYA_DRY_RUN` in exactly
+    Playa's spellings (`1`, `true`, `TRUE`, `yes`).
+  - `PrewarmHandle` (cloneable) `submit_phrases(phrases, &PrewarmInputs)`
+    returns at once: it gates before classifying, classifies on the caller's
+    thread (no I/O), records each `PrewarmKey` when queued, and sends the
+    resolved text over an unbounded channel. A key is never queued twice in
+    one invocation, whether it is in progress, done, or failed.
+  - The worker is a dedicated `std::thread` running a current-thread tokio
+    runtime. `Speak::prepare` does provider discovery synchronously before
+    its first await, so polling it on the launch runtime would occupy one of
+    its threads; a separate thread keeps every TTS operation off it, and
+    works whether or not the caller has a runtime. It inherits the caller's
+    tracing dispatcher and span.
+  - Serial: one `prepare` future at a time. The first failure logs one
+    `warn` with no phrase, secret, or provider text; later failures are
+    silent; later candidates continue. No fallback provider.
+  - Drop sets a `watch` cancel flag; the worker drops its in-flight future
+    (cancellation) and exits without draining the queue. Drop waits at most
+    250 ms for that acknowledgement so the dependency's child/tempfile
+    cleanup runs before process exit, but never for synthesis. Submissions
+    after cancellation are no-ops.
+- `prewarm/mod.rs`: registers `worker`; the module allow stays
+  (`dead_code`, `unused_imports`) with a new reason, because nothing in
+  production starts the worker until Phase 5.
+- `prewarm/classify.rs`: removed an unused `is_template_operand` import that
+  the module allow had been hiding since Phase 3 (drift found and fixed).
+- `lib/tests/l1/context_construction_guard.rs`: one reasoned allowance for
+  the `PLAYA_DRY_RUN` read in `worker.rs`.
+
+### Departures from the plan
+
+- **Thread, not `spawn_blocking`.** The plan says "a single serial task on the
+  tokio runtime; blocking provider work goes through
+  `spawn_blocking`/`std::thread::scope`". `Speak::prepare` is one future
+  whose blocking discovery and async synthesis cannot be split from outside,
+  so the whole worker runs on its own thread with its own runtime (the same
+  idea as `enqueue_speech`'s thread, but long-lived). Same guarantee, one
+  owner.
+- **Classification is on the submitting side.** The plan's
+  "records the dedup key at queue time" needs the resolved text, so
+  `submit_phrases` classifies before queuing. Classification is pure and
+  cheap; Phase 5 should still call it after the launch-critical work where
+  convenient.
+- **Bounded drop.** Shutdown does not drain or await synthesis, but it does
+  wait up to 250 ms for the in-flight future's drop, so cancellation cleanup
+  runs before the process exits.
+
+### Requirement → test
+
+All L1, in-crate `#[cfg(test)]` modules of the `claudine` lib (declared
+targets, no tier markers).
+
+| Requirement | Test |
+| --- | --- |
+| Gates, every accepted `PLAYA_DRY_RUN` spelling, unaccepted spellings, precedence | `composition::lifecycle::prewarm::worker::tests::every_gate_and_every_accepted_dry_run_spelling_disables_prewarm` |
+| C6: `--dry-run` and `prewarm: false` prepare nothing, resolve nothing | `…::dry_run_and_prewarm_false_start_nothing_and_resolve_nothing` |
+| C10 (recorder half): each accepted `PLAYA_DRY_RUN` value read from the environment starts nothing; control `0` runs | `…::every_accepted_playa_dry_run_spelling_starts_nothing` |
+| Same config as playback (`tts_config_from_settings`) | `…::candidates_use_the_lifecycle_playback_configuration` |
+| C9 (lib): submit returns with a blocked `prepare`; serial; late `err` phrase not queued | `…::submission_returns_while_preparation_is_blocked_and_runs_serially` |
+| C12 (worker half): dedup at queue time, across handle clones, while in progress, after completion; changed text is new | `…::a_candidate_is_queued_once_per_invocation` |
+| C8: one sanitized `warn`, later candidates run, failed not retried | `…::failures_warn_once_without_the_phrase_and_later_candidates_still_run` (mutation: removing the warn-once guard makes it fail) |
+| C13: no-op success counts as done | `…::a_successful_or_no_op_preparation_counts_as_done` |
+| C13: drop cancels in flight, does not drain, completed work survives, later submits ignored | `…::dropping_the_worker_cancels_without_draining_and_keeps_completed_work` |
+| Disabled worker is a no-op | `…::a_disabled_worker_is_a_no_op` |
+| C13: an event during a blocked prepare publishes normally; no join, no cancel | `composition::lifecycle::tests::audio_emission::speech_fired_during_a_blocked_prewarm_publishes_without_joining_it` |
+
+No elapsed-time thresholds are asserted; blocking is controlled by the fake's
+gate. The CLI halves of criteria 6, 9, and 10 belong to Phase 5's wiring
+tests. The Input Robustness Matrix does not apply (no file format or
+configuration is read in this phase).
+
+### Gates
+
+- `just test` in `claudine/`: 9119 passed, 9 skipped (the same pre-existing
+  skips).
+- `just lint` in `claudine/`: clean (only the existing macOS linker
+  `__eh_frame` notice).
+- Cross-OS: no paths, `cfg`, process spawning, or filesystem in the new
+  code; one named `std::thread` and a current-thread runtime behave the
+  same on every OS. No rig run was needed.
+
+
+## Phase 5
+
+### What changed
+
+Every invocation flow now submits early phrases to one command-owned worker.
+
+- **Deferred worker** (`prewarm/worker.rs`). `PrewarmWorker::deferred(dry_run)`
+  is the production constructor. It starts no thread and reads no setting
+  until the first submission that carries phrases. That submission's
+  `GlobalSettings` (the lifecycle settings the document plays speech with)
+  decide the gates and the candidate configuration, so the first speaking
+  document wins for the whole invocation. `--dry-run` turns it off at
+  construction. `PrewarmWorker`, `PrewarmHandle`, and `PrewarmInputs` (with
+  `PrewarmInputs::captured`) are now `pub`, and `lifecycle::prewarm` is a
+  public module. `start_gated`, `start_with`, and `submit_phrases` are
+  test-only. Phase 4's module-level `allow(dead_code, unused_imports)` is
+  removed, along with the re-exports nothing used.
+- **Scoped injected keys.** `PrewarmHandle::with_injected_keys` returns a
+  clone that unions extra sequence-injected keys into every submission. Its
+  queue and de-duplication are shared, so differently scoped tasks still
+  dedup invocation-wide.
+- **Entry points** (`prewarm/mod.rs`, `prewarm/sequence.rs`).
+  - `collect_and_submit(handle, settings, lifecycle, || inputs)` is the one
+    entry for a prepared document, and the future `prep` directive's. Inputs
+    are built lazily, only when the handle is live and the lifecycle speaks.
+  - `submit_sequence_preflight(handle, settings, graph, sequence, caller_keys,
+    context)` walks the preflight graph:
+    - each task's `setup:`/`teardown:` (parsed with `parse_task_action_stack`),
+      against the sequence document's frontmatter;
+    - each prompt document a task reaches, judged per task, so the task's
+      `params` keys are late for that task only;
+    - the sequence document's own lifecycle, when a step runs its body.
+  - Late during preflight: `ROOT_OVERLAY_KEYS`, the caller's `--set` keys,
+    every top-level frontmatter value still holding `{{`, `$(`, or a backtick
+    (resolving it would mean evaluating it), and `ctx`/`env` (`Pending`).
+  - Nothing is composed, fetched, or run.
+- **Carrier** (`invocation_context.rs`). `InvocationContext` has a `prewarm`
+  handle (default: disabled). It is set with `with_prewarm`, narrowed with
+  `with_prewarm_injected_keys`, and copied by `enter_document`, so every
+  document view shares it. `DocumentEpoch::prewarm()` reaches it from an
+  epoch.
+- **Ownership.** `compose/prep.rs::run_composition_inner` (compose and
+  inline-compose), `commands/sequence.rs::run_sequence_inner`, and
+  `wrap/mod.rs::run_provider_wrapper_inner` each create one deferred worker
+  and install its handle on the invocation. Dropping it on return cancels
+  unfinished preparation (R7).
+- **Submission sites:**
+  - `wrap/composition/pipeline.rs::construct_lifecycle_runtime`: every
+    prepared document before its launch (eager read, staged stabilized
+    reread, each loop iteration, a compose-path `proxy` target, each sequence
+    step and prompt task). Inputs are the effective frontmatter and the exact
+    lifecycle context, with env overrides applied.
+  - `staged_boot.rs::StagedLifecycleRuntime::new`: the staged bootstrap
+    walk, before `initialize`.
+  - `compose/prep.rs::build_and_run_loop`: the loop's bootstrap walk over
+    `initialize_frontmatter`, before the engine fires `initialize`.
+  - `harness_orch/loop_control.rs::prewarm_materialized`: every fresh
+    harness read (retry, resume, adopted target's stabilized reread, harness
+    loop refresh) and an adopted target's bootstrap before its `initialize`.
+    It uses the guard's settings and the materialized frontmatter, context,
+    and env overrides.
+  - `wrap/sequence/mod.rs::submit_preflight_prewarm`: called right after
+    `validate_prompt_lifecycle_literals`, before any step. It loads settings
+    only when the handle is live.
+  - `wrap/sequence/iterate.rs` scopes each step's view with
+    `ROOT_OVERLAY_KEYS` plus the step's caller-layer keys.
+    `wrap/sequence/task_run.rs` scopes a prompt task's view with its `params`
+    keys.
+- **Test seam** (`prewarm/fixture.rs`, `test-fixtures` only).
+  `CLAUDINE_TEST_PREWARM=record:<path>` swaps the preparer for one that
+  appends each text to `<path>`; `block:<path>` appends and never finishes.
+  Gates still apply. It has a `context_construction_guard` allowance and is
+  gated for `test_seam_gate_guard`.
+
+### Departures and findings
+
+- **Lazy start instead of start-at-entry.** The plan said "create the worker
+  once per top-level invocation". It is created there, but it starts on first
+  use. The settings that decide the gates and the candidate configuration are
+  the lifecycle settings each flow already loads, and those only exist once a
+  document is read. A command whose documents never speak starts no thread
+  and reads no extra config.
+- **Sequence-injected keys come from the handle, not the call site.** A
+  site does not know whether it runs inside a sequence step, a prompt task,
+  or a proxy inside either. The sequence scopes the invocation view instead,
+  and every site inherits it.
+- **Lifecycle `set` in `initialize` is not a new snapshot.** A mapping `set`
+  writes runtime state that event-time playback reads, not the stabilized
+  reread's effective frontmatter. A phrase reading such a key is pre-warmed
+  with its pre-`set` text and misses the cache at event time: the spec's
+  documented `set` limit, never wrong audio. The CLI reread test uses
+  `set_frontmatter`, which rewrites the document. Phase 6's docs should
+  state this limit plainly.
+- **`outputs` outside a sequence is an ordinary absent property.** It is
+  not a declared global in a plain document's event scope. Its read resolves
+  as missing, the same as playback. Inside a sequence it is a root overlay
+  key and therefore late.
+- **The proxy target is covered twice.** On the compose path an
+  `initialize` proxy target is prepared by both the pipeline site and the
+  harness adoption site. A mutation that turned off either one alone left the
+  proxy test green; de-duplication makes the second submission a no-op.
+
+### Requirement → test
+
+L1 throughout. The lib tests are in-crate `#[cfg(test)]` modules. The CLI
+tests are `cli/tests/l1/tts_prewarm.rs`, declared in `l1/main.rs` under
+`#[cfg(all(unix, feature = "test-fixtures"))]` (Unix-only like
+`launch_recorder`; `test-fixtures` is a `local-features` and CI feature).
+
+| Requirement | Test |
+| --- | --- |
+| Deferred worker starts on the first speaking submission; silent documents build no inputs | `claudine composition::lifecycle::prewarm::tests::entry::a_deferred_worker_starts_with_the_first_submission_that_speaks` |
+| C6 (lib): `prewarm: false` from the first speaking document prepares nothing, and cannot be re-enabled | `…::entry::the_first_speaking_submission_decides_the_gates` |
+| C6 (lib): `--dry-run` off before any submission, resolves nothing | `…::entry::dry_run_turns_a_deferred_worker_off_before_any_submission` |
+| C12: bootstrap and reread share one worker; retry / loop refresh / proxy resubmission dedup | `…::entry::bootstrap_and_reread_share_one_worker_without_repeating_a_candidate` |
+| C2/C12: sequence-injected keys late via bare, dotted, bracket; computed index skipped; `loop`/`err` late; unscoped control | `…::entry::sequence_injected_keys_are_late_in_every_document_their_handle_submits` |
+| C12: parallel tasks with different scopes share dedup | `…::entry::differently_scoped_tasks_share_one_de_duplication` |
+| C4 (lib): three prompts, setup/teardown (untaken branch), body-step sequence lifecycle queued in one non-blocking call | `claudine composition::lifecycle::prewarm::sequence::tests::every_early_phrase_of_three_prompts_is_queued_before_any_step_runs` |
+| C4/C12: per-task `params` late only for that task; unresolved template/shell values, `env`, `ctx`, overlay `state` left late; no shell runs | `…::sequence::tests::task_inputs_unresolved_values_and_captures_are_left_late` |
+| Disabled handle walks nothing | `…::sequence::tests::a_disabled_handle_walks_nothing` |
+| C1/C2 (CLI): compose prepares early phrases once with resolved text, skips `err`, walks an untaken `then` | `claudine-cli::l1 tts_prewarm::compose_prepares_every_early_phrase_once_with_its_resolved_text` |
+| C9/C8: blocked `prepare` does not delay launch, exit success, nothing on the terminal | `…::a_blocked_preparation_does_not_delay_the_provider_launch` |
+| C6 (CLI): `--dry-run` prepares nothing | `…::dry_run_prepares_nothing` |
+| C6 (CLI): `config.json` `tts: { prewarm: false }` prepares nothing and still launches | `…::prewarm_false_in_config_prepares_nothing_and_still_launches` |
+| C10: frozen shipped `clarify.md` (`start` says) under the fixture's `PLAYA_DRY_RUN=1` leaves no `biscuit-speaks-*` file in fixture `TMPDIR`/`TMP`/`TEMP`, no `BISCUIT_SPEAKS_CACHE` file, no spool | `…::playa_dry_run_prepares_nothing_and_leaves_no_audio_artifacts` |
+| C10: each accepted spelling (`1`, `true`, `TRUE`, `yes`) keeps the recorder untouched | `…::every_accepted_playa_dry_run_spelling_prepares_nothing` |
+| C4 (CLI): three-prompt sequence; with a blocking recorder the only started preparation is step one's preflight-only `setup:` phrase, and all three steps launch; with a recording one every phrase is prepared | `…::a_three_prompt_sequence_submits_every_document_before_step_one` |
+| C5: `proxy` target prepared with its `with` overlay, never the authored value | `…::a_proxy_target_is_prepared_with_its_overlay` |
+| C12: retry with `retry.with` prepares the new text; unchanged phrase not repeated | `…::a_retry_prepares_its_new_snapshot_without_repeating_a_candidate` |
+| C12: `initialize` rewrites the document; reread finds the new text, unchanged phrase not repeated | `…::initialize_changes_are_discovered_by_the_reread_without_repeating_a_candidate` |
+
+**Mutation checks.** Each wiring site was disabled in turn and the CLI suite
+was run, then the site was restored and the restore confirmed by diff.
+
+| Site disabled | Tests that failed |
+| --- | --- |
+| Pipeline | compose, blocked, staged, retry |
+| Harness | retry |
+| Sequence preflight | sequence |
+| Staged bootstrap | staged |
+
+The Input Robustness Matrix does not apply: this phase reads no new file
+format or configuration field. `config.json` is read through the Phase 2
+loader unchanged.
+
+### Gates
+
+- `just test` in `claudine/`: 9138 passed, 9 skipped (the same pre-existing
+  skips). The first run failed only `context_construction_guard` on the new
+  seam's `std::env::var`; it is green after the reasoned allowance.
+- `just lint` in `claudine/`: clean apart from the existing macOS linker
+  `__eh_frame` notice.
+- `just test-l2` not run: the detached-playback boundary was not touched
+  (criterion 14).
+- Cross-OS: no new `cfg(windows)`, path comparison, or process spawning in
+  production code. The seam's `mode:path` split is on the first `:`, so a
+  Windows drive path survives. The lib tests use temp dirs and are portable.
+  The CLI tests are Unix-only because their stub providers are shell scripts.
+  The behavior they cover is also asserted portably at lib level, so no rig
+  run was needed.
+- New L1 test durations: CLI 0.6–2.4 s each (the slowest is the four-spelling
+  loop), lib under 0.1 s.

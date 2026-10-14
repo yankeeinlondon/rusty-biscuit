@@ -44,6 +44,42 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - claudine/lib/src/composition/lifecycle/prewarm/mod.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/classify.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/worker.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/worker/tests.rs
+    - claudine/lib/src/composition/lifecycle/tests/audio_emission.rs
+    - claudine/lib/tests/l1/context_construction_guard.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/mod.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/worker.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/classify.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/fixture.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/sequence.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/sequence/tests.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/tests.rs
+    - claudine/lib/src/invocation_context.rs
+    - claudine/lib/tests/l1/context_construction_guard.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/tts_prewarm.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/SKILL.md
 ---
 # Plan: TTS Pre-warm
 
@@ -278,23 +314,23 @@ pass at unit level.
 
 **Wave 4.1 (sequential)**
 
-- [ ] **Worker type.** `prewarm/worker.rs`: `PrewarmHandle` with non-blocking
+- [x] **Worker type.** `prewarm/worker.rs`: `PrewarmHandle` with non-blocking
   `submit(candidates)` (records the dedup key at queue time) and a cancel-on-drop
   guard (R7). A single serial task on the tokio runtime; blocking provider work
   goes through `spawn_blocking`/the existing `std::thread::scope` pattern so
   the launch task's executor thread is never occupied.
-- [ ] **Gates.** Before starting the worker or resolving anything, check
+- [x] **Gates.** Before starting the worker or resolving anything, check
   `--dry-run`, `prewarm == false`, and `PLAYA_DRY_RUN` (`1`, `true`, `TRUE`,
   `yes`); a disabled handle is a zero-cost no-op.
-- [ ] **Failure policy.** At most one tracing `warn` per invocation, no phrase
+- [x] **Failure policy.** At most one tracing `warn` per invocation, no phrase
   text, secrets, or raw response; no terminal output; continue with later
   candidates; failed key is not retried; no fallback provider.
-- [ ] **Candidate config.** Build via `tts_config_from_settings` on the bridged
+- [x] **Candidate config.** Build via `tts_config_from_settings` on the bridged
   settings (R1); discard the builder returned by `prepare`.
 
 **Wave 4.2 (after 4.1)**
 
-- [ ] **Worker tests (criteria 8, 9, 13).** Controllable fake futures: submit
+- [x] **Worker tests (criteria 8, 9, 13).** Controllable fake futures: submit
   returns immediately with a blocked `prepare`; a no-op success counts as done;
   a failure warns once and later candidates run; cancellation on drop does not
   drain; an event firing before completion uses the normal publish path
@@ -311,41 +347,41 @@ first, then fan out.
 
 **Wave 5.1 (sequential)**
 
-- [ ] **Single entry point.** `prewarm::collect_and_submit(snapshot, handle)`,
+- [x] **Single entry point.** `prewarm::collect_and_submit(snapshot, handle)`,
   the one function every site calls (also the future `prep` entry point; do not
   implement `prep`).
-- [ ] **Ownership.** Create the worker once per top-level invocation in the
+- [x] **Ownership.** Create the worker once per top-level invocation in the
   compose / inline-compose / sequence / provider-wrapper entry
   (`cli/.../staged_boot.rs`, `pipeline.rs`) and thread the handle through; one
   worker per command, not per document.
 
 **Wave 5.2 (parallel after 5.1; independent call sites)**
 
-- [ ] **Bootstrap walk** before `initialize` fires, using the shell-free
+- [x] **Bootstrap walk** before `initialize` fires, using the shell-free
   bootstrap parse.
-- [ ] **Stabilized reread walk** after initialization, and on any new effective
+- [x] **Stabilized reread walk** after initialization, and on any new effective
   lifecycle/frontmatter snapshot; dedup against already-queued keys.
-- [ ] **Sequence preflight** (`composition/sequence/preflight`): collect from
+- [x] **Sequence preflight** (`composition/sequence/preflight`): collect from
   every statically reached prompt document and each task's `setup:`/`teardown:`
   using the existing graph; submit all before step one launches; skip
   unresolved inputs; evaluate eligibility against the applicable task inputs,
   not path alone; no body composition, reference resolution, remote fetch, or
   setup execution.
-- [ ] **Re-entry:** `proxy` (collected when the target is itself prepared, after
+- [x] **Re-entry:** `proxy` (collected when the target is itself prepared, after
   its `with` overlay), retry/resume preparation, and loop refresh
   (`composition/looping`). A late-finishing candidate from a prior snapshot may
   only write its cache entry.
 
 **Wave 5.3 (after 5.2)**
 
-- [ ] **Wiring tests (criteria 4, 5, 12).** Three-prompt sequence submits all
+- [x] **Wiring tests (criteria 4, 5, 12).** Three-prompt sequence submits all
   eligible phrases before the stub provider launches, even with a blocking
   `prepare`; unresolved input skipped then discovered later; proxy overlay
   applied; bootstrap vs. reread shares one worker with no repeat; retry, loop
   refresh, repeated prompt path, and parallel tasks dedup invocation-wide;
   bare and bracket `fm` reads, a new declared global, and sequence-dependent
   `fm` values.
-- [ ] **CLI tests with `CliProcessFixture` (criteria 6, 10).** Assert
+- [x] **CLI tests with `CliProcessFixture` (criteria 6, 10).** Assert
   `--dry-run` and `prewarm: false` prepare nothing; under `PLAYA_DRY_RUN=1`
   composing a shipped prompt with lifecycle `say` creates no audio cache, voice
   capability cache, spool entry, or subprocess; `audio_spool()` stays absent;
