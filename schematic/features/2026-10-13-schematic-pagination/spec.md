@@ -25,16 +25,8 @@ reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
 review_iterations: 0
 clarified: false
-implemented: false
+implemented: true
 human_review: false
-message_to_agent: |-
-  Phase 3 is complete; read "## Phase 3" in implementation-log.md, especially section 3.1, before starting. What Phase 4 builds on:
-  - The runtime pager is `schematic_runtime::pager` (schematic/runtime/src/pager/). Pages are already real typed sends: each page goes out as the internal `PageRequest<R>` (request.rs) through `Client::send_located` (client.rs, crate-private), which returns the envelope plus the unredacted, pre-credential final URL used to resolve relative links. Credentials, origin policy, redirects, the deadline, and redaction therefore already apply; pre-send refusals (size bounds, start below the base, overflow, page_limit(0)) come back from `PageRequest::into_parts` as the runtime's own `InvalidArgument` TransportError with zero requests sent. Followed links are checked with `Client::check_link::<R>` first.
-  - Task 4.1's decode seam is exactly `request::PageDecoder` (parses the body to serde_json::Value) and `request::decode_items` (serde_json::from_value per item). The engine (engine.rs) reads records and continuations from the Value, so a from_slice candidate must still provide the record/continuation view.
-  - The deadline maps to `PagerError::DeadlineExceeded { completed_pages, error }` but has no acceptance tests yet. The same goes for the two-origin policy matrix, redirect/RedirectFailed mapping, Shopify `Only`, replacement requests, and the remaining IncompleteReason cases (DeadlineExceeded, TransportError, RedirectFailed): those are 4.3/4.4. Response hooks do not run on page bodies; decide this in 4.2 and log it.
-  - Continuation failures are deferred: a page that decodes is delivered and its missing/invalid/repeated continuation is returned by the next request without sending. A failed pager returns `PagerError::AlreadyFailed { first }`, not a clone. Histories are per direction and the opposite one is cleared when a page arrives (R14 re-traversal fix).
-  - The generator emits `impl Paginated` and markers and forwards `pager/page/offset/after/before/page_size/pages/fetch_page/collect_all` on call types (gen/src/codegen/pagination/mod.rs). `pager_view` is the single place adopted params leave the request. ABI is 4 on both sides, and schematic-schema was regenerated in Phase 3 (ABI and legacy-marker removal only).
-  - Runtime test fixtures live in schematic/runtime/tests/l1/pager_support.rs (the `endpoint!` macro plus a `Copy` builder `Def`); add Phase 4 tests beside pager_rules.rs/pager_surface.rs and declare new files in tests/l1/main.rs.
 parent: ../../reviews/2026-07-31-macro-review/spec.md
 depends_on:
     - 2026-10-12-schematic-runtime-envelope

@@ -148,12 +148,409 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_4:
+    - schematic/runtime/src/hooks.rs
+    - schematic/runtime/src/pager/pages.rs
+    - schematic/runtime/src/pager/request.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/runtime/tests/l1/pager_support.rs
+    - schematic/runtime/tests/l1/pager_collect.rs
+    - schematic/runtime/tests/l1/pager_transport.rs
+    - schematic/define/src/pagination/resolve.rs
+    - schematic/define/tests/pagination_tables.rs
+    - schematic/gen/src/codegen/mod.rs
+    - schematic/gen/src/codegen/pagination/mod.rs
+    - schematic/gen/src/codegen/pagination/tests.rs
+    - schematic/gen/src/codegen/request_structs/mod.rs
+    - schematic/gen/src/codegen/request_structs/into_parts.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+docs_updated_during_phase_4:
+    - schematic/define/README.md
+    - schematic/gen/README.md
+    - schematic/docs/runtime/README.md
+    - schematic/docs/runtime/deadlines-and-timeouts.md
+    - schematic/docs/runtime/hooks.md
+    - schematic/docs/runtime/metadata-and-redaction.md
+    - schematic/docs/runtime/origins-and-redirects.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_5:
+    - schematic/runtime/Cargo.toml
+    - schematic/runtime/src/pager/session.rs
+    - schematic/runtime/src/pager/pages.rs
+    - schematic/runtime/src/pager/error.rs
+    - schematic/runtime/src/pager/request.rs
+    - schematic/runtime/src/pager/engine.rs
+    - schematic/runtime/src/pager/progress.rs
+    - schematic/runtime/src/pager/mod.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/runtime/tests/l1/pager_support.rs
+    - schematic/runtime/tests/l1/pager_session.rs
+    - schematic/runtime/tests/l1/pager_partition.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_keep_alive_not_adjustable.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_keep_alive_not_adjustable.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_no_manual_open_or_close.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_no_manual_open_or_close.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_on_a_sessionless_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_on_a_sessionless_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_pages_escape_the_scope.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_pages_escape_the_scope.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_renew_without_a_renew_step.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_renew_without_a_renew_step.stderr
+    - schematic/define/tests/pagination_partitions.rs
+    - schematic/gen/src/codegen/pagination/mod.rs
+    - schematic/gen/src/codegen/pagination/tests.rs
+    - schematic/gen/src/codegen/endpoint_methods/mod.rs
+    - schematic/gen/src/codegen/endpoint_methods/names.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+docs_updated_during_phase_5:
+    - schematic/docs/runtime/README.md
+    - schematic/docs/runtime/deadlines-and-timeouts.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/dependencies.md
+    - schematic/gen/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_6:
+    - schematic/definitions/src/anthropic/mod.rs
+    - schematic/definitions/src/bitbucket/mod.rs
+    - schematic/definitions/src/elevenlabs/mod.rs
+    - schematic/definitions/src/emqx/mod.rs
+    - schematic/definitions/src/gitea/mod.rs
+    - schematic/definitions/src/github/mod.rs
+    - schematic/definitions/src/gitlab/mod.rs
+    - schematic/definitions/src/huggingface/mod.rs
+    - schematic/definitions/src/lib.rs
+    - schematic/definitions/src/openai/mod.rs
+    - schematic/definitions/src/openai_pagination.rs
+    - schematic/definitions/tests/pagination_coverage/main.rs
+    - schematic/definitions/tests/pagination_coverage/forges.rs
+    - schematic/definitions/tests/pagination_coverage/openai.rs
+    - schematic/definitions/tests/pagination_coverage/others.rs
+    - schematic/gen/src/definition_gen.rs
+    - schematic/gen/src/import_pipeline.rs
+    - schematic/gen/src/main.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/import_overlay.rs
+    - schematic/gen/tests/l1/openapi_import_test.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/fixtures/wire_baseline/query_request_lines.txt
+    - schematic/justfile
+    - schematic/schema/src/bitbucket/requests.rs
+    - schematic/schema/src/elevenlabs/requests.rs
+    - schematic/schema/src/gitea/requests.rs
+    - schematic/schema/src/github/requests.rs
+    - schematic/schema/src/gitlab/requests.rs
+    - schematic/schema/src/openai/requests.rs
+    - schematic/schema/tests/github_client.rs
+    - sniff/lib/src/remote/envelope.rs
+    - sniff/lib/src/remote/github.rs
+    - sniff/lib/tests/l1/remote_providers.rs
+docs_updated_during_phase_6:
+    - schematic/docs/io/import-openapi.md
+    - schematic/gen/README.md
+    - schematic/definitions/README.md
+    - schematic/specs/openai/README.md
+    - sniff/docs/repos/repo-tech-design.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_7:
+    - schematic/gen/src/cargo_gen.rs
+    - schematic/schema/Cargo.toml
+    - schematic/schema/Cargo.lock
+    - schematic/schema/tests/pagination.rs
+    - schematic/schema/tests/compile_fail.rs
+    - schematic/schema/tests/fixtures/compile_fail/adopted_field_is_not_a_request_setter.rs
+    - schematic/schema/tests/fixtures/compile_fail/adopted_field_is_not_a_request_setter.stderr
+    - schematic/schema/tests/fixtures/compile_fail/after_on_a_page_number_endpoint.rs
+    - schematic/schema/tests/fixtures/compile_fail/after_on_a_page_number_endpoint.stderr
+    - schematic/schema/tests/fixtures/compile_fail/before_on_a_forward_only_cursor.rs
+    - schematic/schema/tests/fixtures/compile_fail/before_on_a_forward_only_cursor.stderr
+    - schematic/schema/tests/fixtures/compile_fail/knob_after_pages.rs
+    - schematic/schema/tests/fixtures/compile_fail/knob_after_pages.stderr
+    - schematic/schema/tests/fixtures/compile_fail/no_alternate_selection.rs
+    - schematic/schema/tests/fixtures/compile_fail/no_alternate_selection.stderr
+    - schematic/schema/tests/fixtures/compile_fail/offset_on_a_page_number_endpoint.rs
+    - schematic/schema/tests/fixtures/compile_fail/offset_on_a_page_number_endpoint.stderr
+    - schematic/schema/tests/fixtures/compile_fail/page_on_a_cursor_endpoint.rs
+    - schematic/schema/tests/fixtures/compile_fail/page_on_a_cursor_endpoint.stderr
+    - schematic/schema/tests/fixtures/compile_fail/pager_on_an_unpaginated_endpoint.rs
+    - schematic/schema/tests/fixtures/compile_fail/pager_on_an_unpaginated_endpoint.stderr
+    - schematic/schema/tests/fixtures/compile_fail/partitioned_without_partitions.rs
+    - schematic/schema/tests/fixtures/compile_fail/partitioned_without_partitions.stderr
+    - schematic/schema/tests/fixtures/compile_fail/prev_without_a_backward_direction.rs
+    - schematic/schema/tests/fixtures/compile_fail/prev_without_a_backward_direction.stderr
+    - schematic/schema/tests/fixtures/compile_fail/session_on_a_sessionless_endpoint.rs
+    - schematic/schema/tests/fixtures/compile_fail/session_on_a_sessionless_endpoint.stderr
+    - schematic/schema/tests/fixtures/compile_fail/set_page_size_not_adjustable.rs
+    - schematic/schema/tests/fixtures/compile_fail/set_page_size_not_adjustable.stderr
+    - schematic/schema/tests/fixtures/compile_fail/total_without_a_total.rs
+    - schematic/schema/tests/fixtures/compile_fail/total_without_a_total.stderr
+    - schematic/schema/tests/fixtures/pass/authored_controls.rs
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_8:
+    - schematic/define/src/lib.rs
+    - schematic/define/src/pagination/resolve.rs
+    - schematic/define/src/pagination/strategy.rs
+    - schematic/define/src/params/mod.rs
+    - schematic/definitions/src/bitbucket/mod.rs
+    - schematic/definitions/src/github/mod.rs
+    - schematic/definitions/src/gitlab/mod.rs
+    - schematic/gen/src/codegen/endpoint_methods/mod.rs
+    - schematic/gen/src/codegen/endpoint_methods/names.rs
+    - schematic/gen/src/codegen/pagination/mod.rs
+    - schematic/gen/src/codegen/request_structs/into_parts.rs
+    - schematic/runtime/src/pager/engine.rs
+    - schematic/runtime/src/pager/pages.rs
+    - schematic/runtime/src/pager/request.rs
+    - schematic/schema/tests/compile_fail.rs
+    - .config/nextest.toml
+docs_updated_during_phase_8:
+    - schematic/README.md
+    - schematic/define/README.md
+    - schematic/definitions/README.md
+    - schematic/gen/README.md
+    - schematic/runtime/README.md
+    - schematic/docs/dependencies.md
+    - schematic/docs/generation/request-side.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/runtime/README.md
+    - schematic/docs/runtime/calling-an-api.md
+    - schematic/docs/runtime/deadlines-and-timeouts.md
+docs_created_during_phase_8:
+    - schematic/docs/pagination.md
+skills_files_updated_during_phase_8:
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/os/build-hosts.md
+    - .claude/skills/os/windows-paths.md
+source_code:
+    - schematic/define/src/lib.rs
+    - schematic/define/src/openapi/export/info.rs
+    - schematic/define/src/openapi/export/mod.rs
+    - schematic/define/src/openapi/import/builder.rs
+    - schematic/define/src/pagination.rs
+    - schematic/define/src/pagination/collection.rs
+    - schematic/define/src/pagination/resolve.rs
+    - schematic/define/src/pagination/selector.rs
+    - schematic/define/src/pagination/strategy.rs
+    - schematic/define/src/pagination/validate.rs
+    - schematic/define/src/params/mod.rs
+    - schematic/define/src/prelude.rs
+    - schematic/define/src/request.rs
+    - schematic/define/src/types.rs
+    - schematic/define/tests/endpoint_literal_surface.rs
+    - schematic/define/tests/pagination_inventory.rs
+    - schematic/define/tests/pagination_model.rs
+    - schematic/define/tests/pagination_serde.rs
+    - schematic/define/tests/pagination_support/mod.rs
+    - schematic/define/tests/pagination_tables.rs
+    - schematic/definitions/src/anthropic/mod.rs
+    - schematic/definitions/src/artificial_analysis/mod.rs
+    - schematic/definitions/src/bitbucket/mod.rs
+    - schematic/definitions/src/elevenlabs/mod.rs
+    - schematic/definitions/src/emqx/mod.rs
+    - schematic/definitions/src/eversolo/mod.rs
+    - schematic/definitions/src/gitea/mod.rs
+    - schematic/definitions/src/github/mod.rs
+    - schematic/definitions/src/gitlab/mod.rs
+    - schematic/definitions/src/huggingface/mod.rs
+    - schematic/definitions/src/lmstudio/mod.rs
+    - schematic/definitions/src/ollama/mod.rs
+    - schematic/definitions/src/openai/mod.rs
+    - schematic/definitions/src/registry/mod.rs
+    - schematic/definitions/src/samsung_smart_tv/mod.rs
+    - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+    - schematic/gen/src/codegen/api_struct/tests.rs
+    - schematic/gen/src/codegen/client/tests.rs
+    - schematic/gen/src/codegen/endpoint_methods/tests.rs
+    - schematic/gen/src/codegen/module_docs.rs
+    - schematic/gen/src/codegen/request_enum.rs
+    - schematic/gen/src/definition_gen.rs
+    - schematic/gen/src/diagnostics.rs
+    - schematic/gen/src/export/naming.rs
+    - schematic/gen/src/export/openapi.rs
+    - schematic/gen/src/export/postman/collection.rs
+    - schematic/gen/src/export/postman/mod.rs
+    - schematic/gen/src/export/postman/tests.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/test_utils.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/http_client.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/openapi_strict_completeness.rs
+    - schematic/gen/tests/l1/output_validation.rs
+    - schematic/gen/tests/l1/pagination_validation.rs
+    - schematic/gen/tests/l1/partial_generation.rs
+    - schematic/gen/tests/l1/postman_golden.rs
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/src/call.rs
+    - schematic/runtime/src/client.rs
+    - schematic/runtime/src/meta.rs
+    - schematic/runtime/src/pager/mod.rs
+    - schematic/runtime/src/pager/spec.rs
+    - schematic/runtime/src/pager/engine.rs
+    - schematic/runtime/src/pager/json.rs
+    - schematic/runtime/src/pager/link.rs
+    - schematic/runtime/src/pager/progress.rs
+    - schematic/runtime/src/pager/request.rs
+    - schematic/runtime/src/pager/pages.rs
+    - schematic/runtime/src/pager/error.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/runtime/tests/l1/pager_support.rs
+    - schematic/runtime/tests/l1/pager_mechanisms.rs
+    - schematic/runtime/tests/l1/pager_outside.rs
+    - schematic/runtime/tests/l1/pager_rules.rs
+    - schematic/runtime/tests/l1/pager_surface.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_after_without_a_resumable_cursor.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_after_without_a_resumable_cursor.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_before_on_a_forward_only_cursor.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_before_on_a_forward_only_cursor.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_knob_after_pages.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_knob_after_pages.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_offset_on_a_page_number_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_offset_on_a_page_number_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_on_an_unpaginated_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_on_an_unpaginated_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_page_on_a_cursor_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_page_on_a_cursor_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_page_size_not_authored.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_page_size_not_authored.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_pages_on_a_session_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_pages_on_a_session_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_prev_without_a_backward_direction.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_prev_without_a_backward_direction.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_set_page_size_not_adjustable.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_set_page_size_not_adjustable.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_total_without_a_total.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_total_without_a_total.stderr
+    - schematic/gen/src/lib.rs
+    - schematic/gen/src/codegen/mod.rs
+    - schematic/gen/src/codegen/pagination/mod.rs
+    - schematic/gen/src/codegen/pagination/tests.rs
+    - schematic/gen/src/codegen/traits.rs
+    - schematic/gen/src/codegen/endpoint_methods/mod.rs
+    - schematic/gen/src/codegen/endpoint_methods/names.rs
+    - schematic/gen/src/codegen/endpoint_methods/docs.rs
+    - schematic/gen/src/codegen/request_structs/mod.rs
+    - schematic/gen/src/codegen/request_structs/endpoint_spec.rs
+    - schematic/gen/src/codegen/request_structs/tests.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/gen/src/output/assemble/shared.rs
+    - schematic/gen/tests/common/fresh_output.rs
+    - schematic/schema/src/lib.rs
+    - schematic/schema/src/shared.rs
+    - schematic/schema/src/bitbucket/requests.rs
+    - schematic/schema/src/gitea/requests.rs
+    - schematic/schema/src/github/requests.rs
+    - schematic/schema/src/gitlab/requests.rs
+    - schematic/runtime/src/hooks.rs
+    - schematic/runtime/tests/l1/pager_collect.rs
+    - schematic/runtime/tests/l1/pager_transport.rs
+    - schematic/gen/src/codegen/request_structs/into_parts.rs
+    - schematic/runtime/Cargo.toml
+    - schematic/runtime/src/pager/session.rs
+    - schematic/runtime/tests/l1/pager_session.rs
+    - schematic/runtime/tests/l1/pager_partition.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_keep_alive_not_adjustable.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_keep_alive_not_adjustable.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_no_manual_open_or_close.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_no_manual_open_or_close.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_on_a_sessionless_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_on_a_sessionless_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_pages_escape_the_scope.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_pages_escape_the_scope.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_renew_without_a_renew_step.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_renew_without_a_renew_step.stderr
+    - schematic/define/tests/pagination_partitions.rs
+    - schematic/definitions/src/lib.rs
+    - schematic/definitions/src/openai_pagination.rs
+    - schematic/definitions/tests/pagination_coverage/main.rs
+    - schematic/definitions/tests/pagination_coverage/forges.rs
+    - schematic/definitions/tests/pagination_coverage/openai.rs
+    - schematic/definitions/tests/pagination_coverage/others.rs
+    - schematic/gen/src/import_pipeline.rs
+    - schematic/gen/src/main.rs
+    - schematic/gen/tests/l1/import_overlay.rs
+    - schematic/gen/tests/l1/openapi_import_test.rs
+    - schematic/gen/tests/fixtures/wire_baseline/query_request_lines.txt
+    - schematic/justfile
+    - schematic/schema/src/elevenlabs/requests.rs
+    - schematic/schema/src/openai/requests.rs
+    - schematic/schema/tests/github_client.rs
+    - sniff/lib/src/remote/envelope.rs
+    - sniff/lib/src/remote/github.rs
+    - sniff/lib/tests/l1/remote_providers.rs
+    - schematic/gen/src/cargo_gen.rs
+    - schematic/schema/Cargo.toml
+    - schematic/schema/Cargo.lock
+    - schematic/schema/tests/pagination.rs
+    - schematic/schema/tests/compile_fail.rs
+    - schematic/schema/tests/fixtures/compile_fail/adopted_field_is_not_a_request_setter.rs
+    - schematic/schema/tests/fixtures/compile_fail/adopted_field_is_not_a_request_setter.stderr
+    - schematic/schema/tests/fixtures/compile_fail/after_on_a_page_number_endpoint.rs
+    - schematic/schema/tests/fixtures/compile_fail/after_on_a_page_number_endpoint.stderr
+    - schematic/schema/tests/fixtures/compile_fail/before_on_a_forward_only_cursor.rs
+    - schematic/schema/tests/fixtures/compile_fail/before_on_a_forward_only_cursor.stderr
+    - schematic/schema/tests/fixtures/compile_fail/knob_after_pages.rs
+    - schematic/schema/tests/fixtures/compile_fail/knob_after_pages.stderr
+    - schematic/schema/tests/fixtures/compile_fail/no_alternate_selection.rs
+    - schematic/schema/tests/fixtures/compile_fail/no_alternate_selection.stderr
+    - schematic/schema/tests/fixtures/compile_fail/offset_on_a_page_number_endpoint.rs
+    - schematic/schema/tests/fixtures/compile_fail/offset_on_a_page_number_endpoint.stderr
+    - schematic/schema/tests/fixtures/compile_fail/page_on_a_cursor_endpoint.rs
+    - schematic/schema/tests/fixtures/compile_fail/page_on_a_cursor_endpoint.stderr
+    - schematic/schema/tests/fixtures/compile_fail/pager_on_an_unpaginated_endpoint.rs
+    - schematic/schema/tests/fixtures/compile_fail/pager_on_an_unpaginated_endpoint.stderr
+    - schematic/schema/tests/fixtures/compile_fail/partitioned_without_partitions.rs
+    - schematic/schema/tests/fixtures/compile_fail/partitioned_without_partitions.stderr
+    - schematic/schema/tests/fixtures/compile_fail/prev_without_a_backward_direction.rs
+    - schematic/schema/tests/fixtures/compile_fail/prev_without_a_backward_direction.stderr
+    - schematic/schema/tests/fixtures/compile_fail/session_on_a_sessionless_endpoint.rs
+    - schematic/schema/tests/fixtures/compile_fail/session_on_a_sessionless_endpoint.stderr
+    - schematic/schema/tests/fixtures/compile_fail/set_page_size_not_adjustable.rs
+    - schematic/schema/tests/fixtures/compile_fail/set_page_size_not_adjustable.stderr
+    - schematic/schema/tests/fixtures/compile_fail/total_without_a_total.rs
+    - schematic/schema/tests/fixtures/compile_fail/total_without_a_total.stderr
+    - schematic/schema/tests/fixtures/pass/authored_controls.rs
+    - .config/nextest.toml
+documentation:
+    - schematic/define/README.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/generation/partial-generation.md
+    - schematic/gen/README.md
+    - schematic/docs/runtime/README.md
+    - schematic/docs/runtime/deadlines-and-timeouts.md
+    - schematic/docs/runtime/hooks.md
+    - schematic/docs/runtime/metadata-and-redaction.md
+    - schematic/docs/runtime/origins-and-redirects.md
+    - schematic/docs/dependencies.md
+    - schematic/docs/io/import-openapi.md
+    - schematic/definitions/README.md
+    - schematic/specs/openai/README.md
+    - sniff/docs/repos/repo-tech-design.md
+    - schematic/README.md
+    - schematic/runtime/README.md
+    - schematic/docs/generation/request-side.md
+    - schematic/docs/runtime/calling-an-api.md
+    - schematic/docs/pagination.md
+completed_phase: 8
+implemented: true
 packages:
     - schematic-define
     - schematic-gen
     - schematic-definitions
     - schematic-runtime
     - schematic-schema
+    - sniff
 ---
 
 # Schematic pagination implementation plan
@@ -292,14 +689,14 @@ For applicable configuration readers, one test per format starts with a real-too
 
 ### Wave 6 — Single decode spike
 
-- [ ] **4.1 Decode sample**
+- [x] **4.1 Decode sample**
   - Before selecting the production decode path, compare provisional from_value decoding with shared from_slice decoding using the existing bloat scripts adapted to the landed runtime and current inventory count.
   - Keep the same representative endpoint set and release settings for one before/after sample on the implementation host, using scratch/temp build outputs. Preserve item projection, continuation access, envelope evidence, and one-pass item-stream behavior in the candidate.
   - Record binary sizes, host/compiler/cache context, correctness observations, and the chosen path. Prefer reuse when correct and simple; retain from_value with the concrete reason otherwise. No percentage gate, extra hosts, workloads, or later remeasurement.
 
 ### Wave 7 — Sequential runtime integration
 
-- [ ] **4.2 Transport integration**
+- [x] **4.2 Transport integration**
   - Implement the selected decoder and route every page through the full-response typed send path (ordinary call await returns only data) with page-only RequestMeta, credential resolution, redaction, envelope preservation, and shared monotonic deadline. No retries or detached work.
   - Implement fetch_page's single send and original-wrapper ordinary-send behavior with required authored defaults. Add a narrow runtime integration seam for client/request/options access: current Call fields and the generated wrapper field are private; preserve per-call settings and the existing build/send validation parity. Expose next/prev/items/total only where supported.
   - Build follow-up method/path/carry rules, preserving repeated query values, case-insensitive header destinations and exact body segments. Managed inputs win; validate conflicts rather than silently overwriting them. Reject non-replayable bodies when reuse is required.
@@ -308,12 +705,12 @@ For applicable configuration readers, one test per format starts with a real-too
 
 ### Wave 8 — Parallel runtime acceptance tests
 
-- [ ] **4.3 Traversal evidence**
+- [x] **4.3 Traversal evidence**
   - Own traversal mock tests for all R11–R17/R21 rules: configured one-page send, required defaults and overrides, min/max zero-send checks, adjusted size, bases/overflow, total and explicit-more contradictions, empty cursor/link pages, composite boundaries, cyclic continuations, and failed-stays-failed.
   - Test every IncompleteReason with exact items/cause/envelope; retain valid-page items after bad continuation and exclude malformed-page items. Cover resumed starting position, zero limit, completion exactly at limit, and intermediate empty pages.
   - Exercise Shopify Only, AIP-158 AllExcept, and replacement request shapes including carry destinations and replay rejection.
 
-- [ ] **4.4 Transport evidence**
+- [x] **4.4 Transport evidence**
   - Own two-origin link/policy/credential/redirect tests, relative `?page=2` and `../next`, scheme/host/port/userinfo cases, repeated/quoted/ambiguous Link fields, and verbatim versus authored query carry.
   - Test page-two 500, malformed 200, interrupted body, redirect refusal and failed hop; assert original status/headers/raw body evidence and page metadata only on paginated sends.
   - Test monotonic deadline exhaustion, completed-page/elapsed reporting, zero further sends and connection cancellation on drop. Use synchronized server events and at least 100 ms timing margins where real time is required, within the L1 time budget.
@@ -325,7 +722,7 @@ For applicable configuration readers, one test per format starts with a real-too
 
 ### Wave 9 — Sequential lifecycle implementation
 
-- [ ] **5.1 Scoped lifecycle**
+- [x] **5.1 Scoped lifecycle**
   - Own runtime lifecycle files and final public signature: separate/open-on-first-page modes, session page target, in-band keep-alive, authored renew, and latest-handle replacement before item/continuation validation can fail.
   - Await one bounded close after closure success/error/construction panic/poll panic when a usable handle exists. Preserve the closure outcome in SessionError on close failure; resume the original panic after cleanup. No open/close surface or outside-scope pages.
   - Bound all close attempts by grace independently of page budget, including early return. Document lease reliance for cancellation/open failure/abort/termination and inability to return close evidence on resumed panic.
@@ -333,12 +730,12 @@ For applicable configuration readers, one test per format starts with a real-too
 
 ### Wave 10 — Parallel lifecycle evidence
 
-- [ ] **5.2 Session evidence**
+- [x] **5.2 Session evidence**
   - Own scroll/PIT lifecycle tests: open/page/keep-alive/renew/close request records, each exit/panic path, expiry cleanup, early-return grace, slow/failed close, valid and failed closure outcomes, and latest handle after a malformed page.
   - Confirm no addressable close on open failure without a handle, and no detached work after cancellation. Add secret-handle and failed-close diagnostic sentinels.
   - Extend compile-fail cases for manual open/close, pages/fetch outside session scope and unauthored renew/keep-alive controls; verify permitted inside-scope collection.
 
-- [ ] **5.3 Partition evidence**
+- [x] **5.3 Partition evidence**
   - Own four-partition PIT tests: one session open/close, index/count on all requests, independent continuations/stalls, zero/over-max rejection, and latest handle across partitions and cleanup.
   - Validate a rotating-handle/partition definition positively. Use coordinated out-of-order responses to prove latest-observed semantics without claiming provider safety. Log the accepted ordering/invalidation risk.
 
@@ -348,29 +745,29 @@ For applicable configuration readers, one test per format starts with a real-too
 
 ### Wave 11 — Parallel authoring with disjoint ownership
 
-- [ ] **6.1 Forge strategies**
+- [x] **6.1 Forge strategies**
   - Own GitHub/GitLab/Gitea/Bitbucket modules: implement API-local strategy helpers and exceptions from the verified table, provider limits and informational server defaults, wrapper item paths/types and totals, and authored backward controls.
   - Model GitLab keyset alternates without emitting caller selection. Explicitly opt out unverified/default-inferred candidates such as Gitea tag/tree cases and GitLab participants; confirm inventory classifications rather than trusting name matches.
   - Prepare field-removal ledger entries and coverage expectations; do not modify endpoint literals or migrate shared dependents concurrently.
 
-- [ ] **6.2 OpenAI overlay**
+- [x] **6.2 OpenAI overlay**
   - Own the hand-written `openai_pagination` module and its tests: S6/S7/S8 strategy defaults/overrides, data wrappers/item types, last-item-id cursor exceptions, supported before legs, limits and required sendable defaults from the vendored document.
   - Preserve opt-outs for ListModels and the two vector-store provider gaps. Assert each endpoint's controls rather than only group counts.
   - Keep overlay code outside importer-owned output; defer registration/imported factory edits to the integration owner in Wave 12.
 
-- [ ] **6.3 Importer overlay**
+- [x] **6.3 Importer overlay**
   - Own generator CLI/import options, `import_pipeline.rs`, `definition_gen.rs`, and recipe plumbing: a generic validated overlay function-path option emits one call after API construction. No OpenAI-specific generator branch and no new config file.
   - Emit compiling RestApi literals for any API; no configured hook emits no call. Test temporary imported output compilation, unchanged overlay-file bytes, and before/after resolution through the same public factory used by clients and exporters.
   - Use a small vendored-derived fixture for routine L1 compilation and the actual vendored OpenAI input for the catalog re-import check; no network or additional performance sample.
 
-- [ ] **6.4 Remaining coverage**
+- [x] **6.4 Remaining coverage**
   - Own ElevenLabs verified strategy helpers, the all-API inventory test file, and gap records. Add empty fields/default opt-outs for the remaining APIs as required; do not apply recalled Anthropic/EMQX/Hugging Face strategies.
   - Explicitly enumerate every GET Vec endpoint under an API default and assert opt-outs as well as paginated entries. Include non-GET list recognition and non-list array writes.
   - If separately authorized evidence verifies U rows, record provider source/date and all required contract facts before authoring. Apply ListAuthUsers response correction only with both verification and explicit edit authorization; otherwise leave it unchanged and unpaginated. An inconclusive source stays a gap.
 
 ### Wave 12 — Sequential catalog integration
 
-- [ ] **6.5 Catalog integration**
+- [x] **6.5 Catalog integration**
   - Integrate module exports and the configured OpenAI overlay invocation; run the updated import recipe and validate unknown exception ids against its output.
   - Merge authoring expectations into one R27 coverage test asserting endpoint id, resolved origin, strategy and exact knobs across all 18 APIs. Match every unverified endpoint to its verification-task entry.
   - Compare imported resolution before/after and prove the overlay survives a second import. Review every destination adoption and expected removed request field.
@@ -381,7 +778,7 @@ For applicable configuration readers, one test per format starts with a real-too
 
 ### Wave 13 — Sequential regeneration and migrations
 
-- [ ] **7.1 Generated migration**
+- [x] **7.1 Generated migration**
   - Regenerate schematic-schema and exports exclusively through the generator, using the existing non-interactive generation entry point. Migrate every ledger call site that uses removed adopted fields in the same wave: configured single-page callers use fetch_page and handle Page<Item>/metadata instead of the old wrapper.
   - Preserve unrelated ordinary typed sends and provider-specific clients; do not expand into sniff retirement. Discover actual schema dependents from manifests rather than assuming the illustrative list is exhaustive.
   - Keep test sources outside generator-owned paths unless the generator explicitly emits them; ensure repeated generation preserves generated-surface tests and their manifest registration.
@@ -389,12 +786,12 @@ For applicable configuration readers, one test per format starts with a real-too
 
 ### Wave 14 — Parallel end-to-end evidence
 
-- [ ] **7.2 Generated evidence**
+- [x] **7.2 Generated evidence**
   - Own schema tests: local-server forge page-number, OpenAI cursor, and Bitbucket next-link traversals through actual generated code, including collect_all and configured one-page cursor/size sends.
   - Run the complete capability fail/pass suite against a real generated endpoint set, including session prohibitions and no alternate-selection API. Make snapshots portable across host/compiler path mappings; if needed assert custom diagnostic text rather than unstable path output and log the deviation.
   - Run D49 isolated generated compilation, `just test-schema`, and `just lint-schema`; record after-build time with the baseline context, without a new performance campaign.
 
-- [ ] **7.3 Dependent evidence**
+- [x] **7.3 Dependent evidence**
   - Own validation/log records only: build and run root `just test {pkg}` and relevant area lint for actual dependents, including sniff, biscuit-speaks, model-citizen, and homelab crates.
   - Confirm every removed-field use was migrated, no unrelated dependent behavior changed, and error/envelope handling still compiles with actual generated results.
   - Report failures to the migration owner for sequential fixes; do not have two workers edit the same dependent files.
@@ -405,20 +802,20 @@ For applicable configuration readers, one test per format starts with a real-too
 
 ### Wave 15 — Parallel documentation and platform evidence
 
-- [ ] **8.1 Documentation drift**
+- [x] **8.1 Documentation drift**
   - Own `schematic/docs/pagination.md`, its index link if present, define/gen/runtime READMEs, affected area/catalog/schema READMEs, dependency docs, and Schematic skills.
   - Explain model authoring, GET recognition/exception order, adoption/default rules, one-page result migration, compile-time controls, complete-traversal semantics, limits/error evidence, session cleanup/grace/cancellation, and partitions. Include compact examples and Mermaid resolution/lifecycle diagrams for a new developer.
   - List each unverified endpoint with provider, id, recalled strategy, and needed source; distinguish definition/provider gaps. Never link or name feature/fix directories from topic docs.
   - Review docs/comments for every changed symbol and remove the old nonexistent fetch-all claim. Log detected drift and its correction; do not add unrelated comment cleanup.
 
-- [ ] **8.2 Platform evidence**
+- [x] **8.2 Platform evidence**
   - Load the OS skill and collect/reuse qualifying evidence for changed packages and schema on macOS, Linux, native Windows, and WSL2 according to repository policy and actual available hosts.
   - Prove portable trybuild paths and deadline tolerances, with no focus-taking windows. Report exact local/reused/CI-pending cells; absence of evidence is not a passing result. Required coverage without qualifying evidence must run when available, while respecting explicit execution constraints.
   - Use existing event-scheduled CI coverage; do not add speculative matrix cells or trigger a full-scope run to investigate behavior. If remote evidence is unavailable, record the blocker and remaining required validation honestly.
 
 ### Wave 16 — Sequential closure audit
 
-- [ ] **8.3 Acceptance audit**
+- [x] **8.3 Acceptance audit**
   - Run final scoped `just test`, `just lint`, `just test-schema`, `just lint-schema`, and the isolated generation check after the last behavior changes. Verify the runtime is included in area recipes. Avoid cargo test and automatic formatting; L2 remains unaffected.
   - Confirm R1–R36, including R2a/R11a/R22a, each points to a concrete test or reviewed artifact; the same acceptance checks cover either chosen decode path. R30 must include every inventoried mechanism and all ten outside patterns, with the six unverified names preserved.
   - Reconcile all 20 Human review agenda entries in the implementation log: defaults, prerequisite reconciliation, design choices, adopted/retained fields, provider coverage/sources, counts, single decode sample, build/diagnostic observations, platform evidence, deviations/open questions, drift, reversibility, proposed choices, cleanup grace, incomplete mappings, decided provenance, and rotating-handle risk.

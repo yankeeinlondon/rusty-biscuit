@@ -147,12 +147,409 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_4:
+    - schematic/runtime/src/hooks.rs
+    - schematic/runtime/src/pager/pages.rs
+    - schematic/runtime/src/pager/request.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/runtime/tests/l1/pager_support.rs
+    - schematic/runtime/tests/l1/pager_collect.rs
+    - schematic/runtime/tests/l1/pager_transport.rs
+    - schematic/define/src/pagination/resolve.rs
+    - schematic/define/tests/pagination_tables.rs
+    - schematic/gen/src/codegen/mod.rs
+    - schematic/gen/src/codegen/pagination/mod.rs
+    - schematic/gen/src/codegen/pagination/tests.rs
+    - schematic/gen/src/codegen/request_structs/mod.rs
+    - schematic/gen/src/codegen/request_structs/into_parts.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+docs_updated_during_phase_4:
+    - schematic/define/README.md
+    - schematic/gen/README.md
+    - schematic/docs/runtime/README.md
+    - schematic/docs/runtime/deadlines-and-timeouts.md
+    - schematic/docs/runtime/hooks.md
+    - schematic/docs/runtime/metadata-and-redaction.md
+    - schematic/docs/runtime/origins-and-redirects.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_5:
+    - schematic/runtime/Cargo.toml
+    - schematic/runtime/src/pager/session.rs
+    - schematic/runtime/src/pager/pages.rs
+    - schematic/runtime/src/pager/error.rs
+    - schematic/runtime/src/pager/request.rs
+    - schematic/runtime/src/pager/engine.rs
+    - schematic/runtime/src/pager/progress.rs
+    - schematic/runtime/src/pager/mod.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/runtime/tests/l1/pager_support.rs
+    - schematic/runtime/tests/l1/pager_session.rs
+    - schematic/runtime/tests/l1/pager_partition.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_keep_alive_not_adjustable.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_keep_alive_not_adjustable.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_no_manual_open_or_close.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_no_manual_open_or_close.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_on_a_sessionless_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_on_a_sessionless_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_pages_escape_the_scope.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_pages_escape_the_scope.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_renew_without_a_renew_step.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_renew_without_a_renew_step.stderr
+    - schematic/define/tests/pagination_partitions.rs
+    - schematic/gen/src/codegen/pagination/mod.rs
+    - schematic/gen/src/codegen/pagination/tests.rs
+    - schematic/gen/src/codegen/endpoint_methods/mod.rs
+    - schematic/gen/src/codegen/endpoint_methods/names.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+docs_updated_during_phase_5:
+    - schematic/docs/runtime/README.md
+    - schematic/docs/runtime/deadlines-and-timeouts.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/dependencies.md
+    - schematic/gen/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_6:
+    - schematic/definitions/src/anthropic/mod.rs
+    - schematic/definitions/src/bitbucket/mod.rs
+    - schematic/definitions/src/elevenlabs/mod.rs
+    - schematic/definitions/src/emqx/mod.rs
+    - schematic/definitions/src/gitea/mod.rs
+    - schematic/definitions/src/github/mod.rs
+    - schematic/definitions/src/gitlab/mod.rs
+    - schematic/definitions/src/huggingface/mod.rs
+    - schematic/definitions/src/lib.rs
+    - schematic/definitions/src/openai/mod.rs
+    - schematic/definitions/src/openai_pagination.rs
+    - schematic/definitions/tests/pagination_coverage/main.rs
+    - schematic/definitions/tests/pagination_coverage/forges.rs
+    - schematic/definitions/tests/pagination_coverage/openai.rs
+    - schematic/definitions/tests/pagination_coverage/others.rs
+    - schematic/gen/src/definition_gen.rs
+    - schematic/gen/src/import_pipeline.rs
+    - schematic/gen/src/main.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/import_overlay.rs
+    - schematic/gen/tests/l1/openapi_import_test.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/fixtures/wire_baseline/query_request_lines.txt
+    - schematic/justfile
+    - schematic/schema/src/bitbucket/requests.rs
+    - schematic/schema/src/elevenlabs/requests.rs
+    - schematic/schema/src/gitea/requests.rs
+    - schematic/schema/src/github/requests.rs
+    - schematic/schema/src/gitlab/requests.rs
+    - schematic/schema/src/openai/requests.rs
+    - schematic/schema/tests/github_client.rs
+    - sniff/lib/src/remote/envelope.rs
+    - sniff/lib/src/remote/github.rs
+    - sniff/lib/tests/l1/remote_providers.rs
+docs_updated_during_phase_6:
+    - schematic/docs/io/import-openapi.md
+    - schematic/gen/README.md
+    - schematic/definitions/README.md
+    - schematic/specs/openai/README.md
+    - sniff/docs/repos/repo-tech-design.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_7:
+    - schematic/gen/src/cargo_gen.rs
+    - schematic/schema/Cargo.toml
+    - schematic/schema/Cargo.lock
+    - schematic/schema/tests/pagination.rs
+    - schematic/schema/tests/compile_fail.rs
+    - schematic/schema/tests/fixtures/compile_fail/adopted_field_is_not_a_request_setter.rs
+    - schematic/schema/tests/fixtures/compile_fail/adopted_field_is_not_a_request_setter.stderr
+    - schematic/schema/tests/fixtures/compile_fail/after_on_a_page_number_endpoint.rs
+    - schematic/schema/tests/fixtures/compile_fail/after_on_a_page_number_endpoint.stderr
+    - schematic/schema/tests/fixtures/compile_fail/before_on_a_forward_only_cursor.rs
+    - schematic/schema/tests/fixtures/compile_fail/before_on_a_forward_only_cursor.stderr
+    - schematic/schema/tests/fixtures/compile_fail/knob_after_pages.rs
+    - schematic/schema/tests/fixtures/compile_fail/knob_after_pages.stderr
+    - schematic/schema/tests/fixtures/compile_fail/no_alternate_selection.rs
+    - schematic/schema/tests/fixtures/compile_fail/no_alternate_selection.stderr
+    - schematic/schema/tests/fixtures/compile_fail/offset_on_a_page_number_endpoint.rs
+    - schematic/schema/tests/fixtures/compile_fail/offset_on_a_page_number_endpoint.stderr
+    - schematic/schema/tests/fixtures/compile_fail/page_on_a_cursor_endpoint.rs
+    - schematic/schema/tests/fixtures/compile_fail/page_on_a_cursor_endpoint.stderr
+    - schematic/schema/tests/fixtures/compile_fail/pager_on_an_unpaginated_endpoint.rs
+    - schematic/schema/tests/fixtures/compile_fail/pager_on_an_unpaginated_endpoint.stderr
+    - schematic/schema/tests/fixtures/compile_fail/partitioned_without_partitions.rs
+    - schematic/schema/tests/fixtures/compile_fail/partitioned_without_partitions.stderr
+    - schematic/schema/tests/fixtures/compile_fail/prev_without_a_backward_direction.rs
+    - schematic/schema/tests/fixtures/compile_fail/prev_without_a_backward_direction.stderr
+    - schematic/schema/tests/fixtures/compile_fail/session_on_a_sessionless_endpoint.rs
+    - schematic/schema/tests/fixtures/compile_fail/session_on_a_sessionless_endpoint.stderr
+    - schematic/schema/tests/fixtures/compile_fail/set_page_size_not_adjustable.rs
+    - schematic/schema/tests/fixtures/compile_fail/set_page_size_not_adjustable.stderr
+    - schematic/schema/tests/fixtures/compile_fail/total_without_a_total.rs
+    - schematic/schema/tests/fixtures/compile_fail/total_without_a_total.stderr
+    - schematic/schema/tests/fixtures/pass/authored_controls.rs
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_8:
+    - schematic/define/src/lib.rs
+    - schematic/define/src/pagination/resolve.rs
+    - schematic/define/src/pagination/strategy.rs
+    - schematic/define/src/params/mod.rs
+    - schematic/definitions/src/bitbucket/mod.rs
+    - schematic/definitions/src/github/mod.rs
+    - schematic/definitions/src/gitlab/mod.rs
+    - schematic/gen/src/codegen/endpoint_methods/mod.rs
+    - schematic/gen/src/codegen/endpoint_methods/names.rs
+    - schematic/gen/src/codegen/pagination/mod.rs
+    - schematic/gen/src/codegen/request_structs/into_parts.rs
+    - schematic/runtime/src/pager/engine.rs
+    - schematic/runtime/src/pager/pages.rs
+    - schematic/runtime/src/pager/request.rs
+    - schematic/schema/tests/compile_fail.rs
+    - .config/nextest.toml
+docs_updated_during_phase_8:
+    - schematic/README.md
+    - schematic/define/README.md
+    - schematic/definitions/README.md
+    - schematic/gen/README.md
+    - schematic/runtime/README.md
+    - schematic/docs/dependencies.md
+    - schematic/docs/generation/request-side.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/runtime/README.md
+    - schematic/docs/runtime/calling-an-api.md
+    - schematic/docs/runtime/deadlines-and-timeouts.md
+docs_created_during_phase_8:
+    - schematic/docs/pagination.md
+skills_files_updated_during_phase_8:
+    - .claude/skills/schematic-define/SKILL.md
+    - .claude/skills/os/build-hosts.md
+    - .claude/skills/os/windows-paths.md
+source_code:
+    - schematic/define/src/lib.rs
+    - schematic/define/src/openapi/export/info.rs
+    - schematic/define/src/openapi/export/mod.rs
+    - schematic/define/src/openapi/import/builder.rs
+    - schematic/define/src/pagination.rs
+    - schematic/define/src/pagination/collection.rs
+    - schematic/define/src/pagination/resolve.rs
+    - schematic/define/src/pagination/selector.rs
+    - schematic/define/src/pagination/strategy.rs
+    - schematic/define/src/pagination/validate.rs
+    - schematic/define/src/params/mod.rs
+    - schematic/define/src/prelude.rs
+    - schematic/define/src/request.rs
+    - schematic/define/src/types.rs
+    - schematic/define/tests/endpoint_literal_surface.rs
+    - schematic/define/tests/pagination_inventory.rs
+    - schematic/define/tests/pagination_model.rs
+    - schematic/define/tests/pagination_serde.rs
+    - schematic/define/tests/pagination_support/mod.rs
+    - schematic/define/tests/pagination_tables.rs
+    - schematic/definitions/src/anthropic/mod.rs
+    - schematic/definitions/src/artificial_analysis/mod.rs
+    - schematic/definitions/src/bitbucket/mod.rs
+    - schematic/definitions/src/elevenlabs/mod.rs
+    - schematic/definitions/src/emqx/mod.rs
+    - schematic/definitions/src/eversolo/mod.rs
+    - schematic/definitions/src/gitea/mod.rs
+    - schematic/definitions/src/github/mod.rs
+    - schematic/definitions/src/gitlab/mod.rs
+    - schematic/definitions/src/huggingface/mod.rs
+    - schematic/definitions/src/lmstudio/mod.rs
+    - schematic/definitions/src/ollama/mod.rs
+    - schematic/definitions/src/openai/mod.rs
+    - schematic/definitions/src/registry/mod.rs
+    - schematic/definitions/src/samsung_smart_tv/mod.rs
+    - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+    - schematic/gen/src/codegen/api_struct/tests.rs
+    - schematic/gen/src/codegen/client/tests.rs
+    - schematic/gen/src/codegen/endpoint_methods/tests.rs
+    - schematic/gen/src/codegen/module_docs.rs
+    - schematic/gen/src/codegen/request_enum.rs
+    - schematic/gen/src/definition_gen.rs
+    - schematic/gen/src/diagnostics.rs
+    - schematic/gen/src/export/naming.rs
+    - schematic/gen/src/export/openapi.rs
+    - schematic/gen/src/export/postman/collection.rs
+    - schematic/gen/src/export/postman/mod.rs
+    - schematic/gen/src/export/postman/tests.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/test_utils.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/http_client.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/openapi_strict_completeness.rs
+    - schematic/gen/tests/l1/output_validation.rs
+    - schematic/gen/tests/l1/pagination_validation.rs
+    - schematic/gen/tests/l1/partial_generation.rs
+    - schematic/gen/tests/l1/postman_golden.rs
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/src/call.rs
+    - schematic/runtime/src/client.rs
+    - schematic/runtime/src/meta.rs
+    - schematic/runtime/src/pager/mod.rs
+    - schematic/runtime/src/pager/spec.rs
+    - schematic/runtime/src/pager/engine.rs
+    - schematic/runtime/src/pager/json.rs
+    - schematic/runtime/src/pager/link.rs
+    - schematic/runtime/src/pager/progress.rs
+    - schematic/runtime/src/pager/request.rs
+    - schematic/runtime/src/pager/pages.rs
+    - schematic/runtime/src/pager/error.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/runtime/tests/l1/pager_support.rs
+    - schematic/runtime/tests/l1/pager_mechanisms.rs
+    - schematic/runtime/tests/l1/pager_outside.rs
+    - schematic/runtime/tests/l1/pager_rules.rs
+    - schematic/runtime/tests/l1/pager_surface.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_after_without_a_resumable_cursor.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_after_without_a_resumable_cursor.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_before_on_a_forward_only_cursor.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_before_on_a_forward_only_cursor.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_knob_after_pages.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_knob_after_pages.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_offset_on_a_page_number_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_offset_on_a_page_number_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_on_an_unpaginated_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_on_an_unpaginated_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_page_on_a_cursor_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_page_on_a_cursor_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_page_size_not_authored.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_page_size_not_authored.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_pages_on_a_session_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_pages_on_a_session_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_prev_without_a_backward_direction.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_prev_without_a_backward_direction.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_set_page_size_not_adjustable.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_set_page_size_not_adjustable.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_total_without_a_total.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_total_without_a_total.stderr
+    - schematic/gen/src/lib.rs
+    - schematic/gen/src/codegen/mod.rs
+    - schematic/gen/src/codegen/pagination/mod.rs
+    - schematic/gen/src/codegen/pagination/tests.rs
+    - schematic/gen/src/codegen/traits.rs
+    - schematic/gen/src/codegen/endpoint_methods/mod.rs
+    - schematic/gen/src/codegen/endpoint_methods/names.rs
+    - schematic/gen/src/codegen/endpoint_methods/docs.rs
+    - schematic/gen/src/codegen/request_structs/mod.rs
+    - schematic/gen/src/codegen/request_structs/endpoint_spec.rs
+    - schematic/gen/src/codegen/request_structs/tests.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/gen/src/output/assemble/shared.rs
+    - schematic/gen/tests/common/fresh_output.rs
+    - schematic/schema/src/lib.rs
+    - schematic/schema/src/shared.rs
+    - schematic/schema/src/bitbucket/requests.rs
+    - schematic/schema/src/gitea/requests.rs
+    - schematic/schema/src/github/requests.rs
+    - schematic/schema/src/gitlab/requests.rs
+    - schematic/runtime/src/hooks.rs
+    - schematic/runtime/tests/l1/pager_collect.rs
+    - schematic/runtime/tests/l1/pager_transport.rs
+    - schematic/gen/src/codegen/request_structs/into_parts.rs
+    - schematic/runtime/Cargo.toml
+    - schematic/runtime/src/pager/session.rs
+    - schematic/runtime/tests/l1/pager_session.rs
+    - schematic/runtime/tests/l1/pager_partition.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_keep_alive_not_adjustable.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_keep_alive_not_adjustable.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_no_manual_open_or_close.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_no_manual_open_or_close.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_on_a_sessionless_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_on_a_sessionless_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_pages_escape_the_scope.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_pages_escape_the_scope.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_renew_without_a_renew_step.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_session_renew_without_a_renew_step.stderr
+    - schematic/define/tests/pagination_partitions.rs
+    - schematic/definitions/src/lib.rs
+    - schematic/definitions/src/openai_pagination.rs
+    - schematic/definitions/tests/pagination_coverage/main.rs
+    - schematic/definitions/tests/pagination_coverage/forges.rs
+    - schematic/definitions/tests/pagination_coverage/openai.rs
+    - schematic/definitions/tests/pagination_coverage/others.rs
+    - schematic/gen/src/import_pipeline.rs
+    - schematic/gen/src/main.rs
+    - schematic/gen/tests/l1/import_overlay.rs
+    - schematic/gen/tests/l1/openapi_import_test.rs
+    - schematic/gen/tests/fixtures/wire_baseline/query_request_lines.txt
+    - schematic/justfile
+    - schematic/schema/src/elevenlabs/requests.rs
+    - schematic/schema/src/openai/requests.rs
+    - schematic/schema/tests/github_client.rs
+    - sniff/lib/src/remote/envelope.rs
+    - sniff/lib/src/remote/github.rs
+    - sniff/lib/tests/l1/remote_providers.rs
+    - schematic/gen/src/cargo_gen.rs
+    - schematic/schema/Cargo.toml
+    - schematic/schema/Cargo.lock
+    - schematic/schema/tests/pagination.rs
+    - schematic/schema/tests/compile_fail.rs
+    - schematic/schema/tests/fixtures/compile_fail/adopted_field_is_not_a_request_setter.rs
+    - schematic/schema/tests/fixtures/compile_fail/adopted_field_is_not_a_request_setter.stderr
+    - schematic/schema/tests/fixtures/compile_fail/after_on_a_page_number_endpoint.rs
+    - schematic/schema/tests/fixtures/compile_fail/after_on_a_page_number_endpoint.stderr
+    - schematic/schema/tests/fixtures/compile_fail/before_on_a_forward_only_cursor.rs
+    - schematic/schema/tests/fixtures/compile_fail/before_on_a_forward_only_cursor.stderr
+    - schematic/schema/tests/fixtures/compile_fail/knob_after_pages.rs
+    - schematic/schema/tests/fixtures/compile_fail/knob_after_pages.stderr
+    - schematic/schema/tests/fixtures/compile_fail/no_alternate_selection.rs
+    - schematic/schema/tests/fixtures/compile_fail/no_alternate_selection.stderr
+    - schematic/schema/tests/fixtures/compile_fail/offset_on_a_page_number_endpoint.rs
+    - schematic/schema/tests/fixtures/compile_fail/offset_on_a_page_number_endpoint.stderr
+    - schematic/schema/tests/fixtures/compile_fail/page_on_a_cursor_endpoint.rs
+    - schematic/schema/tests/fixtures/compile_fail/page_on_a_cursor_endpoint.stderr
+    - schematic/schema/tests/fixtures/compile_fail/pager_on_an_unpaginated_endpoint.rs
+    - schematic/schema/tests/fixtures/compile_fail/pager_on_an_unpaginated_endpoint.stderr
+    - schematic/schema/tests/fixtures/compile_fail/partitioned_without_partitions.rs
+    - schematic/schema/tests/fixtures/compile_fail/partitioned_without_partitions.stderr
+    - schematic/schema/tests/fixtures/compile_fail/prev_without_a_backward_direction.rs
+    - schematic/schema/tests/fixtures/compile_fail/prev_without_a_backward_direction.stderr
+    - schematic/schema/tests/fixtures/compile_fail/session_on_a_sessionless_endpoint.rs
+    - schematic/schema/tests/fixtures/compile_fail/session_on_a_sessionless_endpoint.stderr
+    - schematic/schema/tests/fixtures/compile_fail/set_page_size_not_adjustable.rs
+    - schematic/schema/tests/fixtures/compile_fail/set_page_size_not_adjustable.stderr
+    - schematic/schema/tests/fixtures/compile_fail/total_without_a_total.rs
+    - schematic/schema/tests/fixtures/compile_fail/total_without_a_total.stderr
+    - schematic/schema/tests/fixtures/pass/authored_controls.rs
+    - .config/nextest.toml
+documentation:
+    - schematic/define/README.md
+    - schematic/docs/generation/validation.md
+    - schematic/docs/generation/partial-generation.md
+    - schematic/gen/README.md
+    - schematic/docs/runtime/README.md
+    - schematic/docs/runtime/deadlines-and-timeouts.md
+    - schematic/docs/runtime/hooks.md
+    - schematic/docs/runtime/metadata-and-redaction.md
+    - schematic/docs/runtime/origins-and-redirects.md
+    - schematic/docs/dependencies.md
+    - schematic/docs/io/import-openapi.md
+    - schematic/definitions/README.md
+    - schematic/specs/openai/README.md
+    - sniff/docs/repos/repo-tech-design.md
+    - schematic/README.md
+    - schematic/runtime/README.md
+    - schematic/docs/generation/request-side.md
+    - schematic/docs/runtime/calling-an-api.md
+    - schematic/docs/pagination.md
+completed_phase: 8
+implemented: true
 packages:
     - schematic-define
     - schematic-gen
     - schematic-definitions
     - schematic-runtime
     - schematic-schema
+    - sniff
 ---
 
 # Implementation Log for 2026-10-13-schematic-pagination (8 phases)
@@ -1555,3 +1952,797 @@ No pre-existing failures.
 14. **Unratified.** R9/R10 adopted as described. R14 widened, plus a reset of the opposite history on a direction change. S11 is provisionally `from_value` behind `request::{PageDecoder, decode_items}`.
 17. **`InvalidContinuation` and the added reasons.** Implemented as listed in 3.1; the Phase 3 tests above cover five of the eight reasons.
 18. **Stall-rule widening.** No test depended on consecutive-only detection. Walking back and forth through a bidirectional list repeats a continuation across directions; that is not treated as a loop.
+
+## Phase 4
+
+Phase 4 integrates typed transport and the complete-list semantics: the decode sample (4.1), the transport gaps left by Phase 3 (4.2), and the traversal and transport acceptance tests (4.3, 4.4). Started 2026-10-13 on `feat/modern-config`. Phase 3 had already routed every page through `Client::send_located`, so 4.2 closes the remaining rules rather than building the transport path.
+
+### 4.1 Decode sample (S11, R24, default 4)
+
+**Method.** The spike's `bloat/gen.py` drives the throwaway `pager-surface` crate, so it was adapted to the landed runtime (scratch copy in `/tmp/pager-bloat/gen.py`, not committed). It writes a standalone crate with one item struct, one `Json<_>` endpoint (the ordinary typed send), and, in `paged` mode, the `Paginated` impl and markers the generator emits per endpoint. It cycles six strategy templates: page number with a `Link` rel and size, cursor from the last item's id with `has_more`, cursor from a body field with size, next link from a body field with size, `Link` header next and prev, and offset with an item total. Half the templates use a `{data: [...]}` wrapper and half a root array. The binary sends every endpoint once and, in `paged` mode, runs `collect_all` on every pager, so each `Pages<_, _, R>` is monomorphized. The count is **94 endpoints**, Phase 1's expected paginated count, not the spike's 157 list candidates, because only paginated endpoints get a pager. Both modes use the workspace `Cargo.lock`, the default `release` profile, and `CARGO_TARGET_DIR=/tmp/pager-bloat/target`, with `RUSTC_WRAPPER` cleared.
+
+**Candidate.** Items were decoded with `serde_json::from_slice` from their own text in the body. A non-generic walk over `&RawValue` spans (serde_json `raw_value`) mirrored `json::records` and `json::project`, and the engine returned the kept record indices instead of cloned values. Projection, continuation access (still from the parsed `Value`), envelope evidence, and one-pass item delivery were unchanged; the runtime's 289 L1 tests passed with it.
+
+**Host.** macOS (Darwin 27.2.0, Apple Silicon), rustc 1.98.1, cold scratch target directory, no compiler cache.
+
+| Binary | `from_value` (Phase 3) | `from_slice` candidate |
+| --- | --- | --- |
+| `base` (ordinary sends only) | 10,033,536 B | 10,057,872 B |
+| `paged` (plus 94 pagers) | 12,670,624 B | 12,726,176 B |
+| pager cost (`paged` − `base`) | 2,637,088 B | 2,668,304 B |
+
+**Observation.** The candidate made the binary 55 KB larger, not smaller. `nm` shows why. The landed `Json<T>` codec already instantiates `<Value as Deserializer>::deserialize_struct::<ItemN::__Visitor>` for every success type, because its `pre_response_json` branch decodes through `from_value`, and that instantiation is present in both binaries. The spike's finding that 74% of the added IR is a second item deserializer measured a prototype whose unpaginated decode had no value path, so it does not hold for the landed runtime. The candidate removed nothing and added `from_trait::<SliceRead, ItemN>`, the raw walk, and the `raw_value` feature.
+
+**Chosen path: keep `from_value`** (`request::decode_items`). The reuse that R24 prefers already happens through the codec's value path. The candidate was correct but added a second traversal of the body, a dependency feature, and 55 KB, for no size benefit. The candidate code was removed and the module doc of `request.rs` now records the reason. The 2.6 MB pager cost at 94 endpoints is the pager's own generic code (engine plumbing, `Pages`, futures, and `collect_all`, monomorphized per endpoint). It is logged for agenda item 8 with no adoption threshold, per the plan. A reduction would come from making less of `Pages` generic over `R`, which is outside this phase. Reversal: reapply the candidate if `Json<T>` ever stops decoding from a value; the seam is still `PageDecoder` and `decode_items`.
+
+**Hooks (4.2 decision, recorded here because the decoder carries it).** `PageDecoder` now overrides `decode_hooked`: the client's global `pre_response_json` hook runs on every page body before the engine reads it, because a definition's item and continuation paths describe the body the hook produces, the same body the endpoint's own `Json` codec decodes. A hook refusal is the envelope's `ErrorKind::Hook` with the original bytes, mapped to `IncompleteReason::HttpError`. The endpoint's typed mutator does not run on a page, because it is typed by the endpoint's response, which a page is not. Alternative: run no hook on pages (Phase 3's behavior), which would make a hook-dependent definition page differently from its ordinary send. `hooks.rs`'s module doc now states the page behavior.
+
+### 4.2 Transport integration
+
+Phase 3 already sent every page as `PageRequest<R>` through `Client::send_located`, so pages already had credentials, redaction, the origin policy, redirects, the shared deadline, the page-only `RequestMeta.page`, and no retries. Phase 3's 3.1 entry records that design. This task closed the remaining rules:
+
+- **Decoder:** `from_value` is kept (4.1), and the global JSON hook now runs on pages (see 4.1).
+- **Ordinary sends of a paginated endpoint send required adopted defaults (R11a, the runtime half of R2a).** An ordinary typed send cannot see `Paginated`, so the generator writes the defaults into the request's `into_parts`. `schematic_define::pagination::ManagedRole::sent_default` (new, public) gives the value the pager sends when the caller sets none: the first page or offset of the index base, `PageSize::sent_default`, or the keep-alive default. `has_sent_default` now derives from it. `codegen::pagination::ordinary_send_defaults(api, endpoint)` lists the adopted parameters the endpoint declares required, with those values. `output/assemble/api.rs` passes them to the new crate-private `generate_request_struct_with_defaults`; the public `generate_request_struct_with_options` delegates to it with none. `into_parts` appends them after the ordinary query and headers. The pager then writes each managed input over the same name, so a page carries one value per input. Optional adopted inputs are still omitted.
+- **Follow-up conflicts (R16).** Destination conflicts between managed inputs are a definition-validation rule (Phase 2). At run time, a managed input replaces any ordinary value of the same name: query by exact name, header without regard to case, and body by exact path segments. That is how a required default from `into_parts` gives way to the pager's value. The plan's "validate conflicts rather than silently overwriting them" is read as the definition-time rule. The define model never adopts a constant or session handle, so an ordinary field cannot shadow one, and a run-time refusal would also reject the required-default case above. Recorded as a deviation.
+- **Carry on bodies (R16, "non-replayable bodies").** Every `RequestBody` variant owns its bytes, so no body is non-replayable in the sense of a consumed stream. The real gap was different: `carried_body` re-sent a URL-encoded, multipart, raw, or non-object JSON body whole under an `Only`/`AllExcept` rule, which silently ignored the rule. It now filters URL-encoded pairs and multipart parts by name, as it already did for JSON object fields, and drops a body left with nothing. A body whose fields cannot be named (raw bytes, or JSON that is not an object) is refused with `InvalidArgument` and zero requests. `All` and `Nothing` are unchanged.
+- **Followed links are checked after carry (R18).** `check_link::<R>` now runs on the URL as it will be sent, after the carry rule and managed inputs changed its query. Before, it ran on the link as read. The origin cannot change in between, but the rule is now literal. The send path's own absolute-URL origin check still runs, and redirects of a followed link go through the client's redirect policy.
+- **Link parsing, relative resolution, verbatim GET following, deadline mapping, and the `IncompleteReason` mapping** were delivered in Phase 3; 4.3 and 4.4 add their acceptance tests.
+- **A shared deadline that expires during a page body read** arrives as the envelope's `BodyInterrupted`, because the head had already come, and maps to `HttpError` (R20, R21). Only an expiry before a page's head is `DeadlineExceeded`. Recorded as a known limit; changing it would mean guessing from an expired deadline what cut the body.
+- **Integration seam.** `Call::into_inner` (crate-private) gives `Call::pager` the client, request, and per-call options. Generated call types forward to it, so their wrapper field stays private. An invalid request (`into_parts` error) surfaces at the first page as `InvalidArgument` with zero requests, the same refusal an ordinary send gives.
+
+### 4.3 Traversal evidence and 4.4 Transport evidence
+
+Two delegated workers wrote these tests concurrently, each owning one new file: `pager_collect.rs` (4.3) and `pager_transport.rs` (4.4). Before they started, `endpoint!` in `pager_support.rs` was changed to use absolute paths and is now re-exported (`pub(crate) use endpoint;`), so each suite declares its own fixtures without editing the shared file. Every test is L1 and untiered, runs against local wiremock servers or raw loopback sockets, and has no fixed synchronization sleeps; real-time margins are at least 100 ms. The slowest new test takes 0.32 s. Neither worker found a runtime defect.
+
+`pager_collect.rs` (21 tests) is the R21 table plus the R16 request shapes:
+
+- One test per `IncompleteReason`, each asserting the exact items, `pages`, the error variant, and the envelope evidence where a response arrived:
+  - `page_limit_reached_keeps_every_page_counts_an_empty_one_and_has_no_error`
+  - `repeated_continuation_keeps_the_page_that_repeated_and_sends_nothing_more`
+  - `http_error_keeps_earlier_items_and_the_failed_page_body`
+  - `invalid_continuation_keeps_the_items_of_the_page_that_carried_it`
+  - `invalid_argument_is_refused_before_the_request_that_would_carry_it`
+  - `transport_error_when_the_next_page_cannot_connect`
+  - `transport_error_when_a_redirect_hop_fails_keeps_the_redirect_as_evidence` (an envelope `RedirectFailed` maps to `TransportError`)
+  - `cross_origin_rejected_sends_nothing_to_the_other_origin`
+  - `deadline_exceeded_keeps_the_pages_that_arrived_in_time`
+- Start positions and limits:
+  - `collect_all_starts_from_a_resumed_cursor_or_a_start_page`
+  - `a_zero_page_limit_is_an_invalid_argument_with_no_request`
+  - `the_last_permitted_page_completes_the_list_when_it_shows_the_end_after_an_empty_page`
+- Follow-up shapes (R16):
+  - `only_carry_sets_the_named_ordinary_inputs_on_a_next_link_and_drops_the_rest` (Shopify `Only`)
+  - `a_follow_up_takes_its_method_filled_path_carried_inputs_and_each_cursor_destination` (method, filled path, query and JSON carry, cursor written to the query, to a header replacing a differently cased ordinary header, and to a JSON body path)
+  - `all_except_carry_drops_the_named_url_encoded_pairs_and_keeps_repeated_ones`
+  - `a_body_the_carry_rule_leaves_empty_is_dropped`
+  - `only_carry_keeps_the_named_multipart_parts`
+  - `a_raw_or_non_object_json_body_is_refused_for_a_follow_up_after_the_first_page`
+  - `a_repeated_ordinary_query_value_stays_repeated_on_an_all_carry_follow_up`
+- Managed inputs win:
+  - `a_caller_page_size_replaces_an_ordinary_value_of_the_same_name_exactly_once`
+  - `without_a_caller_size_the_sent_default_replaces_an_ordinary_value_exactly_once`
+
+`pager_transport.rs` (20 tests) covers R18, R19, R20, R36, and hooks:
+
+- Origins (R18):
+  - `a_link_to_a_second_origin_follows_the_policy_and_its_credential_rule`: under the default policy B receives zero requests. Allow-listing B lets it receive the bearer credential, as `origin.rs` documents. Under the any-origin-without-credentials policy B gets no `Authorization`.
+  - `under_the_default_policy_every_other_scheme_host_port_and_userinfo_link_is_refused_unsent`
+  - `a_relative_link_resolves_against_the_url_page_one_was_redirected_to` (`?page=2` and `../next` after a 302)
+  - `a_followed_link_that_redirects_to_another_origin_obeys_the_redirect_policy_and_credential_rule`
+- `Link` header parsing (R18):
+  - `the_next_link_is_found_across_fields_quoted_commas_and_multiple_relations`
+  - `a_malformed_link_header_is_an_invalid_link_after_its_page_is_delivered`
+  - `a_link_header_without_a_next_relation_ends_the_list`
+- Envelope per page (R20), each with its `collect_all` reason:
+  - `pages_are_ordinary_sends_and_an_error_status_keeps_its_status_headers_and_body_without_a_retry`
+  - `a_page_that_is_not_json_is_a_malformed_success_with_its_bytes`
+  - `a_page_body_cut_off_after_its_head_is_a_body_interruption`
+  - `a_page_redirected_to_a_refused_origin_is_a_redirect_refusal_with_the_redirect_body`
+  - `a_page_whose_redirect_hop_fails_keeps_the_redirect_as_evidence`
+- Deadline and cancellation (R19):
+  - `a_deadline_that_expires_while_page_two_waits_reports_the_completed_pages_and_stays_failed`
+  - `a_deadline_that_expires_between_pages_sends_nothing_more` (the deadline is set on the call, not the pager)
+  - `dropping_a_page_in_flight_closes_its_connection_and_sends_nothing_later` (raw socket: the server observes EOF, and a control request proves no later request arrived)
+- Privacy (R36):
+  - `a_refused_link_carrying_a_secret_cursor_keeps_it_out_of_the_error_text_and_summaries`
+  - `the_client_credential_is_in_no_page_or_pager_error_text_or_debug_output`
+- Hooks:
+  - `the_global_json_hook_reshapes_every_page_before_items_and_continuations_are_read`
+  - `a_global_hook_refusal_is_a_hook_failure_with_the_original_bytes`
+  - `an_endpoint_mutator_does_not_run_on_pages` (the same mutator does fail an ordinary send, which shows it was registered)
+
+Observations recorded from the workers:
+
+- **`pages` counts a request refused before sending.** The engine counts a request when it plans it, so a size refusal reports `pages == 1` with nothing sent. This matches `Incomplete::pages`' doc ("page requests attempted, including the one that failed") and R21's "fetch attempts", and the plan's 1.x default counts attempts. Kept.
+- **Carry rules do not filter headers.** `Carry` selects query and body names, as definition validation requires (`UnknownCarryParam` accepts only declared query parameters and the page size). Request headers are re-sent on every non-link follow-up, and kept on a followed link. Kept and recorded.
+- **The cursor-secret test checks error text and summaries, not the `Debug` output of the inner `TransportError`.** That `Debug` output prints the request URL with the runtime's ordinary redaction, which does not hide a parameter named like a cursor. R36 allows this ("Request URLs and headers use spec 2's redaction").
+
+#### Requirement-to-test mapping (Phase 4 scope)
+
+| Requirement | Boundary and fidelity | Tests |
+| --- | --- | --- |
+| R24 / S11 decode path | runtime crate, F2 (real typed send) | decode sample above; the existing item-decode tests (`pager_rules::a_malformed_collection_*`, mechanism tests) cover the kept `from_value` path |
+| R11a ordinary send with required defaults | define → gen → compiled crate → runtime → HTTP, F3 | gen `pagination::tests::an_ordinary_send_carries_required_adopted_defaults_and_omits_optional_ones`; define `pagination_tables::each_role_sends_its_authored_default_or_none`; fresh-output child test `required_adopted_parameters_are_sent_once_by_an_ordinary_send_and_by_the_pager` (run by `slow_fixture_apis_compile_and_send_offline`: a generated crate compiled against the workspace runtime sends `page=1&limit=25`, and its pager sends `page=3&limit=5`) |
+| R16 follow-up shape | runtime → HTTP, F2 | the 9 follow-up and managed-input tests in `pager_collect.rs` above; Phase 3's AIP-158 test |
+| R18 links and origins | runtime → two loopback origins, F2 | `pager_transport` origin and `Link` tests; Phase 3 `pager_surface` link tests |
+| R19 shared deadline | runtime, real time and raw sockets, F2 | `pager_transport` deadline and drop tests; `pager_collect::deadline_exceeded_keeps_the_pages_that_arrived_in_time` |
+| R20 envelope per page | runtime → HTTP and raw sockets, F2 | the five `pager_transport` envelope tests |
+| R21 `collect_all` | runtime → HTTP, F2 | the `pager_collect` reason table, limit, and start tests |
+| R36 privacy | runtime, F2 | `pager_transport` sentinel tests; Phase 3 cursor sentinels |
+| Hooks on pages | runtime → HTTP, F2 | the three `pager_transport` hook tests |
+
+Input robustness: this phase adds no configuration reader. Provider response bodies and `Link` headers are outside the matrix (Phase 1), and their shapes have defined outcomes in the tests above: malformed, wrong-type, absent, and ambiguous links. Smells grepped in the changed runtime and generator code: no `#[serde(default)]`; the `.ok()` in `decode_items` makes the whole page malformed rather than filtering an item.
+
+### Validation run in this phase (macOS, rustc 1.98.1)
+
+| Check | Result |
+| --- | --- |
+| `just test` (schematic area) | pass: L1 2156/2156 (12 skipped), fresh-output 6/6, compile-fail 1/1 |
+| `just lint` (schematic area) | pass |
+| `just generate`, then `git status` of schema/openapi/postman | no change (no shipped definition has a required adopted parameter) |
+| `RUSTDOCFLAGS='-D warnings' cargo doc -p schematic-runtime --no-deps` | clean |
+| `just cross-check schematic-runtime --os linux` | pass: 329/329 |
+| `pager_transport` suite, three consecutive full runtime runs (worker) | 330/330 each |
+| Windows, WSL2 | not run; Phase 8.2 owns platform evidence. The new socket and deadline tests use loopback, raw sockets, and margins of at least 100 ms, like the existing `timing.rs` and `redirects.rs` suites that already pass on Windows. |
+
+Pre-existing, not caused by this phase: `cargo doc -D warnings` fails for `schematic-define` (`headers/sensitive.rs`, last changed in `c5e4159f9`) and `schematic-gen` (`endpoint_methods/mod.rs`, `parser.rs`, `ws_codegen/mod.rs`). No file this phase changed is involved, and rustdoc is not one of the area's gates.
+
+### Deviations in this phase
+
+- **Decode path kept as `from_value`** (R24 prefers `from_slice`): the measured reason is under 4.1.
+- **No run-time refusal of an ordinary value at a managed destination.** The managed value replaces it, and the definition-time destination rules stand in for the plan's "validate conflicts" (see 4.2).
+- **A page body cut off by the shared deadline is `HttpError`, not `DeadlineExceeded`** (see 4.2).
+- **The generator emits required adopted defaults in `into_parts`.** This is a generator change in a runtime-integration phase, because an ordinary send cannot see `Paginated`.
+- **A refused follow-up carry is a new `InvalidArgument` case:** a raw or non-object JSON body under `Only`/`AllExcept`.
+
+### Human review agenda (Phase 4 updates)
+
+1. **Defaults.** Default 4 (decode path) was evaluated and `from_value` kept. Default 19 (real time with margins of at least 100 ms) is used by every deadline test.
+3. **Design choices.** The global hook runs on pages and the typed mutator does not. `ManagedRole::sent_default` is public. Required adopted defaults are written into `into_parts`. Carry filters URL-encoded and multipart bodies and refuses unselectable ones.
+7. **Single decode sample.** Done, as recorded in the table under 4.1: 94 endpoints, macOS, rustc 1.98.1, and a candidate 55 KB larger, so `from_value` was kept.
+8. **Build observations.** The pager costs 2.6 MB of release binary at 94 endpoints in the synthetic crate. Almost all of it is per-endpoint monomorphization of the generic pager, not item deserializers. Reducing it would mean making less of `Pages` generic; that is not planned.
+9. **OS.** macOS full; Linux runtime cross-check. Windows and WSL2 are Phase 8.2.
+10. **Deviations.** See above.
+11. **Open questions (new).** Should carry rules ever filter headers? Recommended: no, until a provider needs it, because definitions can only name query parameters.
+12. **Drift, resolved by assuming the code is right:**
+    - `docs/runtime/README.md` still listed pagers as planned and said `RequestMeta::page` was always `None` (stale since Phase 3). It now lists only sessions, partitions, and the paging topic page as planned.
+    - `docs/runtime/metadata-and-redaction.md`'s `page` row was rewritten for the same reason.
+    - `docs/runtime/origins-and-redirects.md` called pager link checks planned.
+    - `docs/runtime/hooks.md` said every reply other than JSON endpoint replies skips hooks; it now describes pages.
+    - `docs/runtime/deadlines-and-timeouts.md` gained the pager's deadline behavior.
+    - `hooks.rs`'s module doc gained the page behavior.
+    - `request.rs`'s module doc described the decode seam as provisional.
+    - The gen and define READMEs gained the required-default rule.
+    - The skill `schematic-define` gained the same rule.
+14. **Unratified.** S11 is now final (`from_value`, with its reason).
+15. **Adoption rule.** An adopted parameter that the endpoint declares required is still sent by an ordinary send, at its pager default. No shipped definition has one yet (Phase 1), so the regenerated output is unchanged.
+17. **The added reasons.** All eight `IncompleteReason`s are now asserted through `collect_all` with their evidence (`pager_collect.rs`).
+19. **Provenance.** D55-5 (R2a) is applied on the runtime side: the pager always sends a required managed input, and an ordinary send sends its default.
+
+## Phase 5
+
+Phase 5 adds scoped sessions and partitions: the lifecycle (5.1), session evidence (5.2), and partition evidence (5.3). Started 2026-10-13 on `feat/modern-config`. Entries are appended as work lands.
+
+### 5.1 Scoped lifecycle
+
+New runtime file `schematic/runtime/src/pager/session.rs`. Changes to `pages.rs`, `error.rs`, `request.rs`, `engine.rs`, `progress.rs`, `mod.rs`. `tokio` gains its `sync` feature (`docs/dependencies.md` updated).
+
+**Final public signature (plan "Session signature"; spec Design `with_session`, parent P6/R7):**
+
+```rust
+impl<'a, A: Api, R: Paginated<Api = A>> Pager<'a, A, R> {
+    pub fn with_session<F, O>(self, scope: F) -> CallFuture<'a, SessionResult<O, R>>
+    where
+        R: Sessioned,
+        F: for<'s> FnOnce(&'s mut SessionScope<'a, A, R>) -> CallFuture<'s, O> + Send + 'a,
+        O: Send + 'a;
+}
+pub type SessionResult<O, R> = Result<O, SessionError<O, <R as EndpointSpec>::Failure>>;
+pub struct SessionError<O, E> { pub outcome: O, pub close: PagerError<E> }
+```
+
+A caller writes `.with_session(|scope| Box::pin(async move { scope.collect_all().await }))`. The closure receives a borrowed scope and returns a boxed future tied to that borrow, as the plan specifies. **Alternative tried and rejected:** `F: AsyncFnOnce(&mut SessionScope) -> O` with an unboxed `async fn`. It compiled and ran (the generated child test passed), but the fresh-output compile control showed that rustc cannot prove the returned future `Send` ("implementation of `AsyncFnOnce` is not general enough", the higher-ranked auto-trait limitation). A session could then not be spawned. The boxed form makes `Send` explicit; the control `sends(client.scan_entries().with_session(..))` now compiles. Reversal: revisit once return-type notation lets a bound name an async closure's future.
+
+**Result shape (D57 item 5).** `with_session` returns the closure's output `O` unchanged when the close succeeds or no close is needed. When the close fails, it returns `Err(SessionError { outcome: O, close })`. `O` is whatever the closure returns, usually `Result<Vec<T>, Incomplete<..>>`, so a fully collected list stays `Ok` with every item inside `outcome`. `close` reuses `PagerError<E>` (`Transport` or `Api`) instead of a new error type; a close that runs out of grace is `PagerError::Transport` of kind `DeadlineExceeded`.
+
+**Lifecycle rules as built:**
+
+- **Open.** The session opens with the first page request of any traversal in the scope, not before the closure runs. `SessionOpen::FirstPage`: the first request of each traversal is the opening request (endpoint target, `keep_alive.on_open`, no handle). `SessionOpen::Request`: one open request (the step's method and filled path, the endpoint's headers, no endpoint query or body, step constants, `on_open` keep-alive) is sent under a `tokio::sync::Mutex`, so concurrent partitions send it once and wait for it. Its reply must hold the handle at the authored `Source`; otherwise the new `PagerError::MissingSessionHandle { meta }` (mapped to `IncompleteReason::InvalidContinuation`). A failed open is remembered and every later traversal gets `AlreadyFailed`. An open failure surfaces as the first page's error inside the closure; no handle means no close (R22a).
+- **Pages.** A non-opening page request goes to `Session.pages` (method and filled path) unless it follows a link, carries the latest handle at `send_handle_as`, and carries `keep_alive.on_page`. The keep-alive value is the caller's `.keep_alive(..)` (bound `KeepAliveKnob`) or the authored default.
+- **Latest handle.** Each 2xx page's `handle_from_page` is read right after the body parses, and after the global JSON hook, before items or continuations are checked. A page that later proves malformed still updates the handle the close uses. The latest observed value wins, in response-arrival order, across every traversal and partition. A handle is a non-empty string or a number. A missing, null, empty, or structured handle on a page keeps the previous one.
+- **Renew.** `SessionScope::renew()` and `Pages::renew()` (bound `Renewable`) send the renew step with the latest handle and the step's constants. They return `Ok(false)` without sending when no handle is known yet. `Pages::renew` exists so a traversal holding the scope's borrow can still renew.
+- **Close.** It runs after the closure's future completes, or after a panic while the closure is called or its future is polled; both are caught with `catch_unwind(AssertUnwindSafe(..))`. It runs only when a close step is authored and a handle was observed. The close request is sent with the call's credential mode and a fresh `Deadline::after(grace)` in place of the pages' deadline, so its time is min(grace, the client's per-request timeout) and it is still sent after the page deadline expired (R22a). The grace defaults to `DEFAULT_CLOSE_GRACE` (5 s) and is set with `Pager::close_grace` (bound `Sessioned`) and read with `configured_close_grace`. After a panic, the close is attempted and then the original panic resumes, so its close failure cannot be returned. Nothing is spawned: cancellation of the scope's future, panic abort, and process exit leave the session to the lease. The module doc of `session.rs` states this.
+- **Scope surface.** `SessionScope` has `pages(&mut self)`, `fetch_page`, `collect_all` (with the pager's page limit), `partitioned(&mut self, n)` (bound `Partitioned`), and `renew(&self)`. Each traversal starts at the pager's configured position, from a clone of the configured engine (`Engine`, `History`, and `BoundaryTracker` now derive `Clone`). There is no `open()` or `close()`, and a session endpoint still has no `pages()`, `fetch_page()`, or `collect_all()` outside the scope (`Sessionless`).
+- **Partitions (R23).** `Pager::partitioned(n)` (bounds `Partitioned + Sessionless`) and `SessionScope::partitioned(n)` return `n` independent `Pages`. Traversal `i` writes `index = i` (0-based) and `count = n` at the authored inputs on every request, including followed links. Count `0`, or a count above the authored `max`, is `InvalidArgument` with nothing sent. Each partition has its own engine, so its own continuation history and stall detection. Partitions share only the session state (`&SessionShared`: the latest handle behind a `std` mutex held only while reading or writing, and the open mutex). Page requests are never serialized and nothing is spawned; the caller polls the iterators.
+- **Shared collection code.** `Pager::collect_all` and `fetch_page` now delegate to `pages::{collect, fetch_first}`, so the scope's `collect_all` and `fetch_page` use exactly the same completion and limit rules.
+- **`Pages::items()`** lost its `Sessionless` bound: a session endpoint's `Pages` only exists inside a scope, so its item stream is allowed there.
+
+**Generator (call-type forwards; Phase 3 deferred them here).** `KnobForward::KeepAlive` forwards `.keep_alive(value: impl Into<String>)` on an adjustable keep-alive. A session endpoint's call type forwards `with_session` with the same bounds, spelled with `schematic_runtime::CallFuture`. A partition without a session forwards `partitioned(count)`; a session's partitions are made inside its scope, so its call type forwards none. `PLANNED_CALL_METHODS` gains `with_session`, so a setter of that name on any call type is renamed now rather than later. `PagerForwards::has_control` covers the knob forwards and `partitioned` for the per-endpoint rename. The fresh-output fixture API gains `ScanEntries`, a point-in-time-style session with keep-alive, renew, close, and a partition. It now has:
+
+- a compile control calling `keep_alive`, `with_session`, `renew`, `partitioned`, and `fetch_page`, and proving the future is `Send`;
+- a misuse case, `.pages()` on the session call, which fails with E0599;
+- a child runtime test, `a_generated_session_opens_pages_and_closes_inside_its_scope`, run through the generated client against wiremock: `POST /pit?keep_alive=5m`, two `GET /scan` pages carrying `pit` and `keep_alive`, and `DELETE /pit?pit=pit-1`.
+
+Recorded for review:
+
+- **Elasticsearch scroll ids often repeat** between pages. With a cursor read from `_scroll_id` and the widened stall rule (R14), a repeated id is `RepeatedContinuation`. No shipped definition authors a scroll. A future Elasticsearch definition needs either a scroll id that is not the cursor (the handle alone, with `send_handle_as`) or a stall-rule exception. Open question for agenda item 11.
+- **First-page sessions with partitions** (sliced scroll) follow R23 literally: one shared latest handle, one close. Each slice's first request opens server-side state of its own, so with a real sliced scroll only the latest handle is closed and the others are left to their lease. That is the accepted out-of-order and rotating-handle risk (D57 item 2) applied to first-page opens. No shipped definition has one.
+- **The close grace is forwarded on the call type.** A session endpoint's call type also forwards `close_grace(..)`, so `es.search(i).deadline(&d).close_grace(g).with_session(..)` reads in one chain. `close_grace` is reserved for that endpoint's setters only where a session is authored (`PagerForwards::has_control`).
+- **Regeneration.** `just generate` after these changes leaves `schematic-schema`, OpenAPI, and Postman unchanged. No shipped definition authors a session or partition, and no shipped setter is named `with_session`.
+
+### 5.2 Session evidence and 5.3 Partition evidence
+
+Before the workers started, `pager_support.rs` gained a `session_endpoint!` macro and two shared fixtures. `PitSearch` is an Elasticsearch-style point in time: separate open `POST /logs/_pit` returning `id`, pages at `POST /_search` with `pit.id` and `pit.keep_alive` in the body, `search_after` from the last hit's `sort`, a rotating `pit_id` on every page, partitions in `slice.id` and `slice.max` (max 4), and close `DELETE /_pit`. `ScrollSearch` is an Elasticsearch-style scroll: opened by its first page, `_scroll_id` as both cursor and handle, pages at `POST /_search/scroll`, a renew step with a constant, and close `DELETE /_search/scroll`. Two smoke tests in `pager_session.rs` proved the whole lifecycle before delegation:
+
+- `a_scroll_opened_by_its_first_page_pages_with_the_scroll_id_and_closes_the_latest_one`
+- `a_point_in_time_opens_once_pages_at_its_target_and_closes_with_the_latest_handle`
+
+Then two delegated workers ran concurrently with disjoint files: `pager_session.rs` plus the `pager_session_*` compile-fail fixtures (5.2), and `pager_partition.rs` plus `define/tests/pagination_partitions.rs` (5.3). Neither found a runtime defect. Every test is L1 and untiered, uses local wiremock or raw loopback sockets, and synchronizes on server events with no fixed sleeps. The slowest new test takes 0.32 s.
+
+`pager_session.rs` (22 tests, with the 2 smoke tests):
+
+- Requests sent:
+  - `without_a_caller_keep_alive_the_authored_default_goes_on_the_open_and_every_page`
+  - `the_close_grace_defaults_to_five_seconds_and_takes_the_callers_value`
+  - `renewing_inside_the_scope_sends_the_renew_step_with_the_latest_handle_and_its_constant`
+  - `renewing_before_any_handle_is_known_returns_false_and_sends_nothing`
+- Every exit path:
+  - `a_scope_that_returns_after_its_first_page_still_closes_the_latest_handle`
+  - `a_scope_whose_closure_returns_an_error_closes_and_returns_that_error_unchanged`
+  - `a_closure_that_panics_before_returning_its_future_sends_nothing_and_the_panic_resumes`
+  - `a_closure_that_panics_after_a_page_closes_the_latest_handle_then_resumes_the_panic`
+- Failed close (D57 item 5):
+  - `a_failed_close_returns_the_complete_list_with_the_close_error`
+  - `a_failed_close_after_a_closure_error_keeps_the_closure_error_as_the_outcome`
+- Grace (R22a):
+  - `a_close_slower_than_its_grace_is_abandoned_with_a_deadline_error_and_the_list_kept` (200 ms grace against a 10 s hang)
+  - `an_early_return_under_a_long_page_deadline_bounds_the_close_by_the_grace`
+  - `the_close_is_still_sent_and_succeeds_after_the_pages_deadline_expired`
+- Latest handle:
+  - `a_malformed_page_still_hands_its_new_handle_to_the_close`
+  - `a_malformed_first_page_that_opened_a_scroll_still_closes_it`
+- Open failure:
+  - `a_failed_open_sends_no_page_and_no_close_and_a_second_traversal_does_not_reopen`
+  - `an_open_reply_without_a_handle_is_a_missing_handle_with_no_page_and_no_close`
+- Privacy (R36):
+  - `no_handle_or_scope_summary_appears_in_session_error_text`
+  - `a_page_error_whose_raw_body_carries_the_handle_keeps_it_out_of_its_display_text`
+- Cancellation:
+  - `cancelling_a_scope_while_a_page_is_in_flight_closes_its_connection_and_sends_no_close` (raw socket: the server observes EOF, and a control request proves no close ever arrived)
+
+Compile-fail fixtures (trybuild now has 31 cases; no existing `.stderr` changed):
+
+- `pager_session_no_manual_open_or_close` (E0599)
+- `pager_session_pages_escape_the_scope` (a lifetime error, and E0521)
+- `pager_session_renew_without_a_renew_step` ("has no session renew step")
+- `pager_session_keep_alive_not_adjustable` ("has no adjustable keep-alive")
+- `pager_session_on_a_sessionless_endpoint` ("has no server-side session")
+
+The existing `pager_pages_on_a_session_endpoint` covers `pages`, `fetch_page`, and `collect_all` outside the scope. Permitted collection inside the scope is the runtime tests above.
+
+`pager_partition.rs` (6 tests):
+
+- `four_partitions_share_one_open_and_one_close_and_each_slice_pages_its_own_items`
+- `each_partition_follows_its_own_cursor_and_a_stalled_or_failed_partition_leaves_the_others_complete`: slice 2 stalls with `RepeatedContinuation`, slice 3 gets a 500, and the others complete; one open and one close.
+- `a_partition_count_of_zero_or_above_the_maximum_is_refused_before_anything_is_sent`: session and sessionless; no request at all, not even the open.
+- `a_sessionless_partition_sends_its_index_and_count_on_every_request_and_keeps_its_own_history`
+- `every_request_after_a_late_arriving_response_carries_that_latest_observed_handle_and_so_does_the_close`: a scripted one-request-per-connection server holds partition 0's first reply (`late`) until partition 1 has received `early` and requested its second page. The full sequence asserts that partition 1's second page carries `early`, and that partition 0's second page, partition 1's third page, and the close carry `late`. That is arrival order, not issue order (D57 item 2). The test shows the designed semantics and makes no claim of provider safety.
+- `two_partitions_have_their_first_page_requests_in_flight_at_the_same_time`: each first reply is held until the other first request arrived, so it can only finish if partition requests are not serialized.
+
+`define/tests/pagination_partitions.rs` (1 test, autotests): `a_rotating_handle_point_in_time_with_four_partitions_inherited_from_the_api_default_validates`. A rotating-handle point-in-time default with `Partition` max 4 has no `validate_pagination` errors, resolves with origin `ApiDefault`, and offers the knobs `Session`, `Partitions { max: Some(4) }`, and `KeepAlive`.
+
+Recorded from the workers:
+
+- **A raw page body can carry the handle.** `Display` of every error stays clean, but a page error keeps its raw response body unredacted, so its `Debug` output can show a handle the server put in that body. This is the envelope's documented limit (`error.rs` module doc, R36 "raw response evidence retains the runtime's documented privacy limitations"). The test asserts the current behavior.
+- **Not covered:** cancellation while the open or close request itself is in flight (documented as left to the lease, like cancellation during a page, which is tested); a handle read from a response header (`handle_text` reads both, but no fixture uses a header).
+
+#### Requirement-to-test mapping (Phase 5 scope)
+
+| Requirement | Boundary and fidelity | Tests |
+| --- | --- | --- |
+| R22 only `with_session`; no `open`/`close`; no `pages()` outside | runtime compile surface (trybuild), F2; generated crate, F3 | `pager_session_no_manual_open_or_close`, `pager_session_pages_escape_the_scope`, `pager_pages_on_a_session_endpoint`; fresh-output misuse "pages of a session endpoint outside its scope" (E0599) and compile control (`with_session`, `keep_alive`, `close_grace`, `renew`, `partitioned`, `Send`) |
+| R22 one close attempt on return, error, and unwinding panic | runtime → HTTP, F2 | the exit-path tests above |
+| R22 keep-alive in band, latest handle, `Session.pages` target, renew, separate open | runtime → HTTP, F2; generated crate → HTTP, F3 | both smoke tests, the keep-alive, renew, and malformed-page tests; fresh-output child `a_generated_session_opens_pages_and_closes_inside_its_scope` |
+| R22 cancellation spawns nothing | runtime, raw sockets, F2 | `cancelling_a_scope_while_a_page_is_in_flight_closes_its_connection_and_sends_no_close` |
+| R22a grace, separate from the deadline, every close attempt | runtime, real time (margins ≥ 100 ms), F2 | the three grace tests |
+| R22a no close without a handle | runtime → HTTP, F2 | the two open-failure tests and the construction-panic test |
+| D57 item 5 `SessionError { outcome, close }` | runtime → HTTP, F2 | the two failed-close tests |
+| R23 partitions | runtime → HTTP and raw sockets, F2; define, F1 | the 6 `pager_partition` tests; `pagination_partitions.rs` |
+| R10 session knobs (`keep_alive`, `renew`, `with_session`) | trybuild | the three knob compile-fail fixtures |
+| R36 handle and close privacy | runtime, F2 | the two privacy tests |
+| Generator forwards | gen unit, F1 | `pagination::tests::{session_strategy_forwards_with_session_and_its_knobs_but_no_outside_scope_iteration, a_partition_without_a_session_forwards_partitioned_and_with_one_does_not}` |
+
+Input robustness: this phase adds no configuration reader. Session handles come from provider responses, outside the matrix (Phase 1). Their shapes have defined outcomes: a non-empty string or a number replaces the latest handle; absent, null, empty, or structured keeps the previous one. An open reply without a usable handle is `MissingSessionHandle`. Smells grepped in `session.rs`: no `#[serde(default)]`. The only `unwrap_or` is `serde_json::from_slice(..).unwrap_or(Value::Null)` in `StepDecoder`, where a close or renew reply body is deliberately unread and an open reply without a JSON handle becomes `MissingSessionHandle` rather than an empty success.
+
+### Validation run in this phase (macOS, rustc 1.98.1)
+
+| Check | Result |
+| --- | --- |
+| `just test` (schematic area) | pass: L1 2186/2186 (12 skipped), fresh-output 6/6, compile-fail 1/1 (31 cases) |
+| `just lint` (schematic area) | pass |
+| `cargo clippy -p schematic-runtime -p schematic-define -p schematic-gen --all-targets -D warnings` | clean |
+| `just generate`, then `git status` of schema/openapi/postman | no change |
+| `pager_session` / `pager_partition` repeated runs (workers) | 3 consecutive passes each |
+| `just cross-check schematic-runtime --os linux` | pass: 357/357, 1 skipped (the trybuild test, which runs through its own recipe) |
+| Windows, WSL2 | not run; Phase 8.2 owns platform evidence. The new real-time tests use margins of at least 100 ms (a 200 ms grace against a 10 s hang, a 300 ms page deadline), and the raw-socket cancellation test reuses the Phase 4 pattern. `catch_unwind` assumes `panic = "unwind"`, the workspace default. |
+
+Observation, not a failure: in the full `just test` run, nextest marked `fresh_output_compile::generated_rest_code_references_the_runtime_and_defines_none_of_it` as SLOW (> 5 s), though it passed. Run alone it takes 2.4–3.1 s. It generates every shipped API, and this phase changes none of their output, so the overrun is load from the parallel suite rather than this change. Recorded for Phase 8's acceptance audit.
+
+### Deviations in this phase
+
+- **`with_session` signature.** The plan's "boxed future tied to its borrow" was adopted only after an unboxed async-closure (`AsyncFnOnce`) form proved unable to give a `Send` future (5.1). The caller writes `Box::pin(async move { .. })`.
+- **The session opens with the first page request** (lazily), not before the closure runs. An open failure is therefore the first page's `PagerError` inside the closure, not a separate `with_session` error. Alternative: open eagerly and return an open error from `with_session`, which would need a third result shape.
+- **`SessionError::close` is a `PagerError<E>`,** not a dedicated close-error type. Only its `Transport` and `Api` variants occur.
+- **`renew()` returns `Result<bool, _>`:** `false` means no handle was known, so nothing was sent.
+- **`close_grace` is forwarded on session call types,** beyond the plan's list of forwards, so the R22a builder setting needs no `.pager()`.
+- **`Pages::items()` lost its `Sessionless` bound,** because session `Pages` exist only inside a scope.
+
+### Human review agenda (Phase 5 updates)
+
+3. **Design choices.** The `with_session` signature and result shape (5.1); lazy open; `SessionScope` methods; `DEFAULT_CLOSE_GRACE`, `close_grace`, and `configured_close_grace`; `MissingSessionHandle`; `SessionError`; `SessionResult`; partitions as `Vec<Pages>` with `InvalidArgument` for a bad count; `keep_alive(impl Into<String>)` in the provider's own format.
+9. **OS.** macOS full; Linux runtime cross-check. Windows and WSL2 are Phase 8.2.
+10. **Deviations.** See above.
+11. **Open questions (new).**
+    - Elasticsearch scroll ids can repeat between pages, which the widened stall rule reports as `RepeatedContinuation` when the scroll id is the cursor. Recommended: when a scroll definition is authored, model the id as a session handle sent with `send_handle_as`, or add a per-strategy exception to the stall rule.
+    - Partitions of a first-page-opened session (sliced scroll) close only the latest handle (5.1). Recommended: accept for now, since no shipped definition needs it, and revisit with an Elasticsearch definition.
+16. **Session-close grace (default 21).** 5 s, configurable with `close_grace`, bounding every close as min(grace, the client's per-request timeout), independent of the page deadline. The runtime-envelope spec made no ruling that overrides it.
+20. **Rotating handle with partitions (D57 item 2).** Implemented as decided: the latest observed handle, in response-arrival order, is used by every partition's next request and by the close. `every_request_after_a_late_arriving_response_carries_that_latest_observed_handle_and_so_does_the_close` demonstrates it. **Accepted risk:** when two partitions' responses complete out of order, the latest observed handle may not be the provider's newest. A provider that invalidates older handles could then reject the next request or leave a newer handle unclosed until its lease expires. The pager does not serialize partitions or validate against this, as R23 requires.
+
+## Phase 6
+
+Phase 6 authors pagination in the real definitions and preserves it across OpenAI re-imports. Started 2026-10-13 on `feat/modern-config`. Entries are appended as work lands.
+
+The three Wave 11 tasks with disjoint files ran concurrently in delegated workers: 6.3 (the importer overlay hook, in `schematic/gen` and the `import-openai` recipe), 6.2 (the OpenAI overlay), and 6.1 with 6.4 (forges, ElevenLabs, and the unpaginated rows of the unverified APIs). Before they started, the shared R27 coverage harness was written so each worker filled only its own row file.
+
+### Coverage harness (written first, for 6.1–6.5)
+
+- `schematic/definitions/tests/pagination_coverage/main.rs` is one test binary (auto-discovered; `schematic-definitions` has no `autotests = false`). It loads every shipped API through `apis_by_module()` and holds one expectation table per API, split by family into `forges.rs`, `openai.rs`, and `others.rs`.
+- **Every** endpoint is checked: an endpoint with a row must resolve exactly as the row says, and an endpoint without a row must resolve as "not a list". A paginated row asserts the origin, the item selector, the item type, a one-line description of the strategy (kind, inputs and sources, end signal, total, constants), the exact `caller_knobs`, and the set of adopted request fields. An unpaginated row asserts the origin, the item selector, and a reason: `Unverified { recalled, source_needed }`, `DefinitionGap { gap, recalled, source_needed }`, `ProviderGap`, `NotPaged`, or `NoPagination`. The `Unverified` and `DefinitionGap` rows are the R33 verification task.
+- Before any authoring, the harness failed with 37 GET `Vec<T>` lists that had no row, which shows it detects missing coverage. The strategy description is compared as literal text written in the row; no expectation is computed from the definitions.
+
+### Wire-baseline test migrated in this phase, not Phase 7
+
+`fresh_output_compile::slow_query_wire_matches_pre_split_baseline` generates clients from the **live** definitions and set Gitea `page`/`limit` and OpenAI `limit`/`after` as request fields. Authoring those strategies adopts the fields, so the test would no longer compile, and `just test` runs it. The Phase 1 ledger scheduled this migration for Phase 7.1; it moves here because Phase 6 must leave `just test` green. The program now sends those values through the pager (`send(request)…pager().page(2).page_size(1).fetch_page()`, and `.page_size(5).after("x%y")` for OpenAI). Its `into_parts` checks drop the removed fields. The old `limit=0` value became `page_size(1)`, because a page size below the authored minimum of 1 is now refused before sending. The re-captured baseline lines are recorded below once the run is done.
+
+The re-captured lines differ from the old baseline in exactly three entries, all for the expected reason. `ordered-scalars-reserved-unicode`, `repeated-array-keys`, and `legacy-embedded-query-plus-declared` now carry the pager-managed pairs after the request's own pairs (`…&sort=…&page=2&limit=1`, `…&include=…&after=x%25y&limit=5`, `…&include=%22x%20y%22&limit=3`), because the pager appends its inputs to the request's query. Every value's percent-encoding is unchanged. The other five lines are byte-identical. The `WIRE_BASELINE` doc comment records this as the second intended exception.
+
+### 6.1 Forge strategies (done)
+
+Each forge has one API-local helper; endpoint literals and the legacy `bitbucket_pagination()` are untouched.
+
+| API | Default (helper) | Rows | Paginated | Adopted fields |
+| --- | --- | --- | --- | --- |
+| GitHub | `github_page_number()`: `page` from 1, `per_page` 1..100 (server default 30), more while `Link rel=next` | `ListWorkflowRuns`: `workflow_runs`, `WorkflowRun`, default + total body `total_count` (override) | 9 | `page`, `per_page` ×9 |
+| GitLab | `gitlab_page_number()`: `page` from 1, `per_page` 1..100 (20), more while header `X-Next-Page` present, total header `X-Total` | `ListIssueParticipants` root opt-out (unverified); `ListRepositoryTree`, `ListGroupProjects` inherit with a `keyset` alternate (`gitlab_keyset()`: `Link rel=next`, constants `pagination=keyset`, `order_by=id`, `sort=asc`) | 9 | `page`, `per_page` ×9 |
+| Gitea | `gitea_page_number()`: `page` from 1, `limit` 1..50 (30), `Link rel=next`, total header `X-Total-Count` | `GetTagReference` root opt-out (prefix lookup); `GetGitTree`, `GetGitTreeRecursive` at `tree`, `GitTreeEntry`, unpaginated (unverified) | 8 | `page`, `limit` ×8 |
+| Bitbucket | `bitbucket_next_link()`: body `next`, prev body `previous`, `pagelen` 1..100 (10), total body `size` | `bitbucket_lists()`: 8 inheriting rows at `values` with item types | 8 | `pagelen` ×8 (`page` kept: a next link has no page input) |
+
+Facts re-checked against the definitions: `WorkflowRunsResponse` has `total_count` and `workflow_runs` (`github/types/workflow.rs`); `PaginatedResponse` has `values`, `next`, `previous`, `size` (`bitbucket/types/common.rs`); `GitTreeResponse` has `tree`, `truncated`, `total_count` and the tree endpoints declare no parameters (`gitea/types.rs`). No new contradiction was found.
+
+### 6.2 OpenAI overlay (done)
+
+`schematic/definitions/src/openai_pagination.rs` is hand-written; `apply(api)` sets the default (`after` from body `last_id`, more while `has_more`, size `limit` with no bounds, resumable) and 61 rows. Every row was re-checked against the reply struct, the declared parameters, and `specs/openai/openapi.yaml`; the groups match the Phase 1 reconciliation exactly (no contradictions).
+
+| Group | Endpoints | Origin | Adopted |
+| --- | --- | --- | --- |
+| Default, unbounded size | 8 (ListChatCompletions, GetChatCompletionMessages, ListEvals, GetEvalRuns, GetEvalRunOutputItems, ListFineTuningCheckpointPermissions, ListFineTuningJobCheckpoints, AdminApiKeysList) | ApiDefault | `after`, `limit` |
+| `last_id` with documented bounds | 19 | Exception | `after`, `limit` |
+| `last_id` + backward `before` from `first_id` | 9 | Exception | `after`, `before`, `limit` |
+| `after` from the last item's `id` | 2 (ListFineTuningEvents, ListPaginatedFineTuningJobs) | Exception | `after`, `limit` |
+| `after` from body `next` (S7) | 9 | Exception | `after`, `limit` |
+| `page` from body `next_page` (S8, usage) | 11 | Exception | `page`, `limit` |
+| Unpaginated | ListModels (no continuation), RetrieveVectorStoreFileContent and SearchVectorStore (provider gap) | Exception | none |
+
+Page-size bounds are authored only where the vendored document states one for every request (G2): max 100 on 30 endpoints (server default 20 where stated), ListFiles max 10000 (default 10000), ListGroups/ListGroupUsers max 1000 (default 100), ListRoles/ListProjectRoles max 1000 (default 1000), four role-assignment lists max 1000, UsageCosts max 180 (default 7); ListProjectRateLimits and the two item-id lists carry only a server default; the other ten usage endpoints, whose bounds depend on `bucket_width`, carry none. The source line of each bound is in the worker's report and the overlay's comments.
+
+### 6.3 Importer overlay (done)
+
+- `schematic-gen import --overlay <RUST_PATH>` (`ImportOptions.overlay`). The value must parse as a plain `syn::Path`; empty text, non-paths, generic arguments, and calls are rejected with a `ConfigError` naming `--overlay`, before anything is written. It requires `--definitions-out` (clap `requires`, and `run_import` checks it for library callers).
+- With an overlay the factory ends `let api = RestApi { .. }; <path>(api)` and the module's "Regenerate with" hint names the option. Without one the output is byte-identical to the previous importer (checked on petstore and OpenAI before and after the change). The emitter comment beside the empty pagination fields now states the overlay contract.
+- `just import-openai` passes `--overlay crate::openai_pagination::apply`. `schematic/docs/io/import-openapi.md` gained "Importing into `schematic-definitions`" (example, rules, a Mermaid diagram); `schematic/gen/README.md` gained one example.
+- Compile evidence: L1 tests parse the emitted file with `syn` and check the call's structure; a one-off scratch crate compiled a petstore import with an overlay (`cargo test --offline`, about 38 s) and was deleted. No repeatable `slow_` compile test was added: it would need the fresh-output helpers' private functions and a definitions stand-in with `schemars`. The lasting compile evidence is `schematic-definitions` compiling the re-imported `openai/mod.rs`, and `fresh_output_compile::slow_real_apis_compile_offline` compiling the clients generated from it.
+
+### 6.4 Remaining coverage (done)
+
+- **ElevenLabs** (no API default, helper `elevenlabs_lists()`): `GetHistory` at `history`, `SpeechHistoryItemResponseModel`, cursor `start_after_history_item_id` from body `last_history_item_id`, more while `has_more`, `page_size` 1..1000 (100), resumable; `ListSharedVoices` at `voices`, `LibraryVoiceResponseModel`, page number `page` from 0, more while `has_more`, `page_size` 1..100 (30). Verified against `schematic/docs/research/elevenlabs-api.md` (lines 708–728 and 983–999, research note dated 2026-05-07) and the response types. Neither endpoint declares those parameters, so nothing is adopted. `ListVoices` has an unpaginated row (definition gap D2: `page_token` declared, `next_page_token` researched); its fields stay, so biscuit-speaks is unaffected.
+- **Unpaginated rows for unverified wrappers:** Anthropic `ListModels` (`data`), EMQX basic and bearer through one shared `common_lists()` (7 lists at `data` each), Hugging Face `ListModelDiscussions` (`discussions`). Root arrays with no default (Hugging Face 10, EMQX `ListAuthUsers` ×2, ElevenLabs `ListModels`) resolve unpaginated without a row. Hugging Face already has a `Collection` type, so the pagination import is aliased `ListCollection`.
+- **Non-list array writes:** `others::unfolded_circle_writes_returning_arrays_are_not_lists` pins Unfolded Circle `RestoreBackup`/`UploadResource` as not lists.
+
+### 6.5 Catalog integration (done)
+
+- **Registration and re-import.** `pub mod openai_pagination;` is in `definitions/src/lib.rs`. `just import-openai` (now with `--overlay`) rewrote `definitions/src/openai/mod.rs`; the only differences from the previous import are the overlay tail and the hint line, and `types.rs` is byte-identical. The import takes about 1 s.
+- **Re-import regression (R35).** `import_overlay::reimporting_the_vendored_openai_document_reproduces_the_committed_definition` imports the vendored document twice with the recipe's options and asserts both imports are identical, contain exactly one overlay call, and equal the committed `mod.rs` and `types.rs` byte for byte (1.1 s). Because the committed factory is the one the coverage test resolves, this also proves the resolution after a re-import equals the resolution before it. Unknown exception ids are rejected by `every_shipped_definition_validates` and by gen's `live_definitions_report_no_pagination_diagnostics`.
+- **R27 coverage.** All 18 APIs pass: 94 paginated (GitHub 9, GitLab 9, Gitea 8, Bitbucket 8, OpenAI 58, ElevenLabs 2), 5 opted-out lists, and every other list unpaginated. `every_unverified_list_names_its_recalled_strategy_and_needed_source` pins the R33 verification task to its exact 32 endpoints: Anthropic `ListModels`; ElevenLabs `ListVoices` (definition gap); GitLab `ListIssueParticipants`; Gitea `GetGitTree`, `GetGitTreeRecursive`; EMQX basic and bearer `ListAlarms`, `ListAuthUsers` (definition gap), `ListBanned`, `ListClients`, `ListRetained`, `ListRules`, `ListSubscriptions`, `ListTopics`; Hugging Face `GetUserCollections`, `ListDatasetCommits`, `ListDatasetFiles`, `ListDatasets`, `ListModelCommits`, `ListModelDiscussions`, `ListModelFiles`, `ListModels`, `ListSpaceFiles`, `ListSpaces`, `ListUserRepos`. Each row carries the recalled strategy and the source needed.
+- **Regeneration pulled forward from 7.1.** `fresh_output_compile::slow_real_apis_compile_offline` also asserts that freshly generated Rust equals the committed `schematic/schema/src`, so `just test` cannot pass after authoring without regenerating. `just generate` changed only the six authored APIs' `requests.rs` (+9,798/−3,587 lines on the first run; `git diff --numstat`: bitbucket 700/138, elevenlabs 200/0, gitea 704/305, github 783/330, gitlab 797/384, openai 6614/2430). OpenAPI and Postman are byte-identical (R29), and a second `just generate` produced identical bytes across `schema/src`, `openapi`, and `postman`.
+- **Removed request fields (R7, agenda 4):** 185, matching the Phase 1 prediction of 186 less ElevenLabs `ListVoices` `page_size`, which stayed. GitHub `page` ×9, `per_page` ×9; GitLab `page` ×9, `per_page` ×9; Gitea `page` ×8, `limit` ×8; Bitbucket `pagelen` ×8; OpenAI `after` ×47, `before` ×9, `limit` ×58, `page` ×11. The generated crate gained 94 `impl schematic_runtime::pager::Paginated`.
+- **Call sites migrated with it (ledger rows that the regeneration breaks):**
+  - `schematic/schema/tests/github_client.rs::endpoint_method_and_generic_send_of_its_request_agree`: both paths now set the size through the pager (`.page_size(5).fetch_page()` and `send(request).pager().page_size(5).fetch_page()`) and compare `Page::items`.
+  - `sniff/lib/src/remote/github.rs` `list_workflow_runs`: `call.clone().page_size(n).fetch_page()`, retried as `call.anonymous().page_size(n).fetch_page()` on a 401/403 to a credentialed request; the items come from `Page::items`. The limit is clamped to the definition's 1..=100 because a size outside the bounds is now refused before sending (previously `per_page` was sent unchecked and GitHub capped it). `sniff/lib/src/remote/envelope.rs` gained `Replies::page`, which classifies a `PagerError`'s transport and response failures exactly as a call's, and reports any other pager failure by its redacted `Display`. New test `remote_providers::github_tests::list_workflow_runs_clamps_the_page_size_to_githubs_bounds` (150 → `per_page=100`, 0 → `per_page=1` and no runs). `sniff/docs/repos/repo-tech-design.md` shows the new code.
+  - biscuit-speaks (`ListVoices` unchanged) and the five homelab crates needed no edit; all compile.
+- **Docs and skill.** `schematic/definitions/README.md` gained an overview "Pagination" section and a step in "Adding New APIs"; its Gitea row said "`limit` (default 50)" and is corrected to default 30, max 50 (code assumed correct); the Bitbucket section says the definition follows `next`. `schematic/specs/openai/README.md` explains the overlay. The `schematic-define` skill records the authored set, the coverage test, and `--overlay`.
+
+#### Requirement-to-test mapping (Phase 6 scope)
+
+| Requirement | Boundary, rung, tier | Tests |
+| --- | --- | --- |
+| R27 every list endpoint of the 18 APIs, origin + strategy + exact knobs | definitions crate through `resolve`/`caller_knobs` (F2, L1) | `pagination_coverage::{every_list_endpoint_of_every_api_resolves_as_authored, every_row_names_one_endpoint_of_a_shipped_api, paginated_counts_per_api}` |
+| R28/R33 unverified rows stay unpaginated and are listed | same | `pagination_coverage::every_unverified_list_names_its_recalled_strategy_and_needed_source` (exact 32) |
+| R5 unknown/duplicate ids, item types, array locations in real definitions | define validation and gen registry checks (L1) | `pagination_coverage::every_shipped_definition_validates`; `pagination_validation::live_definitions_report_no_pagination_diagnostics` |
+| R7 adopted fields per endpoint, kept fields (Bitbucket `page`, OpenAI `order`) | same, plus generated output | coverage rows' `adopted`; the regenerated `requests.rs` (185 removals above) |
+| D43 non-GET lists and non-list writes | same | coverage `OpenAI.SearchVectorStore` row; `others::unfolded_circle_writes_returning_arrays_are_not_lists` |
+| R35 overlay hook: emitted call, no call without one, invalid paths, untouched overlay file, deterministic import | gen import pipeline, filesystem (F2, L1) | `definition_gen::tests::*` (7), `import_overlay::{an_overlay_import_emits_the_call_and_leaves_the_overlay_untouched, an_import_without_an_overlay_ends_with_the_literal, an_invalid_overlay_is_rejected_before_anything_is_written, an_overlay_without_definitions_out_is_rejected}` |
+| R35 OpenAI re-import keeps pagination | real vendored document and committed definition (F3, L1) | `import_overlay::reimporting_the_vendored_openai_document_reproduces_the_committed_definition` |
+| R25/R29 generated surface compiles; exports unchanged | generated crate, offline compile (F3, fresh-output) | `fresh_output_compile::slow_real_apis_compile_offline`; `artifact_drift::*`; `just test-schema`, `just lint-schema` |
+| Wire bytes of migrated pager sends | raw TCP listener through generated clients (F3) | `fresh_output_compile::slow_query_wire_matches_pre_split_baseline` |
+| sniff migration: one page, anonymous retry survives, size clamp | sniff provider over wiremock (F2, L1) | the 7 `list_workflow_runs` tests in `sniff::l1 remote_providers`, including the new clamp test |
+
+### Validation run in this phase (macOS, rustc 1.98.1)
+
+| Check | Result |
+| --- | --- |
+| `just test` (schematic area) | pass: L1 2204/2204 (12 skipped), fresh-output 6/6, compile-fail 1/1 |
+| `just lint` (schematic area) | pass |
+| `just test-schema` / `just lint-schema` | pass: 40/40 / clean |
+| `just test sniff` (root) | pass: 3419/3419 (33 skipped); its 27 SLOW tests are host hardware and network probes this phase does not touch |
+| `just lint` (sniff) | pass |
+| `just test biscuit-speaks` (root) | pass: 505/505 (19 skipped) |
+| `cargo check --all-targets --all-features` for biscuit-speaks and the five homelab crates | pass |
+| `just generate` twice | identical hashes for `schema/src`, `openapi`, `postman`; exports unchanged from baseline |
+| Other OSes | not run. The change is definition data, code generation, and one sniff call site, with no paths, processes, or timing. Phase 8.2 owns platform evidence. |
+
+No pre-existing failure was found. The homelab crates' tests were not run (compile only, no call-site change); Phase 7.3 owns full dependent evidence.
+
+### Deviations in this phase
+
+- **Regeneration and the breaking migrations moved from 7.1 into 6.5.** The committed-output check in `slow_real_apis_compile_offline` makes regeneration necessary for `just test` to pass, and regeneration breaks exactly the ledger's call sites. Phase 7.1 still owns the reviews it lists; this phase already recorded the diff statistics, the field-level removal list, export equality, and a second deterministic generation.
+- **The wire-baseline program was migrated here, not in 7.1** (see above).
+- **OpenAI minimums of 0 are held at 1.** Several endpoints' schemas document `minimum: 0` (the 0..100 and 0..1000 rows above), but the model rejects a zero minimum, so a provider-valid `limit=0` is refused client-side. A zero-size page has no use for traversal.
+- **Documented OpenAI defaults without a maximum are not authored on the 8 API-default rows,** because authoring a documentation-only value would turn them into overrides.
+- **No repeatable compile test of overlay import output** (6.3 above); a one-off compile was run.
+
+### Human review agenda (Phase 6 updates)
+
+1. **Defaults.** Default 14 applied: every GET `Vec<T>` under a default has a row or is a real list (GitLab participants and Gitea tag reference opt out). P8 item 7: GitLab's `keyset` alternates are modeled on two endpoints and generate nothing. Default 13/22: wrapper item types are authored strings resolved through each registry.
+3. **Design choices.** API-local strategy helpers per definition; one OpenAI overlay module at the crate root (`openai_pagination.rs`, not inside the importer-owned `openai/`); `--overlay` as a path option requiring `--definitions-out`; unpaginated rows (with item types) for unverified wrappers so they read as lists.
+4. **Removed request fields and dependent edits.** 185 fields (above); edits to `schematic/schema/tests/github_client.rs` and sniff's `list_workflow_runs` (plus `Replies::page` and one test). Bitbucket `GetSource` and ElevenLabs `ListVoices` fields kept.
+5. **Authored versus unpaginated (R33).** Authored: GitHub 9, GitLab 9, Gitea 8, Bitbucket 8, OpenAI 58, ElevenLabs 2 (sources: GitHub/GitLab/Gitea/Bitbucket per `sniff/docs/repos/*-api.md` 2026-02-15 and the 2026-10-09 inventory; OpenAI from the vendored document, retrieved 2026-07-31; ElevenLabs from `schematic/docs/research/elevenlabs-api.md`, 2026-05-07). Unpaginated: the 32-endpoint verification task above, plus provider gaps (OpenAI `RetrieveVectorStoreFileContent`, `SearchVectorStore`), no-continuation (OpenAI `ListModels`), not a list (Gitea `GetTagReference`), and no evidence (ElevenLabs `ListModels`). No U row was verified: network verification stays unauthorized.
+10. **Deviations.** See above.
+11. **Open questions (new).**
+    - Should the model accept a page-size minimum of 0 for OpenAI's `0..N` limits? Recommended: no; a zero page is never useful for traversal, and accepting it would weaken `InvalidPageSize`.
+    - Should documented defaults be authored on the 8 OpenAI API-default rows? Recommended: no; `server_default` is documentation only.
+    - Gitea's max of 50 is the default `MAX_RESPONSE_ITEMS`, which a self-hosted server can raise; a caller asking for more on such a server is refused client-side. Recommended: keep the authoring table's 50 until a user needs more, then drop the max.
+    - sniff clamps `list_workflow_runs`'s limit to 1..=100. Recommended: keep; sniff's callers ask for 2–5 runs.
+12. **Drift.** `schematic/definitions/README.md` Gitea pagination default (50 → 30, max 50) and the GitHub module's `per_page` note (still accurate on the wire; left). The emitter comment beside the empty pagination fields was rewritten for the overlay. `sniff/docs/repos/repo-tech-design.md` showed the removed `.per_page(..)` call.
+13. **Pre-authorized actions to reverse.** Regeneration of six `requests.rs` files (diff above), the re-import of `openai/mod.rs` (hint line and tail only), and the sniff and schema-test edits. The `ListAuthUsers` fix was not taken.
+15. **Adoption rule.** Every adopted field has its knob: page → `.page()`, size → `.page_size()`, cursor parts → `.after()`/`.before()` (resumable). Kept for want of a knob or by design: Bitbucket `page` ×8, `GetSource` `page`/`pagelen`, OpenAI `order`, ElevenLabs `ListVoices` `page_size`/`page_token`. A caller that set one page through a removed field now uses `fetch_page()`, as sniff does.
+
+## Phase 7
+
+Phase 7 re-checks the regeneration, adds end-to-end evidence through the committed generated crate, and runs every dependent. Started 2026-10-13 on `feat/modern-config`, macOS host. Phase 6 already regenerated `schematic/schema` and migrated the call sites the regeneration broke (see "Regeneration pulled forward from 7.1"), so 7.1 here is a verification pass plus one generator change.
+
+### 7.1 Generated migration (verified; one generator change)
+
+- **Generator change: `trybuild` is a generated dev-dependency.** The compile-fail suite of 7.2 must live in `schematic-schema` (R31) and run under `just test-schema`. `schematic-schema/Cargo.toml` is generator-owned, so the dev-dependency is added to the template in `schematic/gen/src/cargo_gen.rs` (new L1 test `generate_cargo_toml_includes_trybuild_dev_dependency`) and `schema/Cargo.toml` was rewritten by `just generate`, never by hand. Test sources stay in `schema/tests/`, which the generator neither writes nor deletes; `schema/Cargo.toml` has no `autotests = false`, so a new test file is compiled without registration.
+- **Dependents discovered from manifests,** not from the spec's list: `grep -rl schematic-schema --include=Cargo.toml` finds `sniff/lib`, `biscuit-speaks/lib`, and five homelab crates (`homelab/lib`, `eversolo-integration`, `arcam-amp-integration`, `unfolded-integration-helper`, `sony-receiver-integration`). `model-citizen` does **not** depend on `schematic-schema`; it depends on `schematic-definitions` (`model-citizen/lib/Cargo.toml`), whose Hugging Face module Phase 6 edited, so it is tested in 7.3 as a definitions dependent.
+- **Field-level removal list, re-derived from `git diff a9184b381^ -- schema/src/<api>/requests.rs`** (removed `pub <field>:` lines; no field added): Bitbucket `pagelen` ×8; Gitea `page` ×8, `limit` ×8; GitHub `page` ×9, `per_page` ×9; GitLab `page` ×9, `per_page` ×9; OpenAI `after` ×47, `before` ×9, `limit` ×58, `page` ×11; ElevenLabs none. Total 185, identical to the Phase 6 list.
+- **Schema diff statistics against the pre-feature baseline (`a9184b381^`):** 8 files under `schema/src`, +9,800/−3,647 (the six authored `requests.rs`, plus `lib.rs`/`shared.rs` losing the empty `Paginated` marker in Phase 3).
+- **Export equality (R29):** `git diff a9184b381^ -- openapi postman` is empty after regeneration: OpenAPI and Postman are byte-identical to the baseline, with no response correction (the EMQX wrapper fix was not taken).
+- **Determinism:** `just generate` twice; the SHA-256 over every file of `schema/src`, `schema/Cargo.toml`, `openapi`, and `postman` was identical across the runs. The only file the two runs changed relative to Phase 6's committed output is `schema/Cargo.toml` (the `trybuild` line).
+
+### 7.2 Generated evidence (done)
+
+Both new test files are in `schematic/schema/tests/` (auto-discovered; run by `just test-schema`, which runs every test of the generated crate with no tier filter). They use the **committed** generated clients, which `slow_real_apis_compile_offline` keeps byte-identical to fresh generation.
+
+**`pagination.rs` — traversal through generated code against wiremock (F3: generated client → runtime → HTTP; L1, 14 tests, about 0.1 s in total).** Clients use an empty env-var order, so no host token reaches a mock and no test is `#[serial]`.
+
+| Endpoint (strategy) | Tests and what each asserts |
+| --- | --- |
+| GitHub `ListReleases` (page number from 1, `per_page` 1..=100, `Link rel="next"`) | `github_page_number_collect_all_returns_every_release_in_order` (ids 1,2,3; wire queries `page=1&per_page=2`, `page=2&per_page=2`); `github_pages_report_each_page_and_stop_after_the_last` (page numbers, `total` `None`, status, no third request, `is_finished`, counters); `github_fetch_page_sends_one_request_with_the_configured_page_and_size` (R11a: `.page(3).page_size(5).fetch_page()` sends exactly `page=3&per_page=5` once although `rel=next` is present; returns `Page<Release>`); `github_ordinary_send_adds_no_pager_input` (plain `.await` sends neither input: no sent default is authored); `github_page_size_outside_the_authored_bounds_is_refused_before_sending` (0 and 101 refused with nothing sent; 1 and 100 accepted on the wire); `github_collect_all_stopped_by_the_page_limit_is_incomplete` (`PageLimitReached`, items of page 1, `error: None`); `github_collect_all_with_a_failing_second_page_is_incomplete` (`HttpError`, page-1 items kept, 502 in the error's metadata) |
+| OpenAI `ListBatches` (cursor `after` ← body `last_id`, `has_more`, `limit` 1..=100) | `openai_cursor_collect_all_follows_last_id_until_has_more_is_false` (b1,b2,b3; queries `limit=2`, `after=b2&limit=2`); `openai_fetch_page_resumes_after_the_given_cursor_with_one_request` (R11a: `.after("b2").page_size(5).fetch_page()` sends `after=b2&limit=5` once even though `has_more: true`); `openai_collect_all_without_a_continuation_is_incomplete` (`has_more: true` without `last_id` → `InvalidContinuation`/`MissingContinuation`, one request) |
+| Bitbucket `ListTags` (follows body `next`, `previous`, `pagelen` 1..=100, total body `size`) | `bitbucket_next_link_collect_all_follows_next_until_it_is_absent` (v1,v2,v3; the absolute `next` URL is sent as given: `pagelen=2&page=2`); `bitbucket_pages_report_the_body_total_on_every_page` (`Page::total` and `Pages::total` = 3); `bitbucket_fetch_page_sends_one_request_with_the_configured_size` (`pagelen=7` once, total 40); `bitbucket_next_link_to_another_origin_is_refused` (`CrossOriginRejected`, nothing reaches the other origin) |
+
+Observed while writing them (expected behavior, recorded so the docs phase states it): a page-number traversal always sends the start page explicitly (`page=1` even when the caller set none), and a followed next link is sent as the provider wrote it, without re-adding `pagelen`.
+
+**`compile_fail.rs` — the capability suite on the real generated set (trybuild).** `slow_generated_pager_surface_reports_the_intended_diagnostics` runs one pass control (`tests/fixtures/pass/authored_controls.rs`, every authored knob/accessor: GitHub `page`/`page_size`/`page_limit`/`collect_all`/`fetch_page`, `ListWorkflowRuns` `total()`, OpenAI `after`, `ListAuditLogs` `before`, Bitbucket `prev()`/`total()`/`items()`) and 13 compile-fail cases under `tests/fixtures/compile_fail/`, each checked against its `.stderr`:
+
+| Case | Real endpoint | Diagnostic |
+| --- | --- | --- |
+| `page_on_a_cursor_endpoint` | OpenAI `ListBatches` | E0277 "is not paginated by page number" via `.pager()`; E0599 no `page` on the call type |
+| `after_on_a_page_number_endpoint` | GitHub `ListReleases` | E0277 "has no resumable cursor"; E0599 on the call |
+| `before_on_a_forward_only_cursor` | OpenAI `ListBatches` | E0277 "has no resumable backward cursor"; E0599 on the call |
+| `offset_on_a_page_number_endpoint` | GitHub `ListReleases` | E0277 "is not paginated by offset" |
+| `prev_without_a_backward_direction` | GitHub `ListReleases` | E0277 "has no backward direction" |
+| `total_without_a_total` | GitHub `ListReleases` | E0277 "has no authored total" |
+| `set_page_size_not_adjustable` | Bitbucket `ListTags` | E0277 "has no adjustable page size" |
+| `knob_after_pages` | GitHub `ListReleases` | E0599 no `page_size` on `Pages` |
+| `pager_on_an_unpaginated_endpoint` | GitHub `GetRepository` | E0277 "is not paginated" (generic send); E0599 no `pager` on the call |
+| `session_on_a_sessionless_endpoint` | GitHub `ListReleases` | E0277 "has no server-side session" (`with_session`); E0277 "has no adjustable keep-alive" |
+| `partitioned_without_partitions` | GitHub `ListReleases` | E0277 "has no partitions" |
+| `no_alternate_selection` | GitLab `ListRepositoryTree` (models a `keyset` alternate) | E0599 no `alternate` on the call, no `keyset` on the pager |
+| `adopted_field_is_not_a_request_setter` | GitHub `ListReleases` | E0599 no `per_page` setter; E0560 no `per_page` field (available: `owner`, `repo`) |
+
+- **Session prohibitions on the real set** are proven against sessionless endpoints only: no shipped definition authors a session, so "`pages()` on a session endpoint" and "pages escaping the scope" stay covered by the runtime's fixture-type cases (`pager_pages_on_a_session_endpoint`, `pager_session_pages_escape_the_scope`), not by a real endpoint.
+- **Portability.** trybuild rewrites this crate's path to `$DIR` and the runtime's to `$SCHEMATIC_RUNTIME`; no snapshot holds a host path, a line number, or a backslash. The test empties `RUSTC_WRAPPER` (kache rewrites paths to `/kache/workspace/…`, observed in the first run), as the runtime's compile-fail test does. No deviation to custom-text assertions was needed.
+- **Known coupling.** Five snapshots include rustc's "the following other types implement trait …" list (first eight implementors, alphabetical, then "and $N others"). Adding a generated endpoint that sorts into the first eight, or a rustc upgrade, changes them; refresh with `TRYBUILD=overwrite cargo nextest run --manifest-path schematic/schema/Cargo.toml --test compile_fail` and review the diff. This is the same coupling the runtime's snapshots already have to rustc.
+- **Cost.** Cold: 117.5 s (trybuild builds the crate once more under `schema/target/tests/trybuild`); warm: 7.7 s. It is `slow_` because it runs Cargo; `test-schema` runs it anyway. CI does not run `test-schema` (the generated crate is outside the workspace), so this suite, like the other `schematic-schema` tests, is local evidence.
+
+**D49 and recipes.** `just test` (area): L1 2205/2205 (12 skipped), fresh-output 6/6 (includes `slow_real_apis_compile_offline`, the isolated compile of all 18 APIs, and `slow_generated_types_reject_misuse_at_compile_time` with the fixture pager control), compile-fail 1/1; 82 s. `just test-schema`: 55/55 (40 before + 14 + 1), 14.7 s warm. `just lint-schema`: clean, 34.3 s. `just lint` (area): clean.
+
+**Build time after authoring (one sample, no new campaign).** On an empty target dir under `/tmp`, without kache: full `--all-targets` build 52.2 s (Phase 1 baseline 69.8 s); `schematic-schema` library alone after touching `lib.rs` 49.9 s (baseline 35.5 s). The library-alone figure grew by about 40 %, consistent with +6,153 net lines of generated Rust (mostly OpenAI's 58 `Paginated` impls and call-type forwards); the full-build figure fell, which shows host noise of the same order, so neither number is a measurement of the feature beyond "same order of magnitude". The author already accepted chained setters without per-API features (Default 10).
+
+### 7.3 Dependent evidence (done)
+
+Run from the repository root after the 7.1/7.2 changes, macOS, rustc 1.98.1.
+
+| Dependent (from manifests) | Depends on | Tests | Lint |
+| --- | --- | --- | --- |
+| sniff (`sniff/lib` and its CLI) | `schematic-schema` | `just test sniff`: 3420/3420 (33 skipped), 95 s | `just lint` (sniff): pass |
+| biscuit-speaks (lib, CLI) | `schematic-schema` | `just test homelab model-citizen biscuit-speaks`: 919/919 (27 skipped), 154 s — biscuit-speaks 320, biscuit-speaks-cli 107, homelab 49, homelab-cli 16, homelab-server 70, eversolo-integration 32, sony-receiver-integration 27, unfolded-integration-helper 29, arcam-amp-integration (in the same run), model-citizen 153, model-citizen-cli 17 | `just lint` in biscuit-speaks, homelab, model-citizen: pass |
+| homelab (`lib`, `eversolo-integration`, `arcam-amp-integration`, `unfolded-integration-helper`, `sony-receiver-integration`) | `schematic-schema` | (same run) | (above) |
+| model-citizen | `schematic-definitions` only | (same run) | (above) |
+
+- **Removed-field uses:** none remain. Every dependent compiles against the regenerated crate, which is the proof; a text search confirms the only surviving `pagelen`/`per_page` mentions are Bitbucket `GetSource` (unpaginated, fields kept by design), the `PaginatedResponse` response struct, and sniff's own hand-written forge client in `sniff/lib/src/remote/focused.rs`, which is out of scope (its retirement is sniff's own spec). The single migrated call site (sniff `list_workflow_runs`, Phase 6) passes its 7 tests inside the sniff run.
+- **No dependent edit was needed in this phase.** The homelab crates use only the Eversolo, Samsung, and Unfolded Circle clients and biscuit-speaks uses ElevenLabs `ListVoices`/TTS, none of which adopted a field; their envelope and error handling compile and pass unchanged.
+- No pre-existing failure was found; no test was skipped beyond each suite's standing skips.
+
+### Requirement-to-test mapping (Phase 7 scope)
+
+| Requirement | Boundary, rung, tier | Tests or artifact |
+| --- | --- | --- |
+| R25 generated surface compiles, deterministic | generated crate; isolated offline compile (F3) | `fresh_output_compile::slow_real_apis_compile_offline`; two `just generate` runs with identical hashes; `just test-schema` / `just lint-schema` |
+| R29 exports unchanged, request structs change only by removing adopted fields | generator output (artifact review) | `git diff a9184b381^ -- openapi postman` empty; the 185-field removal list (7.1), no field added |
+| R10 unauthored knobs do not compile, on real endpoints | rustc over the generated crate (trybuild) | `schematic/schema/tests/compile_fail.rs` |
+| R31 generated-pager smoke tests (page number, cursor, next link; `collect_all`; configured one-page sends; compile-fail on the generated surface) | generated client → runtime → HTTP over wiremock (F3, L1 of the generated crate) and rustc over the generated crate (trybuild) | `schematic/schema/tests/pagination.rs` (14), `schematic/schema/tests/compile_fail.rs` (1 pass control + 13 cases) |
+| R11a configured single page sends exactly one request with both values | same | `github_fetch_page_sends_one_request_with_the_configured_page_and_size`, `openai_fetch_page_resumes_after_the_given_cursor_with_one_request`, `bitbucket_fetch_page_sends_one_request_with_the_configured_size` |
+| R21 `collect_all` complete or `Incomplete`, R13 size bounds, R18 link origin check | same | `github_collect_all_stopped_by_the_page_limit_is_incomplete`, `github_collect_all_with_a_failing_second_page_is_incomplete`, `openai_collect_all_without_a_continuation_is_incomplete`, `github_page_size_outside_the_authored_bounds_is_refused_before_sending`, `github_ordinary_send_adds_no_pager_input`, `bitbucket_next_link_to_another_origin_is_refused` |
+| R32 dependents build and pass | dependent crates (F3) | `just test sniff`, `just test homelab model-citizen biscuit-speaks`, area lints |
+| Generated manifest carries `trybuild` | generator template (L1) | `cargo_gen::tests::generate_cargo_toml_includes_trybuild_dev_dependency` |
+
+The Input Robustness Matrix does not apply: this phase adds no reader of a file format or configuration.
+
+### Validation run in this phase (macOS)
+
+| Check | Result |
+| --- | --- |
+| `just test` (schematic area) | pass: L1 2205/2205 (12 skipped), fresh-output 6/6, compile-fail 1/1 (82 s) |
+| `just lint` (schematic area) | pass |
+| `just test-schema` | pass: 55/55 |
+| `just lint-schema` | pass |
+| `just generate` ×2 | identical bytes; exports equal to the pre-feature baseline |
+| Dependents | see 7.3 |
+| Other OSes | not run here. The new tests use loopback wiremock and trybuild's path normalization; the one OS-sensitive surface is the trybuild snapshots, whose paths trybuild normalizes and which contain no separator. `schematic-schema` is local-only evidence (CI never runs `test-schema`), so Phase 8.2 should run `just test-schema` on Linux and Windows through `just cross-check` if it wants that crate's evidence per OS. |
+
+### Deviations in this phase
+
+- **Generator change in a "regenerate" phase:** `trybuild` added to the generated manifest (7.1). Without it, R31's compile-fail case could not live in `schematic-schema`.
+- **Session-only prohibitions are not exercised on a real endpoint,** because no shipped definition authors a session (7.2).
+- **Build-time comparison is a single noisy sample** (7.2), as the plan asked for no new performance campaign.
+
+### Human review agenda (Phase 7 updates)
+
+4. **Removed request fields and dependent edits.** Re-confirmed 185 removals; no further dependent edit was needed. model-citizen is a dependent of `schematic-definitions`, not of `schematic-schema`.
+8. **Compile-time and diagnostic observations.** Library-alone cold build 49.9 s versus 35.5 s at baseline (one sample; host noise of the same size seen on the full build). The real-endpoint snapshots show the custom capability messages ("`ListBatchesRequest` is not paginated by page number", "has no authored total") and rustc's implementor list truncated to eight with "and $N others".
+9. **Platform evidence.** macOS only in this phase; `schematic-schema` tests are not run by CI on any OS.
+10. **Deviations.** Above.
+13. **Pre-authorized actions to reverse.** The `trybuild` line in the generated manifest (template, `schema/Cargo.toml`, `schema/Cargo.lock` +38 lines: `trybuild 1.0.122`, `glob`, `target-triple`, `termcolor`) and the two new test files with their fixtures.
+
+## Phase 8
+
+Phase 8 finishes the documentation, collects platform evidence, and audits acceptance. Started 2026-10-13 on `feat/modern-config`, macOS host (rustc 1.98.1). Two workers ran concurrently on disjoint files: one wrote the docs (Markdown only) and one reviewed Rust doc comments (comment-only edits, `.rs` only). The platform runs went through `just cross-check` / `scripts/cross-check.sh` in the background while both worked.
+
+### 8.1 Documentation drift (done)
+
+**New topic page: `schematic/docs/pagination.md`.** It is written for a developer new to the repo. The caller's side comes first: the three entry points (`collect_all`, `pages`, `fetch_page`), configuring a pager and its controls table, moving one-page callers to `fetch_page` (with sniff's `list_workflow_runs` as the example), compile-time controls with a real diagnostic, a lifecycle diagram, the complete-or-`Incomplete` rule, how the end is detected, the rules every traversal follows (the start page is always sent, next links are followed as written, cross-origin policy, stall detection, page limit), bounds checked before sending, `PagerError` evidence, sessions (a sequence diagram covering open, handle, keep-alive, renew, close grace, cancellation, and panic), and partitions (including the rotating-handle risk). Then the authoring side: the default plus exceptions table, a resolution diagram (row first, then a GET with an explicit `Vec<T>`, then not a list), adoption with a diagram, builders, validation, and imported definitions through `--overlay`. It ends with per-API counts (94 paginated lists) and "Lists left unpaginated": the 32 unverified and definition-gap endpoints, each with provider, id, recalled strategy, and source needed, plus the provider gaps and no-continuation rows, each reason kept distinct. The page names no feature or fix directory, spec, phase, or requirement id (grep-checked). Its five Mermaid diagrams render with `mmdc`. The session and partition examples use hypothetical endpoints, marked as such, because no shipped definition authors either.
+
+**Links:** `schematic/README.md` (topic-docs list and a Key Features line), `schematic/docs/runtime/README.md` (a "You can" bullet and a Pages row; the stale "Planned: paging topic page" item was removed because the page now exists), `schematic/runtime/README.md` (docs table plus the missing `pager` row in Module Layout), and one pointer each in the define, definitions, and gen READMEs. `.claude/skills/schematic-define/SKILL.md` gained a pointer to the page. `schematic/docs/dependencies.md` gained `trybuild` under `schematic-schema` dev-dependencies (added in Phase 7, not yet listed).
+
+**Drift found and corrected (code assumed correct):**
+
+| File | Stale claim | Correction |
+| --- | --- | --- |
+| `docs/runtime/calling-an-api.md` | opening example, Mermaid chain and `.build()?` example used `list_releases(..).per_page(10)` (no longer a setter); optional-values example chained `.per_page(50)` | `list_pull_requests(..).state(..)` and `.sort(..)`; a short "Paginated lists" section pointing to the topic page |
+| `docs/generation/request-side.md` | Gitea example used `.with_page(2)` (adopted, removed) | `.with_state(..)`/`.with_sort(..)` with the query order and wire line corrected; note on adopted fields |
+| `docs/runtime/deadlines-and-timeouts.md` | manual loop `.page(page).deadline(..).await?` (`.page()` now returns a pager, which cannot be awaited) | a loop over `get_repository`; the pager deadline paragraph is unchanged |
+| `docs/generation/validation.md` | setter-naming example `per_page`/`with_per_page` | `state`/`with_state` |
+| `gen/README.md` | `ListReleasesCall` example with `page`/`per_page` setters | `ListPullRequestsCall` with its real setters and the generated pager forwards |
+| `define/src/lib.rs` crate docs | `PaginationStyle`/`PaginationResponse` presented as the pagination types | marked legacy, superseded by `pagination::Strategy` |
+| `define/src/params/mod.rs` `with_response_pagination`, `has_pagination` | "metadata for potential code generation"; "has pagination parameters" | the signal is unread; `has_pagination` reports only a legacy style, and `resolve` decides pagination |
+| `define/src/pagination/resolve.rs` `param_adoptions` | near miss is "the same name" | compared without regard to case |
+| `gen/src/codegen/endpoint_methods/mod.rs`, `names.rs`, `pagination/mod.rs` | forwarded-control and reserved-setter lists missing `keep_alive`, `partitioned`, `close_grace`, `with_session` | lists completed to match `PagerForwards::has_control` |
+| `runtime/src/pager/request.rs` `build_parts` | followed-link description omitted that the body is dropped | added |
+| `definitions/src/bitbucket/mod.rs` module docs | page-based paging with `.with_page(2).with_pagelen(100)` (no longer exists) | follows `next`/`previous`; example `list_pull_requests(..).page_size(100).collect_all()` |
+| `definitions/src/github/mod.rs` | "all `List*` endpoints support pagination via `page` and `per_page` query parameters" | the pager manages both through `.page(n)`/`.page_size(n)` |
+| `definitions/src/gitlab/mod.rs` | `gitlab_page_number` called "offset pagination" | "offset-based pagination, modeled as a page-number strategy" |
+| production `src/` comments in define, gen, runtime | requirement ids `(R2a)`, `(R6)`, `(R7)`, `(R11a)`, `(R14)`, `(R18)` | removed (they point at a snapshot spec) |
+
+The old nonexistent `fetch_all_pages` claim was already deleted in Phase 3 (no occurrence remains outside specs and reviews). The Rust edits are comment-only: `git diff -U0 -- '*.rs'` shows no changed non-comment line. `cargo test --doc -p schematic-define --all-features` passes (174 doctests).
+
+**Drift reported, not corrected:**
+
+- `schema/src/bitbucket/requests.rs` (`GetSource`, two places) documents `pagelen` as "default: 50, max: 100". The text comes from `PaginationStyle::bitbucket()` in the definition data (Bitbucket's real default is 10), so fixing it is a definition change plus regeneration and is out of this phase's scope. Recorded as open question 11.
+- Pre-feature requirement ids in sniff (`sniff/lib/src/remote/github.rs:95` "(R11.5)", `:240` "(R11.6)") are left, because the feature did not introduce them.
+- `.claude/skills/schematic-define/SKILL.md` is 376 lines, over the ~200-line skill target, which was already true before this phase. Shrinking it is unrelated cleanup.
+
+### 8.2 Platform evidence
+
+Hosts declared on this machine: `BUILD_LINUX=build-linux`, `BUILD_WIN=build-win-native`, `BUILD_WSL=build-win` (no `BUILD_MACOS`; macOS is this host). Every rig run tested the working tree as one throwaway commit. Because that tree is not the head's tree, no run published a CI receipt ("publishing no … observation — the remote tested tree … is not this head's tree"). This is local rig evidence for the reviewer, not reusable CI evidence. CI runs Linux and macOS on the pull request, and the nightly runs Windows and WSL2 over what changed.
+
+**L1 archive mode (`just cross-check <pkg> --os all`, the CI-shaped run):**
+
+| Package | Linux | native Windows | WSL2 |
+| --- | --- | --- | --- |
+| schematic-runtime | 357/357 (1 skipped) | 353/353 (5 skipped) | 357/357 (1 skipped) |
+| schematic-define | 632/632 | 632/632 | 632/632 |
+| schematic-gen | 612/612 (14 skipped) | 610/610 (14 skipped) | 612/612 (14 skipped) |
+| schematic-definitions | 574/574 | 574/574 | 574/574 |
+| sniff | 2424/2424 (31 skipped) | 2375/2376: 1 unrelated failure (below) | 2424/2424 (31 skipped) |
+
+The runtime's real-time deadline, grace, and cancellation tests (margins of at least 100 ms) pass on native Windows in this run, which is the Windows timer-tolerance evidence for R19/R22a.
+
+**Suites that run Cargo themselves** (absent from archives) ran in native mode (`--all-features`, which changes nothing for the runtime and the schema crate, and only adds `terminal-tests` dependencies to gen, which the `slow_` filter leaves out). Results are in the table under "Platform results after the fixes" below.
+
+**Two portability defects found and fixed in this phase:**
+
+1. **trybuild cannot normalize a path dependency on native Windows.** `schematic-schema`'s real-endpoint compile-fail suite passed on Linux (55/55) and WSL2 (55/55), and failed on native Windows: 10 of its 13 cases mismatched, and 3 cases plus the pass control matched. Cause: trybuild 1.0.122 (still the latest; upstream `run.rs` is unchanged) records each path dependency with `Path::canonicalize`, which on Windows returns the verbatim `\\?\B:\…\schematic\runtime`. rustc prints `B:/…/schematic/runtime/src/pager/pages.rs:112:12`, so the `$SCHEMATIC_RUNTIME` rewrite never matches, the line numbers stay, and the gutter widens. Exactly the 10 snapshots containing `$SCHEMATIC_RUNTIME` failed. trybuild clears `RUSTFLAGS`, so a `--remap-path-prefix` workaround is not possible. Fix: `schematic/schema/tests/compile_fail.rs` runs, on Windows only, the compile-fail cases whose expected output names no `$SCHEMATIC_RUNTIME` path, asserts that at least one does, and states the limitation in its module doc. macOS, Linux, and WSL2 still compare all 13. The diagnostic text was otherwise identical on Windows. The runtime's own trybuild suite uses `$DIR` only and is not affected. Recorded in the `os` skill (`windows-paths.md`).
+2. **The runtime's trybuild suite exceeded nextest's default 30 s kill on a cold build.** It took 17.0 s on Linux and 24.8 s on WSL2, and was killed at 30.06 s on native Windows. gen's fresh-output `slow_` tests already had a 60 s × 15 override, but the runtime's had none. Added `.config/nextest.toml` override `binary_id(schematic-runtime::l1) & test(/(^|::)slow_/)` with `slow-timeout = { period = "60s", terminate-after = 5 }`. CI never runs this suite (it runs only `test-fresh-output`), so the change affects local `just test` and rig runs only.
+
+**sniff Windows failure (unrelated, not introduced by this feature):** `os::working_processes::tests::a_sibling_directory_sharing_a_name_prefix_is_not_inside` panicked with "the holder is visible at all" after 5.05 s (`sniff/lib/src/os/working_processes.rs:163`). The feature never touched `sniff/lib/src/os/` (`git diff a9184b381^ -- sniff/lib/src/os` is empty). The pagination change to sniff is `remote/envelope.rs`, `remote/github.rs`, and their test, whose 7 `list_workflow_runs` tests passed on all three rigs. The re-run result is recorded below.
+
+**Tooling facts learned** (added to the `os` skill, `build-hosts.md`): `just cross-check` re-splits its arguments, so a filterset with parentheses fails, as the skill already said. Calling `scripts/cross-check.sh` directly still fails on a Windows archive leg, because the remote `_expected_manifest`/`_test` recipes re-split it the same way. A positional name filter works there. Trybuild and fresh-output suites, and the non-workspace `schematic-schema` crate, run on the rigs in native mode, for example `--all-features --manifest-path schematic/schema/Cargo.toml`.
+
+### 8.3 Acceptance audit
+
+**Cited tests exist.** A script extracted every test name cited in the requirement-mapping rows of Phases 2–7 (137 names) and searched `schematic/` and `sniff/` for each. All exist except four. Three are trybuild fixture files, not functions (`pager_pages_on_a_session_endpoint`, `pager_session_no_manual_open_or_close`, `pager_session_pages_escape_the_scope`, all in `runtime/tests/fixtures/compile_fail/`). One was renamed in Phase 5: `session_strategy_has_markers_but_no_outside_scope_iteration` is now `pagination::tests::session_strategy_forwards_with_session_and_its_knobs_but_no_outside_scope_iteration`.
+
+**Requirement-to-evidence map (R1–R36).** Each row points to a concrete test or reviewed artifact. Phase sections above hold the full test lists.
+
+| Req | Evidence | Status |
+| --- | --- | --- |
+| R1 model | `define/tests/pagination_model.rs` (builders, serde, selectors, no empty default), `pagination_inventory.rs` (prototype port) | met |
+| R2 validation rules | `pagination_model` rule tests, each with its valid sibling; gen `pagination_validation` | met |
+| R2a managed params exempt from required fidelity | `pagination_tables::a_required_managed_parameter_needs_a_value_to_send`; gen `an_ordinary_send_carries_required_adopted_defaults_and_omits_optional_ones`; runtime R13 tests | met |
+| R3 defaults + table, literals untouched | `endpoint_literal_surface::endpoint_and_params_literals_compile_unchanged_and_behave_the_same` | met |
+| R4 resolution order | `pagination_tables::{get_vec_is_a_list_…, only_get_with_an_explicit_vec_is_recognized, a_row_decides_before_inference, …}` | met |
+| R5 table validation | `pagination_tables::{unknown_row_id_is_rejected_with_the_nearest_endpoint, duplicate_row_id_…, row_list_shape_rules}`; `pagination_coverage::every_shipped_definition_validates` | met |
+| R6 alternates modeled, not generated | `pagination_tables::alternates_are_validated_…`; gen `alternates_do_not_change_the_output`; schema compile-fail `no_alternate_selection` | met |
+| R7 adoption | `pagination_tables` adoption tests; coverage rows' `adopted`; 185-field removal list; schema compile-fail `adopted_field_is_not_a_request_setter` | met |
+| R8 legacy inert | `pagination_tables::legacy_pagination_metadata_does_not_change_resolution`; gen `legacy_pagination_metadata_does_not_change_the_output`; `e2e_generation::legacy_pagination_metadata_emits_no_pager` | met |
+| R9 one generic pager, thin forwards | runtime `pager_*` fixtures shaped like generated impls; gen forward tests; fresh-output fixture compile | met (Proposed, adopted) |
+| R10 unauthored knobs do not compile | runtime trybuild suite (16 cases) and `schema/tests/compile_fail.rs` (13 real-endpoint cases; all on macOS/Linux/WSL2, the 3 path-free cases on Windows) | met |
+| R11 iteration surface | `pager_surface::{each_page_carries_its_number_…, items_flattens_every_page_in_order}` | met |
+| R11a `fetch_page` | `pager_surface::fetch_page_sends_one_request_with_the_cursor_and_size_…`; schema `github_fetch_page_…`, `openai_fetch_page_…`, `bitbucket_fetch_page_…`, `github_ordinary_send_adds_no_pager_input` | met |
+| R12 end detection | `pager_rules` end-signal tests (stale cursor, missing continuation, zero cursors, totals, checked arithmetic) | met |
+| R13 page-size rules | `pager_rules::a_size_outside_the_declared_bounds_is_refused_…_with_zero_requests`; schema `github_page_size_outside_the_authored_bounds_is_refused_before_sending` | met |
+| R14 stall and loop | `pager_rules::{a_cursor_cycle_is_a_repeated_continuation, a_repeated_link_…, a_failed_pager_stays_failed_…}` | met (widened rule, Proposed, adopted) |
+| R15 composite and inclusive cursors | `pager_rules::{a_composite_cursor_…, an_inclusive_boundary_drops_…}` | met |
+| R16 follow-up shape | `pager_collect` follow-up tests; `pager_outside::aip_158_…` | met |
+| R17 item location | selector unit tests; `pager_rules::a_malformed_collection_is_a_malformed_success_…` | met |
+| R18 cross-origin links | `pager_transport` two-origin matrix; `pager_surface` link tests; schema `bitbucket_next_link_to_another_origin_is_refused` | met |
+| R19 shared deadline | `pager_transport` deadline and drop tests; passed on native Windows in 8.2 | met |
+| R20 envelope per page | five `pager_transport` envelope tests | met |
+| R21 `collect_all` | `pager_collect` reason table (all eight reasons); schema `*_is_incomplete` tests | met |
+| R22 sessions only through `with_session` | `pager_session` exit-path tests; trybuild `pager_session_*`, `pager_pages_on_a_session_endpoint` | met (runtime fixtures only: no shipped session definition) |
+| R22a close grace | the three grace tests in `pager_session` | met |
+| R23 partitions | `pager_partition` (6), `define/tests/pagination_partitions.rs` | met (fixtures only: no shipped partition definition) |
+| R24 decode path | Phase 4.1 sample (`from_value` kept, +55 KB for the candidate) | met (Proposed, evaluated) |
+| R25 generated surface | gen `pagination::tests`; `fresh_output_compile::slow_real_apis_compile_offline`; `just generate` twice, identical hashes (re-run in 8.3) | met |
+| R26 wrapper item types | gen `pagination::tests::wrapper_item_types_are_emitted_as_authored`; `pagination_validation` item-type tests | met |
+| R27 coverage of 18 APIs | `pagination_coverage::every_list_endpoint_of_every_api_resolves_as_authored` (+ counts) | met |
+| R28 unverified stay unpaginated | `pagination_coverage::every_unverified_list_names_its_recalled_strategy_and_needed_source` (exact 32) | met |
+| R29 exports unchanged | `git diff --quiet a9184b381^ -- openapi postman` (re-run in 8.3: equal) | met |
+| R30 every mechanism + 10 outside patterns | `pager_mechanisms.rs` (17 tests: every inventoried mechanism); `pager_outside.rs`: AIP-158, Mastodon, SCIM, Salesforce Bulk 2.0, and the six named `unverified_{x_api_v2, wordpress, odata_skiptoken, cosmos_db, salesforce_rest_query, reddit}` | met |
+| R31 generated-pager smoke | `schema/tests/pagination.rs` (14), `schema/tests/compile_fail.rs` | met |
+| R32 dependents | Phase 7.3 (sniff 3420/3420; homelab, model-citizen, biscuit-speaks 919/919; lints); sniff L1 on three rigs in 8.2 | met |
+| R33 verification task recorded | agenda item 5 below; `docs/pagination.md` "Lists left unpaginated"; coverage test names the same 32 | met |
+| R34 docs and skills | `docs/pagination.md`; define, gen, runtime READMEs; `schematic-define` skill; grep of the new and changed docs finds no `2026-` directory name | met |
+| R35 import keeps pagination | `import_overlay::reimporting_the_vendored_openai_document_reproduces_the_committed_definition` and the overlay tests | met |
+| R36 privacy | `pager_surface` and `pager_transport` sentinel tests; `pager_session` handle and close privacy tests | met |
+
+The same acceptance tests cover the decode path chosen (`from_value`); R24's alternative was not adopted, so no second run was needed.
+
+**Artifact reviews re-run after the last change:** `just generate` produced identical SHA-256 over `schema/src`, `schema/Cargo.toml`, `openapi`, and `postman` before and after, with an empty `git diff` of those paths. OpenAPI and Postman still equal the pre-feature baseline (`a9184b381^`). The endpoint-literal surface test passes. The import-persistence test passes in `just test`. The schema diff size is unchanged from Phase 7 (8 files, +9,800/−3,647). The dependency docs and skill updates are listed under 8.1.
+
+**Input Robustness Matrix:** not applicable. This phase adds no reader of a file format or configuration. The one source change in a test reads trybuild's own `.stderr` fixtures to choose cases.
+
+### Human review agenda (reconciled, all 20 items)
+
+1. **Defaults adopted.**
+   - P8 items 1–8 and defaults 9–22 were applied as logged in Phases 2–6.
+   - Highlights: a page limit of 100; the widened stall rule; knobs that are infallible and checked before sending; thin forwards on call types; `from_value` decoding; a 5 s close grace; named-struct strategies; adopt-and-hide only with the knob.
+   - *Status:* closed for review.
+2. **Reconciliation with the runtime-envelope spec.** Done in Phase 1. *Status:* closed.
+3. **Design choices.** Phases 2–5 list them: type and entry names, the `PagerError` shape, the `with_session` boxed-future signature, lazy open, constant layout, and the API-local helpers and OpenAI overlay. *Status:* for review.
+4. **Removed request fields and dependent edits.** 185 fields; edits in `schematic/schema/tests/github_client.rs` and sniff's `list_workflow_runs` (with `Replies::page`). *Status:* for review.
+5. **Authored versus left unpaginated (R33).**
+   - Authored: GitHub 9, GitLab 9, Gitea 8, Bitbucket 8, OpenAI 58, ElevenLabs 2.
+   - Left unpaginated: the 32-endpoint verification task, listed in Phase 6.5 and in `docs/pagination.md`.
+   - No unverified row was verified, because network verification was not authorized.
+   - *Status:* awaiting the author's authorization for the verification task.
+6. **Re-counted numbers.** Phase 1. *Status:* closed.
+7. **Decode sample.** Phase 4.1 (`from_value` kept). *Status:* closed.
+8. **Compile-time observations.** Phase 7: library-only cold build 49.9 s versus 35.5 s, from one noisy sample. Phase 8 adds that the runtime trybuild suite's cold build takes 17–30 s or more depending on the host (see 9). *Status:* for review.
+9. **OS and environments.**
+   - Local: macOS ran everything.
+   - Rigs (local evidence, no receipts): Linux, native Windows, and WSL2 ran the L1 archive of every changed workspace package, the runtime's trybuild suite, gen's fresh-output compiles, and `schematic-schema`'s full suite.
+   - Made portable: the `schematic-schema` trybuild cases are reduced on Windows (trybuild's path-dependency normalization defect), and the runtime trybuild timeout was raised.
+   - Left to CI: the nightly Windows and WSL2 cells for the merged head. `schematic-schema` and the trybuild suites are never CI cells.
+   - *Status:* see the final platform table.
+10. **Deviations.** Every phase's "Deviations" section, plus this phase's: a test-only Windows reduction of the real-endpoint compile-fail cases, and one repo-wide nextest override. *Status:* for review.
+11. **Open design questions.**
+    - The questions from Phases 1–6 remain, each with its recommendation.
+    - New in this phase: should `PaginationStyle::bitbucket()`'s documented defaults (50, which `GetSource`'s generated docs repeat) be corrected or removed with the legacy types? Recommended: remove them with the legacy types in the definition-API work, since nothing reads them.
+    - New in this phase: should the trybuild Windows defect be reported upstream? Recommended: yes, as a small issue or PR that strips the verbatim prefix (dunce) in `run.rs`.
+    - *Status:* for the author.
+12. **Drift.** Phases 2–4 and 6, plus the 8.1 tables above. *Status:* closed.
+13. **Pre-authorized actions to reverse.**
+    - The regeneration of six `requests.rs` files.
+    - The OpenAI re-import.
+    - The sniff and schema-test edits.
+    - The `trybuild` generated dev-dependency.
+    - This phase: the `.config/nextest.toml` override and the Windows branch in `schema/tests/compile_fail.rs`.
+    - *Status:* for review.
+14. **Unratified Proposed items.** R14 widened: adopted. R9/R10 generic pager with capability traits and `on_unimplemented`: adopted. S11: `from_value` kept. S12 named structs: adopted. *Status:* awaiting ratification.
+15. **Adoption rule.** Every adopted field has its knob. Kept fields: Bitbucket `page` ×8, `GetSource` `page`/`pagelen`, OpenAI `order`, ElevenLabs `ListVoices` `page_size`/`page_token`. *Status:* for review.
+16. **Session-close grace.** 5 s, configurable through `close_grace`; the runtime-envelope spec made no ruling. *Status:* closed.
+17. **`InvalidContinuation` and the added reasons; wrapper item type.** All eight reasons are tested through `collect_all`. The wrapper item type is an authored `item_type` checked through the registry. *Status:* closed.
+18. **Stall-rule widening.** No test depended on consecutive-only detection. Known provider risk: an Elasticsearch scroll id can repeat (Phase 5). *Status:* for review.
+19. **Decided provenance.**
+    - D55-5: define (Phase 2) and runtime (Phase 4).
+    - D56-1, D56-3, D56-5: the landed runtime (Phase 1).
+    - D57 item 2, latest handle across partitions: Phase 5.
+    - D57 item 3, `fetch_page`: Phases 3 and 7.
+    - D57 item 4, the importer overlay: Phase 6.
+    - D57 item 5, `SessionError`: Phase 5.
+    - D57 item 7, `RedirectFailed`: Phase 4.
+    - D57 item 13, `Default`: Phase 1.
+    - *Status:* closed.
+20. **Rotating-handle partition risk.** Logged in Phase 5 and stated in `docs/pagination.md` "Partitions". No out-of-order invalidation was observed. *Status:* accepted risk, for review.
+
+### Platform results after the fixes (8.2, final)
+
+| Suite | macOS (local) | Linux (`build-linux`) | native Windows (`build-win-native`) | WSL2 (`build-win`) |
+| --- | --- | --- | --- | --- |
+| L1, schematic-runtime / define / gen / definitions | `just test`: 2205/2205 | pass (archive) | pass (archive) | pass (archive) |
+| runtime trybuild (`test-compile-fail`) | 1/1 | 1/1, 17.0 s cold | killed at 30 s before the override; 1/1 in 35.3 s after | 1/1, 24.8 s |
+| gen fresh-output (`test-fresh-output`, D49 isolated compile) | 6/6 | 6/6, 146.6 s | 6/6, 186.9 s | 6/6, 188.3 s |
+| `schematic-schema` (`test-schema`) | 55/55 | 55/55 | 54/55 before the fix (10 path-bearing snapshots); 55/55 after (3 path-free cases + pass control) | 55/55 |
+| sniff L1 | Phase 7: 3420/3420 | 2424/2424 | 2375/2376 (unrelated `working_processes` failure; passes alone, 0.07 s) | 2424/2424 |
+
+"Absence of evidence" items:
+
+- No rig run published a CI receipt, because the tested tree is uncommitted. The nightly Windows and WSL2 cells of the merged head will run them, and `just ci-seed` can seed them from the rigs once the change is committed.
+- The rigs' native-mode runs (trybuild, fresh-output, schema) are never CI cells, so this table is their only cross-OS evidence.
+- No test takes window focus: pagination has no L2 or L3 test, and `just test-l2` is unaffected.
+
+### Requirement-to-test mapping (Phase 8 changes)
+
+| Changed behavior | Boundary, rung, tier | Test |
+| --- | --- | --- |
+| Real-endpoint compile-fail suite runs on Windows (path-free cases only) and on every other OS (all cases) | rustc through trybuild over the generated crate (F3, `test-schema`) | `schema/tests/compile_fail.rs::slow_generated_pager_surface_reports_the_intended_diagnostics`. Failed on native Windows before the change (10 mismatches, recorded above), passes after; unchanged on macOS, Linux, and WSL2 |
+| Runtime trybuild suite is not killed on a cold build | nextest configuration (`test-compile-fail`) | `compile_fail::slow_compile_fail_cases_report_their_intended_diagnostic`: TIMEOUT at 30.06 s on native Windows before, PASS at 35.3 s after |
+| Docs and comments | review | 8.1 tables; the comment-only diff check; the doctests of `schematic-define` |
+
+### Validation run in this phase (macOS, final, after the last change)
+
+| Check | Result |
+| --- | --- |
+| `just lint` (schematic area) | pass |
+| `just test` (schematic area) | pass: L1 2205/2205 (12 skipped), fresh-output 6/6, compile-fail 1/1 |
+| `just test-schema` / `just lint-schema` | pass: 55/55 / clean |
+| `just generate` | identical hashes before and after; no diff in `schema`, `openapi`, `postman`; exports equal the pre-feature baseline |
+| `cargo test --doc -p schematic-define --all-features` | pass (174) |
+| `just check-tier-coverage schematic` | no stranded test |
+| Runtime in area recipes | `test` runs `_test_all` over define, gen, definitions, oauth, and runtime, then `test-fresh-output` and `test-compile-fail` (runtime) |
+| Rigs | the table above |
+
+No pre-existing failure was found in the schematic area. The one red result outside it (the sniff Windows test) is unrelated and passed on re-run.
+
+### Deviations in this phase
+
+- **Test-only Windows reduction** in `schematic/schema/tests/compile_fail.rs`, caused by a trybuild defect (8.2 item 1). This is not a skip of the test: on Windows it still compiles the pass control and every case whose snapshot holds no dependency path.
+- **Repo-wide `.config/nextest.toml` override** for the runtime's trybuild test, outside the plan's documentation-and-evidence scope, because a cold Windows run could not otherwise pass `just test`.
+- **Both workers were launched as background agents** rather than in the foreground. Both finished and were collected before anything depended on them, so no work was lost.
+
+### Status
+
+**Implementation complete, ready for review.** Every Phase 8 task is done, and every requirement R1–R36 points to evidence above. The feature stays in its active directory. Nothing was committed or staged.
