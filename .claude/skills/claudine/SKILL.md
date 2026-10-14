@@ -11,6 +11,21 @@ Lifecycle `say`/`speak`/`effect` and hook `speak`/`sound_effect` audio is
 fire-and-forget after durable publication to Playa's private per-user queue.
 Lifecycle audio is published in stack order: put `effect` before `say` to hear it first.
 
+**TTS pre-warm** (`lifecycle/prewarm/`) prepares early `say`/`speak`
+phrases ahead of their events. Each top-level command (compose,
+inline-compose, sequence, provider wrapper) owns one deferred
+`PrewarmWorker`. The worker starts on the first submission that speaks and
+is cancelled on drop. Its `PrewarmHandle` travels on `InvocationContext`
+(`with_prewarm`; `DocumentEpoch::prewarm`). Every preparation site calls
+`prewarm::collect_and_submit`: the pipeline's lifecycle phase, the staged
+bootstrap, the loop bootstrap, and harness re-materialization. Sequence
+preflight calls `submit_sequence_preflight`. A sequence step or prompt task
+scopes the handle with `with_prewarm_injected_keys` so per-step values stay
+late. A new preparation site submits through the same entry point. CLI tests
+observe preparations through the `test-fixtures` seam
+`CLAUDINE_TEST_PREWARM=record:<path>` or `block:<path>`, with
+`PLAYA_DRY_RUN=0` and only never-firing phrases (`cli/tests/l1/tts_prewarm.rs`).
+
 **Lifecycle grammar.** Each lifecycle stack (the six events, the `loop:`
 block's loose verbs or `gate:` list, and a task's `setup:`/`teardown:`) parses
 into ordered `LifecycleNode`s — a leaf `LifecycleAction` or a
