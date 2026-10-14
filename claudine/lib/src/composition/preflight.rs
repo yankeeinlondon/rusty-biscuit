@@ -43,7 +43,7 @@ pub struct PreFlightResult {
 /// ## Sources
 ///
 /// 1. Template `::shell` directives (via Darkmatter's document graph walker)
-/// 2. Lifecycle stack shell commands (from every reachable `action: shell`
+/// 2. Lifecycle stack shell commands (from every reachable `shell` action
 ///    across the six shell-capable lifecycle events)
 ///
 /// ## Errors
@@ -64,7 +64,7 @@ pub struct PreFlightResult {
 ///   walker.
 /// * `approval_options` — shell approval policy, handler, and cache.
 /// * `lifecycle` — parsed lifecycle configuration; when present, every
-///   reachable `action: shell` command (and `on_error` command) across all
+///   reachable `shell` action command (and `on_error` command) across all
 ///   six shell-capable lifecycle events is collected and audited alongside the other
 ///   sources. `lifecycle_source_path` names the composition source file for
 ///   diagnostics.
@@ -102,7 +102,7 @@ pub fn resolve_shell_approvals(
 
     // -- Source 2: Lifecycle stack shell commands ------------------------------
     // Condition-blind, matching the template posture: every reachable
-    // `action: shell` (and its `on_error`) is gathered regardless of the
+    // `shell` action (and its `on_error`) is gathered regardless of the
     // `when:` guard, because the guard may evaluate differently under
     // document states the audit cannot predict.
     if let Some(lifecycle_config) = lifecycle {
@@ -315,8 +315,8 @@ pub(super) fn approve_discovered_commands(
 ///
 /// [`ShellAction::pre_resolved`]: super::lifecycle::ShellAction::pre_resolved
 ///
-/// Positional `shell` actions (`shell: "..."`) and key/value `shell` actions
-/// (`{ action: shell, command: ... }`) with any `on_error:` text are covered,
+/// Short-form `shell` actions (`shell: "..."`) and long-form `shell` actions
+/// (`shell: { command: ... }`) with any `on_error:` text are covered,
 /// and so is every whole-value `$( … )` in a `set` mapping, whose command
 /// bytes Darkmatter fixes here ([`resolve_set_shell_value`]).
 /// Non-string command expressions (e.g. a bare `command: "ctx.repo"` parsed as a
