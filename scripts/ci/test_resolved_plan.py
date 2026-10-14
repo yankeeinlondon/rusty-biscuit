@@ -341,8 +341,9 @@ class SuiteOwnershipCorpusTests(PlannerFixture):
 
     def test_each_tooling_trigger_selects_exactly_its_owner(self) -> None:
         # Ownership is the whole-tier selection. Several of these files are
-        # also read by `test-toolkit`'s contract tests or `sniff`'s lockfile
-        # parser tests, which a changed test input schedules separately as one
+        # also read by `test-toolkit`'s contract tests, `sniff`'s lockfile
+        # parser tests, or `darkmatter`'s shipped schema corpus tests, which a
+        # changed test input schedules separately as one
         # narrowed Linux L1 cell; that is
         # the second column, and it never widens into ownership.
         for path, owners, readers in (
@@ -355,7 +356,7 @@ class SuiteOwnershipCorpusTests(PlannerFixture):
             ("pnpm-lock.yaml", ["test-toolkit"], ["sniff"]),
             ("pnpm-workspace.yaml", ["test-toolkit"], []),
             ("tools/test-toolkit/Cargo.toml", ["test-toolkit"], []),
-            ("docs/topics/ci-cd.md", [], ["test-toolkit"]),
+            ("docs/topics/ci-cd.md", [], ["darkmatter", "test-toolkit"]),
             ("darkmatter/README.md", [], []),
         ):
             with self.subTest(path=path):
