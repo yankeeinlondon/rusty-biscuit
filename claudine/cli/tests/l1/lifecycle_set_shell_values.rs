@@ -1,6 +1,8 @@
 //! Level-1 process coverage for a lifecycle `set` that runs a command (R9): the
 //! command is approved at pre-flight under its bare bytes, runs when `start`
 //! executes, and a later `when:` reads its typed `::result`.
+//! It also covers branch selection end to end: a guard runs only its selected branch,
+//! in authored order, and the other branch's shell leaves no mark.
 //!
 //! The commands are `git` invocations that need no repository, so they behave
 //! the same on every host: `git check-ref-format --branch ran/x` exits 0 and
@@ -217,4 +219,63 @@ fn a_duplicate_result_suffix_fails_the_composition_naming_both() {
     // Backticked, so the echoed value `$(git status)::ok::result` cannot match.
     assert!(collapsed.contains("`::ok` and `::result`"), "{collapsed}");
     assert!(!collapsed.contains("start ran"), "{collapsed}");
+}
+
+/// Two branches of one guard, each with ordered communication around a shell
+/// that marks which branch ran. Both shells are approved, as pre-flight
+/// requires: approval never depends on which branch runs.
+const BRANCH_DOCUMENT: &str = r#"---
+pick: PICK
+start:
+  - when: "pick == 'then'"
+    then:
+      - stderr: "branch then first"
+      - shell: "git config --add claudine.branch then"
+      - stderr: "branch then second"
+    else:
+      - stderr: "branch else first"
+      - shell: "git config --add claudine.branch else"
+      - stderr: "branch else second"
+---
+Body.
+"#;
+
+const THEN_MARK: &str = "git config --add claudine.branch then";
+const ELSE_MARK: &str = "git config --add claudine.branch else";
+
+/// Composes [`BRANCH_DOCUMENT`] with `pick` and returns the run, its ordered
+/// `branch …` lines, and the marks its shells left.
+fn compose_branch(name: &str, pick: &str) -> (Run, Vec<String>, Vec<String>) {
+    let fixture = marking_fixture(name);
+    let document = BRANCH_DOCUMENT.replace("PICK", pick);
+    let run = spawn(&fixture, &document, &[THEN_MARK, ELSE_MARK], &["compose", "--claude", "doc.md"]);
+    let lines = run
+        .output
+        .lines()
+        .filter_map(|line| line.find("branch ").map(|start| line[start..].trim_end().to_string()))
+        .collect();
+    let output = common::helper_command("git")
+        .arg("-C")
+        .arg(fixture.cwd())
+        .args(["config", "--get-all", "claudine.branch"])
+        .output()
+        .expect("git runs");
+    let marks = String::from_utf8_lossy(&output.stdout).lines().map(str::to_string).collect();
+    (run, lines, marks)
+}
+
+#[test]
+fn only_the_selected_then_branch_runs_and_it_runs_in_order() {
+    let (run, lines, marks) = compose_branch("branch-select-then", "then");
+    assert_eq!(run.code, Some(0), "{}", run.output);
+    assert_eq!(lines, ["branch then first", "branch then second"], "{}", run.output);
+    assert_eq!(marks, ["then"], "the else shell must not run\n{}", run.output);
+}
+
+#[test]
+fn only_the_selected_else_branch_runs_and_it_runs_in_order() {
+    let (run, lines, marks) = compose_branch("branch-select-else", "other");
+    assert_eq!(run.code, Some(0), "{}", run.output);
+    assert_eq!(lines, ["branch else first", "branch else second"], "{}", run.output);
+    assert_eq!(marks, ["else"], "the then shell must not run\n{}", run.output);
 }
