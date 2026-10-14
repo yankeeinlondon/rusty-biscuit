@@ -53,7 +53,7 @@ fn incident_is_rejected_at_success_say_with_the_shared_rewrite() {
     let frontmatter = fixture_frontmatter(REVIEW_SPEC_INLINE);
     let (property, literal, nested, suggestion) = rejection(&frontmatter);
 
-    assert_eq!(property, "success.say");
+    assert_eq!(property, "success.say.text");
     assert_eq!(
         literal,
         r#""The review of the draft specification file in {{ctx.area}} has completed""#
@@ -77,7 +77,7 @@ fn incident_failure_say_is_reported_once_success_say_is_repaired() {
     frontmatter["success"]["say"] =
         json!("{{ ctx.area ? 'done in ' + ctx.area : 'done in ' + ctx.repo_name }}");
     let (property, _, nested, suggestion) = rejection(&frontmatter);
-    assert_eq!(property, "failure.say");
+    assert_eq!(property, "failure.say.text");
     assert_eq!(nested, "{{ title_case(without_date(parent_dir(spec))) }}");
     assert!(suggestion.unwrap().contains("title_case(without_date(parent_dir(spec)))"));
 
@@ -106,25 +106,23 @@ fn preparation_uses_decoded_escape_parity_for_literal_openers() {
 fn every_communication_field_on_every_event_is_checked() {
     let defect = "{{ ok ? 'in {{x}}' : 'y' }}";
     for event in ["initialize", "start", "success", "blocked", "failure", "finalize"] {
-        for field in ["say", "say_first", "message", "stderr", "notify", "info", "warn", "success", "stdout"] {
+        for field in ["say", "speak", "message", "stderr", "notify", "info", "warn", "success", "stdout"] {
             let frontmatter = json!({ event: { field: defect } });
             let (property, literal, nested, _) = rejection(&frontmatter);
-            assert_eq!(property, format!("{event}.{field}"));
+            assert_eq!(property, format!("{event}.{field}.text"));
             assert_eq!(literal, "'in {{x}}'");
             assert_eq!(nested, "{{x}}");
         }
     }
     let frontmatter = json!({ "loop": { "while": "true", "info": defect } });
-    assert_eq!(rejection(&frontmatter).0, "loop.info");
+    assert_eq!(rejection(&frontmatter).0, "loop.info.text");
 }
 
 #[test]
 fn predicates_are_linted_as_condition_text() {
-    let frontmatter = json!({
-        "start": { "stack": [{ "when": "label == 'in {{x}}'", "action": "stop" }] }
-    });
+    let frontmatter = json!({ "start": [{ "when": "label == 'in {{x}}'", "then": ["stop"] }] });
     let (property, literal, nested, suggestion) = rejection(&frontmatter);
-    assert_eq!(property, "start.stack[0].when");
+    assert_eq!(property, "start[0].when");
     assert_eq!(literal, "'in {{x}}'");
     assert_eq!(nested, "{{x}}");
     assert_eq!(suggestion.as_deref(), Some("label == 'in ' + x"));
@@ -139,19 +137,19 @@ fn predicates_are_linted_as_condition_text() {
 fn action_operands_are_checked_in_every_authoring_form() {
     let defect = "{{ ok ? 'a {{x}}' : 'b' }}";
     let cases = [
-        (json!({ "say": defect }), "start.stack[0].action[0].message"),
-        (json!({ "action": "say", "message": defect }), "start.stack[0].action[0].message"),
-        (json!({ "action": "notify", "text": defect }), "start.stack[0].action[0].message"),
-        (json!({ "shell": defect }), "start.stack[0].action[0].command"),
-        (json!({ "action": "shell", "command": "true", "on_error": defect }), "start.stack[0].action[0].on_error"),
-        (json!({ "error": defect }), "start.stack[0].action[0].reason"),
-        (json!({ "proxy": defect }), "start.stack[0].action[0].target"),
-        (json!({ "action": "resume", "message": defect }), "start.stack[0].action[0].message"),
-        (json!({ "set_frontmatter": ["s.md", "k", defect] }), "start.stack[0].action[0].arg[2]"),
-        (json!({ "action": "set_frontmatter", "file": "s.md", "prop": "k", "value": defect }), "start.stack[0].action[0].arg[2]"),
+        (json!({ "say": defect }), "start[0].say.text"),
+        (json!({ "say": { "text": defect } }), "start[0].say.text"),
+        (json!({ "notify": { "text": defect } }), "start[0].notify.text"),
+        (json!({ "shell": defect }), "start[0].shell.command"),
+        (json!({ "shell": { "command": "true", "on_error": defect } }), "start[0].shell.on_error"),
+        (json!({ "error": defect }), "start[0].error.reason"),
+        (json!({ "proxy": defect }), "start[0].proxy.target"),
+        (json!({ "resume": { "message": defect } }), "start[0].resume.message"),
+        (json!({ "set_frontmatter": ["s.md", "k", defect] }), "start[0].set_frontmatter.arg[2]"),
+        (json!({ "set_frontmatter": { "file": "s.md", "prop": "k", "value": defect } }), "start[0].set_frontmatter.arg[2]"),
     ];
     for (action, expected) in cases {
-        let frontmatter = json!({ "start": { "stack": [{ "action": [action.clone()] }] } });
+        let frontmatter = json!({ "start": [action.clone()] });
         assert_eq!(rejection(&frontmatter).0, expected, "action {action}");
     }
 }
@@ -159,28 +157,24 @@ fn action_operands_are_checked_in_every_authoring_form() {
 #[test]
 fn proxy_with_values_are_checked_at_their_overlay_path() {
     let frontmatter = json!({
-        "failure": { "stack": [{ "action": [
+        "failure": [
             { "say": "handing off" },
-            { "action": "proxy", "target": "next.md", "with": {
-                "note": "plain",
-                "meta": { "files": ["a.md", "{{ 'in {{area}}' }}"] }
-            } }
-        ] }] }
+            {
+                "proxy": {
+                    "target": "next.md",
+                    "with": { "note": "plain", "meta": { "files": ["a.md", "{{ 'in {{area}}' }}"] } },
+                },
+            },
+        ],
     });
     let (property, _, nested, suggestion) = rejection(&frontmatter);
-    assert_eq!(property, "failure.stack[0].action[1].with.meta.files[1]");
+    assert_eq!(property, "failure[1].proxy.with.meta.files[1]");
     assert_eq!(nested, "{{area}}");
     assert_eq!(suggestion.as_deref(), Some("'in ' + area"));
 }
 
 fn proxy_with_frontmatter(with: serde_json::Value) -> serde_json::Value {
-    json!({
-        "failure": { "stack": [{ "action": {
-            "action": "proxy",
-            "target": "next.md",
-            "with": with,
-        } }] }
-    })
+    json!({ "failure": [{ "proxy": { "target": "next.md", "with": with } }] })
 }
 
 #[test]
@@ -193,7 +187,7 @@ fn dotted_proxy_keys_cannot_collide_with_nested_mapping_paths() {
     }));
     assert_eq!(
         rejection(&nested_defect).0,
-        "failure.stack[0].action[0].with.a.b"
+        "failure[0].proxy.with.a.b"
     );
 
     let dotted_key_defect = proxy_with_frontmatter(json!({
@@ -202,7 +196,7 @@ fn dotted_proxy_keys_cannot_collide_with_nested_mapping_paths() {
     }));
     assert_eq!(
         rejection(&dotted_key_defect).0,
-        r#"failure.stack[0].action[0].with["a.b"]"#
+        r#"failure[0].proxy.with["a.b"]"#
     );
 }
 
@@ -216,7 +210,7 @@ fn bracket_shaped_proxy_keys_cannot_collide_with_array_paths() {
     }));
     assert_eq!(
         rejection(&array_defect).0,
-        "failure.stack[0].action[0].with.files[0]"
+        "failure[0].proxy.with.files[0]"
     );
 
     let bracket_key_defect = proxy_with_frontmatter(json!({
@@ -225,7 +219,7 @@ fn bracket_shaped_proxy_keys_cannot_collide_with_array_paths() {
     }));
     assert_eq!(
         rejection(&bracket_key_defect).0,
-        r#"failure.stack[0].action[0].with["files[0]"]"#
+        r#"failure[0].proxy.with["files[0]"]"#
     );
 }
 
@@ -239,7 +233,7 @@ fn flat_proxy_keys_cannot_collide_with_nested_mapping_and_array_paths() {
     }));
     assert_eq!(
         rejection(&nested_defect).0,
-        "failure.stack[0].action[0].with.bundle[0].meta.value"
+        "failure[0].proxy.with.bundle[0].meta.value"
     );
 
     let flat_key_defect = proxy_with_frontmatter(json!({
@@ -248,7 +242,7 @@ fn flat_proxy_keys_cannot_collide_with_nested_mapping_and_array_paths() {
     }));
     assert_eq!(
         rejection(&flat_key_defect).0,
-        r#"failure.stack[0].action[0].with["bundle[0].meta.value"]"#
+        r#"failure[0].proxy.with["bundle[0].meta.value"]"#
     );
 }
 
@@ -257,28 +251,26 @@ fn events_are_reported_in_lifecycle_signal_order() {
     let defect = "{{ 'x {{y}}' }}";
     let frontmatter = json!({
         "finalize": { "say": defect },
-        "success": { "stack": [{ "action": [{ "say": defect }] }] },
-        "start": { "info": "fine", "stack": [{ "when": "a == 'b {{c}}'", "action": "stop" }] },
+        "success": [{ "say": defect }],
+        "start": [{ "info": "fine" }, { "when": "a == 'b {{c}}'", "then": ["stop"] }],
     });
-    assert_eq!(rejection(&frontmatter).0, "start.stack[0].when");
+    assert_eq!(rejection(&frontmatter).0, "start[1].when");
 }
 
 #[test]
 fn synthesized_mixed_and_non_lifecycle_surfaces_are_not_rejected() {
     let frontmatter = json!({
         "resides_in": "{{ ok ? 'in {{x}}' : 'y' }}",
-        "start": {
-            "info": "running {{agent}}",
-            "message": "a {{ x ? 'in {{x}}' : 'y' }} b",
-            "say": "{{{ 'literal {{braces}}' }}}",
-            "stack": [{ "action": [
-                { "info": "running {{agent}}" },
-                { "action": "message", "message": "Deployed {{version}}" },
-                { "set_frontmatter": ["s.md", "k", "{{ payload }}"] },
-                { "say": "{{ 'in ' + area }}" },
-                { "retry": 3 }
-            ] }]
-        }
+        "start": [
+            { "info": "running {{agent}}" },
+            { "message": "a {{ x ? 'in {{x}}' : 'y' }} b" },
+            { "say": "{{{ 'literal {{braces}}' }}}" },
+            { "info": "running {{agent}}" },
+            { "message": { "text": "Deployed {{version}}" } },
+            { "set_frontmatter": ["s.md", "k", "{{ payload }}"] },
+            { "say": "{{ 'in ' + area }}" },
+            { "retry": 3 },
+        ],
     });
     validate(&frontmatter).expect("only single-pass authored literals are rejected");
 }
@@ -292,12 +284,12 @@ fn commit_fixture_nested_span_lives_on_a_non_lifecycle_key() {
 
 #[test]
 fn a_surface_without_an_authored_source_is_an_internal_error() {
-    let authored = json!({ "start": { "stack": [{ "action": [{ "say": "{{ 'x' }}" }] }] } });
+    let authored = json!({ "start": [{ "say": "{{ 'x' }}" }] });
     let config = parse_lifecycle_config(&authored, dummy_path()).unwrap();
     let err = validate_no_nested_spans_in_literals(&json!({}), &config, dummy_path()).unwrap_err();
     match err {
         CompositionError::LifecycleInvalid { property, message, .. } => {
-            assert_eq!(property, "start.stack[0].action[0].message");
+            assert_eq!(property, "start[0].say.text");
             assert!(message.contains("internal error"), "{message}");
         }
         other => panic!("expected internal LifecycleInvalid, got {other:?}"),
@@ -321,8 +313,9 @@ fn nested_span_error_renders_property_literal_rewrite_and_escape_hint() {
 }
 
 /// The single-pass inventory is checked against the authored Claudine schema,
-/// so a new lifecycle event or communication field cannot silently escape the
-/// nested-span rule (spec Invariant 2).
+/// so a new lifecycle event cannot silently escape the nested-span rule (spec
+/// Invariant 2). Every action of an event is a stack item, so the per-action
+/// walk covers each communication verb.
 #[test]
 fn single_pass_inventory_matches_the_authored_claudine_schema() {
     use std::collections::BTreeSet;
@@ -349,25 +342,8 @@ fn single_pass_inventory_matches_the_authored_claudine_schema() {
     let signals: BTreeSet<&str> = LifecycleSignal::ALL.iter().map(|s| s.property_name()).collect();
     assert_eq!(schema_events, signals);
 
-    let comm_fields: BTreeSet<&str> = notification_comm_fields(&LifecycleNotification::default())
-        .iter()
-        .map(|(name, _)| *name)
-        .collect();
-    for event_type in ["lifecycle-event", "loop-event"] {
-        let fields: BTreeSet<&str> = types["$schema"][event_type]
-            .as_object()
-            .unwrap()
-            .iter()
-            .filter(|(_, value)| value.as_str().is_some_and(|ty| ty.starts_with("string ")))
-            .map(|(key, _)| key.as_str())
-            .filter(|key| *key != "effect")
-            .collect();
-        assert_eq!(fields, comm_fields, "{event_type} communication fields");
-    }
     for predicate in ["while", "until"] {
         let ty = types["$schema"]["loop-event"][predicate].as_str().unwrap();
         assert!(ty.starts_with("expression "), "loop.{predicate}: {ty}");
     }
-    let when = types["$schema"]["lifecycle-stack-item"]["when"].as_str().unwrap();
-    assert!(when.starts_with("expression "), "stack when: {when}");
 }

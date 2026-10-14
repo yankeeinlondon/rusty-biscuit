@@ -23,6 +23,7 @@ use darkmatter::markdown::compose::{
     build_resolution_context_with_catalog,
 };
 
+use crate::composition::lifecycle_executor::DocumentShellRunner;
 use crate::composition::{
     LaunchWorkspaceContext, with_prompt_magic_roots,
 };
@@ -32,6 +33,10 @@ use crate::events::{
     EnvironmentContext, environment_context_from_sniff_result_and_env,
 };
 use crate::system_prompt::LaunchContext;
+
+mod document_environment;
+
+pub use document_environment::{DocumentEnvironment, EnvironmentSource};
 
 /// Failure to establish immutable invocation inputs.
 #[derive(Debug, thiserror::Error)]
@@ -102,6 +107,10 @@ pub struct InvocationWorkSnapshot {
     pub harness_eligibility_parses: usize,
     pub harness_materializations: usize,
     pub ambient_fallbacks: usize,
+    /// Document environments captured: one for the launch document, plus one
+    /// per [`InvocationContext::enter_document`]. Re-preparation, loop
+    /// iterations, retry/resume, and transclusion add none.
+    pub document_environment_captures: usize,
     /// Launch-capture constructions: full `ComposeContext` snapshots built by
     /// [`InvocationContext::capture_launch_context`]. One per document
     /// preparation epoch is the contract; more means a route recaptured.
@@ -244,6 +253,7 @@ struct InvocationWork {
     harness_eligibility_parses: AtomicUsize,
     harness_materializations: AtomicUsize,
     ambient_fallbacks: AtomicUsize,
+    document_environment_captures: AtomicUsize,
     launch_context_constructions: AtomicUsize,
     launch_context_extensions: AtomicUsize,
     prepared_context_consumers: Mutex<BTreeMap<String, usize>>,
@@ -268,6 +278,9 @@ impl InvocationWork {
                 .load(Ordering::Relaxed),
             harness_materializations: self.harness_materializations.load(Ordering::Relaxed),
             ambient_fallbacks: self.ambient_fallbacks.load(Ordering::Relaxed),
+            document_environment_captures: self
+                .document_environment_captures
+                .load(Ordering::Relaxed),
             launch_context_constructions: self
                 .launch_context_constructions
                 .load(Ordering::Relaxed),
@@ -730,6 +743,22 @@ impl EnvBaseline {
             .map(|(_, value)| value.as_os_str())
     }
 
+    /// This baseline as the complete environment of a Darkmatter shell child
+    /// (`::shell`, frontmatter `$( … )`).
+    pub fn shell_child_environment(
+        &self,
+    ) -> darkmatter::markdown::compose::shell_expansion::ShellChildEnvironment {
+        darkmatter::markdown::compose::shell_expansion::ShellChildEnvironment::new(
+            self.entries.iter().cloned(),
+        )
+    }
+
+    /// This baseline as the complete environment of a child process
+    /// ([`crate::child_environment::command_with_environment`]).
+    pub fn to_child_map(&self) -> HashMap<OsString, OsString> {
+        self.entries.iter().cloned().collect()
+    }
+
     /// The number of captured variables.
     pub fn len(&self) -> usize {
         self.entries.len()
@@ -739,18 +768,47 @@ impl EnvBaseline {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+
+    /// This launch baseline as a document entered under `document` sees it.
+    ///
+    /// Only the variables `document` changes, adds, or removes relative to
+    /// `launch` (the UTF-8 view this baseline was captured beside) are
+    /// rewritten, so raw values the document left alone survive byte for
+    /// byte. The home variables are request-owned and never rewritten.
+    fn for_document(&self, launch: &HashMap<String, String>, document: &HashMap<String, String>) -> Self {
+        let is_home = |name: &OsStr| HOME_VARIABLES.iter().any(|home| env_names_match(name, OsStr::new(home)));
+        let removed = |name: &OsStr| {
+            name.to_str()
+                .is_some_and(|name| launch.contains_key(name) && !document.contains_key(name))
+        };
+        let mut entries: Vec<(OsString, OsString)> = self
+            .entries
+            .iter()
+            .filter(|(name, _)| is_home(name) || !removed(name))
+            .cloned()
+            .collect();
+        for (name, value) in document {
+            if is_home(OsStr::new(name)) || launch.get(name) == Some(value) {
+                continue;
+            }
+            match entries.iter_mut().find(|(key, _)| env_names_match(key, OsStr::new(name))) {
+                Some(entry) => entry.1 = OsString::from(value),
+                None => entries.push((OsString::from(name), OsString::from(value))),
+            }
+        }
+        Self { entries }
+    }
 }
 
 #[derive(Debug)]
 struct InvocationInner {
     launch_cwd: PathBuf,
-    snapshot: RequestSnapshot,
     home_baseline: HomeBaseline,
-    env_baseline: EnvBaseline,
-    environment: HashMap<String, String>,
+    /// The launch document's environment-dependent state; every later
+    /// document is derived from it, never from another entered document.
+    launch_document: Arc<DocumentScope>,
     launch_repository: Arc<RepositoryEntry>,
     launch_result: sniff::SniffResult,
-    launch_file_resolution: FileResolutionContext,
     repositories: Mutex<RepositoryCache>,
     os: OnceLock<Result<OsInfo, Arc<sniff::SniffError>>>,
     hardware: OnceLock<Result<HardwareInfo, Arc<sniff::SniffError>>>,
@@ -758,10 +816,34 @@ struct InvocationInner {
     work: InvocationWork,
 }
 
-/// Owner of immutable launch facts and request-local repository evidence.
+/// Everything in an invocation that reads one document's environment.
+///
+/// Replaced together by [`InvocationContext::enter_document`], so `env.*`,
+/// `ctx` environment values, file references, schema roots, shell approval,
+/// selectors, loop settings, lazy evidence, and child processes cannot read
+/// different maps within one document.
+#[derive(Debug)]
+struct DocumentScope {
+    environment: DocumentEnvironment,
+    snapshot: RequestSnapshot,
+    /// The child-process baseline, held by the runner of the document's
+    /// lifecycle `shell` actions.
+    shell_runner: DocumentShellRunner,
+    file_resolution: FileResolutionContext,
+}
+
+/// Owner of immutable launch facts and request-local repository evidence,
+/// viewed from one document.
+///
+/// A clone is the same document. [`Self::enter_document`] returns a view of
+/// the same invocation — shared home, launch directory, repository and host
+/// evidence, launch `@` scope, caches, and work accounting — under another
+/// document's environment.
 #[derive(Debug, Clone)]
 pub struct InvocationContext {
     inner: Arc<InvocationInner>,
+    document: Arc<DocumentScope>,
+    environment_source: EnvironmentSource,
 }
 
 /// The [`CurrentProvider`] an invocation installs for the lazy `current` root.
@@ -824,6 +906,24 @@ impl DocumentEpoch {
     /// The composition run this epoch observes volatile evidence from.
     pub fn run_evidence(&self) -> &RunEvidence {
         &self.run
+    }
+
+    /// The environment of the document this epoch prepares: the map its
+    /// invocation view entered, shared by every epoch of that document.
+    pub fn environment(&self) -> &DocumentEnvironment {
+        self.invocation.document_environment()
+    }
+
+    /// The raw environment a child process of this epoch's document starts
+    /// from; see [`InvocationContext::env_baseline`].
+    pub fn env_baseline(&self) -> &EnvBaseline {
+        self.invocation.env_baseline()
+    }
+
+    /// The runner for this epoch's document's lifecycle `shell` actions; see
+    /// [`InvocationContext::shell_runner`].
+    pub fn shell_runner(&self) -> &DocumentShellRunner {
+        self.invocation.shell_runner()
     }
 
     /// Capture this epoch's one launch-anchored context construction.
@@ -893,12 +993,74 @@ impl DocumentEpoch {
 }
 
 impl InvocationContext {
+    /// Enter a new document under `environment`.
+    ///
+    /// Call this once per document lifecycle — a sequence task, a serial or
+    /// parallel group leg, a `proxy` target — before its bootstrap and
+    /// `initialize`, and prepare every stage of that document (epochs, loop
+    /// iterations, retry/resume, handlers, finalize) from the returned view.
+    /// Transclusion is not a document and never calls this.
+    ///
+    /// The view replaces only environment-dependent state, derived from the
+    /// launch document: the request snapshot's map, the launch
+    /// file-resolution context's map (and the `VAULT`-selected tree root it
+    /// decides), and the child-process baseline. Home, launch directory,
+    /// repository and host evidence, the launch `@` scope, source anchors,
+    /// caches, and work accounting stay the invocation's.
+    #[must_use]
+    pub fn enter_document(&self, environment: DocumentEnvironment) -> Self {
+        let launch = &self.inner.launch_document;
+        let vars = environment.vars().clone();
+        let document = DocumentScope {
+            snapshot: launch.snapshot.clone().with_env(vars.clone()),
+            shell_runner: DocumentShellRunner::new(
+                launch
+                    .shell_runner
+                    .environment()
+                    .for_document(launch.environment.vars(), &vars),
+            ),
+            file_resolution: launch.file_resolution.clone().with_env(vars),
+            environment,
+        };
+        self.inner
+            .work
+            .document_environment_captures
+            .fetch_add(1, Ordering::Relaxed);
+        Self {
+            inner: Arc::clone(&self.inner),
+            document: Arc::new(document),
+            environment_source: self.environment_source.clone(),
+        }
+    }
+
+    /// Capture a new document's environment from the installed
+    /// [`EnvironmentSource`] and [enter](Self::enter_document) it.
+    #[must_use]
+    pub fn capture_document(&self) -> Self {
+        self.enter_document(self.environment_source.capture())
+    }
+
+    /// Install where [`Self::capture_document`] captures from.
+    ///
+    /// Without one, a captured document re-enters the launch map.
+    #[must_use]
+    pub fn with_environment_source(mut self, source: EnvironmentSource) -> Self {
+        self.environment_source = source;
+        self
+    }
+
+    /// The environment of the document this view belongs to.
+    pub fn document_environment(&self) -> &DocumentEnvironment {
+        &self.document.environment
+    }
+
     /// Begin one independently attributable canonical document epoch that
     /// opens a new composition run.
     ///
     /// Use this at every run boundary: a document invoked or adopted, a
     /// sequence step or serial group member, a loop iteration, a retry, and a
-    /// resume.
+    /// resume. The epoch reads this view's document environment; a new
+    /// document enters its own view first ([`Self::enter_document`]).
     pub fn begin_document_epoch(&self) -> DocumentEpoch {
         self.begin_document_epoch_in(&RunEvidence::default())
     }
@@ -997,14 +1159,16 @@ impl InvocationContext {
         observation: FilesystemObservation,
     ) -> Result<Self, InvocationContextError> {
         let cwd = snapshot.request_dir().to_path_buf();
-        // `ctx.*`, `env.*`, and file references read the snapshot's
-        // environment. The raw baseline is kept beside it only for child
-        // processes, which must reproduce values no UTF-8 view survives.
+        // The launch document's environment is the snapshot's, captured once
+        // at the CLI boundary. The raw baseline is kept beside it only for
+        // child processes, which must reproduce values no UTF-8 view survives.
         let env_baseline = EnvBaseline::capture();
-        let environment = snapshot.env().clone();
+        let environment = DocumentEnvironment::new(snapshot.env().clone());
         let home_baseline = HomeBaseline::capture(snapshot);
         let work = InvocationWork::default();
         work.git_root_discoveries.fetch_add(1, Ordering::Relaxed);
+        work.document_environment_captures
+            .fetch_add(1, Ordering::Relaxed);
 
         let (launch_repository, launch_result) = observe_repository(
             &cwd,
@@ -1034,16 +1198,21 @@ impl InvocationContext {
                 .insert(canonical_key(&cwd), launch_repository.clone());
         }
 
+        let launch_document = Arc::new(DocumentScope {
+            environment,
+            snapshot: snapshot.clone(),
+            shell_runner: DocumentShellRunner::new(env_baseline),
+            file_resolution: launch_file_resolution,
+        });
         Ok(Self {
+            environment_source: EnvironmentSource::fixed(launch_document.environment.clone()),
+            document: Arc::clone(&launch_document),
             inner: Arc::new(InvocationInner {
                 launch_cwd: cwd,
-                snapshot: snapshot.clone(),
                 home_baseline,
-                env_baseline,
-                environment,
+                launch_document,
                 launch_repository,
                 launch_result,
-                launch_file_resolution,
                 repositories: Mutex::new(cache),
                 os: OnceLock::new(),
                 hardware: OnceLock::new(),
@@ -1070,27 +1239,37 @@ impl InvocationContext {
         &self.inner.home_baseline
     }
 
-    /// The immutable launch environment snapshot, in raw [`OsString`] form.
+    /// The environment a child process of this document starts from, in raw
+    /// [`OsString`] form: the launch baseline with this document's changes
+    /// applied (see [`Self::enter_document`]).
     pub fn env_baseline(&self) -> &EnvBaseline {
-        &self.inner.env_baseline
+        self.document.shell_runner.environment()
     }
 
+    /// The runner for this document's lifecycle `shell` actions: its children
+    /// start from [`Self::env_baseline`].
+    pub fn shell_runner(&self) -> &DocumentShellRunner {
+        &self.document.shell_runner
+    }
+
+    /// This document's environment map; see [`Self::document_environment`].
     pub fn environment(&self) -> &HashMap<String, String> {
-        &self.inner.environment
+        self.document.environment.vars()
     }
 
     /// The request snapshot this invocation was captured from, anchored at
-    /// the launch directory.
+    /// the launch directory and carrying this document's environment.
     ///
     /// A context for a directory in another repository is built from this
     /// snapshot ([`RequestSnapshot::at_request_dir`]), so it keeps the
-    /// invocation's home and environment.
+    /// invocation's home and this document's environment.
     pub fn request_snapshot(&self) -> &RequestSnapshot {
-        &self.inner.snapshot
+        &self.document.snapshot
     }
 
+    /// The launch file-resolution context under this document's environment.
     pub fn launch_file_resolution_context(&self) -> &FileResolutionContext {
-        &self.inner.launch_file_resolution
+        &self.document.file_resolution
     }
 
     pub fn launch_repository(&self) -> RepositoryObservation {
@@ -1106,7 +1285,7 @@ impl InvocationContext {
     pub fn environment_context(&self) -> EnvironmentContext {
         environment_context_from_sniff_result_and_env(
             self.inner.launch_result.clone(),
-            &self.inner.environment,
+            self.environment(),
         )
     }
 
@@ -1121,7 +1300,7 @@ impl InvocationContext {
             filesystem: Some(filesystem),
             ..Default::default()
         };
-        environment_context_from_sniff_result_and_env(result, &self.inner.environment)
+        environment_context_from_sniff_result_and_env(result, self.environment())
     }
 
     pub fn launch_workspace_context(
@@ -1170,11 +1349,11 @@ impl InvocationContext {
             .repo_root()
             .map(|root| repo_root_in_base_spelling(&base_dir, root));
         let file_resolution = build_file_resolution_context(
-            &self.inner.snapshot.at_request_dir(&base_dir),
+            &self.document.snapshot.at_request_dir(&base_dir),
             Some(&source_path),
             repository_root.as_deref(),
             entry.repo_info(),
-            Some(self.inner.launch_file_resolution.launch_magic_scope()),
+            Some(self.document.file_resolution.launch_magic_scope()),
         )?;
         let package_area_root = file_resolution.package_area().map(Path::to_path_buf);
         let package_root = file_resolution.package_root().map(Path::to_path_buf);
@@ -1253,7 +1432,8 @@ impl InvocationContext {
     ///
     /// The returned `ComposeContext` is anchored at [`Self::launch_cwd`] and
     /// populated exclusively from the invocation's retained launch repository,
-    /// launch package topology, environment, and host evidence. The anchor and
+    /// launch package topology, host evidence, and
+    /// this view's document environment. The anchor and
     /// the evidence are inseparable here by construction: a caller cannot pair
     /// a launch directory with a prompt-derived repository.
     ///
@@ -1400,7 +1580,7 @@ impl InvocationContext {
     ) -> darkmatter::markdown::compose::ContextCaptureEvidence {
         use darkmatter::markdown::compose::{ContextCaptureEvidence, ContextGroup};
 
-        let mut evidence = ContextCaptureEvidence::new(self.inner.environment.clone());
+        let mut evidence = ContextCaptureEvidence::new(self.environment().clone());
         let volatile = run.for_repository(repository);
         let needs_repository = requirements.iter().any(|group| {
             matches!(
@@ -1683,12 +1863,10 @@ impl InvocationContext {
     ) -> Option<darkmatter::markdown::compose::ContextCaptureEvidence> {
         use darkmatter::markdown::compose::{ContextCaptureEvidence, ContextGroup};
 
-        // The live process environment, not the frozen launch snapshot: `agent`
-        // and `model` derive from `AGENT`/`MODEL`, and the whole point of the
-        // lazy mirror is that a wrapper stage which re-exported them since
-        // launch is observable. This matches `current_env.<KEY>`, which rereads
-        // the process environment for the same reason.
-        let evidence = ContextCaptureEvidence::new(std::env::vars().collect());
+        // Environment-derived facts (`agent` and `model` from `AGENT`/`MODEL`)
+        // are this document's captured map, fixed for its lifecycle; only the
+        // host and repository facts below are re-observed.
+        let evidence = ContextCaptureEvidence::new(self.environment().clone());
         let repository = &self.inner.launch_repository;
         let repository_root = self.launch_repository_root_spelling();
         let base_dir = self.inner.launch_cwd.clone();
@@ -2316,6 +2494,9 @@ impl darkmatter::markdown::compose::ContextExtension for DocumentEpoch {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod document_tests;
 
 /// The newest `count` commits of the repository containing `root`.
 ///

@@ -159,7 +159,7 @@ This matrix lists every individual Darkmatter feature and the LSP capabilities t
 
 Frontmatter coverage notes:
 
-- The frontmatter model descends into **sequences**. Each list item is its own entry. Diagnostics, hover, completion, and navigation reach the keys and values inside list items (a lifecycle `stack:` item's `when`, action operands, `proxy … with` values), and a schema problem inside an array ranges the failing element rather than the whole sequence. The synthetic item marker and index stay silent.
+- The frontmatter model descends into **sequences**. Each list item is its own entry. Diagnostics, hover, completion, and navigation reach the keys and values inside list items (a lifecycle item's `when`, its `then`/`else` bodies, action operands, `proxy … with` values), and a schema problem inside an array ranges the failing element rather than the whole sequence. The synthetic item marker and index stay silent.
 - Frontmatter **string scalars** are scanned for interpolation spans, but only on the surfaces a diagnostic owns. The nested-span rule applies only to Claudine's single-pass lifecycle values and predicates, never to mixed strings or arbitrary whole-value keys.
 - Exact source projection exists only for untagged **plain, single-quoted, and double-quoted** scalars (plus literal `|` blocks for the nested-span rule). Folded `>` blocks, tagged scalars, and aliases keep the generic schema diagnostic or a whole-scalar range and are never given a fabricated expression range or an edit.
 

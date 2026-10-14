@@ -2,11 +2,17 @@
 //!
 //! `clean_quoting` and `clean_suggestions` cover the Phase 5
 //! schema-aware clean repair layer (acceptance matrix A-4 / B-5);
-//! the remaining tests exercise [`super`] validation, resolution,
-//! and effective-schema assembly.
+//! `embedded_sources` covers the compiled-in schema source, sharing
+//! `tests/content_policy_fixtures` with the darkmatter L1 suite; the
+//! remaining tests exercise [`super`] validation, resolution, and
+//! effective-schema assembly.
 
 mod clean_quoting;
 mod clean_suggestions;
+#[path = "../../../../tests/content_policy_fixtures/mod.rs"]
+mod content_policy_fixtures;
+mod embedded_sources;
+mod positions;
 
 use super::*;
 use crate::markdown::Markdown;
@@ -933,6 +939,16 @@ fn darkmatter_base_json_schema_is_cached() {
     let mut owned = super::darkmatter_base_json_schema();
     owned["title"] = serde_json::json!("independent clone");
     assert_ne!(&owned, borrowed_a);
+}
+
+/// The typed baseline is cached beside its lowered form: one preparation per
+/// process, and the JSON is that typed schema lowered.
+#[test]
+fn darkmatter_base_schema_is_prepared_once_with_its_json() {
+    assert!(std::ptr::eq(super::darkmatter_base_schema_ref(), super::darkmatter_base_schema_ref()));
+    assert!(std::ptr::eq(super::shipped_baseline(), super::shipped_baseline()));
+    let lowered = to_json_schema(super::darkmatter_base_schema_ref()).expect("lowers");
+    assert_eq!(&lowered, super::darkmatter_base_json_schema_ref());
 }
 
 #[test]

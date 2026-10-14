@@ -35,6 +35,10 @@ fn property_definition_parser_matches_schema_property_matrix() {
         "\"string(required)\"",
         "title: string(required)\nmetadata:\n  count: number\n",
         "- literal(auto)\n- number(min(1))\n- width: number(required)\n",
+        // The YAML null scalar is the `null` type at a property position.
+        "null",
+        "~",
+        "- string\n- null\n",
     ] {
         let value = yaml(source);
         assert_eq!(
@@ -47,7 +51,6 @@ fn property_definition_parser_matches_schema_property_matrix() {
     for source in [
         "true",
         "2",
-        "null",
         "[]",
         "[string, true]",
         "string(min(nope))",
@@ -887,4 +890,129 @@ fn expression_source_maps_follow_description_and_file_reference_modes() {
             }
         }
     }
+}
+
+/// Every authored span of `kind` at `path`, as authored text.
+fn span_texts<'a>(
+    source: &'a str,
+    map: &darkmatter::markdown::schemas::SchemaSourceMap,
+    path: &SchemaSourcePath,
+    kind: SchemaSpanKind,
+) -> Vec<&'a str> {
+    map.spans(path, kind).iter().map(|span| &source[span.clone()]).collect()
+}
+
+/// A bare non-keyword name is a local reference: its identifier is recorded
+/// as an `ImportName` span (never `TypeKeyword`) with no `ImportReference`, in
+/// every YAML presentation and in documents that contain no `@` at all.
+#[test]
+fn bare_local_reference_projects_its_name_as_an_import_name_span() {
+    let root = SchemaSourcePath::root();
+    for (source, path, name) in [
+        ("person[](min(1)) -> People\n", root.clone(), "person"),
+        ("'person(required)'\n", root.clone(), "person"),
+        ("\"post_code -> The code\"\n", root.clone(), "post_code"),
+        ("{author: person, title: string}\n", root.property("author"), "person"),
+        ("'{ author: x-person(required), title: string }'\n", root.property("author"), "x-person"),
+        ("- string\n- person\n", root.union_arm(1), "person"),
+        ("[string, 'person[]']\n", root.union_arm(1), "person"),
+    ] {
+        assert!(!source.contains('@'), "fixture must not contain `@`: {source:?}");
+        let value = yaml(source);
+        let parsed = parse_property_definition_with_source("candidate", &value, source, 0)
+            .unwrap_or_else(|error| panic!("{source:?}: {error}"));
+        let map = &parsed.source_map;
+        assert_eq!(span_texts(source, map, &path, SchemaSpanKind::ImportName), [name], "{source:?}");
+        assert!(map.spans(&path, SchemaSpanKind::ImportReference).is_empty(), "{source:?}");
+        assert!(map.spans(&path, SchemaSpanKind::TypeKeyword).is_empty(), "{source:?}");
+    }
+}
+
+#[test]
+fn bare_keyword_stays_a_type_keyword_span_and_explicit_this_records_both_spans() {
+    let root = SchemaSourcePath::root();
+    let source = "{plain: string, local: string@this, bare: person}\n";
+    let value = yaml(source);
+    let parsed = parse_property_definition_with_source("candidate", &value, source, 0)
+        .expect("source-aware parse");
+    let map = &parsed.source_map;
+
+    let plain = root.property("plain");
+    assert_eq!(span_texts(source, map, &plain, SchemaSpanKind::TypeKeyword), ["string"]);
+    assert!(map.spans(&plain, SchemaSpanKind::ImportName).is_empty());
+
+    let local = root.property("local");
+    assert_eq!(span_texts(source, map, &local, SchemaSpanKind::ImportName), ["string"]);
+    assert_eq!(span_texts(source, map, &local, SchemaSpanKind::ImportReference), ["this"]);
+
+    let bare = root.property("bare");
+    assert_eq!(span_texts(source, map, &bare, SchemaSpanKind::ImportName), ["person"]);
+    assert!(map.spans(&bare, SchemaSpanKind::ImportReference).is_empty());
+}
+
+#[test]
+fn bare_local_reference_in_a_schema_declaration_records_import_name_spans() {
+    const OFFSET: usize = 11;
+    let source = concat!(
+        "author: person(required)\n",
+        "reviewers: 'person[] -> Reviewers'\n",
+        "person:\n",
+        "  name: string(required)\n",
+    );
+    assert!(!source.contains('@'));
+    let value = yaml(source);
+    let declared = parse_schema_declaration_with_source(&value, source, OFFSET)
+        .expect("a bare reference parses passively without a definition lookup");
+    let root = SchemaSourcePath::root();
+    for (property, name) in [("author", "person"), ("reviewers", "person")] {
+        let path = root.property(property);
+        let spans = declared.source_map.spans(&path, SchemaSpanKind::ImportName);
+        assert_eq!(spans.len(), 1, "{property}");
+        assert_eq!(authored(source, OFFSET, &spans[0]), name, "{property}");
+        assert!(declared.source_map.spans(&path, SchemaSpanKind::ImportReference).is_empty());
+    }
+    let name = root.property("person").property("name");
+    assert_eq!(
+        authored(source, OFFSET, &declared.source_map.spans(&name, SchemaSpanKind::TypeKeyword)[0]),
+        "string",
+    );
+}
+
+/// Editing one schema property splices only that leaf: an untouched
+/// `person@this` elsewhere keeps its explicit spelling even though canonical
+/// serialization would write it bare.
+#[test]
+fn a_leaf_edit_does_not_respell_an_untouched_explicit_local_reference() {
+    use darkmatter::markdown::hash::{FrontmatterPathSegment, locate_frontmatter_leaves};
+    use darkmatter::markdown::schemas::simplified::{
+        grammar::parse_type_expr, serialize_property_atom,
+    };
+
+    let document = concat!(
+        "---\n",
+        "$schema:\n",
+        "  editor: person@this\n",
+        "  title: string\n",
+        "  person:\n",
+        "    name: string\n",
+        "---\n",
+        "Body\n",
+    );
+    let title = vec![
+        FrontmatterPathSegment::Key("$schema".into()),
+        FrontmatterPathSegment::Key("title".into()),
+    ];
+    let leaves = locate_frontmatter_leaves(document, &[title]).expect("locate the title leaf");
+    let replacement =
+        serialize_property_atom(&parse_type_expr("title", "string(required)").expect("parse"));
+    let mut edited = document.to_string();
+    edited.replace_range(leaves[0].range.clone(), &replacement);
+
+    assert!(edited.contains("  editor: person@this\n"), "{edited}");
+    assert!(edited.contains("  title: string(required)\n"), "{edited}");
+    assert_eq!(
+        serialize_property_atom(&parse_type_expr("editor", "person@this").expect("parse")),
+        "person",
+        "canonical serialization is bare, so the splice above preserved authored text",
+    );
 }

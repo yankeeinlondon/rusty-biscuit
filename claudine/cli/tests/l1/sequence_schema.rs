@@ -525,9 +525,7 @@ fn sequence_proxy_target_partial_fails_typed_before_the_target_initialize() {
 sequence:
   - alpha
 initialize:
-  stack:
-    - action:
-        - proxy: "./review.md"
+  - proxy: "./review.md"
 ---
 Step {{ state }}.
 "#,

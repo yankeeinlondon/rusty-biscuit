@@ -12,22 +12,20 @@ branch: "{{ frontmatter(report, 'branch') }}"
 start:
     stderr: "Local testing blocked the push; the agent will walk you through what failed and ask whether to fix it."
 success:
-    stack:
-        - when: "frontmatter(report, 'fix_requested') == true && frontmatter(report, 'issue')"
-          action:
-              - message: "🔧  handing the local test failures on `{{branch}}` to the fix stage"
-              - say: "Handing the local test failures to the fix stage."
-              - action: proxy
+    - when: "frontmatter(report, 'fix_requested') == true && frontmatter(report, 'issue')"
+      then:
+          - message: "🔧  handing the local test failures on `{{branch}}` to the fix stage"
+          - say: "Handing the local test failures to the fix stage."
+          - proxy:
                 target: ./fix.md
                 with:
                     base: "{{ base }}"
                     report: "{{ report }}"
                     committed: "{{ committed }}"
-        - action:
-              - info: "the PR for `{{branch}}` is paused; the local test failures were left unfixed (details in {{report}})"
-              - message: "⏸️  the PR for `{{branch}}` is paused; local test failures were left unfixed (details in `{{report}}`)"
-              - say: "The pull request is paused. The local test failures were not fixed."
-              - stop
+    - info: "the PR for `{{branch}}` is paused; the local test failures were left unfixed (details in {{report}})"
+    - message: "⏸️  the PR for `{{branch}}` is paused; local test failures were left unfixed (details in `{{report}}`)"
+    - say: "The pull request is paused. The local test failures were not fixed."
+    - stop
 failure:
     message: "❌  triage of the local test failures on `{{branch}}` failed ({{ctx.agent}}/{{ctx.model}}: {{err.msg}})"
     say: "Triage of the local test failures failed."

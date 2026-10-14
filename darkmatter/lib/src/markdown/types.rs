@@ -422,6 +422,31 @@ impl MarkdownError {
         None
     }
 
+    /// The read of a host global declared unavailable
+    /// ([`BindingError::Unavailable`](crate::markdown::compose::expression::BindingError::Unavailable))
+    /// somewhere in this error's cause chain, if any.
+    ///
+    /// The host forbade the read, so no tolerance a stage offers for ordinary
+    /// failures (a transclusion replaced by a notice) may absorb it.
+    pub fn unavailable_binding(
+        &self,
+    ) -> Option<&crate::markdown::compose::expression::UnavailableBinding> {
+        use crate::markdown::compose::expression::BindingError;
+        let mut current: Option<&(dyn std::error::Error + 'static)> = Some(self);
+        while let Some(error) = current {
+            let expression = error
+                .downcast_ref::<ExpressionError>()
+                .or_else(|| error.downcast_ref::<Box<ExpressionError>>().map(AsRef::as_ref));
+            if let Some(ExpressionError::Binding(binding)) = expression
+                && let BindingError::Unavailable(read) = binding.as_ref()
+            {
+                return Some(read);
+            }
+            current = error.source();
+        }
+        None
+    }
+
     /// The [`NotPreApproved`](crate::markdown::compose::ShellExpansionError::NotPreApproved)
     /// failure somewhere in this error's cause chain, if any.
     ///

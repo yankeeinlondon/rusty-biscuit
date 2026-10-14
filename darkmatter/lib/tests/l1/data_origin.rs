@@ -465,5 +465,6 @@ fn a_data_value_holding_template_text_is_validated_not_deferred() {
             .with_override_layers([OverrideLayer::authored(json!({"count": "$(echo 2)"}))]),
     )
     .unwrap_or_else(|error| panic!("an authored command is deferred and run: {error}"));
-    assert_eq!(frontmatter_string(&authored, "count"), json!("2"));
+    // The post-shell schema pass coerces the command's text to the declared type.
+    assert_eq!(frontmatter_string(&authored, "count"), json!(2));
 }

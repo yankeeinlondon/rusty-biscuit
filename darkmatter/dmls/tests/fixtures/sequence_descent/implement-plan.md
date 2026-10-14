@@ -14,7 +14,7 @@ description: |-
 plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
 phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || frontmatter(plan, 'phase') || 1 : null }}"
 area: "{{ ctx.area ? ctx.area : ctx.is_monorepo ? 'monorepo-root' : 'repo-root' }}"
-pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
+pass_icon: "{{ loop.is_last ? '✅' : '🧑‍💻' }}"
 total_phases: |-
     {{
         file_exists(plan)
@@ -32,69 +32,64 @@ spec: |-
 # The implementation's log file
 log: "{{ dirname(spec || plan) + '/implementation-log.md' }}"
 initialize:
-    stack:
-        - action:
-            - ensure_file: "{{log}}"
-        - when: "phase != 1"
-          action:
-              - set:
-                    epilog: null
-        - when: "!total_phases || total_phases <= 0"
-          action:
-              - warn: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
-              - message: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
-              - error: "for a plan to be implemented using the **implement-plan** prompt, you need to ensure the plan ({{plan}}) has set either `total_phases` or `phases` Frontmatter property!"
-        - when: "file_exists(log) && frontmatter(log, 'message_to_agent')"
-          action:
-              - stderr: |-
-                    The previous phase's agent has passed a message to this agent:
+    - ensure_file: "{{log}}"
+    - when: "phase != 1"
+      then:
+          - set:
+                epilog: null
+    - when: "!total_phases || total_phases <= 0"
+      then:
+          - warn: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
+          - message: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
+          - error: "for a plan to be implemented using the **implement-plan** prompt, you need to ensure the plan ({{plan}}) has set either `total_phases` or `phases` Frontmatter property!"
+    - when: "file_exists(log) && frontmatter(log, 'message_to_agent')"
+      then:
+          - stderr: |-
+                The previous phase's agent has passed a message to this agent:
 
-                    > {{frontmatter(log, 'message_to_agent')}}
-              - message: |-
-                    The previous phase's agent has passed a message to this agent:
-        
-                    > {{frontmatter(log, 'message_to_agent')}}
-              - set:
-                    epilog: "{{message_to_agent}}"
-                    message_to_agent: null
+                > {{frontmatter(log, 'message_to_agent')}}
+          - message: |-
+                The previous phase's agent has passed a message to this agent:
 
-                  
-                  
+                > {{frontmatter(log, 'message_to_agent')}}
+          - set:
+                epilog: "{{message_to_agent}}"
+                message_to_agent: null
+
 start:
-    message: "🎬  implementing phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{ ctx.area || ctx.repo }}, **agent:** {{ctx.agent}}/{{ctx.model}})"
-success: 
-    say: "Phase {{phase}} of the plan in the {{area}} {{ctx.area_description}}, was implemented successfully"
-    message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{area}}, {{ctx.agent}}/{{ctx.model}})"
-    success: "Completed the implementation of <b>phase <yellow>{{phase}}</yellow></b> of the {{link(plan)}} plan"
-    stack:
-        - when: "ctx.dirty_files && !commit_message"
-          action:
-            - message: |-
+    - message: "🎬  implementing phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{ ctx.area || ctx.repo }}, **agent:** {{ctx.agent}}/{{ctx.model}})"
+success:
+    - success: "Completed the implementation of <b>phase <yellow>{{phase}}</yellow></b> of the {{link(plan)}} plan"
+    - message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{area}}, {{ctx.agent}}/{{ctx.model}})"
+    - say: "Phase {{phase}} of the plan in the {{area}} {{ctx.area_description}}, was implemented successfully"
+    - when: "ctx.dirty_files && !commit_message"
+      then:
+          - message: |-
                 staging all files from phase **#{{phase}}** in preparation for the git commit:
 
                 {{ as_unordered_list(ctx.dirty_files) }}
-            - shell: git add ..
-            - shell: just commit
-            - shell: gitnexus analyze --force
-        - when: "ctx.dirty_files && commit_message"
-          action:
-            - message: |-
+          - shell: git add ..
+          - shell: just commit
+          - shell: gitnexus analyze --force
+    - when: "ctx.dirty_files && commit_message"
+      then:
+          - message: |-
                 staging all files from phase **#{{phase}}** in preparation for the git commit:
 
                 {{ as_unordered_list(ctx.dirty_files) }}
-            - shell: git add ..
-            - shell: git commit -m "{{commit_message}}"
-            - shell: gitnexus analyze --force
-        - when: "!ctx.dirty_files"
-          action:
-              - message: phase {{phase}} of the plan made no file changes!
-              - warn: phase {{phase}} of the plan made no file changes!
+          - shell: git add ..
+          - shell: git commit -m "{{commit_message}}"
+          - shell: gitnexus analyze --force
+    - when: "!ctx.dirty_files"
+      then:
+          - message: phase {{phase}} of the plan made no file changes!
+          - warn: phase {{phase}} of the plan made no file changes!
 blocked:
-    message: "💥  phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved for execution!"
+    - message: "💥  phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved for execution!"
 failure:
-    say: "Phase {{phase}} of a plan in the {{area}} package area, ran into problems!"
-    message: "❌️  phase **{{phase}}** (_of {{total_phases}}_) failed in the plan `{{parent_dir(plan)}}` ({{area}}, {{ctx.agent}}/{{ctx.model}}: {{err.msg}})"
-    effect: sad-trombone
+    - message: "❌️  phase **{{phase}}** (_of {{total_phases}}_) failed in the plan `{{parent_dir(plan)}}` ({{area}}, {{ctx.agent}}/{{ctx.model}}: {{err.msg}})"
+    - effect: sad-trombone
+    - say: "Phase {{phase}} of a plan in the {{area}} package area, ran into problems!"
 loop:
     until: "phase >= total_phases || frontmatter(log, 'human_involvement')"
     action: "increment(phase)"

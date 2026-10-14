@@ -48,8 +48,8 @@ content_policy:
   that contain one. The parser names the trap in its diagnostic.
 - `FileChanged` paths are relative, stay inside the repository (or, outside
   one, the starting directory), and reject absolute paths, drive letters, `\`,
-  `~ @ % & ^` prefixes, `vault:`, `{{`, URLs, `,`, `)`, and surrounding
-  whitespace. The lexical check runs in core without any feature.
+  `~ @ %` prefixes, `vault:`, `{{`, URLs, `,`, `)`, and surrounding
+  whitespace; `&`/`^` prefixes are accepted. The lexical check needs no feature.
 - `blake3-lf:` normalizes only CRLF to LF (a lone CR is data); `blake3:` hashes
   raw bytes. A well-formed unknown scheme (`sha256:…`) is `unknown`, not an
   error; uppercase hex is an error.
@@ -155,11 +155,30 @@ on stderr even with `--json`), `2` on usage. `--key`, `--default-policy`, and
 `content-policy/schemas/content-policy.yaml` declares `short_form`,
 `long_form`, and `policy` for DMLS; the library exports its text as
 `content_policy::EDITOR_SCHEMA` for callers to compile into their own schema.
-`policy[]` (a list of the union type)
-cannot be loaded: Darkmatter rejects `[]` on a union-typed named type
-("cannot apply `[]`/constraints to the union-typed named type"), so its base
-schema does not type `content_policy` yet, and `rule` is not `(required)`. Its tests live
-in `darkmatter/lib/tests/l1/content_policy_editor_schema.rs`.
+`long_form` is closed with `rule: short_form(required)`; same-file references
+are bare. Darkmatter's runtime baseline declares
+`content_policy: "policy[](min(1))@../../../content-policy/schemas/content-policy.yaml"`
+(optional, no default, no null items) and compiles `EDITOR_SCHEMA` in, so
+`md compose`, `md schema validate`, and DMLS type it with no file on disk; it
+never inserts an absent `content_policy`. Problems carry the instance path
+(`/content_policy/1/rule`; a missing `rule` at the entry) and line/column.
+Validation is passive (no evidence read, renewal, or stamping).
+
+Parser rejects, schema accepts: `ValidUntil(2027-02-30)`,
+`ValidFor(99999999999999999999d)`, `FileChanged(vault:x, @fp)` or a URL,
+`FileChanged(docs/{{HOME}}.md, @fp)`, `[Evergreen, "ValidFor(3mo)"]`, and
+`content_policy: null`. Both accept `FileChanged(notes/a(b.md, @fp)`,
+`&Cargo.toml`, `^README.md`, and a nonexistent file. DMLS skips `{{ … }}`
+values and suggests all seven shipped rules (the single `suggest(...)` list
+sits on the `Evergreen` arm and is linted against the whole rule union;
+spreading it across arms fails preparation).
+
+Cases live in `darkmatter/lib/tests/content_policy_fixtures/` (`DECLARATIONS`).
+Tests: `darkmatter/lib/tests/l1/content_policy_*.rs`, `schemas_union_postfix.rs`,
+`darkmatter/cli/tests/l1/schema_validate_baseline_selection.rs`,
+`darkmatter/dmls/tests/l1/content_policy_baseline.rs`, and the out-of-checkout
+subprocess tests `darkmatter/cli/tests/l1/standalone_baseline.rs` and
+`darkmatter/dmls/tests/l1/standalone_stdio.rs`.
 
 ## Recipes (run in `content-policy/`)
 

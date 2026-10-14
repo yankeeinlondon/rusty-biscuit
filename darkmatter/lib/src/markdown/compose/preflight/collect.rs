@@ -1047,7 +1047,7 @@ fn detect_dynamic_frontmatter_command_shape(
 /// frontmatter-shell expansion after pass-1 interpolation.
 ///
 /// These are the only values whose literal `$(...)` text can leak into a body
-/// command via `{{ doc.key }}` interpolation, which is the dynamic-shape case.
+/// command via `{{ fm.key }}` interpolation, which is the dynamic-shape case.
 fn pending_shell_literals(
     prepared: &Markdown,
     provenance: &FrontmatterProvenance,
@@ -1075,7 +1075,7 @@ struct InheritedDiscovery {
     /// as the executed output of that command.
     pending: Vec<(String, String)>,
     /// Keys whose value reads something discovery does not evaluate (a shell
-    /// probe, `as_markdown`, a lazy `current`/`current_env` read), directly or
+    /// probe, `as_markdown`, a lazy `current` read), directly or
     /// through another such key.
     unobserved: Vec<String>,
 }
@@ -1325,8 +1325,7 @@ fn visit_calls(expression: &Expr, visit: &mut impl FnMut(&str, &[Expr])) {
     }
 }
 
-/// The first function in [`UNEVALUATED_IN_DISCOVERY`] that `expression` calls.
-/// The lazy root (`current`, `current_env`) `expression` reads, if any.
+/// The lazy `current` root, if `expression` reads it.
 ///
 /// Discovery observes no lazy value, and composition reads one when the
 /// command is reached, so a command built from one has no bytes discovery can
@@ -1336,7 +1335,7 @@ fn lazy_root_read(expression: &Expr) -> Option<String> {
     collect_expression_roots(expression, &mut roots);
     roots
         .into_iter()
-        .find(|root| root == "current" || root == "current_env")
+        .find(|root| root == "current")
         .map(|root| format!("`{root}.*`, which is read when the command runs"))
 }
 
@@ -1350,6 +1349,7 @@ fn unobserved_read(expression: &Expr, unobserved: &[String]) -> Option<String> {
         .map(|key| format!("frontmatter.{key}, whose value discovery does not observe"))
 }
 
+/// The first function in [`UNEVALUATED_IN_DISCOVERY`] that `expression` calls.
 fn unevaluated_call(expression: &Expr) -> Option<String> {
     let mut found = None;
     visit_calls(expression, &mut |name, _| {
@@ -1493,7 +1493,7 @@ fn dynamic_nested_dependency(
 fn collect_expression_roots(expression: &Expr, roots: &mut Vec<String>) {
     match expression {
         Expr::Variable(path) => {
-            let path = path.strip_prefix("doc.").unwrap_or(path);
+            let path = crate::markdown::compose::expression::fm_namespace::strip_fm_prefix(path);
             if let Some(root) = path.split('.').next()
                 && !root.is_empty()
             {
@@ -1522,6 +1522,12 @@ fn collect_expression_roots(expression: &Expr, roots: &mut Vec<String>) {
             collect_expression_roots(right, roots);
         }
         Expr::Index { base, index } => {
+            if let Some(key) =
+                crate::markdown::compose::expression::fm_namespace::literal_index_key(base, index)
+            {
+                roots.push(key.to_string());
+                return;
+            }
             collect_expression_roots(base, roots);
             collect_expression_roots(index, roots);
         }
@@ -2340,7 +2346,7 @@ replace:
     /// pre-flight error, not a late `NotPreApproved`.
     #[test]
     fn dynamic_command_shape_in_body_directive_is_rejected() {
-        let content = "---\nbranch: $(git branch --show-current)\n---\n::shell git log {{ doc.branch }} -1\n";
+        let content = "---\nbranch: $(git branch --show-current)\n---\n::shell git log {{ fm.branch }} -1\n";
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 
@@ -2360,7 +2366,7 @@ replace:
     /// dynamic-shape detection is scoped to shell directives.
     #[test]
     fn dynamic_value_in_prose_is_not_rejected() {
-        let content = "---\nbranch: $(git branch --show-current)\n---\nThe branch is {{ doc.branch }}.\n";
+        let content = "---\nbranch: $(git branch --show-current)\n---\nThe branch is {{ fm.branch }}.\n";
         let md: Markdown = content.into();
         let options = ComposeOptions::new();
 

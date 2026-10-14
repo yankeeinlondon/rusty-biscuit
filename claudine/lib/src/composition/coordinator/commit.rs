@@ -79,7 +79,9 @@ impl std::error::Error for ProxyCommitError {
 /// Resolve and commit a proxy using the invocation's immutable file context.
 ///
 /// Proxy resolution cannot re-read process CWD, HOME, environment, or
-/// repository topology: every input comes from `request_context`.
+/// repository topology: every input comes from `request_context`, which is the
+/// *source* document's, so the source's environment selects the target. The
+/// target then captures its own environment when its owner enters it.
 pub fn commit_proxy(
     ledger: &mut RunLedger,
     request: EvaluatedProxyRequest,
@@ -106,7 +108,7 @@ fn proxy_resolution_error(
             context: Box::new(crate::composition::FileReferenceContext {
                 source_path: source_path.to_path_buf(),
                 event: Some(event.to_string()),
-                property: format!("{event}.stack[*].proxy"),
+                property: format!("{event}[*].proxy"),
                 reference: target.to_string(),
                 hint: PROXY_TARGET_HINT.to_string(),
             }),

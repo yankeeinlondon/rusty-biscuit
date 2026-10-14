@@ -119,6 +119,23 @@ pub trait TtsExecutor: Send + Sync {
         config: &TtsConfig,
     ) -> impl std::future::Future<Output = Result<SpeakResult, TtsError>> + Send;
 
+    /// Synthesize `text` into the shared audio cache without playing it.
+    ///
+    /// Success means a complete cache file is published for the settings this
+    /// call resolved, or that there is nothing to prepare: the default does no
+    /// work, which is right for providers that speak directly (eSpeak, SAPI),
+    /// and file-producing providers also return without work under
+    /// `PLAYA_DRY_RUN` or when an external default cannot be resolved. Never
+    /// plays audio or publishes a playback job, and is available without the
+    /// `playa` feature.
+    fn prepare(
+        &self,
+        _text: &str,
+        _config: &TtsConfig,
+    ) -> impl std::future::Future<Output = Result<(), TtsError>> + Send {
+        async { Ok(()) }
+    }
+
     /// Build a durable playback operation for this provider.
     ///
     /// File-producing implementations may synthesize into their shared cache;
@@ -436,5 +453,16 @@ mod tests {
         let executor = MinimalExecutor;
         // Default info returns "Unknown TTS Provider"
         assert_eq!(executor.info(), "Unknown TTS Provider");
+    }
+
+    fn assert_send<T: Send>(value: T) -> T {
+        value
+    }
+
+    #[tokio::test]
+    async fn default_prepare_is_a_send_no_op() {
+        let config = TtsConfig::default();
+        let future = assert_send(MinimalExecutor.prepare("text", &config));
+        assert!(future.await.is_ok());
     }
 }

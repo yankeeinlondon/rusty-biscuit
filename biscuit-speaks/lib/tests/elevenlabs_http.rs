@@ -175,6 +175,68 @@ async fn list_voices_raw_follows_page_token_and_aggregates() {
 
 #[tokio::test]
 #[serial]
+async fn list_voices_raw_stops_when_more_voices_have_no_next_token() {
+    let _env = key_env(TEST_KEY);
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v2/voices"))
+        .and(query_param("page_size", "100"))
+        .and(query_param_is_missing("page_token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "voices": [voice("v1", "First")],
+            "has_more": true,
+            "total_count": 2
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let response = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        provider_for(&server).list_voices_raw(),
+    )
+    .await
+    .expect("a missing token must terminate pagination")
+    .expect("the available page must succeed");
+
+    assert_eq!(response.voices.len(), 1);
+    assert_eq!(response.voices[0].voice_id, "v1");
+    assert_eq!(response.total_count, Some(2));
+    assert!(!response.has_more);
+    assert_eq!(response.next_page_token, None);
+}
+
+#[tokio::test]
+#[serial]
+async fn provider_keeps_the_credential_read_at_construction() {
+    let _env = key_env(TEST_KEY);
+    let server = MockServer::start().await;
+    let provider = provider_for(&server);
+    let _changed_key = EnvGuard::set_safe("ELEVEN_LABS_API_KEY", "another-account-key");
+    Mock::given(method("POST"))
+        .and(path("/v1/text-to-speech/voice-abc"))
+        .and(header("xi-api-key", TEST_KEY))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "audio/mpeg")
+                .set_body_bytes(vec![1, 2, 3]),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let bytes = provider
+        .generate_audio(
+            "credential stays pinned",
+            &TtsConfig::new().with_voice("voice-abc"),
+        )
+        .await
+        .expect("synthesis must use the original credential");
+    assert_eq!(bytes, [1, 2, 3]);
+}
+
+#[tokio::test]
+#[serial]
 async fn list_voices_raw_maps_402_to_paid_plan_required_with_body() {
     let _env = key_env(TEST_KEY);
     let server = MockServer::start().await;

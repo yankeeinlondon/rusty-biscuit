@@ -29,6 +29,7 @@ fn inputs_for(provider: Provider) -> LaunchPlanInputs {
         system_prompt_scoped_tmp: PathBuf::new(),
         sandbox_requested: false,
         has_model_env: false,
+        environment: claudine::invocation_context::DocumentEnvironment::default(),
         mcp: None,
         opencode_config_base: None,
         kilo_config_base: None,

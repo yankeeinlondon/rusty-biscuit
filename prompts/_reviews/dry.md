@@ -4,13 +4,11 @@ $schema:
 file: "{{ctx.area}}/reviews/{{ctx.today}}-dry-review/review.md"
 
 success: 
-    stack:
-        - when: file_exists(file)
-          action:
-            - stderr: "🍸  the DRY review `{{file}}` has completed (_{{frontmatter(file, 'recommendations')}} recommendations_)"
-        - when: "!file_exists(file)"
-          action:
-            - warn: "the review file -- {{ file }} -- was not created!"
+    - when: file_exists(file)
+      then:
+        - stderr: "🍸  the DRY review `{{file}}` has completed (_{{frontmatter(file, 'recommendations')}} recommendations_)"
+      else:
+        - warn: "the review file -- {{ file }} -- was not created!"
 failure: 
     stderr: "💥  the DRY review for `{{file}}` failed to complete!"
 ---

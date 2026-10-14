@@ -122,6 +122,9 @@ The stop itself is unchanged. Turn this off with `CLAUDINE_AUTO_STEER=off` or
 
 Claudine's composition features let you use Markdown as a dynamic template for agentic CLI sessions, leveraging [Darkmatter](../darkmatter/README.md)'s composition pipeline (transclusion, interpolation, conditionals, shell commands).
 
+Composed prompts and dry-run bodies export plain Markdown, including generated
+file listings. See [Composition](docs/topics/composition.md#direct-composition).
+
 Prompt context uses the launch repository even for prompts stored elsewhere:
 `ctx.repo` provides its name independently of Git-variable references, while
 `ctx.area` is empty at the repository root. See [context variables](docs/topics/state-management/context-variables.md).

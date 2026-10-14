@@ -41,6 +41,7 @@ fn materialized_with_prompt(prompt: &str) -> MaterializedHarnessPrompt {
         lifecycle: None,
         live_frontmatter: MaterializedHarnessPrompt::live_cell_from(&serde_json::Value::Null),
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
+        loop_values: None,
         mcp_body_tags: Vec::new(),
     }
 }
@@ -201,6 +202,7 @@ fn a_retry_after_a_resume_drops_the_live_session() {
         max_attempts: 3,
         backoff: RetryBackoff::Fixed,
         delay: "0s".to_string(),
+        overlay: indexmap::IndexMap::new(),
     });
     dispatch_terminal_control(
         &retry,

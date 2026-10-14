@@ -132,6 +132,8 @@ Sub-modules:
 
 Shell environment variables are also supported via `{{env.VAR_NAME}}` with optional defaults: `{{env.MY_VAR || "fallback"}}`. The legacy single-pipe `|` form is no longer supported.
 
+Every event, OS, hardware, Git, and project variable can also be read through the hook-only `hook` root, which names the normalized payload explicitly: `{{hook.tool_name}}` is `{{tool_name}}`, and bare `{{hook}}` renders the whole payload as JSON (without the environment). The same root works in `when` conditions and expression matchers. It replaces the former `doc` payload root, which was renamed with no alias.
+
 Unknown placeholders are left as-is. `None` values render as empty strings.
 
 ### Configuration (`config`)
@@ -382,6 +384,13 @@ Timeouts, shell policy, and runtime attempt classification for composed prompt p
 - **Legacy single-brace templates are deprecated**: `{placeholder}` is automatically rewritten to `{{placeholder}}` with a tracing warning. New configs should use Handlebars-style double braces.
 
 ## Compatibility Notes
+
+### Lifecycle Grammar (2026-10)
+
+- A lifecycle event is a list of actions or one dictionary of verbs, with `when`/`then`/`else` items nested up to five levels. The old `stack:` key, the `action:` aggregator and `{action: verb}` map, `say_first`, the communication `message`/`sound`/`route` parameters, and the `_loop_*` names are rejected with `CompositionError::RemovedGrammar`, which names the replacement. See [Lifecycle](../docs/topics/flow-control/lifecycle.md).
+- `LifecycleStackItem` and `LifecycleNotification` are removed. A stack is `Vec<LifecycleNode>` (`Action` or `Conditional`); `LifecycleAction` gained `path: LifecyclePath`, and `LifecycleConfig` holds only `stacks`.
+- Loop values are the `loop` global (`loop.count`, `loop.is_first`, `loop.is_last`, `loop.last_output`, `loop.last_exit_code`); `fm.loop` is the loop configuration.
+- `ProxyWith`/`ProxyWithValue`/`ProxyWithError` are now `WithOverlay`/`WithValue`/`WithOverlayError`, shared by `proxy` and `retry`. `LifecycleProxyWith*` errors are `LifecycleWith*`; `LifecycleProxyOnlyParameter` is `LifecycleWithUnsupported`. `LifecycleStackAmbiguous` and `LifecycleSetLongFormRemoved` are removed.
 
 ### Nested-Span Lifecycle Validation (2026-09)
 

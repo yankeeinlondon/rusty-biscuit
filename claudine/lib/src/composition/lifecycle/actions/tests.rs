@@ -41,12 +41,13 @@ fn control_action_validity_matrix() {
     ];
     let proxy = A::Proxy {
         target: Expr::StringLiteral("@other.md".into()),
-        with: ProxyWith::default(),
+        with: WithOverlay::default(),
     };
     let retry = A::Retry {
         max_attempts: None,
         backoff: None,
         delay: None,
+        with: WithOverlay::default(),
     };
     let resume = A::Resume {
         message: Expr::StringLiteral("please retry".into()),
@@ -113,14 +114,15 @@ fn is_lifecycle_control_flag() {
     let lc_stop = LifecycleAction {
         kind: LifecycleActionKind::LifecycleControl(LifecycleControlAction::Stop),
         no_error: false,
+        path: LifecyclePath::root("start").index(0).field("stop"),
     };
     let comm = LifecycleAction {
         kind: LifecycleActionKind::Communication(CommunicationAction {
             channel: CommunicationChannel::Say,
-            message: Expr::StringLiteral("hi".into()),
-            route: None,
+            text: Expr::StringLiteral("hi".into()),
         }),
         no_error: false,
+        path: LifecyclePath::root("start").index(1).field("say"),
     };
     assert!(lc_stop.is_lifecycle_control());
     assert!(!comm.is_lifecycle_control());

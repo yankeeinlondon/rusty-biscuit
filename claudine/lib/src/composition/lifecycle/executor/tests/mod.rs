@@ -201,6 +201,7 @@ fn ctx<'a>(
         timing: None,
         current: None,
         group: None,
+        loop_values: None,
         base_dir: None,
         ctx_base_dir: None,
         prepared_context: None,
@@ -265,6 +266,7 @@ fn ctx_with_live<'a>(
         timing: None,
         current: None,
         group: None,
+        loop_values: None,
         base_dir: None,
         ctx_base_dir: None,
         prepared_context: None,
@@ -290,3 +292,4 @@ mod mutation_visibility;
 mod runtime_set;
 mod set_shell_values;
 mod proxy_with_evaluation;
+mod retry_with_evaluation;

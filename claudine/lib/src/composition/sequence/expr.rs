@@ -13,8 +13,8 @@
 //! `template(color + '-is-great')` reads the item's `color` even when the
 //! invoking document defines one too. Layering is by top-level key: an item's
 //! `config` replaces the frontmatter's `config` whole, for a dotted path and a
-//! bare `doc` alike. Reserved namespaces resolve first, so an
-//! item field can never stand in for `ctx`, `env`, or `doc`.
+//! bare `fm` alike. Reserved namespaces resolve first, so an
+//! item field can never stand in for `ctx`, `env`, or `fm`.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -22,7 +22,7 @@ use std::sync::Arc;
 use darkmatter::markdown::compose::expression::{
     AuthoredMode, BindingView, CtxLookup, EvaluationLookup, EvaluationSession, ExpressionError,
     ParseMode, ResolutionContext, ResolvedBinding, ScopeId, evaluate_prepared,
-    is_reserved_namespace, prepare_value,
+    FmPath, fm_namespace_path, is_reserved_namespace, prepare_value,
 };
 use darkmatter::markdown::MarkdownError;
 use serde_json::{Map, Value};
@@ -32,10 +32,10 @@ use super::super::error::{CompositionError, SequenceExpressionCause};
 /// Lookup for sequence-source expressions.
 ///
 /// Resolution order: the reserved namespaces (`ctx.*` captured on demand,
-/// `env.NAME`, `doc.*`), then the document layer — item fields (when evaluating
+/// `env.NAME`, `fm.*`), then the document layer — item fields (when evaluating
 /// per item) over the invoking document's frontmatter. A bare name never reads
 /// `ctx`, and no context group is captured unless an expression reads one.
-/// `current` and `current_env` have no event here and read as `null`.
+/// `current` has no event here and reads as `null`.
 pub struct SourceExpressionLookup<'a> {
     item: Option<&'a Map<String, Value>>,
     frontmatter: &'a Map<String, Value>,
@@ -77,7 +77,7 @@ impl<'a> SourceExpressionLookup<'a> {
     /// document's frontmatter.
     ///
     /// The layer is chosen by the top-level key alone, never per segment, so
-    /// a dotted path agrees with indexing the bare `doc` object
+    /// a dotted path agrees with indexing the bare `fm` object
     /// ([`document_object`](Self::document_object)): an item's `config`
     /// replaces the frontmatter's `config` whole, and `config.b` is absent
     /// when the item's `config` has no `b`.
@@ -90,7 +90,7 @@ impl<'a> SourceExpressionLookup<'a> {
         resolve_path(layer, path)
     }
 
-    /// The whole document layer, for a bare `doc`: the item's top-level keys
+    /// The whole document layer, for a bare `fm`: the item's top-level keys
     /// replace the frontmatter's.
     fn document_object(&self) -> Value {
         let mut merged = self.frontmatter.clone();
@@ -103,6 +103,11 @@ impl<'a> SourceExpressionLookup<'a> {
 
 impl EvaluationLookup for SourceExpressionLookup<'_> {
     fn get(&self, path: &str) -> Option<Value> {
+        match fm_namespace_path(path) {
+            Some(FmPath::Member(rest)) => return self.document(rest),
+            Some(FmPath::Whole) => return Some(self.document_object()),
+            None => {}
+        }
         let root = path.split('.').next().unwrap_or(path);
         match root {
             "ctx" => self.ctx.resolve_ctx(path),
@@ -110,10 +115,6 @@ impl EvaluationLookup for SourceExpressionLookup<'_> {
                 .strip_prefix("env.")
                 .and_then(|key| self.file_resolution_context.env().get(key).cloned())
                 .map(Value::String),
-            "doc" => match path.strip_prefix("doc.") {
-                Some(rest) => self.document(rest),
-                None => Some(self.document_object()),
-            },
             root if is_reserved_namespace(root) => None,
             _ => self.document(path),
         }
@@ -239,15 +240,15 @@ mod tests {
 
         let cases = [
             ("config.b", Value::Null),
-            ("doc.config.b", Value::Null),
-            ("doc['config']['b']", Value::Null),
+            ("fm.config.b", Value::Null),
+            ("fm['config']['b']", Value::Null),
             ("config['b']", Value::Null),
             ("config.a", json!(1)),
-            ("doc.config.a", json!(1)),
-            ("doc['config']['a']", json!(1)),
+            ("fm.config.a", json!(1)),
+            ("fm['config']['a']", json!(1)),
             ("only_fm.x", json!(3)),
-            ("doc.only_fm.x", json!(3)),
-            ("doc['only_fm']['x']", json!(3)),
+            ("fm.only_fm.x", json!(3)),
+            ("fm['only_fm']['x']", json!(3)),
         ];
         for (expression, expected) in cases {
             let actual = evaluate_whole(expression, &lookup).unwrap();

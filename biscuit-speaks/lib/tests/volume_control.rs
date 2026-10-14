@@ -48,8 +48,8 @@ async fn say_foreground_preserves_voice_and_applies_output_volume() {
     let args_file = temp.path().join("args");
     let text_file = temp.path().join("text");
     let player_file = temp.path().join("player");
-    executable(&temp.path().join("say"), "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$TTS_TEST_ARGS\"\n/bin/cat > \"$TTS_TEST_TEXT\"\n");
-    // Empty synthesized bytes force native decoding to fail without submitting audio.
+    executable(&temp.path().join("say"), "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$TTS_TEST_ARGS\"\n/bin/cat > \"$TTS_TEST_TEXT\"\nprintf 'not audio' > \"$2\"\n");
+    // Undecodable synthesized bytes force native decoding to fail without submitting audio.
     let player = if cfg!(feature = "playa") { "mpv" } else { "afplay" };
     executable(&temp.path().join(player), "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$TTS_TEST_PLAYER\"\n");
     let _path = test_toolkit::EnvGuard::set_safe("PATH", temp.path());
@@ -57,16 +57,27 @@ async fn say_foreground_preserves_voice_and_applies_output_volume() {
     let _text = test_toolkit::EnvGuard::set_safe("TTS_TEST_TEXT", &text_file);
     let _player = test_toolkit::EnvGuard::set_safe("TTS_TEST_PLAYER", &player_file);
     let _dry_run = test_toolkit::EnvGuard::remove_safe("PLAYA_DRY_RUN");
+    // The resolved voice and rate make the speech a shared cache entry.
+    let cache = temp.path().join("cache");
+    std::fs::create_dir(&cache).unwrap();
+    let _tmpdir = test_toolkit::EnvGuard::set_safe("TMPDIR", &cache);
     let text = "This is a test message: quoted 'speech' and unicode 世界";
     for (volume, percent) in [(0.0, "0"), (0.42, "42")] {
         let config = TtsConfig::new().with_voice("Samantha").with_speed(SpeedLevel::Slow)
             .with_volume(VolumeLevel::Explicit(volume));
         SayProvider.speak(text, &config).await.unwrap();
-        assert_eq!(std::fs::read_to_string(&text_file).unwrap(), text);
-        let args = std::fs::read_to_string(&args_file).unwrap();
-        let args: Vec<_> = args.lines().collect();
-        assert_eq!(&args[2..], ["--file-format=WAVE", "--data-format=LEI16", "-v", "Samantha", "-r", "131"]);
-        assert!(!std::path::Path::new(args[1]).exists(), "temporary speech must be cleaned after playback");
+        if volume == 0.0 {
+            assert_eq!(std::fs::read_to_string(&text_file).unwrap(), text);
+            let args = std::fs::read_to_string(&args_file).unwrap();
+            let args: Vec<_> = args.lines().collect();
+            assert_eq!(&args[2..], ["--file-format=WAVE", "--data-format=LEI16", "-v", "Samantha", "-r", "131"]);
+            assert!(!std::path::Path::new(args[1]).exists(), "the staging file is renamed into the cache");
+            std::fs::remove_file(&args_file).unwrap();
+        } else {
+            assert!(!args_file.exists(), "a volume change reuses the cached speech");
+        }
+        let entries: Vec<_> = std::fs::read_dir(&cache).unwrap().map(|entry| entry.unwrap().path()).collect();
+        assert_eq!(entries.len(), 1, "{entries:?}");
         let player_args = std::fs::read_to_string(&player_file).unwrap();
         if cfg!(feature = "playa") {
             assert!(player_args.lines().any(|arg| arg == format!("--volume={percent}")), "{player_args}");

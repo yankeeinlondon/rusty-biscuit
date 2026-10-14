@@ -1,16 +1,20 @@
 # Darkmatter Base Frontmatter Schema
 
 The `darkmatter` library exposes a base frontmatter schema for Darkmatter-owned
-properties. `md compose` injects this schema by default as its baseline. `md
-schema validate` uses a baseline only when one is supplied with `--schema` or
-`BASELINE_SCHEMA`.
+properties. `md compose`, `md schema validate`, and DMLS apply it by default as
+the baseline of every document. Each CLI command can replace it or opt out;
+see
+[Selecting the Baseline](../topics/schemas/definition.md#selecting-the-baseline).
 
 The schema is authored in the same `SimplifiedSchema` language that Markdown
 authors can use with the `$schema` frontmatter property, so the baseline behaves
 like an ordinary schema file.
 
-The library loads the schema from the file below, and this page transcludes it
-so the documentation and validation source stay in lock step.
+The library compiles in the file below, and this page transcludes it so the
+documentation and validation source stay in lock step. The schemas it imports
+are compiled in too, so the baseline is prepared without reading the disk, and
+works the same in an installed binary as in a checkout (see
+[The Built-in Baseline](../topics/schemas/definition.md#the-built-in-baseline)).
 
 ## What the base schema covers
 
@@ -18,6 +22,13 @@ so the documentation and validation source stay in lock step.
   `title`, `description`, `tags`, `draft`, `hash`, `style`, `change`,
   `replace`, `ctx`, `prologue`, `epilogue`, `ignore_invalid`, and
   `interpolate_code_blocks`.
+- `content_policy`, typed by importing Content Policy's editor schema
+  ([`content-policy/schemas/content-policy.yaml`](../../../content-policy/schemas/content-policy.yaml))
+  as an optional, non-empty list of `policy` entries. The baseline never adds
+  the property to a document that omits it, and checking it is passive: no
+  watched file is read, no policy is renewed, and no date is stamped. Content Policy's
+  [editor guide](../../../content-policy/docs/topics/policy-lifecycle.md#get-help-in-the-editor)
+  lists what the schema checks and the values only evaluation rejects.
 - The `$schema` property itself, which documents may use to declare their own
   schema or override baseline definitions.
 

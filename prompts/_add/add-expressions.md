@@ -20,10 +20,9 @@ catalog_command: "claudine context --expressions"
 spec_dir: "{{ ctx.repo_root + '/darkmatter/features/' + ctx.today + '-' + (name || 'add-expressions') }}"
 interactive: true
 initialize:
-    stack:
-        - when: "!file_exists(ctx.repo_root + '/darkmatter/docs/schemas/expression-functions.yaml')"
-          action:
-              - error: "The **add-expressions** prompt must run inside the rusty-biscuit checkout: it edits `darkmatter/docs/schemas/expression-functions.yaml`, which was not found under `{{ctx.repo_root}}`."
+    - when: "!file_exists(ctx.repo_root + '/darkmatter/docs/schemas/expression-functions.yaml')"
+      then:
+          - error: "The **add-expressions** prompt must run inside the rusty-biscuit checkout: it edits `darkmatter/docs/schemas/expression-functions.yaml`, which was not found under `{{ctx.repo_root}}`."
 start:
     stderr: "Starting an interactive session to add expression functions; the agent will clarify the requirements, write a spec to `{{spec_dir}}`, then implement it."
     say: "Starting the add expressions session."

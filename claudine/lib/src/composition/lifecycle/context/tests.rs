@@ -406,7 +406,7 @@ fn state(fm: Value) -> darkmatter::markdown::compose::EffectiveState {
     state_with_current(fm, darkmatter::markdown::compose::CurrentAuthority::default())
 }
 
-/// [`state`] with `authority` installed as the lazy roots' refresh capability —
+/// [`state`] with `authority` installed as the lazy root's refresh capability —
 /// the same wiring `StackExecutionContext::build_state` performs per event.
 fn state_with_current(
     fm: Value,
@@ -566,9 +566,9 @@ fn timing_global_resolves_through_dm2_subtree() {
 }
 
 #[test]
-fn doc_namespace_reaches_literal_err_property_through_dm2() {
-    // `doc.err` reaches a literal frontmatter `err` property, not the
-    // lifecycle `err` global — `doc` is never an injected global root.
+fn fm_namespace_reaches_literal_err_property_through_dm2() {
+    // `fm.err` reaches a literal frontmatter `err` property, not the
+    // lifecycle `err` global — `fm` is never an injected global root.
     use darkmatter::markdown::compose::subtree::SubtreeCompose;
     let info = LifecycleErrorInfo {
         kind: "ClaudineError",
@@ -581,7 +581,7 @@ fn doc_namespace_reaches_literal_err_property_through_dm2() {
     };
     let (view, globals) = catalog(LifecycleSignal::Failure, Some(&info), None);
     let state = state(json!({"err": "literal-value"}));
-    let resolved = SubtreeCompose::new(&json!("{{doc.err}} / {{err.msg}}"), &state)
+    let resolved = SubtreeCompose::new(&json!("{{fm.err}} / {{err.msg}}"), &state)
         .with_globals(globals)
         .with_binding_view(view)
         .compose()
@@ -677,44 +677,6 @@ fn timing_from_instants_omits_total_ms_without_run_start() {
     let timing = LifecycleTiming::from_instants(start, None, std::time::Instant::now());
     assert!(timing.document_ms.is_some());
     assert!(timing.total_ms.is_none());
-}
-
-/// Late-binding contract: a stack `when:` clause reacts to the environment as
-/// it stands when the event evaluates.
-///
-/// Since the clean break (spec R31–R33) that surface is Darkmatter's reserved
-/// `current_env` root, which rereads the live process environment at reference
-/// time. Resolved here through a DM2 layered session with the lifecycle
-/// globals attached; a global can never be registered under a reserved root.
-#[test]
-#[serial_test::serial(env_lifecycle_current)]
-fn when_clause_reacts_to_env_changed_after_prepare() {
-    use darkmatter::markdown::compose::expression::{evaluate, is_truthy, parse};
-    use darkmatter::markdown::compose::subtree::layered_session;
-
-    let key = "CLAUDINE_TEST_LATE_BINDING_MYVAR";
-    // SAFETY: serialized via #[serial]; no other thread reads this var.
-
-    // "Prepare time": the variable holds an old value.
-    unsafe { std::env::set_var(key, "old") };
-    let base = state(json!({}));
-    let (view, globals) = catalog(LifecycleSignal::Start, None, None);
-    let lookup = layered_session(&base, globals, Some(view), None).expect("the globals associate");
-    let expr = parse(&format!("current_env.{key} == 'x'")).expect("parses");
-
-    assert!(
-        !is_truthy(&evaluate(&expr, &lookup).expect("evaluates")),
-        "the guard does not fire while the variable still holds the old value"
-    );
-
-    // A side effect / external change happens AFTER prepare. The next
-    // evaluation is a new expression scope, so it rereads the live value.
-    unsafe { std::env::set_var(key, "x") };
-    assert!(
-        is_truthy(&evaluate(&expr, &lookup).expect("evaluates")),
-        "when clause fires on the value present at event time"
-    );
-    unsafe { std::env::remove_var(key) };
 }
 
 // --- Phase 5: one selection, hygienic `err.msg`, one-level `err.cause` ------

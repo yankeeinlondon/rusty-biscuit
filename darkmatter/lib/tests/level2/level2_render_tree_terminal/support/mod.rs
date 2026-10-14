@@ -917,7 +917,6 @@ pub(super) fn render_unmatched_policy_page_to_tempfile(
 /// (returns `None`) when WezTerm is unavailable.
 pub(super) fn run_file_links_in_pane(name: &str) -> Option<(CapturedFrame, tempfile::TempDir)> {
     use darkmatter::markdown::compose::ComposeOptions;
-    use darkmatter::markdown::output::terminal::{DimMode, HyperlinkMode, TerminalImageMode};
 
     match wezterm_decision() {
         LevelDecision::Run => {}
@@ -929,8 +928,7 @@ pub(super) fn run_file_links_in_pane(name: &str) -> Option<(CapturedFrame, tempf
     }
 
     let dir = tempdir().unwrap();
-    // A real repository: the prepared request context, not a `.git` probe,
-    // decides the repository root icon.
+    // A real repository supplies the boundary for the directory label.
     let status = std::process::Command::new("git")
         .args(["init", "-q"])
         .current_dir(dir.path())
@@ -981,18 +979,17 @@ pub(super) fn run_file_links_in_pane(name: &str) -> Option<(CapturedFrame, tempf
         )
         .expect("compose ::file-links");
 
-    // `TerminalOptions` is `#[non_exhaustive]`; build from the default and force
-    // the capabilities the assertions depend on (truecolor, dim, OSC8 links).
-    let mut options = TerminalOptions::default();
-    options.color_mode = ColorMode::Dark;
-    options.color_depth = Some(ColorDepth::TrueColor);
-    options.image_mode = TerminalImageMode::Never;
-    options.dim_mode = DimMode::Always;
-    options.hyperlink_mode = HyperlinkMode::Always;
-    options.max_width = Some(100);
-    let rendered = composed
-        .as_terminal(options)
-        .expect("render composed ::file-links");
+    let (document, diagnostics) = fold_markdown_to_document(
+        SourceDescriptor::Virtual { name: name.into() }, composed.content(),
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let mut term = Terminal::new_optimistic(100);
+    term.is_nerd_font = Some(false);
+    term.osc_link_support = true;
+    let rendered = render_terminal_document(
+        &document,
+        &TerminalRenderOptions::new(&term, RenderStrictness::Lossy),
+    ).expect("render composed ::file-links").output;
 
     let path = dir.path().join(format!("{name}.ansi"));
     fs::write(&path, rendered).unwrap();

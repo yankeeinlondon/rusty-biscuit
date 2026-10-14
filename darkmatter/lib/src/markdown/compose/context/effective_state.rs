@@ -160,8 +160,13 @@ pub struct EffectiveState {
     /// path is rendered into Markdown body text.
     presentation_values: HashMap<String, Value>,
 
-    /// The lazy `current` / `current_env` roots and their per-expression memo.
+    /// The lazy `current` root and its per-expression memo.
     current: super::CurrentScope,
+
+    /// The document's own `ctx` value. `build` replaces `data["ctx"]` with the
+    /// materialized runtime context, so `fm.ctx` and bare `fm` read this
+    /// instead.
+    document_ctx: Option<Value>,
 }
 
 impl EffectiveState {
@@ -191,6 +196,7 @@ impl EffectiveState {
         };
 
         Self {
+            document_ctx: data.get("ctx").cloned(),
             data,
             context,
             ctx_diagnostics: Vec::new(),
@@ -215,23 +221,21 @@ impl EffectiveState {
     ///
     /// Returns `None` if the key doesn't exist or the path is invalid.
     pub fn get(&self, path: &str) -> Option<Value> {
-        // Reserved lazy roots — intercepted before every other surface, so no
+        // The reserved lazy root — intercepted before every other surface, so no
         // frontmatter key, external-state key, or authored `ctx` entry can
-        // shadow `current` / `current_env`.
+        // shadow `current`.
         if let Some(resolved) = self.current.resolve(path, &self.context) {
             return resolved.ok().flatten();
         }
 
-        // Reserved `doc` namespace — intercepted before normal key lookup, so
-        // `doc.*` always reads the document, even for a reserved-looking key.
-        if super::super::expression::doc_namespace::is_doc_namespace(path) {
-            return super::super::expression::doc_namespace::resolve_doc_namespace_in_map(
-                path, &self.data,
-            );
+        // Reserved `fm` namespace — intercepted before normal key lookup, so
+        // `fm.*` always reads the document, even for a reserved-looking key.
+        if let Some(fm_path) = super::super::expression::fm_namespace::fm_namespace_path(path) {
+            return self.get_fm(path, fm_path);
         }
 
         // The `ctx` and `env` namespaces, their exact roots included, so a
-        // frontmatter key of either name is reachable only as `doc.<name>`.
+        // frontmatter key of either name is reachable only as `fm.<name>`.
         if let Some(ctx_key) = path.strip_prefix("ctx.") {
             return self.get_context_value(ctx_key);
         }
@@ -251,6 +255,37 @@ impl EffectiveState {
         self.get_nested_value(path)
     }
 
+    /// The document's own value at an `fm` path: everything but `ctx` reads
+    /// `data`, and `ctx` reads [`Self::document_ctx`].
+    fn get_fm(&self, path: &str, fm_path: super::super::expression::fm_namespace::FmPath<'_>) -> Option<Value> {
+        use super::super::expression::fm_namespace::{FmPath, resolve_fm_namespace_in_map};
+        match fm_path {
+            FmPath::Member(rest) => {
+                let mut segments = rest.split('.');
+                if segments.next() != Some("ctx") {
+                    return resolve_fm_namespace_in_map(path, &self.data);
+                }
+                let mut current = self.document_ctx.as_ref()?;
+                for segment in segments {
+                    current = current.as_object()?.get(segment)?;
+                }
+                Some(current.clone())
+            }
+            FmPath::Whole => {
+                let mut whole: serde_json::Map<String, Value> = self
+                    .data
+                    .iter()
+                    .filter(|(key, _)| key.as_str() != "ctx")
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect();
+                if let Some(ctx) = &self.document_ctx {
+                    whole.insert("ctx".to_string(), ctx.clone());
+                }
+                Some(Value::Object(whole))
+            }
+        }
+    }
+
     /// Checked twin of [`get`](Self::get) for the evaluator channel.
     ///
     /// Explicit `ctx.*` paths classify against the captured groups before any
@@ -263,7 +298,7 @@ impl EffectiveState {
         if let Some(resolved) = self.current.resolve(path, &self.context) {
             return resolved;
         }
-        if super::super::expression::doc_namespace::is_doc_namespace(path) {
+        if super::super::expression::fm_namespace::is_fm_namespace(path) {
             return Ok(self.get(path));
         }
         if let Some(ctx_key) = path.strip_prefix("ctx.") {
@@ -484,9 +519,24 @@ impl<'a> ResolvingLookup<'a> {
     }
 }
 
+impl ResolvingLookup<'_> {
+    /// The host global `path` reads, when its root is one.
+    fn host_global(
+        &self,
+        path: &str,
+    ) -> Option<
+        Result<super::super::expression::ResolvedBinding, super::super::expression::ExpressionError>,
+    > {
+        self.resolution_context.host_globals.as_ref()?.resolve(path)
+    }
+}
+
 impl super::super::expression::EvaluationLookup for ResolvingLookup<'_> {
     fn get(&self, path: &str) -> Option<Value> {
-        self.state.get(path)
+        match self.host_global(path) {
+            Some(global) => global.ok().and_then(super::super::expression::ResolvedBinding::into_value),
+            None => self.state.get(path),
+        }
     }
 
     fn resolve(
@@ -494,15 +544,33 @@ impl super::super::expression::EvaluationLookup for ResolvingLookup<'_> {
         path: &str,
     ) -> Result<super::super::expression::ResolvedBinding, super::super::expression::ExpressionError>
     {
-        super::super::expression::EvaluationLookup::resolve(self.state, path)
+        match self.host_global(path) {
+            Some(global) => global,
+            None => super::super::expression::EvaluationLookup::resolve(self.state, path),
+        }
+    }
+
+    fn binding_view(&self) -> Option<&super::super::expression::BindingView> {
+        self.resolution_context.host_globals.as_ref().map(super::super::expression::HostGlobals::view)
     }
 
     fn format_resolved(&self, path: &str, value: &Value) -> String {
-        super::super::expression::EvaluationLookup::format_resolved(self.state, path, value)
+        let root = path.split('.').next().unwrap_or(path);
+        match &self.resolution_context.host_globals {
+            Some(globals) if globals.declares(root) => super::super::expression::default_format(value),
+            _ => super::super::expression::EvaluationLookup::format_resolved(self.state, path, value),
+        }
     }
 
     fn get_string(&self, path: &str) -> String {
-        self.state.get_string(path)
+        match self.host_global(path) {
+            Some(global) => global
+                .ok()
+                .and_then(super::super::expression::ResolvedBinding::into_value)
+                .map(|value| super::super::expression::default_format(&value))
+                .unwrap_or_default(),
+            None => self.state.get_string(path),
+        }
     }
 
     fn resolution_context(&self) -> Option<super::super::expression::ResolutionContext> {
@@ -620,8 +688,7 @@ impl EffectiveStateBuilder {
         self
     }
 
-    /// Sets the request's refresh authority for the lazy `current` /
-    /// `current_env` roots.
+    /// Sets the request's refresh authority for the lazy `current` root.
     ///
     /// The default authority holds no capability, so every `current.<key>` read
     /// fails closed with a `PartialRuntimeCapture` diagnostic. The compose
@@ -690,6 +757,7 @@ impl EffectiveStateBuilder {
         // Include capture diagnostics from context
         ctx_diagnostics.extend(context.diagnostics().iter().cloned());
 
+        let document_ctx = data.get("ctx").cloned();
         let user_ctx = data.get("ctx");
         let runtime_ctx = context.as_object();
 
@@ -705,6 +773,7 @@ impl EffectiveStateBuilder {
             name_coercion_keys: self.name_coercion_keys,
             presentation_values: self.presentation_values,
             current: super::CurrentScope::new(self.current),
+            document_ctx,
         })
     }
 }
@@ -759,42 +828,42 @@ mod tests {
     }
 
     #[test]
-    fn doc_namespace_resolves_against_frontmatter_only() {
+    fn fm_namespace_resolves_against_frontmatter_only() {
         let mut fm = HashMap::new();
         fm.insert("build".to_string(), json!("frontmatter-build"));
         fm.insert("config".to_string(), json!({ "retries": 3 }));
-        // A frontmatter property literally named `doc`.
-        fm.insert("doc".to_string(), json!({ "child": "literal-doc" }));
+        // A frontmatter property literally named `fm`.
+        fm.insert("fm".to_string(), json!({ "child": "literal-fm" }));
         let state = EffectiveState::new(&fm, None, test_context());
 
-        // doc.<path> resolves a frontmatter property.
-        assert_eq!(state.get("doc.build"), Some(json!("frontmatter-build")));
-        assert_eq!(state.get("doc.config.retries"), Some(json!(3)));
+        // fm.<path> resolves a frontmatter property.
+        assert_eq!(state.get("fm.build"), Some(json!("frontmatter-build")));
+        assert_eq!(state.get("fm.config.retries"), Some(json!(3)));
 
-        // bare doc returns the whole frontmatter object.
-        let obj = state.get("doc").expect("bare doc resolves");
+        // bare fm returns the whole frontmatter object.
+        let obj = state.get("fm").expect("bare fm resolves");
         assert!(obj.is_object());
         assert_eq!(obj.get("build"), Some(&json!("frontmatter-build")));
 
-        // a literal property named `doc` is reached as doc.doc.
-        assert_eq!(state.get("doc.doc"), Some(json!({ "child": "literal-doc" })));
-        assert_eq!(state.get("doc.doc.child"), Some(json!("literal-doc")));
+        // a literal property named `fm` is reached as fm.fm.
+        assert_eq!(state.get("fm.fm"), Some(json!({ "child": "literal-fm" })));
+        assert_eq!(state.get("fm.fm.child"), Some(json!("literal-fm")));
 
-        // missing doc.* values do NOT fall back to ctx.* — `today` exists only
+        // missing fm.* values do NOT fall back to ctx.* — `today` exists only
         // in the runtime context, never as a frontmatter property.
         assert_eq!(state.get("ctx.today"), Some(json!("2024-06-15")));
-        assert_eq!(state.get("doc.today"), None);
+        assert_eq!(state.get("fm.today"), None);
     }
 
     #[test]
-    fn bare_doc_resolves_when_no_doc_property_exists() {
+    fn bare_fm_resolves_when_no_fm_property_exists() {
         let mut fm = HashMap::new();
         fm.insert("title".to_string(), json!("Hello"));
         let state = EffectiveState::new(&fm, None, test_context());
 
-        // No frontmatter property named `doc`; bare doc is still the object and
+        // No frontmatter property named `fm`; bare fm is still the object and
         // must not fall back to `ctx.doc`.
-        let obj = state.get("doc").expect("bare doc resolves to the object");
+        let obj = state.get("fm").expect("bare fm resolves to the object");
         assert_eq!(obj.get("title"), Some(&json!("Hello")));
     }
 
@@ -879,6 +948,39 @@ mod tests {
         // Only the materialized "ctx" key should be present (no user frontmatter)
         assert_eq!(state.data().len(), 1);
         assert!(state.data().contains_key("ctx"));
+    }
+
+    /// The builder materializes the runtime context into `data["ctx"]`; the
+    /// document's own `ctx` key is still what `fm.ctx` and bare `fm` read.
+    #[test]
+    fn fm_reads_the_document_ctx_key_not_the_materialized_context() {
+        let mut fm = HashMap::new();
+        fm.insert("ctx".to_string(), json!("document ctx"));
+        fm.insert("title".to_string(), json!("T"));
+        let state = EffectiveStateBuilder::new()
+            .with_frontmatter(fm)
+            .with_context(test_context())
+            .with_allow_ctx_override(true)
+            .build()
+            .unwrap();
+        assert_eq!(state.get("fm.ctx"), Some(json!("document ctx")));
+        assert_eq!(state.get("fm.ctx.today"), None);
+        assert_eq!(state.get("fm"), Some(json!({"ctx": "document ctx", "title": "T"})));
+        assert_eq!(state.get("ctx.today"), Some(json!("2024-06-15")));
+
+        let mut nested = HashMap::new();
+        nested.insert("ctx".to_string(), json!({"note": "n"}));
+        let state = EffectiveStateBuilder::new()
+            .with_frontmatter(nested)
+            .with_context(test_context())
+            .build()
+            .unwrap();
+        assert_eq!(state.get("fm.ctx"), Some(json!({"note": "n"})));
+        assert_eq!(state.get("fm.ctx.note"), Some(json!("n")));
+
+        let state = EffectiveStateBuilder::new().with_context(test_context()).build().unwrap();
+        assert_eq!(state.get("fm"), Some(json!({})), "no document `ctx`, no `ctx` member");
+        assert_eq!(state.get("fm.ctx"), None);
     }
 
     #[test]

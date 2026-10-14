@@ -47,8 +47,6 @@ const ALLOWLIST: &[(&str, usize)] = &[
     ("claudine/cli/tests/level2/level2_lifecycle_control.rs", 1),
     // Negative test: `{{current.ctx.branch}}` fails under Claudine.
     ("claudine/lib/src/composition/lifecycle/context/tests.rs", 2),
-    // Doc comment naming the contract that replaced the nesting.
-    ("claudine/lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs", 1),
     // Negative test through the `md` binary.
     ("darkmatter/cli/tests/l1/compose_lazy_roots.rs", 2),
     // User docs: "There is no nesting".

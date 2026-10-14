@@ -1085,6 +1085,49 @@ mod shell {
         );
     }
 
+    /// The sequence-owned properties are frontmatter-root properties of each
+    /// step, so the `fm` namespace reads the same value as the bare name.
+    #[test]
+    fn sequence_owned_properties_read_the_same_under_fm() {
+        let dir = TempDir::new().unwrap();
+        let command = "echo {{ fm.state.name }}={{ state.name }} \
+                       {{ fm.state.index }}={{ state.index }} \
+                       {{ fm.sequence_id }}={{ sequence_id }} \
+                       {{ fm.previous.name || 'none' }}={{ previous.name || 'none' }} \
+                       {{ fm.next.name || 'none' }}={{ next.name || 'none' }}";
+        let source = write_source(
+            dir.path(),
+            "seq.md",
+            &[(
+                "sequence",
+                json!([
+                    { "name": "alpha", "shell": command },
+                    { "name": "beta", "shell": command },
+                ]),
+            )],
+            "Body.\n",
+        );
+
+        let graph = graph_for(&source).unwrap();
+        let commands: Vec<&str> =
+            graph.shell_commands.iter().map(|c| c.command.as_str()).collect();
+        assert_eq!(commands.len(), 2, "{commands:?}");
+        let sequence_id = commands[0]
+            .split_whitespace()
+            .nth(3)
+            .and_then(|pair| pair.split_once('='))
+            .map(|(fm, _)| fm.to_string())
+            .unwrap();
+        assert_eq!(sequence_id.len(), 16, "{commands:?}");
+        assert_eq!(
+            commands,
+            vec![
+                format!("echo alpha=alpha 1=1 {sequence_id}={sequence_id} none=none beta=beta"),
+                format!("echo beta=beta 2=2 {sequence_id}={sequence_id} alpha=alpha none=none"),
+            ],
+        );
+    }
+
     /// A command list preserves declaration order, which is also the order the
     /// concatenated stdout will follow.
     #[test]
@@ -1130,12 +1173,12 @@ mod shell {
 
     /// The lifecycle late-binding roots are rejected for the same reason.
     ///
-    /// `current` and `current_env` belong here even though Darkmatter owns
-    /// them: both observe a fact when the reference is reached, and a shell
-    /// command is resolved at preflight before any event fires (R33).
+    /// `current` belongs here even though Darkmatter owns it: it observes a
+    /// fact when the reference is reached, and a shell command is resolved at
+    /// preflight before any event fires (R33).
     #[test]
     fn lifecycle_late_binding_in_a_shell_command_is_rejected() {
-        for root_name in ["err", "timing", "current", "current_env"] {
+        for root_name in ["err", "timing", "current"] {
             let dir = TempDir::new().unwrap();
             let command = format!("echo {{{{ {root_name}.message }}}}");
             let source = write_source(
@@ -1289,11 +1332,13 @@ mod shell {
             "seq.md",
             &[(
                 "sequence",
-                json!([{
-                    "name": "one",
-                    "shell": "echo primary",
-                    "teardown": [ { "action": [ { "shell": "echo {{ env.AGENT }}" } ] } ],
-                }]),
+                json!([
+                    {
+                        "name": "one",
+                        "shell": "echo primary",
+                        "teardown": [{ "shell": "echo {{ env.AGENT }}" }],
+                    },
+                ]),
             )],
             "Body.\n",
         );
@@ -1346,12 +1391,14 @@ mod shell {
             "seq.md",
             &[(
                 "sequence",
-                json!([{
-                    "name": "one",
-                    "shell": "echo primary",
-                    "setup": [ { "when": "false", "action": [ { "shell": "echo setup" } ] } ],
-                    "teardown": [ { "action": [ { "shell": "echo teardown" } ] } ],
-                }]),
+                json!([
+                    {
+                        "name": "one",
+                        "shell": "echo primary",
+                        "setup": [{ "when": "false", "then": [{ "shell": "echo setup" }] }],
+                        "teardown": [{ "shell": "echo teardown" }],
+                    },
+                ]),
             )],
             "Body.\n",
         );
@@ -1378,17 +1425,13 @@ mod shell {
             "seq.md",
             &[(
                 "sequence",
-                json!([{
-                    "name": "one",
-                    "side_effect": { "set": {"ready": "{{ true }}"} },
-                    "setup": [ {
-                        "action": [ {
-                            "action": "shell",
-                            "command": "echo main",
-                            "on_error": "echo recover",
-                        } ],
-                    } ],
-                }]),
+                json!([
+                    {
+                        "name": "one",
+                        "side_effect": { "set": { "ready": "{{ true }}" } },
+                        "setup": [{ "shell": { "command": "echo main", "on_error": "echo recover" } }],
+                    },
+                ]),
             )],
             "Body.\n",
         );
@@ -1599,7 +1642,7 @@ mod lifecycle_literals {
                         dunce::canonicalize(dir.join(file)).unwrap(),
                         "{reference}"
                     );
-                    assert_eq!(property, "success.say", "{reference}");
+                    assert_eq!(property, "success.say.text", "{reference}");
                     assert_eq!(nested, "{{area}}", "{reference}");
                 }
                 other => panic!("{reference}: expected a nested-span rejection, got {other:?}"),

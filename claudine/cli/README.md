@@ -92,6 +92,8 @@ Hook action templates, conditional `when` clauses, event binding matchers, and l
 - Comparisons: `{{hardware.cores > 8 ? "fast" : "slow"}}`
 - Helper functions: `{{length(git.branch) > 30 ? "long-branch" : git.branch}}`
 
+**The `hook` Root.** `hook` names the normalized event payload explicitly in templates, `when` clauses, and expression matchers: `{{hook.tool_name}}` is the same field as `{{tool_name}}`, and bare `{{hook}}` renders the whole payload as JSON. A missing `hook.<path>` is absent and never falls back to an unprefixed field, and `hook` excludes the environment (use `env.*`). The root was previously spelled `doc` and was renamed with no alias, so replace `doc.` with `hook.` in existing configuration: an old `{{doc.tool_name}}` is now left as literal text and an old `doc.tool_name == 'Bash'` condition is false. See [Configuring Actions](../docs/topics/configuring-actions.md#the-hook-root).
+
 Booleans render as `true`/`false`. Unknown bare-variable references like `{{unknown_field}}` are preserved verbatim so misspellings stay visible. Composite expressions that fail to parse are also preserved unchanged. Legacy single-brace placeholders such as `{tool_name}` are still rewritten to `{{tool_name}}` for one compatibility cycle and emit a deprecation warning.
 
 **Action `when` Clauses.** Every hook action variant accepts an optional `when` boolean expression. When it evaluates to false (or fails to parse), the action is skipped without short-circuiting the rest of the binding. A skipped `Call` action cannot replace a previously selected blocking response.

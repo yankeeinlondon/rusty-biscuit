@@ -14,11 +14,12 @@ They wouldn't be wrong in a normal world but we all know this topsy turvy world 
 
 Eagerly evaluated state variables get their values set precisely once as soon as Darkmatter composition process starts. They are available _everywhere_ (frontmatter, document body, lifecycle events).
 
-- **Document State** (`doc`) is the Frontmatter values your Markdown friend told you about and is the **primary** form of state in Darkmatter
-    - when you use variables that refer to Markdown's Frontmatter you are not required to add the `doc` namespace but you _can_ if you want to be explicit
-    - the variable `{{ foo }}` is the same as the variable `{{ doc.foo }}`
-    - Darkmatter just assumes a bare variable name is a reference to the `doc` global variable
-    - you'll never _need_ to use the `doc.` namespacing prefix unless you have a frontmatter variable called "doc" or that has the same name as a Darkmatter [expression engine](../expression-engine.md)
+- **Document State** (`fm`, short for "frontmatter") is the Frontmatter values your Markdown friend told you about and is the **primary** form of state in Darkmatter
+    - when you use variables that refer to Markdown's Frontmatter you are not required to add the `fm` namespace but you _can_ if you want to be explicit
+    - the variable `{{ foo }}` is the same as the variable `{{ fm.foo }}`
+    - Darkmatter just assumes a bare variable name is a reference to the `fm` global variable
+    - you'll only _need_ the `fm.` prefix for a frontmatter variable named after a reserved root such as `env` or `ctx`: `{{ env }}` is always the environment, so a frontmatter `env` key is read as `{{ fm.env }}`
+    - `doc` is not reserved: a frontmatter variable named `doc` is read as `{{ doc }}`, like any other
     - A document -- _as you likely know_ -- can define a dictionary of key/values which we call Frontmatter but in Darkmatter we need to know a bit more:
         - A few of the key's like `$schema`, `title`, `style` are defined by Darkmatter's default schema; that means they are _typed_ and your values must meet the expectation of that type and in most cases that they have some sort of specific semantic meaning to Darkmatter.
         - The number of properties that are imposed by Darkmatter is limited but if you're using the [DMLS](../dmls.md) LSP then they'll all be highlighted to you right in the editor

@@ -127,13 +127,11 @@ pub fn write_stalling_provider(bin_dir: &Path, events: &[String]) {
 pub const REPLAY_DOCUMENT: &str = r#"---
 title: incomplete subagent replay
 success:
-  stack:
-    - action: {append_line: ["events.log", "success-stack-ran"]}
+  - {append_line: ["events.log", "success-stack-ran"]}
 failure:
-  stack:
-    - action: {append_line: ["events.log", "{{ 'failure-code=' + err.code }}"]}
-    - action: {append_line: ["events.log", "{{ 'failure-category=' + err.category }}"]}
-    - action: {append_line: ["events.log", "{{ 'failure-msg=' + err.msg }}"]}
+  - {append_line: ["events.log", "{{ 'failure-code=' + err.code }}"]}
+  - {append_line: ["events.log", "{{ 'failure-category=' + err.category }}"]}
+  - {append_line: ["events.log", "{{ 'failure-msg=' + err.msg }}"]}
 ---
 Replay of the 2026-08-31 silent-success incident.
 "#;

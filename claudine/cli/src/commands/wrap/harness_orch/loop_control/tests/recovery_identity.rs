@@ -167,7 +167,7 @@ fn the_unowned_handoff_command_names_the_provider_it_is_given() {
         indexmap::IndexMap::new(),
         claudine::composition::ProxyProvenance::new(
             source.to_path_buf(),
-            claudine::composition::ActionLocation::new(LifecycleSignal::Success, 0, 0),
+            claudine::composition::ActionLocation::new(LifecycleSignal::Success, claudine::composition::LifecyclePath::root("success").index(0).field("proxy")),
             vec![source.to_path_buf()],
         ),
     );

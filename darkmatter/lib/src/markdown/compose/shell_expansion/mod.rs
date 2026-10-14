@@ -46,7 +46,7 @@ pub use policy::{
 pub use store::resolve_policy_paths;
 pub use types::{
     ErrorHandling, ErrorHandlingOutcome, ShellApprovalDecision, ShellApprovalHandler,
-    ShellApprovalRequest, ShellCommandEntry, ShellCommandOrigin, ShellDirective,
+    ShellApprovalRequest, ShellChildEnvironment, ShellCommandEntry, ShellCommandOrigin, ShellDirective,
     ShellExpansionError, ShellExpansionOptions, ShellExpansionRuntime, ShellPolicyPaths,
     ShellRuleSet, ShellTimeoutBehavior,
 };
@@ -582,7 +582,13 @@ pub(crate) fn execute_prepared_outcome(
 ) -> Result<DirectiveOutcome, ShellExpansionError> {
     let shell_opts = options.shell_options();
     let run = || {
-        executor::execute_directive_outcome(&prepared.effective, &shell_opts, &options.source, options.resolution_context())
+        executor::execute_directive_outcome(
+            &prepared.effective,
+            &shell_opts,
+            &options.source,
+            options.resolution_context(),
+            options.shell_child_environment(),
+        )
     };
     if prepared.effective.no_cache {
         return Ok(DirectiveOutcome {

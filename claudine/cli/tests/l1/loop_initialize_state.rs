@@ -17,7 +17,7 @@ fn loop_initialize_retains_document_context_and_mapping_writes() {
             &fixture.bin_dir().join("goose"),
             "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$CLAUDINE_PROMPT_CAPTURE\"\nexit 0\n",
         );
-        let ending = if fail { "            - error: original initialize failure\n" } else { "" };
+        let ending = if fail { "    - error: original initialize failure\n" } else { "" };
         let prompt = fixture.cwd().join("prompt.md");
         write(&prompt, &format!(r#"---
 phase: 3
@@ -25,13 +25,11 @@ total_phases: 4
 plan: fixes/case/plan.md
 derived: "phase {{{{phase}}}}"
 initialize:
-    stack:
-        - action:
-            - set:
-                epilog: "{{{{message_to_agent}}}}"
-                message_to_agent: null
-            - set:
-                carried: "ready"
+    - set:
+        epilog: "{{{{message_to_agent}}}}"
+        message_to_agent: null
+    - set:
+        carried: "ready"
 {ending}failure:
     message: "phase {{{{phase}}}} in {{{{parent_dir(plan)}}}}: {{{{err.msg}}}}"
     stderr: "plan={{{{plan}}}}; carried={{{{carried}}}}; cause={{{{err.msg}}}}"

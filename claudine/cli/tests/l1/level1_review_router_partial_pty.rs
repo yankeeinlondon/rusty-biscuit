@@ -259,7 +259,7 @@ fn level1_proxy_target_schema_resolves_partial_once_before_its_initialize() {
     let entry = fixture.cwd().join("prompts/entry.md");
     common::write(
         &entry,
-        "---\ninitialize:\n  stack:\n    - action:\n        - proxy: ./review.md\n---\nEntry without a schema.\n",
+        "---\ninitialize:\n  - proxy: ./review.md\n---\nEntry without a schema.\n",
     );
     let mut session = review_router_session(&fixture, &entry);
     let transcript = wait_for_marker(&mut session, "Use this file", Duration::from_secs(15));

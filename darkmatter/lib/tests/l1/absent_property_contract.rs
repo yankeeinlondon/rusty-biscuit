@@ -37,12 +37,12 @@ fn body(content: &str) -> String {
 // ── An absent property is null ──────────────────────────────────────────────
 
 /// Whole-value frontmatter keeps the type of its single span, so an absent
-/// bare property and an absent `doc.<p>` both store `null`, which the body
+/// bare property and an absent `fm.<p>` both store `null`, which the body
 /// then tests and renders as such.
 #[test]
 fn an_absent_property_is_a_null_whole_value() {
     let rendered = body(
-        "---\nbare: \"{{ missing }}\"\nqualified: \"{{ doc.missing }}\"\n---\n\
+        "---\nbare: \"{{ missing }}\"\nqualified: \"{{ fm.missing }}\"\n---\n\
          {{ is_null(bare) }} {{ is_null(qualified) }} [{{ bare }}][{{ qualified }}]\n",
     );
     assert_eq!(rendered, "true true [][]");
@@ -50,7 +50,7 @@ fn an_absent_property_is_a_null_whole_value() {
 
 #[test]
 fn an_absent_property_is_empty_in_a_mixed_string() {
-    assert_eq!(body("---\ntitle: T\n---\n[{{ missing }}] [{{ doc.missing }}]\n"), "[] []");
+    assert_eq!(body("---\ntitle: T\n---\n[{{ missing }}] [{{ fm.missing }}]\n"), "[] []");
     assert_eq!(
         body("---\nlabel: \"x {{ missing }} y\"\n---\n[{{ label }}]\n"),
         "[x  y]",
@@ -106,10 +106,10 @@ fn a_missing_bare_property_does_not_resolve_from_ctx() {
 }
 
 /// A reserved namespace wins over a frontmatter key of the same name, which
-/// stays reachable through `doc.`.
+/// stays reachable through `fm.`.
 #[test]
 fn an_exact_namespace_root_is_never_a_document_property() {
-    let rendered = body("---\nenv: authored\n---\n{{ doc.env }} {{ is_object(env) }}\n");
+    let rendered = body("---\nenv: authored\n---\n{{ fm.env }} {{ is_object(env) }}\n");
     assert_eq!(rendered, "authored true");
 }
 

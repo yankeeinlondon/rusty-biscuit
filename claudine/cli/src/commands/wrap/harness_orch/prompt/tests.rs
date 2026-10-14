@@ -9,6 +9,7 @@ fn compose_state(source_path: &Path, input_layers: CallerInputLayers) -> Harness
         original_ref: source_path.display().to_string(),
         base_prompt: None,
         overlay: indexmap::IndexMap::new(),
+        pending_retry_overlay: None,
         prompt_tail: Vec::new(),
         input_layers,
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
@@ -62,8 +63,8 @@ fn bootstrap_harness_prompt_reads_an_initialize_target_without_its_body() {
     let generated = dir.path().join("generated.md");
     std::fs::write(
         &target,
-        "---\ntitle: staged target\ninitialize:\n  stack:\n    \
-         - action: {ensure_file: 'generated.md'}\n---\nTARGET-BODY\n\n::file generated.md\n",
+        "---\ntitle: staged target\ninitialize:\n  - ensure_file: 'generated.md'\n\
+         ---\nTARGET-BODY\n\n::file generated.md\n",
     )
     .unwrap();
     let mut state = compose_state(&target, CallerInputLayers::new(crate::request::test_context()));

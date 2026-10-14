@@ -29,6 +29,13 @@ hold the rest:
   `HANDLE_FLAG_INHERIT` on the current process's stdio before setting the
   detached creation flags (`windows` crate features `Win32_Foundation` and
   `Win32_System_Console`). Unix never sees this; fds are close-on-exec.
+- **`std::env::temp_dir()` ignores `TMPDIR` on Windows.** It reads `TMP`,
+  then `TEMP`, then `USERPROFILE`. A test fixture that redirects only
+  `TMPDIR` passes on macOS and Linux but writes into the Windows host's real
+  temp directory, and a later run finds that leftover state. Found
+  2026-10-13 when biscuit-speaks' ElevenLabs cache tests hit audio files an
+  earlier `just cross-check --os windows` had left behind. Set all three, as
+  biscuit-speaks' `TtsFixture` does.
 - **Python's piped stdout is cp1252 on a Windows runner.** A script that
   prints non-ASCII (a check mark, a box-drawing character) raises
   `UnicodeEncodeError` the moment its output is piped, which every CI step

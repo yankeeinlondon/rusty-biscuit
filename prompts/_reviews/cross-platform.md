@@ -14,15 +14,14 @@ favorites: true
 start:
     message: "🎛️ starting a **cross-platform** review in the **{{ctx.area}}** package area (_{{ctx.now}}_)"
 success:
-    stack:
-        - when: "frontmatter(review, 'ready') == true"
-          action:
-              - message: "✅ **cross-platform** review in **{{ctx.area}}** completed successfully (_all platforms are deemed to be in good shape_). Review took: {{timing.duration}}."
-              - effect: small-group-cheer
-        - when: "frontmatter(review, 'ready') != true"
-          action:
-              - message: "⚠️ **cross-platform** review completed successfully but was deemed to have code issues that need addressing: `{{review}}`"
-              - effect: phase-jump-3
+    - when: "frontmatter(review, 'ready') == true"
+      then:
+          - message: "✅ **cross-platform** review in **{{ctx.area}}** completed successfully (_all platforms are deemed to be in good shape_). Review took: {{timing.duration}}."
+          - effect: small-group-cheer
+    - when: "frontmatter(review, 'ready') != true"
+      then:
+          - message: "⚠️ **cross-platform** review completed successfully but was deemed to have code issues that need addressing: `{{review}}`"
+          - effect: phase-jump-3
 failure:
     message: "💥 failed to complete the **cross-platform** review in **{{ctx.area}}**. Error: {{err.msg}}."
     effect: sad-trombone

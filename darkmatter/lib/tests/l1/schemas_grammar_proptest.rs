@@ -6,7 +6,7 @@
 //! every code path.
 
 use darkmatter::markdown::schemas::simplified::{
-    Constraint, PropertyAtom, SimplifiedType, TypeExpr, grammar::parse_type_expr,
+    AlphanumericOption, AlphanumericOptions, Constraint, PropertyAtom, SimplifiedType, TypeExpr, grammar::parse_type_expr,
     serialize_property_atom,
 };
 use proptest::prelude::*;
@@ -31,7 +31,10 @@ fn type_strategy() -> impl Strategy<Value = SimplifiedType> {
         Just(SimplifiedType::Expression),
         Just(SimplifiedType::TypeDefinition),
         Just(SimplifiedType::Schema),
-        Just(SimplifiedType::Any),
+        Just(SimplifiedType::Unknown),
+        Just(SimplifiedType::Null),
+        Just(SimplifiedType::Alphanumeric),
+        Just(SimplifiedType::Shell),
     ]
 }
 
@@ -103,6 +106,28 @@ fn item_constraints_for(ty: SimplifiedType) -> impl Strategy<Value = Vec<Constra
                     out.push(Constraint::MaxLen(m));
                 }
                 if ne {
+                    out.push(Constraint::NotEmpty);
+                }
+                out
+            })
+            .boxed(),
+        // Options are generated in canonical form, the form the serializer
+        // writes, so the round trip compares equal atoms.
+        SimplifiedType::Alphanumeric => (
+            proptest::collection::vec(proptest::sample::select(AlphanumericOption::ALL.to_vec()), 0..5),
+            proptest::option::of(0usize..200),
+            any::<bool>(),
+        )
+            .prop_map(|(options, max, not_empty)| {
+                let canonical = options.into_iter().collect::<AlphanumericOptions>().canonical();
+                let mut out = vec![];
+                if canonical != AlphanumericOptions::base() {
+                    out.push(Constraint::Options(canonical.options().collect()));
+                }
+                if let Some(m) = max {
+                    out.push(Constraint::MaxLen(m));
+                }
+                if not_empty {
                     out.push(Constraint::NotEmpty);
                 }
                 out

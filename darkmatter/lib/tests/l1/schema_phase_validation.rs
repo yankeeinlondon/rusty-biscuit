@@ -363,9 +363,14 @@ fn eager_is_universal_in_catalog_and_round_trips() {
         eager.json_schema_effect
     );
 
-    for descriptor in schema_type_descriptors() {
+    // The semantic meta types reject `eager`; the catalog's parity test pins
+    // that, so only the value types are expected to list it here.
+    for descriptor in schema_type_descriptors()
+        .iter()
+        .filter(|descriptor| !matches!(descriptor.keyword, "type-definition" | "schema"))
+    {
         assert!(
-            descriptor.accepted_constraints.contains("eager"),
+            descriptor.accepts_constraint("eager"),
             "{} omits eager",
             descriptor.keyword,
         );

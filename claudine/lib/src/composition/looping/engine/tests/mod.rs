@@ -143,7 +143,9 @@ fn run_loop(
 
 mod gate_ambient;
 mod iteration_actions;
+mod iteration_bindings;
 mod lifecycle_control;
 mod post_checked_timing;
 mod rate_limits;
+mod removed_loop_reads;
 mod seed_state;

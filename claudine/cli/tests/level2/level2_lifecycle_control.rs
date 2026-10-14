@@ -10,14 +10,14 @@
 //!
 //! ## Controls covered and their *actual* wired behavior
 //!
-//! - **Retry from `failure`** — `failure.stack` ending in `{retry: N}` re-invokes
+//! - **Retry from `failure`** — `failure` list ending in `{retry: N}` re-invokes
 //!   the provider; the provider runs `1 + N` times (the original attempt plus N
 //!   retries), `failure` fires each attempt, the budget exhausts, then
 //!   `finalize` fires once. Asserted via the `provider-ran` / `failure` line
 //!   counts in `events.log`.
 //! - **Retry from `finalize` (verify in `success`, recover in `finalize`)** — a
-//!   `success.stack` raises `{error: "..."}` on a missing artifact, which routes
-//!   through the `failure` event and carries an `err` into `finalize`; the `finalize.stack`
+//!   `success` list raises `{error: "..."}` on a missing artifact, which routes
+//!   through the `failure` event and carries an `err` into `finalize`; the `finalize` list
 //!   `retry`s. The fake provider produces the artifact on its second invocation,
 //!   so the retried attempt verifies clean and the terminal `finalize` runs its
 //!   no-`err` branch. Exercises the `finalize` recovery surface and the
@@ -36,7 +36,7 @@
 //!   surfaces the typed "not implemented" error; `failure` and `finalize` still
 //!   fire. Asserted via `events.log` markers and the error text in the pane.
 //!
-//! - **Proxy from `failure`** — `failure.stack` ending in `{proxy: "@target.md"}`
+//! - **Proxy from `failure`** — `failure` list ending in `{proxy: "@target.md"}`
 //!   hands off to the target document, which runs its OWN lifecycle
 //!   (`start`/`success`/`finalize`) once with its own provider exit. The source
 //!   document's `failure`/`proxy` stack does NOT re-fire (no infinite loop), and
@@ -46,7 +46,7 @@
 //!   on hand-off, so the target's events fire and the source's stack cannot
 //!   re-trigger.)
 //!
-//! - **Proxy from `initialize`** — `initialize.stack` ending in `{proxy: "@target.md"}`
+//! - **Proxy from `initialize`** — `initialize` list ending in `{proxy: "@target.md"}`
 //!   hands off before the source's `start`. The target's own `initialize` fires
 //!   and respects target-side `Skip`/`Proxy`/`Error` controls, including nested
 //!   proxy cycle detection.
@@ -61,15 +61,14 @@
 //!   `defer` everywhere, returns the typed "not implemented" error until the
 //!   rendezvous deferred-execution backend lands.
 //!
-//! - **Top-level-before-stack ordering** — for `success` and `blocked`, top-level
-//!   communication properties (`stderr`, `info`, `warn`, etc.) fire before any
-//!   `stack:` side effects in the captured terminal output.
+//! - **Authored-order communication** — for `success` and `blocked`, list items
+//!   reach the captured terminal output in the order they are written.
 //!
-//! - **`success.stack` downgrade** — when the stack ends in
-//!   `{error: "downgraded"}`, the already-fired original top-level communication
+//! - **`success` list downgrade** — when the list ends in
+//!   `{error: "downgraded"}`, the communication already fired ahead of it
 //!   is preserved, the `failure` event fires next, and the terminal lifecycle
 //!   state is failure. Asserted by marker ordering in the pane. Downgrade from
-//!   `blocked.stack` is no longer supported because the shell-audit blocked
+//!   `blocked` list is no longer supported because the shell-audit blocked
 //!   path runs during composition preflight and does not process control
 //!   actions from the blocked stack.
 //!
@@ -706,8 +705,11 @@ fn run_compose_await_exit_redirected(
 fn level2_lifecycle_initialize_proxy_compose_error_renders_styled_block() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let source_doc = "---\ninitialize:\n  stack:\n    \
-         - action: {proxy: '@target.md'}\n---\nsource body\n";
+    let source_doc = "---\n\
+         initialize:\n  \
+         - {proxy: '@target.md'}\n\
+         ---\n\
+         source body\n";
     // `::file` a non-existent partial: transclusion fails during the target's
     // re-materialization inside the harness loop.
     let target_doc = "---\ntitle: proxy target\n---\n::file _no_such_partial.md\n";
@@ -745,12 +747,10 @@ fn level2_lifecycle_failure_retry_reinvokes_provider_until_budget_exhausted() {
     let doc = r#"---
 title: lifecycle retry
 failure:
-  stack:
-    - action: {append_line: ["events.log", "failure"]}
-    - action: {retry: 2}
+  - {append_line: ["events.log", "failure"]}
+  - {retry: 2}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#;
@@ -986,14 +986,11 @@ fn level2_lifecycle_retry_launches_the_refreshed_provider_binary() {
 title: retry switches provider
 agent: goose
 failure:
-  stack:
-    - action:
-        - {append_line: ["events.log", "failure"]}
-        - {set_frontmatter: ["doc.md", "agent", "gemini"]}
-    - action: {retry: 1}
+  - {append_line: ["events.log", "failure"]}
+  - {set_frontmatter: ["doc.md", "agent", "gemini"]}
+  - {retry: 1}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#;
@@ -1023,10 +1020,10 @@ Body
 fn provider_switch_retry_doc(from: &str, to: &str, extra: &str) -> String {
     format!(
         "---\ntitle: provider switch retry\nagent: {from}\n{extra}\
-         failure:\n  stack:\n    - action:\n        \
-         - {{set_frontmatter: [\"doc.md\", \"agent\", \"{to}\"]}}\n    \
-         - action: {{retry: 1}}\nfinalize:\n  stack:\n    \
-         - action: {{append_line: [\"events.log\", \"finalize\"]}}\n---\nBody\n"
+         failure:\n  \
+         - {{set_frontmatter: [\"doc.md\", \"agent\", \"{to}\"]}}\n  \
+         - {{retry: 1}}\nfinalize:\n  \
+         - {{append_line: [\"events.log\", \"finalize\"]}}\n---\nBody\n"
     )
 }
 
@@ -1151,8 +1148,13 @@ fn write_codex_system_prompt_reader(bin_dir: &Path, events_log: &Path) {
 /// failure/retry surface at all — the direct, first-attempt launch.
 fn direct_system_prompt_doc(agent: &str) -> String {
     format!(
-        "---\ntitle: direct system prompt\nagent: {agent}\nfinalize:\n  stack:\n    \
-         - action: {{append_line: [\"events.log\", \"finalize\"]}}\n---\nBody\n"
+        "---\n\
+         title: direct system prompt\n\
+         agent: {agent}\n\
+         finalize:\n  \
+         - {{append_line: [\"events.log\", \"finalize\"]}}\n\
+         ---\n\
+         Body\n"
     )
 }
 
@@ -1424,11 +1426,17 @@ fn level2_lifecycle_retry_clears_model_when_the_refresh_drops_it() {
     // A null action parameter has to arrive as a whole-value interpolation;
     // a bare YAML `null` is a typed parse refusal.
     let doc = format!(
-        "---\ntitle: retry drops the model\nagent: goose\nmodel: {OPENING_MODEL}\n\
-         failure:\n  stack:\n    - action:\n        \
-         - {{set_frontmatter: [\"doc.md\", \"model\", \"{{{{ null }}}}\"]}}\n    \
-         - action: {{retry: 1}}\nfinalize:\n  stack:\n    \
-         - action: {{append_line: [\"events.log\", \"finalize\"]}}\n---\nBody\n"
+        "---\n\
+         title: retry drops the model\n\
+         agent: goose\n\
+         model: {OPENING_MODEL}\n\
+         failure:\n  \
+         - {{set_frontmatter: [\"doc.md\", \"model\", \"{{{{ null }}}}\"]}}\n  \
+         - {{retry: 1}}\n\
+         finalize:\n  \
+         - {{append_line: [\"events.log\", \"finalize\"]}}\n\
+         ---\n\
+         Body\n"
     );
     let staged = stage_launch_recording(&doc);
     // Same binary both attempts: the model facet moves on its own, with the
@@ -1718,14 +1726,11 @@ fn level2_lifecycle_retry_rebuilds_mcp_injection_from_the_refreshed_body() {
 title: retry gains an mcp tag
 agent: gemini
 failure:
-  stack:
-    - action:
-        - {append_line: ["events.log", "failure"]}
-        - {append_line: ["doc.md", "also check #proxyprobeserver"]}
-    - action: {retry: 1}
+  - {append_line: ["events.log", "failure"]}
+  - {append_line: ["doc.md", "also check #proxyprobeserver"]}
+  - {retry: 1}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Body with no tag
 "#;
@@ -1781,12 +1786,10 @@ title: retry keeps an interpolated mcp tag
 agent: gemini
 probe: {MCP_PROBE_SERVER}
 failure:
-  stack:
-    - action: {{append_line: ["events.log", "failure"]}}
-    - action: {{retry: 1}}
+  - {{append_line: ["events.log", "failure"]}}
+  - {{retry: 1}}
 finalize:
-  stack:
-    - action: {{append_line: ["events.log", "finalize"]}}
+  - {{append_line: ["events.log", "finalize"]}}
 ---
 Body whose server is named only after composition #{{{{ probe }}}} here
 "#
@@ -1837,14 +1840,11 @@ fn level2_lifecycle_retry_launches_the_refreshed_mode_and_permission() {
 title: retry flips session mode
 agent: opencode
 failure:
-  stack:
-    - action:
-        - {append_line: ["events.log", "failure"]}
-        - {set_frontmatter: ["doc.md", "interactive", true]}
-    - action: {retry: 1}
+  - {append_line: ["events.log", "failure"]}
+  - {set_frontmatter: ["doc.md", "interactive", true]}
+  - {retry: 1}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#;
@@ -1894,10 +1894,10 @@ Body
 fn interactivity_retry_doc(opening: &str, refreshed: bool) -> String {
     format!(
         "---\ntitle: retry flips session mode\nagent: goose\n{opening}\
-         failure:\n  stack:\n    - action:\n        \
-         - {{set_frontmatter: [\"doc.md\", \"interactive\", {refreshed}]}}\n    \
-         - action: {{retry: 1}}\nfinalize:\n  stack:\n    \
-         - action: {{append_line: [\"events.log\", \"finalize\"]}}\n---\nBody\n"
+         failure:\n  \
+         - {{set_frontmatter: [\"doc.md\", \"interactive\", {refreshed}]}}\n  \
+         - {{retry: 1}}\nfinalize:\n  \
+         - {{append_line: [\"events.log\", \"finalize\"]}}\n---\nBody\n"
     )
 }
 
@@ -2133,15 +2133,12 @@ fn level2_lifecycle_retry_into_codex_rebuilds_the_execution_adapters() {
 title: retry switches into codex
 agent: goose
 failure:
-  stack:
-    - action:
-        - {append_line: ["events.log", "failure"]}
-        - {set_frontmatter: ["doc.md", "agent", "codex"]}
-        - {set_frontmatter: ["doc.md", "model", "gpt-5.4"]}
-    - action: {retry: 1}
+  - {append_line: ["events.log", "failure"]}
+  - {set_frontmatter: ["doc.md", "agent", "codex"]}
+  - {set_frontmatter: ["doc.md", "model", "gpt-5.4"]}
+  - {retry: 1}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#;
@@ -2214,14 +2211,11 @@ fn level2_lifecycle_retry_out_of_codex_drops_the_codex_adapters() {
 title: retry leaves codex
 agent: codex
 failure:
-  stack:
-    - action:
-        - {append_line: ["events.log", "failure"]}
-        - {set_frontmatter: ["doc.md", "agent", "goose"]}
-    - action: {retry: 1}
+  - {append_line: ["events.log", "failure"]}
+  - {set_frontmatter: ["doc.md", "agent", "goose"]}
+  - {retry: 1}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#;
@@ -2277,13 +2271,18 @@ Body
 /// to `finalize` and the run terminates in exactly three provider invocations.
 fn switch_then_resume_doc(from: &str, to: &str, follow_up: &str) -> String {
     format!(
-        "---\ntitle: switch then resume\nagent: {from}\n\
-         failure:\n  stack:\n    - action: \
-         {{set_frontmatter: [\"doc.md\", \"agent\", \"{to}\"]}}\n    \
-         - action: {{retry: 1}}\n\
-         success:\n  stack:\n    - action: {{resume: \"{follow_up}\"}}\n\
-         finalize:\n  stack:\n    \
-         - action: {{append_line: [\"events.log\", \"finalize\"]}}\n---\nBody\n"
+        "---\n\
+         title: switch then resume\n\
+         agent: {from}\n\
+         failure:\n  \
+         - {{set_frontmatter: [\"doc.md\", \"agent\", \"{to}\"]}}\n  \
+         - {{retry: 1}}\n\
+         success:\n  \
+         - {{resume: \"{follow_up}\"}}\n\
+         finalize:\n  \
+         - {{append_line: [\"events.log\", \"finalize\"]}}\n\
+         ---\n\
+         Body\n"
     )
 }
 
@@ -2430,9 +2429,9 @@ exit 0
     );
 }
 
-/// Verify-in-`success`, recover-in-`finalize`: a `success.stack` that detects a
+/// Verify-in-`success`, recover-in-`finalize`: a `success` list that detects a
 /// missing artifact raises `{error: "..."}`, which routes through the `failure` event
-/// and carries an `err` into `finalize`; the `finalize.stack` then `retry`s the
+/// and carries an `err` into `finalize`; the `finalize` list then `retry`s the
 /// whole run. The fake provider creates the awaited artifact on its **second**
 /// invocation, so the retried attempt verifies clean and the run ends in a
 /// no-`err` `finalize`. Proves the `finalize` recovery surface and the
@@ -2445,18 +2444,16 @@ fn level2_lifecycle_finalize_retry_recovers_success_verification_failure() {
     let doc = r#"---
 title: verify in success, recover in finalize
 success:
-  stack:
-    - when: "!file_exists('attempt2.flag')"
-      action:
-        - {append_line: ["events.log", "verify-failed"]}
-        - {error: "artifact missing"}
+  - when: "!file_exists('attempt2.flag')"
+    then:
+      - {append_line: ["events.log", "verify-failed"]}
+      - {error: "artifact missing"}
 finalize:
-  stack:
-    - when: "err"
-      action:
-        - {append_line: ["events.log", "finalize-retry"]}
-        - {retry: 1}
-    - action: {append_line: ["events.log", "finalize-done"]}
+  - when: "err"
+    then:
+      - {append_line: ["events.log", "finalize-retry"]}
+      - {retry: 1}
+  - {append_line: ["events.log", "finalize-done"]}
 ---
 Body
 "#;
@@ -2522,12 +2519,10 @@ fn level2_lifecycle_failure_resume_without_session_surfaces_typed_error() {
     let doc = r#"---
 title: lifecycle resume
 failure:
-  stack:
-    - action: {append_line: ["events.log", "failure"]}
-    - action: {resume: "please finish the work"}
+  - {append_line: ["events.log", "failure"]}
+  - {resume: "please finish the work"}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#;
@@ -2567,18 +2562,14 @@ fn level2_lifecycle_failure_resume_with_session_reinvokes_provider_with_follow_u
         r#"---
 title: lifecycle resume success
 start:
-  stack:
-    - action: {{append_line: ["events.log", "start"]}}
+  - {{append_line: ["events.log", "start"]}}
 failure:
-  stack:
-    - action: {{append_line: ["events.log", "failure"]}}
-    - action: {{resume: "{follow_up}"}}
+  - {{append_line: ["events.log", "failure"]}}
+  - {{resume: "{follow_up}"}}
 success:
-  stack:
-    - action: {{append_line: ["events.log", "success"]}}
+  - {{append_line: ["events.log", "success"]}}
 finalize:
-  stack:
-    - action: {{append_line: ["events.log", "finalize"]}}
+  - {{append_line: ["events.log", "finalize"]}}
 ---
 Original body
 "#
@@ -2670,18 +2661,14 @@ fn level2_lifecycle_resume_with_dropped_launch_flag_stays_compatible() {
         r#"---
 title: resume compat with system prompt
 start:
-  stack:
-    - action: {{append_line: ["events.log", "start"]}}
+  - {{append_line: ["events.log", "start"]}}
 failure:
-  stack:
-    - action: {{append_line: ["events.log", "failure"]}}
-    - action: {{resume: "{follow_up}"}}
+  - {{append_line: ["events.log", "failure"]}}
+  - {{resume: "{follow_up}"}}
 success:
-  stack:
-    - action: {{append_line: ["events.log", "success"]}}
+  - {{append_line: ["events.log", "success"]}}
 finalize:
-  stack:
-    - action: {{append_line: ["events.log", "finalize"]}}
+  - {{append_line: ["events.log", "finalize"]}}
 ---
 Original body
 "#
@@ -2800,19 +2787,15 @@ fn level2_lifecycle_resume_refuses_when_refresh_changes_model() {
 title: resume refused after model refresh
 model: llamacpp/opener-model
 start:
-  stack:
-    - action: {{append_line: ["events.log", "start"]}}
+  - {{append_line: ["events.log", "start"]}}
 failure:
-  stack:
-    - action: {{append_line: ["events.log", "failure"]}}
-    - action: {{set_frontmatter: ["doc.md", "model", "llamacpp/refreshed-model"]}}
-    - action: {{resume: "{follow_up}"}}
+  - {{append_line: ["events.log", "failure"]}}
+  - {{set_frontmatter: ["doc.md", "model", "llamacpp/refreshed-model"]}}
+  - {{resume: "{follow_up}"}}
 success:
-  stack:
-    - action: {{append_line: ["events.log", "success"]}}
+  - {{append_line: ["events.log", "success"]}}
 finalize:
-  stack:
-    - action: {{append_line: ["events.log", "finalize"]}}
+  - {{append_line: ["events.log", "finalize"]}}
 ---
 Original body
 "#
@@ -3030,19 +3013,15 @@ fn level2_lifecycle_resume_refuses_when_refresh_changes_provider() {
 title: resume refused after provider refresh
 agent: claude
 start:
-  stack:
-    - action: {{append_line: ["events.log", "start"]}}
+  - {{append_line: ["events.log", "start"]}}
 failure:
-  stack:
-    - action: {{append_line: ["events.log", "failure"]}}
-    - action: {{set_frontmatter: ["doc.md", "agent", "goose"]}}
-    - action: {{resume: "{follow_up}"}}
+  - {{append_line: ["events.log", "failure"]}}
+  - {{set_frontmatter: ["doc.md", "agent", "goose"]}}
+  - {{resume: "{follow_up}"}}
 success:
-  stack:
-    - action: {{append_line: ["events.log", "success"]}}
+  - {{append_line: ["events.log", "success"]}}
 finalize:
-  stack:
-    - action: {{append_line: ["events.log", "finalize"]}}
+  - {{append_line: ["events.log", "finalize"]}}
 ---
 Original body
 "#
@@ -3082,19 +3061,15 @@ fn level2_lifecycle_resume_refuses_when_refresh_changes_interactivity() {
         r#"---
 title: resume refused after interactivity refresh
 start:
-  stack:
-    - action: {{append_line: ["events.log", "start"]}}
+  - {{append_line: ["events.log", "start"]}}
 failure:
-  stack:
-    - action: {{append_line: ["events.log", "failure"]}}
-    - action: {{set_frontmatter: ["doc.md", "interactive", true]}}
-    - action: {{resume: "{follow_up}"}}
+  - {{append_line: ["events.log", "failure"]}}
+  - {{set_frontmatter: ["doc.md", "interactive", true]}}
+  - {{resume: "{follow_up}"}}
 success:
-  stack:
-    - action: {{append_line: ["events.log", "success"]}}
+  - {{append_line: ["events.log", "success"]}}
 finalize:
-  stack:
-    - action: {{append_line: ["events.log", "finalize"]}}
+  - {{append_line: ["events.log", "finalize"]}}
 ---
 Original body
 "#
@@ -3135,19 +3110,15 @@ fn level2_lifecycle_resume_refuses_when_refresh_changes_permission_mode() {
 title: resume refused after permission-mode refresh
 agent: claude
 start:
-  stack:
-    - action: {{append_line: ["events.log", "start"]}}
+  - {{append_line: ["events.log", "start"]}}
 failure:
-  stack:
-    - action: {{append_line: ["events.log", "failure"]}}
-    - action: {{set_frontmatter: ["doc.md", "agent", "pi"]}}
-    - action: {{resume: "{follow_up}"}}
+  - {{append_line: ["events.log", "failure"]}}
+  - {{set_frontmatter: ["doc.md", "agent", "pi"]}}
+  - {{resume: "{follow_up}"}}
 success:
-  stack:
-    - action: {{append_line: ["events.log", "success"]}}
+  - {{append_line: ["events.log", "success"]}}
 finalize:
-  stack:
-    - action: {{append_line: ["events.log", "finalize"]}}
+  - {{append_line: ["events.log", "finalize"]}}
 ---
 Original body
 "#
@@ -3175,19 +3146,15 @@ fn level2_lifecycle_resume_refuses_when_refresh_changes_mcp_server_set() {
         r#"---
 title: resume refused after mcp tag refresh
 start:
-  stack:
-    - action: {{append_line: ["events.log", "start"]}}
+  - {{append_line: ["events.log", "start"]}}
 failure:
-  stack:
-    - action: {{append_line: ["events.log", "failure"]}}
-    - action: {{append_line: ["doc.md", "also check #calendar"]}}
-    - action: {{resume: "{follow_up}"}}
+  - {{append_line: ["events.log", "failure"]}}
+  - {{append_line: ["doc.md", "also check #calendar"]}}
+  - {{resume: "{follow_up}"}}
 success:
-  stack:
-    - action: {{append_line: ["events.log", "success"]}}
+  - {{append_line: ["events.log", "success"]}}
 finalize:
-  stack:
-    - action: {{append_line: ["events.log", "finalize"]}}
+  - {{append_line: ["events.log", "finalize"]}}
 ---
 Original body
 "#
@@ -3236,19 +3203,15 @@ fn level2_lifecycle_resume_refuses_when_refresh_changes_an_interpolated_mcp_tag(
 title: resume refused after interpolated mcp tag refresh
 probe: calendar
 start:
-  stack:
-    - action: {{append_line: ["events.log", "start"]}}
+  - {{append_line: ["events.log", "start"]}}
 failure:
-  stack:
-    - action: {{append_line: ["events.log", "failure"]}}
-    - action: {{set_frontmatter: ["doc.md", "probe", "slack"]}}
-    - action: {{resume: "{follow_up}"}}
+  - {{append_line: ["events.log", "failure"]}}
+  - {{set_frontmatter: ["doc.md", "probe", "slack"]}}
+  - {{resume: "{follow_up}"}}
 success:
-  stack:
-    - action: {{append_line: ["events.log", "success"]}}
+  - {{append_line: ["events.log", "success"]}}
 finalize:
-  stack:
-    - action: {{append_line: ["events.log", "finalize"]}}
+  - {{append_line: ["events.log", "finalize"]}}
 ---
 Original body naming its server only after composition #{{{{ probe }}}} here
 "#
@@ -3291,15 +3254,12 @@ fn level2_lifecycle_failure_defer_returns_not_implemented() {
     let doc = r#"---
 title: lifecycle defer
 failure:
-  stack:
-    - action: {append_line: ["events.log", "failure"]}
-    - action:
-        action: defer
-        delay: 5m
-        reason: provider failed
+  - {append_line: ["events.log", "failure"]}
+  - defer:
+      delay: 5m
+      reason: provider failed
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#;
@@ -3341,7 +3301,7 @@ fn write_proxy_goose(bin_dir: &Path, events_log: &Path, target_sentinel: &str) {
     );
 }
 
-/// Proxy from `failure`: the source document's `failure.stack` ends in
+/// Proxy from `failure`: the source document's `failure` list ends in
 /// `{proxy: "@target.md"}`. The target runs its OWN lifecycle once
 /// (`start`/`success`/`finalize`) with a clean provider exit. The source's
 /// `failure`/`proxy` stack must NOT re-fire (no infinite loop), and the
@@ -3366,20 +3326,31 @@ fn level2_lifecycle_failure_proxy_runs_target_document_no_loop() {
     // Source document: provider fails → `failure` stack records a marker then
     // proxies to the target. Source has its own `finalize` that must NOT fire
     // (the run hands off before the source's terminal finalize).
-    let main_doc = "---\ntitle: proxy source\nfailure:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'source-failure']}\n    \
-         - action: {proxy: '@target.md'}\nfinalize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'source-finalize']}\n---\nsource body\n";
+    let main_doc = "---\n\
+         title: proxy source\n\
+         failure:\n  \
+         - {append_line: ['events.log', 'source-failure']}\n  \
+         - {proxy: '@target.md'}\n\
+         finalize:\n  \
+         - {append_line: ['events.log', 'source-finalize']}\n\
+         ---\n\
+         source body\n";
     let main_file = workspace.path().join("main.md");
     fs::write(&main_file, main_doc).unwrap();
 
     // Target document: provider succeeds (stdin carries the sentinel) → its own
     // `start`/`success`/`finalize` fire exactly once.
     let target_doc = format!(
-        "---\ntitle: proxy target\nstart:\n  stack:\n    \
-         - action: {{append_line: ['events.log', 'target-start']}}\nsuccess:\n  stack:\n    \
-         - action: {{append_line: ['events.log', 'target-success']}}\nfinalize:\n  stack:\n    \
-         - action: {{append_line: ['events.log', 'target-finalize']}}\n---\n{target_sentinel}\n"
+        "---\n\
+         title: proxy target\n\
+         start:\n  \
+         - {{append_line: ['events.log', 'target-start']}}\n\
+         success:\n  \
+         - {{append_line: ['events.log', 'target-success']}}\n\
+         finalize:\n  \
+         - {{append_line: ['events.log', 'target-finalize']}}\n\
+         ---\n\
+         {target_sentinel}\n"
     );
     fs::write(workspace.path().join("target.md"), target_doc).unwrap();
 
@@ -3541,9 +3512,16 @@ fn level2_lifecycle_failure_proxy_to_looping_target_matches_direct_iterations() 
     // 1, 2, 3, so the loop-gate stack records `target-iter` exactly three
     // times (the gate observes pre-increment phase each pass).
     let target_doc = format!(
-        "---\ntitle: proxy loop target\nphase: 1\nloop:\n  until: \"phase > 2\"\n  \
-         action: \"increment(phase)\"\n  max: 10\n  stack:\n    \
-         - action: {{append_line: ['events.log', 'target-iter']}}\n---\n\
+        "---\n\
+         title: proxy loop target\n\
+         phase: 1\n\
+         loop:\n  \
+         until: \"phase > 2\"\n  \
+         action: \"increment(phase)\"\n  \
+         max: 10\n  \
+         gate:\n    \
+         - {{append_line: ['events.log', 'target-iter']}}\n\
+         ---\n\
          {target_sentinel} phase {{{{phase}}}}\n"
     );
 
@@ -3563,9 +3541,13 @@ fn level2_lifecycle_failure_proxy_to_looping_target_matches_direct_iterations() 
 
     // Proxy: a source whose provider fails hands off at `failure` to the same
     // looping target.
-    let source_doc = "---\ntitle: proxy loop source\nfailure:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'source-failure']}\n    \
-         - action: {proxy: '@target.md'}\n---\nsource body\n";
+    let source_doc = "---\n\
+         title: proxy loop source\n\
+         failure:\n  \
+         - {append_line: ['events.log', 'source-failure']}\n  \
+         - {proxy: '@target.md'}\n\
+         ---\n\
+         source body\n";
     let proxy = stage_proxy_pair_gated(source_doc, &target_doc, target_sentinel);
     let proxy_pane = run_compose_settle(&proxy, "target-iter", 3);
     let proxy_lines = event_lines(&proxy);
@@ -3594,37 +3576,35 @@ fn level2_lifecycle_failure_proxy_to_looping_target_matches_direct_iterations() 
     );
 }
 
-/// For a `success` event, top-level `stderr` fires before the stack's side
-/// effects in the observable terminal output.
+/// A `success` list runs its communication in authored order: the first
+/// `stderr` item reaches the terminal before the second.
 #[test]
 #[serial(level2_lifecycle_control)]
-fn level2_lifecycle_success_top_level_communication_fires_before_stack() {
+fn level2_lifecycle_success_communication_fires_in_authored_order() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let doc = r#"---
 title: success ordering
 success:
-  stderr: "SUCCESS-TOP"
-  stack:
-    - action: {stderr: "SUCCESS-STACK"}
+  - stderr: "SUCCESS-FIRST"
+  - stderr: "SUCCESS-SECOND"
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#;
     let staged = stage_success(doc);
     let pane = run_in_tmux(&staged);
 
-    let top_pos = pane
-        .find("SUCCESS-TOP")
-        .expect("success top-level stderr must appear in pane");
-    let stack_pos = pane
-        .find("SUCCESS-STACK")
-        .expect("success stack stderr must appear in pane");
+    let first_pos = pane
+        .find("SUCCESS-FIRST")
+        .expect("the first success stderr must appear in pane");
+    let second_pos = pane
+        .find("SUCCESS-SECOND")
+        .expect("the second success stderr must appear in pane");
     assert!(
-        top_pos < stack_pos,
-        "top-level communication must fire before stack; pane:\n{pane}"
+        first_pos < second_pos,
+        "success communication must fire in authored order; pane:\n{pane}"
     );
 
     let lines = event_lines(&staged);
@@ -3634,35 +3614,32 @@ Body
     );
 }
 
-/// A `success.stack` ending in `{error: "downgraded"}` downgrades the run to
-/// failure. The original success top-level communication still fires, the
+/// A `success` list ending in `{error: "downgraded"}` downgrades the run to
+/// failure. The communication authored ahead of the directive still fires, the
 /// failure event fires, and the final lifecycle state is failure.
 #[test]
 #[serial(level2_lifecycle_control)]
-fn level2_lifecycle_success_stack_error_downgrades_to_failure_preserving_top_level() {
+fn level2_lifecycle_success_error_downgrades_to_failure_preserving_earlier_communication() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let doc = r#"---
 title: success downgrade
 success:
-  stderr: "SUCCESS-TOP"
-  stack:
-    - action: {stderr: "SUCCESS-STACK"}
-    - action: {error: "downgraded"}
+  - stderr: "SUCCESS-FIRST"
+  - stderr: "SUCCESS-SECOND"
+  - {error: "downgraded"}
 failure:
-  stderr: "FAILURE-TOP"
-  stack:
-    - action: {stderr: "FAILURE-STACK"}
+  - stderr: "FAILURE-FIRST"
+  - stderr: "FAILURE-SECOND"
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#;
     let staged = stage_success(doc);
     let pane = run_in_tmux(&staged);
 
-    let markers = ["SUCCESS-TOP", "SUCCESS-STACK", "FAILURE-TOP", "FAILURE-STACK"];
+    let markers = ["SUCCESS-FIRST", "SUCCESS-SECOND", "FAILURE-FIRST", "FAILURE-SECOND"];
     let positions: Vec<_> = markers
         .iter()
         .map(|m| {
@@ -3675,8 +3652,7 @@ Body
         .collect();
     assert!(
         positions.windows(2).all(|w| w[0].1 < w[1].1),
-        "expected success top-level, success stack, failure top-level, failure stack \
-         in that order; got {positions:?}; pane:\n{pane}"
+        "expected both success lines, then both failure lines, in authored order; got {positions:?}; pane:\n{pane}"
     );
 
     let lines = event_lines(&staged);
@@ -3686,42 +3662,38 @@ Body
     );
 }
 
-/// For a `blocked` event, top-level `stderr` fires before the stack's side
-/// effects in the observable terminal output. The blocked path is triggered
-/// by a blacklisted shell command in `start.stack` failing composition
+/// A `blocked` list runs its communication in authored order. The blocked path
+/// is triggered by a blacklisted shell command in `start` failing composition
 /// preflight shell audit.
 #[test]
 #[serial(level2_lifecycle_control)]
-fn level2_lifecycle_blocked_top_level_communication_fires_before_stack() {
+fn level2_lifecycle_blocked_communication_fires_in_authored_order() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let doc = r#"---
 title: blocked ordering
 start:
-  stack:
-    - action: {shell: "rm -rf /tmp/nonexistent"}
+  - {shell: "rm -rf /tmp/nonexistent"}
 blocked:
-  stderr: "BLOCKED-TOP"
-  stack:
-    - action: {stderr: "BLOCKED-STACK"}
+  - stderr: "BLOCKED-FIRST"
+  - stderr: "BLOCKED-SECOND"
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#;
     let staged = stage(doc);
     let pane = run_in_tmux(&staged);
 
-    let top_pos = pane
-        .find("BLOCKED-TOP")
-        .expect("blocked top-level stderr must appear in pane");
-    let stack_pos = pane
-        .find("BLOCKED-STACK")
-        .expect("blocked stack stderr must appear in pane");
+    let first_pos = pane
+        .find("BLOCKED-FIRST")
+        .expect("the first blocked stderr must appear in pane");
+    let second_pos = pane
+        .find("BLOCKED-SECOND")
+        .expect("the second blocked stderr must appear in pane");
     assert!(
-        top_pos < stack_pos,
-        "top-level communication must fire before stack; pane:\n{pane}"
+        first_pos < second_pos,
+        "blocked communication must fire in authored order; pane:\n{pane}"
     );
 
     let lines = event_lines(&staged);
@@ -3731,7 +3703,7 @@ Body
     );
 }
 
-/// `initialize.stack` ending in `{proxy: "@target.md"}` hands off to the target
+/// `initialize` list ending in `{proxy: "@target.md"}` hands off to the target
 /// before the source's `start`. The target's own `initialize` fires, then its
 /// normal lifecycle (`start`, `success`, `finalize`) runs. The source's
 /// `start`/`success`/`finalize` do not fire.
@@ -3740,17 +3712,31 @@ Body
 fn level2_lifecycle_initialize_proxy_runs_target_initialize() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let source_doc = "---\ntitle: proxy source\ninitialize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'source-init']}\n    \
-         - action: {proxy: '@target.md'}\nstart:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'source-start']}\nsuccess:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'source-success']}\nfinalize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'source-finalize']}\n---\nsource body\n";
-    let target_doc = "---\ntitle: proxy target\ninitialize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'target-init']}\nstart:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'target-start']}\nsuccess:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'target-success']}\nfinalize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'target-finalize']}\n---\ntarget body\n";
+    let source_doc = "---\n\
+         title: proxy source\n\
+         initialize:\n  \
+         - {append_line: ['events.log', 'source-init']}\n  \
+         - {proxy: '@target.md'}\n\
+         start:\n  \
+         - {append_line: ['events.log', 'source-start']}\n\
+         success:\n  \
+         - {append_line: ['events.log', 'source-success']}\n\
+         finalize:\n  \
+         - {append_line: ['events.log', 'source-finalize']}\n\
+         ---\n\
+         source body\n";
+    let target_doc = "---\n\
+         title: proxy target\n\
+         initialize:\n  \
+         - {append_line: ['events.log', 'target-init']}\n\
+         start:\n  \
+         - {append_line: ['events.log', 'target-start']}\n\
+         success:\n  \
+         - {append_line: ['events.log', 'target-success']}\n\
+         finalize:\n  \
+         - {append_line: ['events.log', 'target-finalize']}\n\
+         ---\n\
+         target body\n";
     let staged = stage_proxy_pair(source_doc, target_doc, true);
     let pane = run_in_tmux_for(&staged, "target-finalize");
 
@@ -3802,10 +3788,20 @@ fn level2_lifecycle_initialize_proxy_runs_target_initialize() {
 fn level2_lifecycle_initialize_proxy_forwards_set_params_to_target_schema() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let source_doc = "---\n$schema:\n    spec: file(required;eager)\ninitialize:\n  stack:\n    \
-         - action: {proxy: '@target.md'}\n---\nsource body\n";
-    let target_doc = "---\n$schema:\n    spec: file(required;eager)\nsuccess:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'target-success']}\n---\ntarget body\n";
+    let source_doc = "---\n\
+         $schema:\n    \
+         spec: file(required;eager)\n\
+         initialize:\n  \
+         - {proxy: '@target.md'}\n\
+         ---\n\
+         source body\n";
+    let target_doc = "---\n\
+         $schema:\n    \
+         spec: file(required;eager)\n\
+         success:\n  \
+         - {append_line: ['events.log', 'target-success']}\n\
+         ---\n\
+         target body\n";
     let staged = stage_proxy_pair(source_doc, target_doc, true);
     // The `file(required;eager)` param resolves against the launch area (the
     // workspace we `cd` into), exercising the forwarded `file_ref_fallback_dir`.
@@ -3844,13 +3840,22 @@ fn level2_lifecycle_initialize_proxy_forwards_set_params_to_target_schema() {
 fn level2_lifecycle_proxy_with_overlay_loses_to_a_caller_set_and_beats_the_target() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let source_doc = "---\ntitle: router\ninitialize:\n  stack:\n    \
-         - action: {action: proxy, target: '@target.md', with: {phase: 2, note: from-router}}\n\
-         ---\nrouter body\n";
-    let target_doc = "---\ntitle: target\nphase: 0\nnote: from-target\nsuccess:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'phase={{ phase }} note={{ note }}']}\n\
-         finalize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'target-finalize']}\n---\ntarget body\n";
+    let source_doc = "---\n\
+         title: router\n\
+         initialize:\n  \
+         - {proxy: {target: '@target.md', with: {phase: 2, note: from-router}}}\n\
+         ---\n\
+         router body\n";
+    let target_doc = "---\n\
+         title: target\n\
+         phase: 0\n\
+         note: from-target\n\
+         success:\n  \
+         - {append_line: ['events.log', 'phase={{ phase }} note={{ note }}']}\n\
+         finalize:\n  \
+         - {append_line: ['events.log', 'target-finalize']}\n\
+         ---\n\
+         target body\n";
     let staged = stage_proxy_pair(source_doc, target_doc, true);
 
     let pane = run_proxy_in_tmux_with_set(&staged, "phase=9", "target-finalize");
@@ -3896,11 +3901,18 @@ fn level2_lifecycle_proxy_with_overlay_loses_to_a_caller_set_and_beats_the_targe
 fn level2_lifecycle_initialize_proxy_reports_redirect_and_target_prompt() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let source_doc = "---\ninitialize:\n  stack:\n    \
-         - action: {proxy: '@target.md'}\nsuccess:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'source-success']}\n---\nSOURCEBODYMARKER\n";
-    let target_doc = "---\nsuccess:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'target-success']}\n---\nTARGETBODYMARKER\n";
+    let source_doc = "---\n\
+         initialize:\n  \
+         - {proxy: '@target.md'}\n\
+         success:\n  \
+         - {append_line: ['events.log', 'source-success']}\n\
+         ---\n\
+         SOURCEBODYMARKER\n";
+    let target_doc = "---\n\
+         success:\n  \
+         - {append_line: ['events.log', 'target-success']}\n\
+         ---\n\
+         TARGETBODYMARKER\n";
     let staged = stage_proxy_pair(source_doc, target_doc, true);
 
     let pane = run_in_tmux_for(&staged, "target-success");
@@ -3928,12 +3940,19 @@ fn level2_lifecycle_initialize_proxy_reports_redirect_and_target_prompt() {
 fn level2_lifecycle_initialize_proxy_target_preserves_line_structure() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let source_doc = "---\ninitialize:\n  stack:\n    \
-         - action: {proxy: '@target.md'}\n---\nsource body\n";
+    let source_doc = "---\n\
+         initialize:\n  \
+         - {proxy: '@target.md'}\n\
+         ---\n\
+         source body\n";
     // A block-quoted unordered list: each item must stay on its own line.
-    let target_doc = "---\nsuccess:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'target-done']}\n---\n\
-         > - ALPHAITEM\n> - BETAITEM\n> - GAMMAITEM\n";
+    let target_doc = "---\n\
+         success:\n  \
+         - {append_line: ['events.log', 'target-done']}\n\
+         ---\n\
+         > - ALPHAITEM\n\
+         > - BETAITEM\n\
+         > - GAMMAITEM\n";
     let staged = stage_proxy_pair(source_doc, target_doc, true);
 
     let pane = run_in_tmux_for(&staged, "target-done");
@@ -3966,11 +3985,17 @@ fn level2_lifecycle_initialize_proxy_target_preserves_line_structure() {
 fn level2_lifecycle_initialize_proxy_target_resolves_ctx_not_in_source() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let source_doc = "---\ninitialize:\n  stack:\n    \
-         - action: {proxy: '@target.md'}\n---\nsource body\n";
-    let target_doc = "---\nsuccess:\n  stack:\n    - action:\n        \
-         - {append_line: ['events.log', 'osmarker=[{{ctx.os}}]']}\n        \
-         - {append_line: ['events.log', 'target-done']}\n---\ntarget body\n";
+    let source_doc = "---\n\
+         initialize:\n  \
+         - {proxy: '@target.md'}\n\
+         ---\n\
+         source body\n";
+    let target_doc = "---\n\
+         success:\n  \
+         - {append_line: ['events.log', 'osmarker=[{{ctx.os}}]']}\n  \
+         - {append_line: ['events.log', 'target-done']}\n\
+         ---\n\
+         target body\n";
     let staged = stage_proxy_pair(source_doc, target_doc, true);
 
     let pane = run_in_tmux_for(&staged, "target-done");
@@ -3987,20 +4012,29 @@ fn level2_lifecycle_initialize_proxy_target_resolves_ctx_not_in_source() {
     );
 }
 
-/// `initialize.stack` ending in `{proxy: "@target.md"}` hands off to a target
-/// whose own `initialize.stack` ends in `skip`. The run exits cleanly with
+/// `initialize` list ending in `{proxy: "@target.md"}` hands off to a target
+/// whose own `initialize` list ends in `skip`. The run exits cleanly with
 /// no provider invocation and no source lifecycle beyond the proxy.
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_proxy_respects_target_skip() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let source_doc = "---\ntitle: proxy source\ninitialize:\n  stack:\n    \
-         - action: {proxy: '@target.md'}\nstart:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'source-start']}\n---\nsource body\n";
-    let target_doc = "---\ntitle: proxy target\ninitialize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'target-init']}\n    \
-         - action: skip\n---\ntarget body\n";
+    let source_doc = "---\n\
+         title: proxy source\n\
+         initialize:\n  \
+         - {proxy: '@target.md'}\n\
+         start:\n  \
+         - {append_line: ['events.log', 'source-start']}\n\
+         ---\n\
+         source body\n";
+    let target_doc = "---\n\
+         title: proxy target\n\
+         initialize:\n  \
+         - {append_line: ['events.log', 'target-init']}\n  \
+         - skip\n\
+         ---\n\
+         target body\n";
     let staged = stage_proxy_pair(source_doc, target_doc, false);
     let pane = run_in_tmux_for(&staged, "target-init");
 
@@ -4021,20 +4055,30 @@ fn level2_lifecycle_initialize_proxy_respects_target_skip() {
     );
 }
 
-/// `initialize.stack` ending in `{proxy: "@target.md"}` hands off to a target
-/// whose own `initialize.stack` ends in `{error: "..."}`. The run routes to the
+/// `initialize` list ending in `{proxy: "@target.md"}` hands off to a target
+/// whose own `initialize` list ends in `{error: "..."}`. The run routes to the
 /// target's failure + finalize and surfaces the error.
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_initialize_proxy_respects_target_error() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let source_doc = "---\ntitle: proxy source\ninitialize:\n  stack:\n    \
-         - action: {proxy: '@target.md'}\n---\nsource body\n";
-    let target_doc = "---\ntitle: proxy target\ninitialize:\n  stack:\n    \
-         - action: {error: 'target init failed'}\nfailure:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'target-failure']}\nfinalize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'target-finalize']}\n---\ntarget body\n";
+    let source_doc = "---\n\
+         title: proxy source\n\
+         initialize:\n  \
+         - {proxy: '@target.md'}\n\
+         ---\n\
+         source body\n";
+    let target_doc = "---\n\
+         title: proxy target\n\
+         initialize:\n  \
+         - {error: 'target init failed'}\n\
+         failure:\n  \
+         - {append_line: ['events.log', 'target-failure']}\n\
+         finalize:\n  \
+         - {append_line: ['events.log', 'target-finalize']}\n\
+         ---\n\
+         target body\n";
     let staged = stage_proxy_pair(source_doc, target_doc, true);
     let pane = run_in_tmux_for(&staged, "target-finalize");
 
@@ -4059,7 +4103,7 @@ fn level2_lifecycle_initialize_proxy_respects_target_error() {
     );
 }
 
-/// `initialize.stack` proxying back and forth between two documents is caught
+/// `initialize` list proxying back and forth between two documents is caught
 /// by the cycle/hop-limit guard rather than looping forever.
 ///
 /// Waits for the compose command to *exit* rather than for `target-init` in the
@@ -4075,11 +4119,19 @@ fn level2_lifecycle_initialize_proxy_respects_target_error() {
 fn level2_lifecycle_initialize_proxy_cycle_guarded() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let source_doc = "---\ntitle: proxy source\ninitialize:\n  stack:\n    \
-         - action: {proxy: '@target.md'}\n---\nsource body\n";
-    let target_doc = "---\ntitle: proxy target\ninitialize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'target-init']}\n    \
-         - action: {proxy: '@doc.md'}\n---\ntarget body\n";
+    let source_doc = "---\n\
+         title: proxy source\n\
+         initialize:\n  \
+         - {proxy: '@target.md'}\n\
+         ---\n\
+         source body\n";
+    let target_doc = "---\n\
+         title: proxy target\n\
+         initialize:\n  \
+         - {append_line: ['events.log', 'target-init']}\n  \
+         - {proxy: '@doc.md'}\n\
+         ---\n\
+         target body\n";
     let staged = stage_proxy_pair(source_doc, target_doc, false);
     let pane = run_compose_await_exit(&staged);
 
@@ -4113,11 +4165,13 @@ fn level2_lifecycle_initialize_proxy_cycle_guarded() {
 /// records the typed `err.kind`/`err.variant`, `finalize` records `err.msg`
 /// under a `when: err` guard and then a bare `source-finalize` marker (so a
 /// duplicate `finalize` would show two of them).
-const AC29_CATCH_STACKS: &str = "blocked:\n  stack:\n    \
-     - action: {append_line: ['events.log', \"{{ 'blocked-kind=' + err.kind }}\"]}\n    \
-     - action: {append_line: ['events.log', \"{{ 'blocked-variant=' + err.variant }}\"]}\nfinalize:\n  stack:\n    \
-     - when: \"err\"\n      action: {append_line: ['events.log', \"{{ 'finalize-msg=' + err.msg }}\"]}\n    \
-     - action: {append_line: ['events.log', 'source-finalize']}\n";
+const AC29_CATCH_STACKS: &str = "blocked:\n  \
+     - {append_line: ['events.log', \"{{ 'blocked-kind=' + err.kind }}\"]}\n  \
+     - {append_line: ['events.log', \"{{ 'blocked-variant=' + err.variant }}\"]}\n\
+     finalize:\n  \
+     - when: \"err\"\n    \
+     then: {append_line: ['events.log', \"{{ 'finalize-msg=' + err.msg }}\"]}\n  \
+     - {append_line: ['events.log', 'source-finalize']}\n";
 
 /// Assert the shared AC29 outcome: the source `initialize` ran exactly once, the
 /// provider never launched, and `blocked` → `finalize` fired once each with the
@@ -4138,20 +4192,20 @@ fn assert_ac29_source_catch(lines: &[String], pane: &str) {
         lines
             .iter()
             .any(|l| l.starts_with("blocked-kind=") && l.len() > "blocked-kind=".len()),
-        "the source blocked.stack must fire and observe a non-empty err.kind; \
+        "the source blocked stack must fire and observe a non-empty err.kind; \
          got {lines:?}; pane:\n{pane}"
     );
     assert!(
         lines
             .iter()
             .any(|l| l.starts_with("blocked-variant=") && l.len() > "blocked-variant=".len()),
-        "the source blocked.stack must observe a non-empty err.variant; got {lines:?}; pane:\n{pane}"
+        "the source blocked stack must observe a non-empty err.variant; got {lines:?}; pane:\n{pane}"
     );
     assert!(
         lines
             .iter()
             .any(|l| l.starts_with("finalize-msg=") && l.len() > "finalize-msg=".len()),
-        "the source finalize.stack `when: err` must be truthy and observe a non-empty err.msg; \
+        "the source finalize stack `when: err` must be truthy and observe a non-empty err.msg; \
          got {lines:?}; pane:\n{pane}"
     );
     assert_eq!(
@@ -4171,9 +4225,13 @@ fn level2_lifecycle_initialize_proxy_missing_target_routes_source_blocked_finali
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = format!(
-        "---\ntitle: refuse source\ninitialize:\n  stack:\n    \
-         - action: {{append_line: ['events.log', 'source-init']}}\n    \
-         - action: {{proxy: '@no-such-target.md'}}\n{catch}---\nsource body\n",
+        "---\n\
+         title: refuse source\n\
+         initialize:\n  \
+         - {{append_line: ['events.log', 'source-init']}}\n  \
+         - {{proxy: '@no-such-target.md'}}\n\
+         {catch}---\n\
+         source body\n",
         catch = AC29_CATCH_STACKS,
     );
     let staged = stage(&source_doc);
@@ -4198,9 +4256,13 @@ fn level2_lifecycle_initialize_proxy_cycle_routes_source_blocked_finalize() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = format!(
-        "---\ntitle: cycle source\ninitialize:\n  stack:\n    \
-         - action: {{append_line: ['events.log', 'source-init']}}\n    \
-         - action: {{proxy: '@doc.md'}}\n{catch}---\nsource body\n",
+        "---\n\
+         title: cycle source\n\
+         initialize:\n  \
+         - {{append_line: ['events.log', 'source-init']}}\n  \
+         - {{proxy: '@doc.md'}}\n\
+         {catch}---\n\
+         source body\n",
         catch = AC29_CATCH_STACKS,
     );
     let staged = stage(&source_doc);
@@ -4230,17 +4292,25 @@ fn level2_lifecycle_initialize_proxy_hop_limit_routes_source_blocked_finalize() 
 
     // `doc.md` proxies into the chain; its `source-init` marker doubles as the
     // shared assertion's "exactly one source-init" anchor.
-    let doc = "---\ntitle: hop chain head\ninitialize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'source-init']}\n    \
-         - action: {proxy: '@h1.md'}\n---\nhead body\n";
+    let doc = "---\n\
+         title: hop chain head\n\
+         initialize:\n  \
+         - {append_line: ['events.log', 'source-init']}\n  \
+         - {proxy: '@h1.md'}\n\
+         ---\n\
+         head body\n";
     let staged = stage(doc);
     let ws = staged.workspace.path();
 
     // h1..h14 hand off cleanly to the next link.
     for i in 1..=14 {
         let body = format!(
-            "---\ntitle: hop {i}\ninitialize:\n  stack:\n    \
-             - action: {{proxy: '@h{next}.md'}}\n---\nhop {i} body\n",
+            "---\n\
+             title: hop {i}\n\
+             initialize:\n  \
+             - {{proxy: '@h{next}.md'}}\n\
+             ---\n\
+             hop {i} body\n",
             next = i + 1,
         );
         fs::write(ws.join(format!("h{i}.md")), body).unwrap();
@@ -4249,15 +4319,23 @@ fn level2_lifecycle_initialize_proxy_hop_limit_routes_source_blocked_finalize() 
     // its own blocked/finalize catch stacks must fire. It reuses the source
     // marker names so the shared assertion applies unchanged.
     let h15 = format!(
-        "---\ntitle: hop 15\ninitialize:\n  stack:\n    \
-         - action: {{proxy: '@h16.md'}}\n{catch}---\nhop 15 body\n",
+        "---\n\
+         title: hop 15\n\
+         initialize:\n  \
+         - {{proxy: '@h16.md'}}\n\
+         {catch}---\n\
+         hop 15 body\n",
         catch = AC29_CATCH_STACKS,
     );
     fs::write(ws.join("h15.md"), h15).unwrap();
     // h16 exists so the refusal is a hop-limit overrun, not a missing target;
     // if it ever launched a provider the `provider-ran` guard would catch it.
-    let h16 = "---\ntitle: hop 16 target\nsuccess:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'h16-success']}\n---\nhop 16 body\n";
+    let h16 = "---\n\
+         title: hop 16 target\n\
+         success:\n  \
+         - {append_line: ['events.log', 'h16-success']}\n\
+         ---\n\
+         hop 16 body\n";
     fs::write(ws.join("h16.md"), h16).unwrap();
 
     let pane = run_in_tmux_for(&staged, "source-finalize");
@@ -4276,7 +4354,7 @@ fn level2_lifecycle_initialize_proxy_hop_limit_routes_source_blocked_finalize() 
 
 /// Finding 5 (High): a proxy hand-off whose target then fails **harness-plan
 /// parse** before provider launch must route the blocked pre-provider run
-/// through the target's `blocked.stack` and `finalize.stack`, with the runtime
+/// through the target's `blocked` list and `finalize` list, with the runtime
 /// `err` payload available — not the legacy top-level-only `emit_blocked_or_err`
 /// path that skipped the typed stacks, never fired `finalize`, and never exposed
 /// `err`.
@@ -4285,26 +4363,38 @@ fn level2_lifecycle_initialize_proxy_hop_limit_routes_source_blocked_finalize() 
 /// own lifecycle (succeeds) and runs its `initialize` (proceeds), then
 /// `parse_harness_plan` rejects the target's `timeout: "not a duration"` with a
 /// typed `HarnessError`. The fix routes this through `blocked` → `finalize`
-/// carrying `err_info`, so the target's `blocked.stack` observes
-/// `err.kind`/`err.variant` and the `when: "err"` guard on `finalize.stack`
+/// carrying `err_info`, so the target's `blocked` list observes
+/// `err.kind`/`err.variant` and the `when: "err"` guard on `finalize` list
 /// observes `err.msg`. The provider never launches.
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_proxy_target_harness_plan_failure_routes_blocked_finalize_with_err() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let source_doc = "---\ntitle: proxy source\ninitialize:\n  stack:\n    \
-         - action: {proxy: '@target.md'}\n---\nsource body\n";
+    let source_doc = "---\n\
+         title: proxy source\n\
+         initialize:\n  \
+         - {proxy: '@target.md'}\n\
+         ---\n\
+         source body\n";
     // `timeout: "not a duration"` passes lifecycle parse + the target's
     // `initialize`, then fails `parse_harness_plan` (a typed HarnessError)
     // before the provider launches. The target's blocked/finalize stacks read
     // the `err` payload routed in by the Finding-5 fix.
-    let target_doc = "---\ntitle: proxy target\ntimeout: \"not a duration\"\ninitialize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'target-init']}\nblocked:\n  stack:\n    \
-         - action: {append_line: ['events.log', \"{{ 'blocked-err-kind=' + err.kind }}\"]}\n    \
-         - action: {append_line: ['events.log', \"{{ 'blocked-err-variant=' + err.variant }}\"]}\nfinalize:\n  stack:\n    \
-         - when: \"err\"\n      action: {append_line: ['events.log', \"{{ 'finalize-err-msg=' + err.msg }}\"]}\n    \
-         - action: {append_line: ['events.log', 'target-finalize']}\n---\ntarget body\n";
+    let target_doc = "---\n\
+         title: proxy target\n\
+         timeout: \"not a duration\"\n\
+         initialize:\n  \
+         - {append_line: ['events.log', 'target-init']}\n\
+         blocked:\n  \
+         - {append_line: ['events.log', \"{{ 'blocked-err-kind=' + err.kind }}\"]}\n  \
+         - {append_line: ['events.log', \"{{ 'blocked-err-variant=' + err.variant }}\"]}\n\
+         finalize:\n  \
+         - when: \"err\"\n    \
+         then: {append_line: ['events.log', \"{{ 'finalize-err-msg=' + err.msg }}\"]}\n  \
+         - {append_line: ['events.log', 'target-finalize']}\n\
+         ---\n\
+         target body\n";
     let staged = stage_proxy_pair(source_doc, target_doc, false);
     let pane = run_in_tmux_for(&staged, "target-finalize");
 
@@ -4323,24 +4413,24 @@ fn level2_lifecycle_proxy_target_harness_plan_failure_routes_blocked_finalize_wi
         "a pre-provider harness-plan parse failure must not launch the provider; \
          got {lines:?}; pane:\n{pane}"
     );
-    // The target's blocked.stack fired and observed the typed err payload. The
+    // The target's blocked stack fired and observed the typed err payload. The
     // typed HarnessError (`InvalidTimeout` → `composition.lifecycle_invalid`) is
     // classifiable, so the deprecated `err.kind` alias now reads as its
     // `err.category` facet (`composition`), not the internal Rust type name.
     assert!(
         lines.iter().any(|l| l == "blocked-err-kind=composition"),
-        "blocked.stack must fire and observe err.kind='composition' (alias of err.category); \
+        "blocked stack must fire and observe err.kind='composition' (alias of err.category); \
          got {lines:?}; pane:\n{pane}"
     );
     assert!(
         lines.iter().any(|l| l.starts_with("blocked-err-variant=")),
-        "blocked.stack must observe a non-empty err.variant; got {lines:?}; pane:\n{pane}"
+        "blocked stack must observe a non-empty err.variant; got {lines:?}; pane:\n{pane}"
     );
-    // The target's finalize.stack fired and its `when: "err"` guard was truthy,
+    // The target's finalize stack fired and its `when: "err"` guard was truthy,
     // so err.msg reached the failed-finalize stack.
     assert!(
         lines.iter().any(|l| l.starts_with("finalize-err-msg=") && l.len() > "finalize-err-msg=".len()),
-        "finalize.stack `when: err` must be truthy and observe a non-empty err.msg; \
+        "finalize stack `when: err` must be truthy and observe a non-empty err.msg; \
          got {lines:?}; pane:\n{pane}"
     );
     assert!(
@@ -4368,16 +4458,27 @@ fn level2_lifecycle_proxy_target_harness_plan_failure_routes_blocked_finalize_wi
 fn level2_lifecycle_proxy_target_lifecycle_parse_failure_fires_no_catch_events() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let source_doc = "---\ntitle: proxy source\ninitialize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'source-init']}\n    \
-         - action: {proxy: '@target.md'}\nblocked:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'source-blocked']}\nfinalize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'source-finalize']}\n---\nsource body\n";
-    // The target's `success.stack` carries a malformed item (no `action` key),
+    let source_doc = "---\n\
+         title: proxy source\n\
+         initialize:\n  \
+         - {append_line: ['events.log', 'source-init']}\n  \
+         - {proxy: '@target.md'}\n\
+         blocked:\n  \
+         - {append_line: ['events.log', 'source-blocked']}\n\
+         finalize:\n  \
+         - {append_line: ['events.log', 'source-finalize']}\n\
+         ---\n\
+         source body\n";
+    // The target's `success` list carries a malformed item (a `when` with
+    // neither `then` nor a sibling verb),
     // which `parse_lifecycle_config` rejects with a typed CompositionError
     // (`LifecycleStackInvalidShape`) during the target's bootstrap read.
-    let target_doc = "---\ntitle: proxy target\nsuccess:\n  stack:\n    \
-         - when: \"true\"\n---\ntarget body\n";
+    let target_doc = "---\n\
+         title: proxy target\n\
+         success:\n  \
+         - when: \"true\"\n\
+         ---\n\
+         target body\n";
     let staged = stage_proxy_pair(source_doc, target_doc, false);
     let pane = run_in_tmux_until_exit(&staged);
 
@@ -4444,8 +4545,8 @@ fn level2_lifecycle_proxy_target_lifecycle_parse_failure_fires_no_catch_events()
 /// old labels no faceted clause could.
 ///
 /// Asserts the ordered markers prove: `start` fired → the provider never ran
-/// (pre-spawn error) → `failure.stack` fired with the `err` interpolated →
-/// `finalize.stack` fired with `err.msg`.
+/// (pre-spawn error) → `failure` list fired with the `err` interpolated →
+/// `finalize` list fired with `err.msg`.
 #[test]
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_post_start_setup_failure_routes_failure_finalize_with_err() {
@@ -4461,17 +4562,14 @@ exit_expressions:
       - "["
     kind: regex
 start:
-  stack:
-    - action: {append_line: ["events.log", "start"]}
+  - {append_line: ["events.log", "start"]}
 failure:
-  stack:
-    - action: {append_line: ["events.log", "{{ 'failure-kind=' + err.kind }}"]}
-    - action: {append_line: ["events.log", "{{ 'failure-variant=' + err.variant }}"]}
+  - {append_line: ["events.log", "{{ 'failure-kind=' + err.kind }}"]}
+  - {append_line: ["events.log", "{{ 'failure-variant=' + err.variant }}"]}
 finalize:
-  stack:
-    - when: "err"
-      action: {append_line: ["events.log", "{{ 'finalize-msg=' + err.msg }}"]}
-    - action: {append_line: ["events.log", "finalize"]}
+  - when: "err"
+    then: {append_line: ["events.log", "{{ 'finalize-msg=' + err.msg }}"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#;
@@ -4498,12 +4596,12 @@ Body
     // its real facets rather than a synthesized label (see the doc comment).
     assert!(
         lines.iter().any(|l| l == "failure-kind=config"),
-        "failure.stack must fire and observe the typed error's category \
+        "failure stack must fire and observe the typed error's category \
          (err.kind='config'); got {lines:?}; pane:\n{pane}"
     );
     assert!(
         lines.iter().any(|l| l == "failure-variant=config.invalid"),
-        "failure.stack must observe the typed error's code \
+        "failure stack must observe the typed error's code \
          (err.variant='config.invalid'); got {lines:?}; pane:\n{pane}"
     );
     // The finalize stack fired and its `when: "err"` guard was truthy.
@@ -4511,7 +4609,7 @@ Body
         lines
             .iter()
             .any(|l| l.starts_with("finalize-msg=") && l.len() > "finalize-msg=".len()),
-        "finalize.stack `when: err` must be truthy and observe a non-empty err.msg; \
+        "finalize stack `when: err` must be truthy and observe a non-empty err.msg; \
          got {lines:?}; pane:\n{pane}"
     );
     assert!(
@@ -4667,11 +4765,9 @@ loop:
   action: "increment(phase)"
   max: 10
 initialize:
-  stack:
-    - action: {append_line: ["events.log", "target-init"]}
+  - {append_line: ["events.log", "target-init"]}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "target-finalize:{{phase}}"]}
+  - {append_line: ["events.log", "target-finalize:{{phase}}"]}
 ---
 target body phase {{phase}}
 "#;
@@ -4681,8 +4777,7 @@ target body phase {{phase}}
 const EQUIV_ROUTER: &str = r#"---
 title: proxy router
 initialize:
-  stack:
-    - action: {proxy: "@target.md"}
+  - {proxy: "@target.md"}
 ---
 router body
 "#;
@@ -4700,11 +4795,9 @@ loop:
   action: "increment(phase)"
   max: 10
 initialize:
-  stack:
-    - action: {proxy: "@target.md"}
+  - {proxy: "@target.md"}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "router-finalize:{{phase}}"]}
+  - {append_line: ["events.log", "router-finalize:{{phase}}"]}
 ---
 router body phase {{phase}}
 "#;
@@ -5383,12 +5476,21 @@ fn run_in_tmux_until_exit(staged: &Staged) -> String {
 fn level2_lifecycle_proxy_target_initialize_shell_is_gated_before_dispatch() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let source_doc = "---\ntitle: gate source\ninitialize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'source-init']}\n    \
-         - action: {proxy: '@target.md'}\n---\nsource body\n";
-    let target_doc = "---\ntitle: gate target\ninitialize:\n  stack:\n    \
-         - action: {shell: 'rm sentinel.txt'}\nsuccess:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'target-success']}\n---\ntarget body\n";
+    let source_doc = "---\n\
+         title: gate source\n\
+         initialize:\n  \
+         - {append_line: ['events.log', 'source-init']}\n  \
+         - {proxy: '@target.md'}\n\
+         ---\n\
+         source body\n";
+    let target_doc = "---\n\
+         title: gate target\n\
+         initialize:\n  \
+         - {shell: 'rm sentinel.txt'}\n\
+         success:\n  \
+         - {append_line: ['events.log', 'target-success']}\n\
+         ---\n\
+         target body\n";
     let staged = stage_proxy_pair(source_doc, target_doc, true);
     let sentinel = staged.workspace.path().join("sentinel.txt");
     fs::write(&sentinel, "intact").unwrap();
@@ -5428,12 +5530,21 @@ fn level2_lifecycle_proxy_target_initialize_shell_is_gated_before_dispatch() {
 fn level2_lifecycle_proxy_target_later_event_shell_is_audited_after_stabilization() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let source_doc = "---\ntitle: audit source\ninitialize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'source-init']}\n    \
-         - action: {proxy: '@target.md'}\n---\nsource body\n";
-    let target_doc = "---\ntitle: audit target\ninitialize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'target-init']}\nsuccess:\n  stack:\n    \
-         - action: {shell: 'rm sentinel.txt'}\n---\ntarget body\n";
+    let source_doc = "---\n\
+         title: audit source\n\
+         initialize:\n  \
+         - {append_line: ['events.log', 'source-init']}\n  \
+         - {proxy: '@target.md'}\n\
+         ---\n\
+         source body\n";
+    let target_doc = "---\n\
+         title: audit target\n\
+         initialize:\n  \
+         - {append_line: ['events.log', 'target-init']}\n\
+         success:\n  \
+         - {shell: 'rm sentinel.txt'}\n\
+         ---\n\
+         target body\n";
     let staged = stage_proxy_pair(source_doc, target_doc, true);
     let sentinel = staged.workspace.path().join("sentinel.txt");
     fs::write(&sentinel, "intact").unwrap();
@@ -5467,12 +5578,22 @@ fn level2_lifecycle_proxy_target_later_event_shell_is_audited_after_stabilizatio
 fn level2_lifecycle_proxy_target_rereads_after_initialize_mutation() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let source_doc = "---\ntitle: reread source\ninitialize:\n  stack:\n    \
-         - action: {proxy: '@target.md'}\n---\nsource body\n";
-    let target_doc = "---\ntitle: reread target\nphase: authored\ninitialize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'target-init']}\n    \
-         - action: {set_frontmatter: ['target.md', 'phase', 'stabilized']}\nfinalize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'target-finalize']}\n---\nphase-is-{{ phase }}\n";
+    let source_doc = "---\n\
+         title: reread source\n\
+         initialize:\n  \
+         - {proxy: '@target.md'}\n\
+         ---\n\
+         source body\n";
+    let target_doc = "---\n\
+         title: reread target\n\
+         phase: authored\n\
+         initialize:\n  \
+         - {append_line: ['events.log', 'target-init']}\n  \
+         - {set_frontmatter: ['target.md', 'phase', 'stabilized']}\n\
+         finalize:\n  \
+         - {append_line: ['events.log', 'target-finalize']}\n\
+         ---\n\
+         phase-is-{{ phase }}\n";
     let staged = stage_proxy_pair(source_doc, target_doc, true);
     write_prompt_recording_goose(&staged.bin_dir, &staged.events_log);
 
@@ -5599,19 +5720,15 @@ title: equivalence probe
 note: authored-note
 derived: "{{ note }}-derived"
 initialize:
-  stack:
-    - action: {append_line: ["events.log", "sig=initialize"]}
+  - {append_line: ["events.log", "sig=initialize"]}
 success:
-  stack:
-    - action:
-        - {append_line: ["events.log", "sig=success"]}
-        - {append_line: ["events.log", "fm.note={{ note }}"]}
-        - {append_line: ["events.log", "fm.derived={{ derived }}"]}
-        - {append_line: ["events.log", "ctx.area={{ ctx.area }}"]}
-        - {append_line: ["events.log", "ctx.os={{ ctx.os }}"]}
+  - {append_line: ["events.log", "sig=success"]}
+  - {append_line: ["events.log", "fm.note={{ note }}"]}
+  - {append_line: ["events.log", "fm.derived={{ derived }}"]}
+  - {append_line: ["events.log", "ctx.area={{ ctx.area }}"]}
+  - {append_line: ["events.log", "ctx.os={{ ctx.os }}"]}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "sig=finalize"]}
+  - {append_line: ["events.log", "sig=finalize"]}
 ---
 probe body note={{ note }}
 "#;
@@ -5700,16 +5817,12 @@ const EQUIV_PINNED_MODEL_TARGET: &str = r#"---
 title: equivalence probe with a pinned model
 model: llamacpp/probe-model-x
 initialize:
-  stack:
-    - action: {append_line: ["events.log", "sig=initialize"]}
+  - {append_line: ["events.log", "sig=initialize"]}
 success:
-  stack:
-    - action:
-        - {append_line: ["events.log", "sig=success"]}
-        - {append_line: ["events.log", "env.MODEL={{ env.MODEL }}"]}
+  - {append_line: ["events.log", "sig=success"]}
+  - {append_line: ["events.log", "env.MODEL={{ env.MODEL }}"]}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "sig=finalize"]}
+  - {append_line: ["events.log", "sig=finalize"]}
 ---
 pinned probe body
 "#;
@@ -5773,8 +5886,7 @@ const AC9_ROUTER: &str = r#"---
 title: ac9 router
 agent: goose
 initialize:
-  stack:
-    - action: {proxy: "@target.md"}
+  - {proxy: "@target.md"}
 ---
 router body
 "#;
@@ -5804,25 +5916,21 @@ fm_model: "{{ ctx.model }}"
 fm_env_agent: "{{ env.AGENT }}"
 fm_env_model: "{{ env.MODEL }}"
 initialize:
-  stack:
-    - action: {append_line: ["events.log", "sig=initialize"]}
+  - {append_line: ["events.log", "sig=initialize"]}
 success:
-  stack:
-    - action:
-        - {append_line: ["events.log", "sig=success"]}
-        - {append_line: ["events.log", "lc.ctx.area={{ ctx.area }}"]}
-        - {append_line: ["events.log", "lc.ctx.agent={{ ctx.agent }}"]}
-        - {append_line: ["events.log", "lc.ctx.model={{ ctx.model }}"]}
-        - {append_line: ["events.log", "lc.env.AGENT={{ env.AGENT }}"]}
-        - {append_line: ["events.log", "lc.env.MODEL={{ env.MODEL }}"]}
-        - {append_line: ["events.log", "fm.ctx.area={{ fm_area }}"]}
-        - {append_line: ["events.log", "fm.ctx.agent={{ fm_agent }}"]}
-        - {append_line: ["events.log", "fm.ctx.model={{ fm_model }}"]}
-        - {append_line: ["events.log", "fm.env.AGENT={{ fm_env_agent }}"]}
-        - {append_line: ["events.log", "fm.env.MODEL={{ fm_env_model }}"]}
+  - {append_line: ["events.log", "sig=success"]}
+  - {append_line: ["events.log", "lc.ctx.area={{ ctx.area }}"]}
+  - {append_line: ["events.log", "lc.ctx.agent={{ ctx.agent }}"]}
+  - {append_line: ["events.log", "lc.ctx.model={{ ctx.model }}"]}
+  - {append_line: ["events.log", "lc.env.AGENT={{ env.AGENT }}"]}
+  - {append_line: ["events.log", "lc.env.MODEL={{ env.MODEL }}"]}
+  - {append_line: ["events.log", "fm.ctx.area={{ fm_area }}"]}
+  - {append_line: ["events.log", "fm.ctx.agent={{ fm_agent }}"]}
+  - {append_line: ["events.log", "fm.ctx.model={{ fm_model }}"]}
+  - {append_line: ["events.log", "fm.env.AGENT={{ fm_env_agent }}"]}
+  - {append_line: ["events.log", "fm.env.MODEL={{ fm_env_model }}"]}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "sig=finalize"]}
+  - {append_line: ["events.log", "sig=finalize"]}
 ---
 probe body.ctx.area=[{{ ctx.area }}] body.ctx.agent=[{{ ctx.agent }}] body.ctx.model=[{{ ctx.model }}] body.env.AGENT=[{{ env.AGENT }}] body.env.MODEL=[{{ env.MODEL }}]
 "#;
@@ -5990,17 +6098,26 @@ fn level2_lifecycle_proxy_overlay_value_is_not_disclosed_in_rendered_status() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let source_doc = format!(
-        "---\ntitle: overlay redaction router\ninitialize:\n  stack:\n    \
-         - action: {{action: proxy, target: '@target.md', with: {{secret: \"{secret}\"}}}}\n\
-         ---\nrouter body\n",
+        "---\n\
+         title: overlay redaction router\n\
+         initialize:\n  \
+         - {{proxy: {{target: '@target.md', with: {{secret: \"{secret}\"}}}}}}\n\
+         ---\n\
+         router body\n",
         secret = AC30_OVERLAY_SECRET,
     );
     // The target authors its own `secret` default and reads the effective value
     // through its `success` stack into `events.log`. Its body never references
     // `secret`, so the value cannot reach the agent-prompt preview.
-    let target_doc = "---\ntitle: overlay redaction target\nsecret: authored-default\nsuccess:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'consumed={{ secret }}']}\nfinalize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'redaction-finalize']}\n---\ntarget body carries no secret\n";
+    let target_doc = "---\n\
+         title: overlay redaction target\n\
+         secret: authored-default\n\
+         success:\n  \
+         - {append_line: ['events.log', 'consumed={{ secret }}']}\n\
+         finalize:\n  \
+         - {append_line: ['events.log', 'redaction-finalize']}\n\
+         ---\n\
+         target body carries no secret\n";
     let staged = stage_proxy_pair(&source_doc, target_doc, true);
 
     let pane = run_in_tmux_for(&staged, "redaction-finalize");
@@ -6043,16 +6160,30 @@ fn level2_lifecycle_proxy_overlay_value_is_not_disclosed_in_rendered_status() {
 fn level2_lifecycle_proxy_three_document_chain_forwards_only_explicit_keys() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let source_doc = "---\ntitle: chain source\ninitialize:\n  stack:\n    \
-         - action: {action: proxy, target: '@mid.md', with: {token: from-source, extra: source-extra}}\n\
-         ---\nsource body\n";
+    let source_doc = "---\n\
+         title: chain source\n\
+         initialize:\n  \
+         - {proxy: {target: '@mid.md', with: {token: from-source, extra: source-extra}}}\n\
+         ---\n\
+         source body\n";
     // The middle hop forwards `token` explicitly and omits `extra`.
-    let mid_doc = "---\ntitle: chain middle\ntoken: mid-default\ninitialize:\n  stack:\n    \
-         - action: {action: proxy, target: '@target.md', with: {token: \"{{ token }}\"}}\n\
-         ---\nmiddle body\n";
-    let target_doc = "---\ntitle: chain target\ntoken: target-default\nextra: authored-extra\nsuccess:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'token={{ token }} extra={{ extra }}']}\nfinalize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'chain-finalize']}\n---\nchain target body\n";
+    let mid_doc = "---\n\
+         title: chain middle\n\
+         token: mid-default\n\
+         initialize:\n  \
+         - {proxy: {target: '@target.md', with: {token: \"{{ token }}\"}}}\n\
+         ---\n\
+         middle body\n";
+    let target_doc = "---\n\
+         title: chain target\n\
+         token: target-default\n\
+         extra: authored-extra\n\
+         success:\n  \
+         - {append_line: ['events.log', 'token={{ token }} extra={{ extra }}']}\n\
+         finalize:\n  \
+         - {append_line: ['events.log', 'chain-finalize']}\n\
+         ---\n\
+         chain target body\n";
     let staged = stage_proxy_pair(source_doc, target_doc, true);
     fs::write(staged.workspace.path().join("mid.md"), mid_doc).unwrap();
 
@@ -6102,8 +6233,7 @@ title: cross repo router
 $schema:
     spec: file(required;eager)
 initialize:
-  stack:
-    - action: {proxy: "@otherrepo/target.md"}
+  - {proxy: "@otherrepo/target.md"}
 ---
 router body
 "#;
@@ -6238,10 +6368,9 @@ fn run_capturing_stdout(staged: &Staged, done_marker: &str) -> (String, String) 
 const ROUTING_TARGET: &str = r#"---
 title: routing target
 success:
-  stdout: "STDOUTrouteMARKER"
-  info: "STDERRrouteMARKER"
-  stack:
-    - action: {append_line: ["events.log", "routing-done"]}
+  - stdout: "STDOUTrouteMARKER"
+  - info: "STDERRrouteMARKER"
+  - {append_line: ["events.log", "routing-done"]}
 ---
 routing target body
 "#;
@@ -6304,10 +6433,21 @@ fn level2_lifecycle_equivalence_stdout_stderr_routing_matches_direct_run() {
 fn level2_lifecycle_proxy_inside_sequence_step_is_contained() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let sequence_doc = "---\ntitle: sequence with a proxy step\nsequence:\n  - alpha\n  - beta\n\
-         initialize:\n  stack:\n    - action: {proxy: '@target.md'}\n---\nsequence body {{ state }}\n";
-    let target_doc = "---\ntitle: sequence proxy target\nsuccess:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'target-ran']}\n---\nsequence proxy target body\n";
+    let sequence_doc = "---\n\
+         title: sequence with a proxy step\n\
+         sequence:\n  \
+         - alpha\n  \
+         - beta\n\
+         initialize:\n  \
+         - {proxy: '@target.md'}\n\
+         ---\n\
+         sequence body {{ state }}\n";
+    let target_doc = "---\n\
+         title: sequence proxy target\n\
+         success:\n  \
+         - {append_line: ['events.log', 'target-ran']}\n\
+         ---\n\
+         sequence proxy target body\n";
     let staged = stage_proxy_pair(sequence_doc, target_doc, true);
 
     // Two steps, each proxying to the target once: 2 `target-ran` markers.
@@ -6376,15 +6516,27 @@ fn run_sequence_until_target_runs(staged: &Staged, expected_runs: usize) -> Stri
 
 /// A two-step sequence source whose every step hands its step off to the looping
 /// `target.md` at `initialize`.
-const SEQ_LOOP_SOURCE: &str = "---\ntitle: sequence with a looping proxy step\n\
-     sequence:\n  - alpha\n  - beta\ninitialize:\n  stack:\n    \
-     - action: {proxy: '@target.md'}\n---\nsequence body\n";
+const SEQ_LOOP_SOURCE: &str = "---\n\
+     title: sequence with a looping proxy step\n\
+     sequence:\n  \
+     - alpha\n  \
+     - beta\n\
+     initialize:\n  \
+     - {proxy: '@target.md'}\n\
+     ---\n\
+     sequence body\n";
 
 /// A two-step sequence source whose every step proxies to the pinned-model
 /// target. Mirrors [`SEQ_LOOP_SOURCE`] but reaches [`EQUIV_PINNED_MODEL_TARGET`].
-const SEQ_MODEL_SOURCE: &str = "---\ntitle: sequence pinned-model launch facet\n\
-     sequence:\n  - alpha\n  - beta\ninitialize:\n  stack:\n    \
-     - action: {proxy: '@target.md'}\n---\nsequence body\n";
+const SEQ_MODEL_SOURCE: &str = "---\n\
+     title: sequence pinned-model launch facet\n\
+     sequence:\n  \
+     - alpha\n  \
+     - beta\n\
+     initialize:\n  \
+     - {proxy: '@target.md'}\n\
+     ---\n\
+     sequence body\n";
 
 /// Run `claudine sequence --goose <doc>` in tmux and block until `events.log`
 /// holds `expected_lines` markers, or the marker count settles (so a run that
@@ -6650,10 +6802,18 @@ fn level2_lifecycle_inline_compose_proxy_closure_rewrites_only_final_target() {
 
     // Every document is an inline-compose document (has `prompt:`); the first two
     // hand off at `initialize` before their own prompt is ever used.
-    let router = "---\nprompt: gen-router\ninitialize:\n  stack:\n    \
-         - action: {proxy: '@mid.md'}\n---\nrouter original body\n";
-    let mid = "---\nprompt: gen-mid\ninitialize:\n  stack:\n    \
-         - action: {proxy: '@final.md'}\n---\nmid original body\n";
+    let router = "---\n\
+         prompt: gen-router\n\
+         initialize:\n  \
+         - {proxy: '@mid.md'}\n\
+         ---\n\
+         router original body\n";
+    let mid = "---\n\
+         prompt: gen-mid\n\
+         initialize:\n  \
+         - {proxy: '@final.md'}\n\
+         ---\n\
+         mid original body\n";
     let final_doc = "---\nprompt: gen-final\n---\nfinal original body\n";
 
     let staged = stage_success(router);
@@ -6737,12 +6897,20 @@ fn level2_lifecycle_proxy_shell_approved_bytes_equal_executed_bytes() {
 
     // The router installs the overlay value the command interpolates; the target
     // authors a different default so a template re-evaluation would be visible.
-    let source_doc = "---\ntitle: approved-bytes router\ninitialize:\n  stack:\n    \
-         - action: {action: proxy, target: '@target.md', with: {marker: 'forty two'}}\n\
-         ---\nrouter body\n";
-    let target_doc = "---\ntitle: approved-bytes target\nmarker: authored\nsuccess:\n  stack:\n    \
-         - action: {shell: \"logbytes 'exact {{ marker }} bytes'\"}\n    \
-         - action: {append_line: ['events.log', 'ac17-done']}\n---\ntarget body\n";
+    let source_doc = "---\n\
+         title: approved-bytes router\n\
+         initialize:\n  \
+         - {proxy: {target: '@target.md', with: {marker: 'forty two'}}}\n\
+         ---\n\
+         router body\n";
+    let target_doc = "---\n\
+         title: approved-bytes target\n\
+         marker: authored\n\
+         success:\n  \
+         - {shell: \"logbytes 'exact {{ marker }} bytes'\"}\n  \
+         - {append_line: ['events.log', 'ac17-done']}\n\
+         ---\n\
+         target body\n";
     let staged = stage_proxy_pair(source_doc, target_doc, true);
 
     // The recorder is whitelisted so the non-interactive run approves it without
@@ -6776,13 +6944,19 @@ fn level2_lifecycle_proxy_shell_approved_bytes_equal_executed_bytes() {
 fn level2_lifecycle_overlay_installed_initialize_shell_is_denied_by_target_policy() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let source_doc = "---\ntitle: overlay-installed denial router\ninitialize:\n  stack:\n    \
-         - action: {action: proxy, target: '@target.md', with: \
-         {initialize: {stack: [{action: {shell: 'rm sentinel.txt'}}]}}}\n\
-         ---\nrouter body\n";
+    let source_doc = "---\n\
+         title: overlay-installed denial router\n\
+         initialize:\n  \
+         - {proxy: {target: '@target.md', with: {initialize: [{shell: 'rm sentinel.txt'}]}}}\n\
+         ---\n\
+         router body\n";
     // The target authors no `initialize`: the audited stack is the overlay's.
-    let target_doc = "---\ntitle: overlay-installed denial target\nsuccess:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'target-success']}\n---\ntarget body\n";
+    let target_doc = "---\n\
+         title: overlay-installed denial target\n\
+         success:\n  \
+         - {append_line: ['events.log', 'target-success']}\n\
+         ---\n\
+         target body\n";
     let staged = stage_proxy_pair(source_doc, target_doc, true);
     let sentinel = staged.workspace.path().join("sentinel.txt");
     fs::write(&sentinel, "intact").unwrap();
@@ -6823,7 +6997,7 @@ fn level2_lifecycle_overlay_installed_initialize_shell_is_denied_by_target_polic
 #[serial(level2_lifecycle_control)]
 fn level2_lifecycle_overlay_initialization_shell_cannot_be_whitelisted() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
-    let source_doc = "---\ninitialize:\n  stack:\n    - action: {action: proxy, target: '@target.md', with: {initialize: {stack: [{action: {shell: \"logbytes forbidden\"}}]}}}\n---\nRouter\n";
+    let source_doc = "---\ninitialize:\n  - {proxy: {target: '@target.md', with: {initialize: [{shell: \"logbytes forbidden\"}]}}}\n---\nRouter\n";
     let staged = stage_proxy_pair(source_doc, "---\ntitle: target\n---\nTarget\n", true);
     let executed_log = staged.workspace.path().join("executed.log");
     write_bytes_recorder(&staged.bin_dir, &executed_log);
@@ -6846,14 +7020,23 @@ fn level2_lifecycle_overlay_initialization_shell_cannot_be_whitelisted() {
 fn level2_lifecycle_proxy_with_overlay_survives_a_retry() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let source_doc = "---\ntitle: overlay retry router\ninitialize:\n  stack:\n    \
-         - action: {action: proxy, target: '@target.md', with: {token: OVL26retry}}\n\
-         ---\nrouter body\n";
-    let target_doc = "---\ntitle: overlay retry target\ntoken: authored\nfailure:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'attempt-token={{ token }}']}\n    \
-         - action: {retry: 1}\nfinalize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'final-token={{ token }}']}\n    \
-         - action: {append_line: ['events.log', 'retry-done']}\n---\ntarget body\n";
+    let source_doc = "---\n\
+         title: overlay retry router\n\
+         initialize:\n  \
+         - {proxy: {target: '@target.md', with: {token: OVL26retry}}}\n\
+         ---\n\
+         router body\n";
+    let target_doc = "---\n\
+         title: overlay retry target\n\
+         token: authored\n\
+         failure:\n  \
+         - {append_line: ['events.log', 'attempt-token={{ token }}']}\n  \
+         - {retry: 1}\n\
+         finalize:\n  \
+         - {append_line: ['events.log', 'final-token={{ token }}']}\n  \
+         - {append_line: ['events.log', 'retry-done']}\n\
+         ---\n\
+         target body\n";
     // Failing provider so the target always routes through `failure` → `retry`.
     let staged = stage_proxy_pair(source_doc, target_doc, false);
 
@@ -6887,14 +7070,24 @@ fn level2_lifecycle_proxy_with_overlay_survives_a_retry() {
 fn level2_lifecycle_proxy_with_overlay_survives_a_loop_refresh() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let source_doc = "---\ntitle: overlay loop router\ninitialize:\n  stack:\n    \
-         - action: {action: proxy, target: '@target.md', with: {token: OVL26loop}}\n\
-         ---\nrouter body\n";
-    let target_doc = "---\ntitle: overlay loop target\ntoken: authored\nphase: 1\n\
-         loop:\n  until: \"phase > 2\"\n  action: \"increment(phase)\"\n  max: 10\n\
-         finalize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'loop-token={{ token }}:{{ phase }}']}\n\
-         ---\ntarget body\n";
+    let source_doc = "---\n\
+         title: overlay loop router\n\
+         initialize:\n  \
+         - {proxy: {target: '@target.md', with: {token: OVL26loop}}}\n\
+         ---\n\
+         router body\n";
+    let target_doc = "---\n\
+         title: overlay loop target\n\
+         token: authored\n\
+         phase: 1\n\
+         loop:\n  \
+         until: \"phase > 2\"\n  \
+         action: \"increment(phase)\"\n  \
+         max: 10\n\
+         finalize:\n  \
+         - {append_line: ['events.log', 'loop-token={{ token }}:{{ phase }}']}\n\
+         ---\n\
+         target body\n";
     let staged = stage_proxy_pair(source_doc, target_doc, true);
 
     // 3 iterations × (provider-ran + loop-token) = 6 markers.
@@ -6924,15 +7117,26 @@ fn level2_lifecycle_proxy_with_overlay_survives_a_resume() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let follow_up = "please finish the resumed work";
-    let source_doc = "---\ntitle: overlay resume router\ninitialize:\n  stack:\n    \
-         - action: {action: proxy, target: '@target.md', with: {token: OVL26resume}}\n\
-         ---\nrouter body\n";
+    let source_doc = "---\n\
+         title: overlay resume router\n\
+         initialize:\n  \
+         - {proxy: {target: '@target.md', with: {token: OVL26resume}}}\n\
+         ---\n\
+         router body\n";
     let target_doc = format!(
-        "---\ntitle: overlay resume target\ntoken: authored\nstart:\n  stack:\n    \
-         - action: {{append_line: ['events.log', 'start-token={{{{ token }}}}']}}\nfailure:\n  stack:\n    \
-         - action: {{resume: \"{follow_up}\"}}\nsuccess:\n  stack:\n    \
-         - action: {{append_line: ['events.log', 'success-token={{{{ token }}}}']}}\nfinalize:\n  stack:\n    \
-         - action: {{append_line: ['events.log', 'resume-done']}}\n---\ntarget body\n"
+        "---\n\
+         title: overlay resume target\n\
+         token: authored\n\
+         start:\n  \
+         - {{append_line: ['events.log', 'start-token={{{{ token }}}}']}}\n\
+         failure:\n  \
+         - {{resume: \"{follow_up}\"}}\n\
+         success:\n  \
+         - {{append_line: ['events.log', 'success-token={{{{ token }}}}']}}\n\
+         finalize:\n  \
+         - {{append_line: ['events.log', 'resume-done']}}\n\
+         ---\n\
+         target body\n"
     );
     let staged = stage_proxy_pair(source_doc, &target_doc, true);
     // A resume-capable Claude: fails the first attempt after reporting a session,
@@ -6997,8 +7201,12 @@ fn write_cwd_recording_goose(bin_dir: &Path, events_log: &Path) {
 
 /// A minimal probe target whose only job is to stamp a terminal marker once the
 /// provider has launched, so a run can be settled on it.
-const LAUNCH_FACET_PROBE_TARGET: &str = "---\ntitle: launch facet probe\nsuccess:\n  stack:\n    \
-     - action: {append_line: ['events.log', 'probe-done']}\n---\nlaunch facet probe body\n";
+const LAUNCH_FACET_PROBE_TARGET: &str = "---\n\
+     title: launch facet probe\n\
+     success:\n  \
+     - {append_line: ['events.log', 'probe-done']}\n\
+     ---\n\
+     launch facet probe body\n";
 
 /// **Acceptance criterion 10, effective child CWD.** The provider child spawns in
 /// the launch area regardless of route: invoked directly or reached through an
@@ -7143,10 +7351,20 @@ fn level2_lifecycle_equivalence_target_authored_provider_matches_direct_run() {
 
     // Router pins `goose` (so its pre-proxy resolution is unambiguous), proxies at
     // initialize; the target authors a *different* provider, `codex`.
-    let router = "---\ntitle: provider router\nagent: goose\ninitialize:\n  stack:\n    \
-         - action: {proxy: '@target.md'}\n---\nrouter body\n";
-    let target = "---\ntitle: provider target\nagent: codex\nsuccess:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'target-done']}\n---\ntarget body\n";
+    let router = "---\n\
+         title: provider router\n\
+         agent: goose\n\
+         initialize:\n  \
+         - {proxy: '@target.md'}\n\
+         ---\n\
+         router body\n";
+    let target = "---\n\
+         title: provider target\n\
+         agent: codex\n\
+         success:\n  \
+         - {append_line: ['events.log', 'target-done']}\n\
+         ---\n\
+         target body\n";
 
     let stage_pair = || {
         let staged = stage_proxy_pair(router, target, true);
@@ -7245,8 +7463,7 @@ const LAUNCH_BUNDLE_ROUTER: &str = r#"---
 title: launch bundle router
 agent: goose
 initialize:
-  stack:
-    - action: {proxy: "@target.md"}
+  - {proxy: "@target.md"}
 ---
 router body
 "#;
@@ -7259,8 +7476,7 @@ title: launch bundle target
 agent: codex
 interactive: false
 success:
-  stack:
-    - action: {append_line: ["events.log", "sig=success"]}
+  - {append_line: ["events.log", "sig=success"]}
 ---
 launch bundle target body
 "#;
@@ -7439,8 +7655,7 @@ const MCP_ROUTER: &str = r#"---
 title: mcp router
 agent: codex
 initialize:
-  stack:
-    - action: {proxy: "@target.md"}
+  - {proxy: "@target.md"}
 ---
 router body with no tag
 "#;
@@ -7452,8 +7667,7 @@ const MCP_PROBE_TARGET: &str = r#"---
 title: mcp target
 agent: gemini
 success:
-  stack:
-    - action: {append_line: ["events.log", "sig=success"]}
+  - {append_line: ["events.log", "sig=success"]}
 ---
 mcp target body #proxyprobeserver
 "#;
@@ -7558,8 +7772,7 @@ const MCP_CODEX_TARGET: &str = r#"---
 title: mcp codex target
 agent: codex
 success:
-  stack:
-    - action: {append_line: ["events.log", "sig=success"]}
+  - {append_line: ["events.log", "sig=success"]}
 ---
 mcp codex target body #proxyprobeserver
 "#;
@@ -7764,15 +7977,21 @@ impl DiagnosticRoute {
         match self {
             Self::Direct => None,
             Self::InitializeProxy => Some(format!(
-                "---\ntitle: initialize router\ninitialize:\n  stack:\n    \
-                 - action: {{action: proxy, target: '@target.md', with: {overlay}}}\n\
-                 ---\nrouter body\n"
+                "---\n\
+                 title: initialize router\n\
+                 initialize:\n  \
+                 - {{proxy: {{target: '@target.md', with: {overlay}}}}}\n\
+                 ---\n\
+                 router body\n"
             )),
             Self::TerminalRecoveryProxy => Some(format!(
-                "---\ntitle: terminal recovery router\nfailure:\n  stack:\n    \
-                 - action: {{append_line: ['events.log', 'source-failure']}}\n    \
-                 - action: {{action: proxy, target: '@target.md', with: {overlay}}}\n\
-                 ---\nrouter body\n"
+                "---\n\
+                 title: terminal recovery router\n\
+                 failure:\n  \
+                 - {{append_line: ['events.log', 'source-failure']}}\n  \
+                 - {{proxy: {{target: '@target.md', with: {overlay}}}}}\n\
+                 ---\n\
+                 router body\n"
             )),
         }
     }
@@ -8188,28 +8407,34 @@ fn level2_lifecycle_diagnostic_matrix_preparation_failure_is_route_equivalent() 
 /// `initialize` fails the document. `initialize` writes it; the body then proves
 /// which read was delivered — the pre-`initialize` bootstrap composes
 /// `count-is-`, the stabilized reread composes `count-is-7`.
-const INIT_REPAIRS_SCHEMA_TARGET: &str = "---\n$schema:\n    count: 'number(required)'\n\
-     initialize:\n  stack:\n    \
-     - action: {append_line: ['events.log', 'target-init']}\n    \
-     - action: {set_frontmatter: ['target.md', 'count', 7]}\n\
-     finalize:\n  stack:\n    \
-     - action: {append_line: ['events.log', 'target-finalize']}\n\
-     ---\ncount-is-{{ count }}\n";
+const INIT_REPAIRS_SCHEMA_TARGET: &str = "---\n\
+     $schema:\n    \
+     count: 'number(required)'\n\
+     initialize:\n  \
+     - {append_line: ['events.log', 'target-init']}\n  \
+     - {set_frontmatter: ['target.md', 'count', 7]}\n\
+     finalize:\n  \
+     - {append_line: ['events.log', 'target-finalize']}\n\
+     ---\n\
+     count-is-{{ count }}\n";
 
 /// The same target, whose `initialize` writes a value that is *still* invalid.
 ///
 /// The verdict is therefore genuinely owed — and owed *after* `initialize` and
 /// after the target's own `blocked`/`finalize`, which is what the event log
 /// pins.
-const INIT_CANNOT_REPAIR_SCHEMA_TARGET: &str = "---\n$schema:\n    count: 'number(required)'\n\
-     initialize:\n  stack:\n    \
-     - action: {append_line: ['events.log', 'target-init']}\n    \
-     - action: {set_frontmatter: ['target.md', 'count', 'still-not-a-number']}\n\
-     blocked:\n  stack:\n    \
-     - action: {append_line: ['events.log', 'target-blocked']}\n\
-     finalize:\n  stack:\n    \
-     - action: {append_line: ['events.log', 'target-finalize']}\n\
-     ---\ncount-is-{{ count }}\n";
+const INIT_CANNOT_REPAIR_SCHEMA_TARGET: &str = "---\n\
+     $schema:\n    \
+     count: 'number(required)'\n\
+     initialize:\n  \
+     - {append_line: ['events.log', 'target-init']}\n  \
+     - {set_frontmatter: ['target.md', 'count', 'still-not-a-number']}\n\
+     blocked:\n  \
+     - {append_line: ['events.log', 'target-blocked']}\n\
+     finalize:\n  \
+     - {append_line: ['events.log', 'target-finalize']}\n\
+     ---\n\
+     count-is-{{ count }}\n";
 
 // The same two documents, plus a `loop:` they own. Owning a `loop:` routes a
 // document down `execute_loop_or_single`'s loop branch instead of its single
@@ -8225,29 +8450,41 @@ const INIT_CANNOT_REPAIR_SCHEMA_TARGET: &str = "---\n$schema:\n    count: 'numbe
 // asserting a different contract.
 
 /// [`INIT_REPAIRS_SCHEMA_TARGET`] with a `loop:` of its own.
-const INIT_REPAIRS_SCHEMA_LOOP_TARGET: &str = "---\n$schema:\n    count: 'number(required)'\n\
+const INIT_REPAIRS_SCHEMA_LOOP_TARGET: &str = "---\n\
+     $schema:\n    \
+     count: 'number(required)'\n\
      phase: 3\n\
-     loop:\n  until: 'phase > 2'\n  action: 'increment(phase)'\n  max: 10\n\
-     initialize:\n  stack:\n    \
-     - action: {append_line: ['events.log', 'target-init']}\n    \
-     - action: {set_frontmatter: ['target.md', 'count', 7]}\n\
-     finalize:\n  stack:\n    \
-     - action: {append_line: ['events.log', 'target-finalize']}\n\
-     ---\ncount-is-{{ count }}\n";
+     loop:\n  \
+     until: 'phase > 2'\n  \
+     action: 'increment(phase)'\n  \
+     max: 10\n\
+     initialize:\n  \
+     - {append_line: ['events.log', 'target-init']}\n  \
+     - {set_frontmatter: ['target.md', 'count', 7]}\n\
+     finalize:\n  \
+     - {append_line: ['events.log', 'target-finalize']}\n\
+     ---\n\
+     count-is-{{ count }}\n";
 
 /// [`INIT_CANNOT_REPAIR_SCHEMA_TARGET`] with a `loop:` of its own.
 const INIT_CANNOT_REPAIR_SCHEMA_LOOP_TARGET: &str =
-    "---\n$schema:\n    count: 'number(required)'\n\
+    "---\n\
+     $schema:\n    \
+     count: 'number(required)'\n\
      phase: 3\n\
-     loop:\n  until: 'phase > 2'\n  action: 'increment(phase)'\n  max: 10\n\
-     initialize:\n  stack:\n    \
-     - action: {append_line: ['events.log', 'target-init']}\n    \
-     - action: {set_frontmatter: ['target.md', 'count', 'still-not-a-number']}\n\
-     blocked:\n  stack:\n    \
-     - action: {append_line: ['events.log', 'target-blocked']}\n\
-     finalize:\n  stack:\n    \
-     - action: {append_line: ['events.log', 'target-finalize']}\n\
-     ---\ncount-is-{{ count }}\n";
+     loop:\n  \
+     until: 'phase > 2'\n  \
+     action: 'increment(phase)'\n  \
+     max: 10\n\
+     initialize:\n  \
+     - {append_line: ['events.log', 'target-init']}\n  \
+     - {set_frontmatter: ['target.md', 'count', 'still-not-a-number']}\n\
+     blocked:\n  \
+     - {append_line: ['events.log', 'target-blocked']}\n\
+     finalize:\n  \
+     - {append_line: ['events.log', 'target-finalize']}\n\
+     ---\n\
+     count-is-{{ count }}\n";
 
 /// A `goose` that records its prompt, then succeeds only for the *target*'s
 /// stabilized body.
@@ -8550,18 +8787,14 @@ fn assert_still_invalid_target_pays_its_closure(target_doc: &str) {
 const WRAPPER_MEMORY_FILE_WITH_LIFECYCLE: &str = r#"---
 timeout: 5m
 initialize:
-  stack:
-    - action: {append_line: ["events.log", "src-initialize"]}
+  - {append_line: ["events.log", "src-initialize"]}
 start:
-  stack:
-    - action: {append_line: ["events.log", "src-start"]}
+  - {append_line: ["events.log", "src-start"]}
 failure:
-  stack:
-    - action: {append_line: ["events.log", "src-failure"]}
-    - action: {proxy: "@target.md"}
+  - {append_line: ["events.log", "src-failure"]}
+  - {proxy: "@target.md"}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "src-finalize"]}
+  - {append_line: ["events.log", "src-finalize"]}
 ---
 memory file body
 "#;
@@ -8574,11 +8807,9 @@ const WRAPPER_PROXY_TARGET: &str = r#"---
 agent: codex
 interactive: true
 success:
-  stack:
-    - action: {append_line: ["events.log", "TARGET-SUCCESS"]}
+  - {append_line: ["events.log", "TARGET-SUCCESS"]}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "TARGET-FINALIZE"]}
+  - {append_line: ["events.log", "TARGET-FINALIZE"]}
 ---
 target body mentioning #calendar
 "#;

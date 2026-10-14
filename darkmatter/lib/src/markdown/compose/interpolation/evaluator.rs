@@ -366,9 +366,10 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
     }
 
     fn presentation_path_value(&self, path: &str) -> Option<Value> {
-        let path = match path.strip_prefix("doc.") {
-            Some(path) => path,
-            None if path == "doc" => return None,
+        use crate::markdown::compose::expression::{FmPath, fm_namespace_path};
+        let path = match fm_namespace_path(path) {
+            Some(FmPath::Member(path)) => path,
+            Some(FmPath::Whole) => return None,
             None => path,
         };
         let mut segments = path.split('.');

@@ -81,10 +81,15 @@ required-features = ["terminal-tests"]
 # (render-tree terminal) tier tests.
 [package.metadata.ci.tests]
 # The entry-point parity runner and the clean parity suite include
-# darkmatter's shared matrices by `#[path]` and spell them in their tests.
+# darkmatter's shared matrices, the union-reference suites its union fixtures,
+# and the diagnostic-position suite its position fixtures, by `#[path]`; each
+# test spells the file it reads.
 source-inputs = [
     "darkmatter/lib/tests/common/clean_parity/mod.rs",
     "darkmatter/lib/tests/common/entry_point_parity/mod.rs",
+    "darkmatter/lib/tests/content_policy_fixtures/mod.rs",
+    "darkmatter/lib/tests/position_fixtures/mod.rs",
+    "darkmatter/lib/tests/union_fixtures/mod.rs",
 ]
 tiers = ["L1", "L2"]
 features = ["terminal-tests"]

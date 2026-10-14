@@ -94,12 +94,13 @@ pub use lifecycle::runtime::{
 #[allow(deprecated)]
 pub use lifecycle::{
     DefaultLifecycleEmitter, LIFECYCLE_EVENT_KEYS, LifecycleConfig, LifecycleEmitter,
-    LifecycleNotification, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleRuntimeState,
-    LifecycleSignal, parse_lifecycle_config,
+    LifecycleRunGuard, LifecycleRuntimeContext, LifecycleRuntimeState, LifecycleSignal,
+    parse_lifecycle_config,
 };
 pub use lifecycle_actions::{
     CommunicationAction, CommunicationChannel, ExpressionFunctionAction, LifecycleAction,
-    LifecycleActionKind, LifecycleControlAction, LifecycleStackItem, RetryBackoff, ShellAction,
+    LifecycleActionKind, LifecycleConditional, LifecycleControlAction, LifecycleNode,
+    LifecyclePath, RetryBackoff, ShellAction,
     SideEffectAction, is_known_side_effect, side_effect_signature,
 };
 pub use lifecycle_context::{LifecycleErrorInfo, LifecycleTiming};
@@ -108,8 +109,8 @@ pub use lifecycle_control::{
     parse_delay, proxy_handoff_allowed, proxy_path_identity, resolve_proxy_target,
 };
 pub use lifecycle_executor::{
-    LifecycleEventOutcome, LifecycleExprError, ShellRunError, ShellRunner, StackControl,
-    StackExecutionContext, SystemShellRunner,
+    DocumentShellRunner, LifecycleEventOutcome, LifecycleExprError, ShellRunError, ShellRunner,
+    StackControl, StackExecutionContext, SystemShellRunner,
 };
 pub use looping::{
     DEFAULT_MAX_ITERATIONS, LoopExecutionOptions, LoopExecutionResult, LoopIterationContext,
@@ -157,7 +158,7 @@ pub use schema::{
     render_required_line, schema_status_report_prose,
 };
 pub use select::{
-    ambient_env_lookup, build_candidate_set, build_installed_snapshot, build_picker_plan,
+    build_candidate_set, build_installed_snapshot, build_picker_plan, prepared_environment,
     build_picker_plan_with_hints, classify_agent_resolution, detect_installed_providers,
     resolve_model, resolve_model_with_catalog, resolve_model_with_hints,
     resolve_model_with_hints_from, resolve_target_non_tty, resolve_target_non_tty_with_catalog,

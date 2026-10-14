@@ -18,7 +18,6 @@ use super::actions::ActionStaging;
 use super::expression::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
 use super::types::{
     LoopExecutionOptions, LoopExecutionResult, LoopIterationContext, LoopIterationOutput,
-    insert_ambient_overrides,
 };
 use crate::stream::summary::RateLimitInfo;
 
@@ -47,7 +46,7 @@ const PAUSE_RESET_MARGIN: std::time::Duration = std::time::Duration::from_secs(5
 /// 2. Evaluate `while`/`until` condition (against pre-mutation frontmatter).
 /// 3. Apply per-iteration mutations only when continuing.
 ///
-/// Steps 1 and 2 read the same `_loop_*` values: those of the iteration that
+/// Steps 1 and 2 read the same `loop.*` values: those of the iteration that
 /// just finished. Loop concerns run on every gate pass, including the terminal
 /// pass that exits. Under `fail_fast: true`, iterations ending in `blocked` or `failure`
 /// emit `finalize` through the executor and then exit before the loop gate.
@@ -126,6 +125,8 @@ where
         file_resolution_context,
         Some(&init_timing),
         current_authority.clone(),
+        // `initialize` fires once, before any iteration: outside the loop.
+        None,
     );
     init_ctx.live_frontmatter = Some(&initialize_live);
     init_ctx.runtime_state = runtime_state;
@@ -276,7 +277,7 @@ where
 
     for iteration in 1..=max_iterations {
         // Under post-finalize checking the current frontmatter is the
-        // pre-mutation state for this iteration. `_loop_is_last` should be
+        // pre-mutation state for this iteration. `loop.is_last` should be
         // true exactly when the loop will exit after this iteration, which
         // is when the condition is falsy against the current frontmatter.
         let is_last = if iteration == max_iterations {
@@ -595,15 +596,11 @@ fn run_loop_gate(
     current: Option<darkmatter::markdown::compose::CurrentAuthority>,
 ) -> Result<LoopGateOutcome, CompositionError> {
     let timing = capture_loop_lifecycle_timing(loop_start);
-    // The gate's notification fields and stack read `_loop_*` from the same
-    // ambient the condition reads below: the iteration that just finished.
-    // Ambient values shadow same-named frontmatter keys, matching
-    // `LoopExpressionLookup`'s resolution order.
-    let mut gate_frontmatter = frontmatter.clone();
-    insert_ambient_overrides(&mut gate_frontmatter, ambient);
+    // The gate's stack reads the `loop` global from the same ambient the
+    // condition reads below: the iteration that just finished.
     let loop_ctx = build_loop_stack_context(
         LifecycleSignal::Loop,
-        &gate_frontmatter,
+        frontmatter,
         lifecycle_ctx,
         effect_engine,
         shell_runner,
@@ -612,6 +609,7 @@ fn run_loop_gate(
         file_resolution_context,
         Some(&timing),
         current,
+        Some(ambient),
     );
     let loop_outcome = guard.execute_event(LifecycleSignal::Loop, &loop_ctx);
 
@@ -735,7 +733,9 @@ fn run_loop_gate(
 ///
 /// `timing` is the lifecycle stack-only global; the caller owns it (captured
 /// fresh per event so it outlives this borrowed context). `current` is the
-/// invocation's refresh authority for the lazy `current`/`current_env` roots.
+/// invocation's refresh authority for the lazy `current` root. `loop_values`
+/// is the `loop` global: the gate's just-finished iteration, or `None` for
+/// `initialize`, which runs before any iteration.
 #[allow(clippy::too_many_arguments)]
 fn build_loop_stack_context<'a>(
     signal: LifecycleSignal,
@@ -748,6 +748,7 @@ fn build_loop_stack_context<'a>(
     file_resolution_context: &'a biscuit_file::FileResolutionContext,
     timing: Option<&'a super::super::lifecycle_context::LifecycleTiming>,
     current: Option<darkmatter::markdown::compose::CurrentAuthority>,
+    loop_values: Option<&'a LoopAmbient>,
 ) -> StackExecutionContext<'a> {
     StackExecutionContext {
         signal,
@@ -768,6 +769,7 @@ fn build_loop_stack_context<'a>(
         // A loop gate is not inside a sequence group; `group.*` has no scope
         // here.
         group: None,
+        loop_values,
         base_dir,
         ctx_base_dir: lifecycle_ctx.launch_area,
         prepared_context: lifecycle_ctx.context,

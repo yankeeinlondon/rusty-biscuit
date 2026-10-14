@@ -13,6 +13,7 @@ use claudine::provider::Provider;
 
 /// Resolved provider-selection configuration: the user's favorite agent and
 /// per-provider model overrides.
+#[derive(Clone)]
 pub(crate) struct SelectionConfig {
     pub favorite: Option<Provider>,
     #[allow(dead_code)]

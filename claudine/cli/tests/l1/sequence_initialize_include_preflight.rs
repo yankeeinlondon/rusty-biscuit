@@ -25,10 +25,10 @@ const NOTE: &str = "note: a sequence checks every prompt document before its fir
      document's own initialize can create it. Create the file before starting the sequence.";
 
 /// A prompt document whose `initialize` creates the file its body includes.
-const TARGET: &str = "---\ntitle: target\ninitialize:\n  stack:\n    \
-     - action: {append_line: ['events.log', 'initialize']}\n    \
-     - action: {ensure_file: 'generated/notes.md'}\n    \
-     - action: {append_line: ['generated/notes.md', 'GENERATED-BY-INITIALIZE']}\n\
+const TARGET: &str = "---\ntitle: target\ninitialize:\n  \
+     - {append_line: ['events.log', 'initialize']}\n  \
+     - {ensure_file: 'generated/notes.md'}\n  \
+     - {append_line: ['generated/notes.md', 'GENERATED-BY-INITIALIZE']}\n\
      ---\nTARGET-BODY\n\n::file generated/notes.md\n";
 
 /// An earlier step that would create the include, then the prompt step.

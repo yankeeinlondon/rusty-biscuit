@@ -104,7 +104,7 @@ impl Markdown {
         // Every nested and transcluded child clones these options, so one
         // handle drains the ICMP denials raised anywhere under this root.
         let icmp = options.icmp.clone();
-        // Same handle rule for the lazy roots: one sink drains every fail-closed
+        // Same handle rule for the lazy root: one sink drains every fail-closed
         // `current.*` read raised anywhere under this root.
         let current = options.current_authority();
         let glob_warnings = options.glob_warnings.clone();
@@ -128,7 +128,7 @@ impl Markdown {
     /// pass 2 resolves only the keys that were deferred because they
     /// referenced shell-pending values. Every authored value is scanned once
     /// and its result is data (see [`value_origin`](super::value_origin)).
-    /// Read-side functions and `doc.*` are available in both passes.
+    /// Read-side functions and `fm.*` are available in both passes.
     ///
     /// Executes operations in four phases:
     /// 1. **Inline Pre** (serial): TextReplacement, PageBlocks, Interpolation, ShellExpansion, ShellBlocks
@@ -182,6 +182,7 @@ impl Markdown {
 
             let mut provenance = prepare_frontmatter_for_compose(self, &options);
             let mut deferred_keys = Vec::new();
+            let mut provisional_keys = std::collections::HashSet::new();
 
             // Caller file parameters are invocation-owned semantic inputs.
             // Project them from their captured origins before the
@@ -245,6 +246,7 @@ impl Markdown {
                 })?;
                 report.frontmatter_interpolations_applied = fm_report.replacements;
                 deferred_keys = fm_report.deferred_keys;
+                provisional_keys = fm_report.provisional_keys;
                 report.add_warnings(fm_report.warnings);
                 add_frontmatter_candidates(&mut report, "frontmatter-interpolation", fm_report.missing_roots);
                 if let Some(start) = fm_start {
@@ -280,10 +282,10 @@ impl Markdown {
             // boolean field) and writes the real types back into frontmatter,
             // so later stages and the composed output see coerced values.
             //
-            // For frontmatter values that depend on shell-expanded inputs,
-            // the second interpolation pass below will re-resolve them and
-            // the prepare-time consumer (e.g. claudine's `prepare_*_with_schema`)
-            // can re-validate the post-shell effective frontmatter. Internal
+            // Problems on values a later stage resolves (a whole-value
+            // `$(...)`, a template reading one, or a key pass 1 resolved from a
+            // command's unexpanded text) are deferred to the post-shell pass
+            // below; see `schema_validation::PendingDeferral`. Internal
             // non-terminal passes (shell-command discovery) that strip
             // FrontmatterShellExpansion set
             // `ComposeOptions::defer_shell_pending_schema_problems` so a
@@ -307,6 +309,10 @@ impl Markdown {
                     &prepared_schemas,
                     &caller_projection,
                     provenance.data(),
+                    schema_validation::PendingDeferral::BeforeShell {
+                        provenance: &provenance,
+                        provisional: &provisional_keys,
+                    },
                     &schema_consumer,
                     &mut report,
                 )?;
@@ -403,13 +409,15 @@ impl Markdown {
                 // frontmatter snapshot. Re-assemble after shell expansion and
                 // interpolation pass 2 so concrete values can select a
                 // different root-union arm as well as activate or deactivate
-                // trigger payloads. Trigger schemas retain their established
-                // full post-shell validation pass; otherwise this stage only
-                // checks caller-file classification, leaving final coercion and
-                // optional-value scrubbing with the downstream schema owner.
-                // Either way, a value a result suffix typed (`::ok`,
-                // `::exit-code`, `::result`) is judged below.
-                if options.trigger_schemas {
+                // trigger payloads, then judge the values the first pass
+                // deferred as pending. `--no-trigger-schemas` removes trigger
+                // schemas from this pass, never the document and baseline
+                // verdict. Only a caller that re-validates the post-shell
+                // frontmatter itself takes that verdict over; compose then
+                // checks caller-file classification and the values a result
+                // suffix typed, which that caller does not judge, unless
+                // trigger schemas (also unseen by it) are in play.
+                if options.trigger_schemas || !options.caller_owns_post_shell_verdict {
                     let schema_consumer = runtime
                         .transclusion
                         .root_path()
@@ -421,6 +429,11 @@ impl Markdown {
                         &prepared_schemas,
                         &caller_projection,
                         provenance.data(),
+                        if options.caller_owns_post_shell_verdict {
+                            schema_validation::PendingDeferral::CallerOwned
+                        } else {
+                            schema_validation::PendingDeferral::Final
+                        },
                         &schema_consumer,
                         &mut report,
                     )?;
@@ -432,13 +445,13 @@ impl Markdown {
                         &caller_projection,
                         provenance.data(),
                     )?;
+                    schema_validation::validate_typed_shell_values(
+                        self,
+                        &options,
+                        &prepared_schemas,
+                        &fse_report.typed_keys,
+                    )?;
                 }
-                schema_validation::validate_typed_shell_values(
-                    self,
-                    &options,
-                    &prepared_schemas,
-                    &fse_report.typed_keys,
-                )?;
             }
 
             // Build effective state for replacement/interpolation and condition checks.

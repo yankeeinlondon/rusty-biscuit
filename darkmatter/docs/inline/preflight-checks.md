@@ -66,7 +66,7 @@ branch, and arguments discovery can evaluate) is walked like a transcluded
 child, relative to the root document. Discovery answers shell probes
 (`has_alias`, `has_builtin_function`, `has_user_function`, `can_execute`) with
 `false`, returns `""` for `as_markdown`, and answers `ping`/`ping_under` with
-`null`, and observes no lazy `current.*`/`current_env.*` value, so a command,
+`null`, and observes no lazy `current.*` value, so a command,
 transclusion target, or nested content whose shape depends on one of those is
 rejected up front as `UnevaluatedDependencyShape`. That includes reading one
 indirectly: through a frontmatter value that reads it, in the same document or

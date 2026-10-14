@@ -441,6 +441,45 @@ async fn when_condition_false_skips_call_action_and_no_blocking_response() {
 }
 
 #[tokio::test]
+async fn when_hook_namespace_condition_executes_action() {
+    let config = claudine_config_with_tts(TtsValue::Boolean(false));
+    let messaging = RuntimeMessagingSettings::default();
+    let actions = vec![HookAction::Call {
+        command: "__claudine_missing_when_hook_namespace__".to_string(),
+        args: None,
+        timeout_ms: Some(50),
+        mapper: None,
+        when: Some("hook.tool_name == 'Bash'".to_string()),
+    }];
+
+    let result = execute_actions(&actions, None, &make_meta_for_when_tests(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
+    .await
+    .unwrap()
+    .expect("hook.tool_name == 'Bash' should be truthy and run the call");
+
+    assert_eq!(result.decision, Some(HookDecision::Deny));
+}
+
+#[tokio::test]
+async fn when_old_doc_namespace_condition_skips_action() {
+    let config = claudine_config_with_tts(TtsValue::Boolean(false));
+    let messaging = RuntimeMessagingSettings::default();
+    let actions = vec![HookAction::Call {
+        command: "__claudine_missing_when_doc_namespace__".to_string(),
+        args: None,
+        timeout_ms: Some(50),
+        mapper: None,
+        when: Some("doc.tool_name == 'Bash'".to_string()),
+    }];
+
+    let result = execute_actions(&actions, None, &make_meta_for_when_tests(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
+    .await
+    .unwrap();
+
+    assert!(result.is_none(), "doc.* no longer reads the hook payload");
+}
+
+#[tokio::test]
 async fn when_invalid_expression_skips_action_non_fatally() {
     let config = claudine_config_with_tts(TtsValue::Boolean(false));
     let messaging = RuntimeMessagingSettings::default();

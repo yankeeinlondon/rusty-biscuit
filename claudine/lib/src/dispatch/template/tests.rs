@@ -348,3 +348,36 @@ fn all_variables_have_availability() {
         );
     }
 }
+
+#[test]
+fn hook_namespace_renders_field_and_whole_payload() {
+    let meta = sample_meta();
+
+    assert_eq!(interpolate("Tool: {{ hook.tool_name }}", &meta), "Tool: Bash");
+    assert_eq!(interpolate("{{hook.git.branch}}", &meta), "main");
+
+    let rendered = interpolate("{{ hook }}", &meta);
+    let payload: serde_json::Value =
+        serde_json::from_str(&rendered).expect("bare hook renders the payload as JSON");
+    assert_eq!(payload["tool_name"], "Bash");
+    assert_eq!(payload["provider"], "claude");
+    assert!(payload.get("env").is_none());
+}
+
+#[test]
+fn hook_namespace_missing_field_does_not_fall_back() {
+    let meta = sample_meta();
+
+    assert_eq!(interpolate("[{{ hook.missing }}]", &meta), "[]");
+    assert_eq!(interpolate("[{{ hook.branch }}]", &meta), "[]");
+    assert_eq!(interpolate("[{{ hook.env.HOME }}]", &meta), "[]");
+}
+
+#[test]
+fn old_doc_namespace_is_left_literal() {
+    let meta = sample_meta();
+
+    assert_eq!(interpolate("{{ doc.tool_name }}", &meta), "{{ doc.tool_name }}");
+    assert_eq!(interpolate("{{ doc }}", &meta), "{{ doc }}");
+    assert_eq!(interpolate("{{ tool_name }}", &meta), "Bash");
+}

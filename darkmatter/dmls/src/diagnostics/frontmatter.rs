@@ -17,6 +17,7 @@ use darkmatter::markdown::schemas::{
     PositionMap, SchemaError, SchemaOriginKind, SuggestionLintProblem, SuggestionLintReason,
     ValidationOptions, ValidationProblem, ValidationProblemCode, ValidationReport,
     SchemaValueKind, SchemaValueNode, classify_schema_reference, flow_collection_end,
+    decode_scalar_node,
     locate_schema_value,
     parse_property_definition, parse_schema_declaration, parse_yaml_schema,
 };
@@ -27,6 +28,7 @@ use lsp_types::{
 
 use crate::context::resolution_failure_data;
 use crate::diagnostics::codes::{code, source};
+use crate::diagnostics::named_types;
 use crate::diagnostics::nested_span;
 use crate::overlay::{
     FrontmatterAst, SchemaAuthoringState, SchemaBundle, SchemaOutcome, SuggestionState,
@@ -94,6 +96,14 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
     }
 
     suggestion_diagnostics(ctx, &overlay.suggestions, &mut out);
+
+    if let Some(error) = &overlay.standalone_resolution
+        && let SchemaAuthoringState::Standalone { model: Some(model), stale: false, .. } =
+            &overlay.schema_authoring
+    {
+        let scope = named_types::NamedTypeScope::standalone(ctx, model);
+        named_types::standalone_diagnostics(&scope, error, None, &mut out);
+    }
 
     if let SuggestionState::TriggerError(error) = &overlay.suggestions {
         out.push(diagnostic(
@@ -173,6 +183,11 @@ fn schema_prepare_diagnostic_with_origin(
     let fallback_span = ast
         .and_then(|ast| ast.schema_entry().map(|entry| entry.value_span.clone()))
         .or_else(|| ast.map(FrontmatterAst::block_span));
+    if named_types::is_named_type_error(error) {
+        let scope = named_types::NamedTypeScope::frontmatter(ctx, ast, fallback_span);
+        out.push(scope.diagnostic(error, referenced_origin));
+        return;
+    }
     let (code_value, message, span) = match error {
         SchemaError::Grammar { property, .. } | SchemaError::Convert { property, .. }
             if property != "<root>" =>
@@ -271,6 +286,7 @@ fn schema_problem_diagnostics(
             problem.message.clone(),
         );
         specialized.related_information = schema_origin_related(ctx, bundle, problem);
+        specialized.data = Some(schema_problem_data(problem));
         out.push(specialized);
     }
 
@@ -293,7 +309,7 @@ fn schema_problem_diagnostics(
         {
             continue;
         }
-        let Some(range) = problem_range(ast, ctx.source_map, problem) else {
+        let Some(range) = problem_range(ctx.text, ast, ctx.source_map, problem) else {
             continue;
         };
         let mut diagnostic = diagnostic(
@@ -304,10 +320,7 @@ fn schema_problem_diagnostics(
             problem.message.clone(),
         );
         diagnostic.related_information = schema_origin_related(ctx, bundle, problem);
-        diagnostic.data = problem
-            .file_reference
-            .as_ref()
-            .map(|reference| resolution_failure_data(reference.resolution_failure()));
+        diagnostic.data = Some(schema_problem_data(problem));
         out.push(diagnostic);
     }
 
@@ -316,6 +329,26 @@ fn schema_problem_diagnostics(
     // pure noise. The passive "never executed" guarantee is surfaced on hover
     // (schema description for the key; policy verdict for `$()` shell), not as a
     // per-value diagnostic. `report.pending` stays populated but unconsumed.
+}
+
+/// The `data` payload of a schema-problem diagnostic:
+/// `{"instance_path": "/content_policy/1/rule"}`, plus `resolution_failure`
+/// for a file-reference failure.
+///
+/// The range already marks the node, but a missing key ranges its parent
+/// mapping and a list item shares its line with its fields, so the validator's
+/// JSON Pointer travels with it. A missing key's pointer names the parent
+/// object, as in `md schema validate --format json`; the message names the key.
+fn schema_problem_data(problem: &ValidationProblem) -> serde_json::Value {
+    let mut data = serde_json::Map::new();
+    data.insert("instance_path".to_string(), problem.path.clone().into());
+    if let Some(reference) = &problem.file_reference
+        && let serde_json::Value::Object(failure) =
+            resolution_failure_data(reference.resolution_failure())
+    {
+        data.extend(failure);
+    }
+    serde_json::Value::Object(data)
 }
 
 /// The instance paths at which schema validation reported a problem.
@@ -426,6 +459,7 @@ fn semantic_authored_diagnostics(
         );
         if let Some(problem) = report.problems.iter().find(|problem| problem.path == value.pointer) {
             specialized.related_information = schema_origin_related(ctx, bundle, problem);
+            specialized.data = Some(schema_problem_data(problem));
         }
         out.push(specialized);
         diagnosed.insert(value.pointer.clone());
@@ -446,10 +480,13 @@ fn smallest_invalid_definition_span(
     text: &str,
     parent: &crate::overlay::FmEntry,
 ) -> Option<std::ops::Range<usize>> {
-    let value_span = complete_flow_value_span(text, parent.value_span.clone());
-    // The slice is deliberately not dedented: the locator reads *relative*
-    // indentation, so keeping the authored columns keeps every span it reports
-    // an exact document offset.
+    let value_span = crate::overlay::frontmatter::line_aligned_span(
+        text,
+        complete_flow_value_span(text, parent.value_span.clone()),
+    );
+    // The slice is deliberately not dedented, and starts at its line: the
+    // locator reads indentation, so keeping the authored columns keeps every
+    // span it reports an exact document offset.
     let root = locate_schema_value(text.get(value_span.clone())?, value_span.start)?;
     let mut candidates = Vec::new();
     collect_definition_candidates(&root, &parent.key, 0, &mut candidates);
@@ -580,7 +617,12 @@ fn semantic_problem_range(
 }
 
 /// The concrete range for one validation problem (R-5 ranging rules).
-fn problem_range(ast: &FrontmatterAst, sm: &SourceMap, problem: &ValidationProblem) -> Option<Range> {
+fn problem_range(
+    text: &str,
+    ast: &FrontmatterAst,
+    sm: &SourceMap,
+    problem: &ValidationProblem,
+) -> Option<Range> {
     let span = match problem.code {
         // A missing key has no value node; range the parent mapping so the
         // squiggle is visible.
@@ -592,8 +634,10 @@ fn problem_range(ast: &FrontmatterAst, sm: &SourceMap, problem: &ValidationProbl
             .as_deref()
             .and_then(|key| ast.key_span_for(&problem.path, key))
             .unwrap_or_else(|| ast.value_range(&problem.path)),
-        // Type / constraint / file-reference failures range the value node.
-        _ => ast.value_range(&problem.path),
+        // Type / constraint / file-reference failures range the value node,
+        // all of it: the YAML loader ends an empty flow collection (`{}`)
+        // after its opening delimiter.
+        _ => complete_flow_value_span(text, ast.value_range(&problem.path)),
     };
     sm.byte_range_to_lsp(span)
 }
@@ -989,13 +1033,14 @@ fn standalone_type_definition_diagnostic(ctx: &DocumentContext) -> Option<Diagno
         // otherwise miss its entry and fall through to the whole-document
         // `dm.schema.document_malformed` fallback.
         let entry = ast.entry_by_key_path(&[payload_key, key])?;
-        let span = match &error {
+        let token = grammar_token_span(ctx.text, payload_key, key, value, &error);
+        let span = token.unwrap_or_else(|| match &error {
             SchemaError::Grammar { property, .. } if property != key => ast
                 .entry_by_key_path(&[payload_key, key, property])
                 .map(|nested| nested.value_span.clone())
                 .unwrap_or_else(|| entry.value_span.clone()),
             _ => entry.value_span.clone(),
-        };
+        });
         let range = ctx.source_map.byte_range_to_lsp(span)?;
         return Some(diagnostic(
             range,
@@ -1006,6 +1051,97 @@ fn standalone_type_definition_diagnostic(ctx: &DocumentContext) -> Option<Diagno
         ));
     }
     None
+}
+
+/// The authored range of the token a standalone definition's grammar error
+/// names, or `None` when it cannot be recovered exactly.
+///
+/// The grammar error's span is relative to the decoded expression, which a
+/// folded or quoted scalar does not author verbatim, so it is projected
+/// through the offending scalar's decoded map. The offending scalar is the one
+/// whose own re-parse reproduces the error; the decoded text must also equal
+/// the YAML parser's value, or the map describes other text. `None` keeps the
+/// caller's whole-value fallback, and never yields an empty range.
+fn grammar_token_span(
+    text: &str,
+    payload_key: &str,
+    key: &str,
+    value: &serde_yaml_ng::Value,
+    error: &SchemaError,
+) -> Option<std::ops::Range<usize>> {
+    let SchemaError::Grammar { span, message: expected, .. } = error else {
+        return None;
+    };
+    let SchemaValueKind::Mapping(definitions) = standalone_payload_node(text, payload_key)?.kind
+    else {
+        return None;
+    };
+    let definition = definitions.into_iter().find(|entry| entry.key == key)?;
+    let mut scalars = Vec::new();
+    collect_string_scalars(
+        text,
+        key,
+        source_column(text, definition.key_span.start),
+        &definition.value,
+        value,
+        &mut scalars,
+    );
+    scalars.into_iter().find_map(|(property, holder, node, semantic)| {
+        let reproduced = matches!(
+            parse_property_definition(&property, &serde_yaml_ng::Value::String(semantic.to_string())),
+            Err(SchemaError::Grammar { span: ref candidate, ref message, .. })
+                if candidate == span && *message == *expected
+        );
+        if !reproduced {
+            return None;
+        }
+        let (scalar, _) = decode_scalar_node(text, node.span.start, holder)?;
+        if scalar.decoded() != semantic {
+            return None;
+        }
+        scalar.project(span.clone()).filter(|range| !range.is_empty())
+    })
+}
+
+/// Pairs each located string scalar under a definition with its YAML value,
+/// as `(property, holder column, node, value)`. A sequence item inherits its
+/// property; a structural disagreement between the two trees contributes
+/// nothing below it.
+fn collect_string_scalars<'a>(
+    text: &str,
+    property: &str,
+    holder: usize,
+    node: &'a SchemaValueNode,
+    value: &'a serde_yaml_ng::Value,
+    out: &mut Vec<(String, usize, &'a SchemaValueNode, &'a str)>,
+) {
+    match (&node.kind, value) {
+        (SchemaValueKind::Scalar, serde_yaml_ng::Value::String(semantic)) => {
+            out.push((property.to_string(), holder, node, semantic));
+        }
+        (SchemaValueKind::Mapping(entries), serde_yaml_ng::Value::Mapping(mapping)) => {
+            for entry in entries {
+                if let Some(child) = mapping.get(entry.key.as_str()) {
+                    let holder = source_column(text, entry.key_span.start);
+                    collect_string_scalars(text, &entry.key, holder, &entry.value, child, out);
+                }
+            }
+        }
+        (SchemaValueKind::Sequence(items), serde_yaml_ng::Value::Sequence(values))
+            if items.len() == values.len() =>
+        {
+            for (item, child) in items.iter().zip(values) {
+                // An item's continuation lines must sit deeper than its `-`,
+                // which is the last indicator before the item on its line.
+                let line_start = text[..item.span.start].rfind('\n').map_or(0, |index| index + 1);
+                let holder = text[line_start..item.span.start]
+                    .rfind('-')
+                    .unwrap_or(holder);
+                collect_string_scalars(text, property, holder, item, child, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// An invalid **outer** standalone declaration, ranged at the smallest authored
@@ -1170,6 +1306,9 @@ fn zero_range() -> Range {
 mod severity_tests;
 
 #[cfg(test)]
+mod position_parity_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1188,15 +1327,28 @@ mod tests {
     /// Builds a real overlay-backed context for `text`, runs `diagnostics`, and
     /// hands the diagnostics to `f`.
     fn diagnostics_for<R>(text: &str, f: impl FnOnce(&[Diagnostic]) -> R) -> R {
+        diagnostics_with(text, PositionEncoding::Utf16, &DmlsConfig::default(), |diagnostics, _| {
+            f(diagnostics)
+        })
+    }
+
+    /// [`diagnostics_for`] with the client's negotiated `encoding` and an
+    /// explicit `config`; `f` also receives the context's source map, so a
+    /// caller can convert the diagnostics' positions back to byte offsets.
+    pub(super) fn diagnostics_with<R>(
+        text: &str,
+        encoding: PositionEncoding,
+        config: &DmlsConfig,
+        f: impl FnOnce(&[Diagnostic], &SourceMap) -> R,
+    ) -> R {
         let path = Path::new("/w/doc.md");
         let uri: Uri = "file:///w/doc.md".parse().unwrap();
-        let config = DmlsConfig::default();
         let roots = [PathBuf::from("/w")];
         let state = OverlayState::default();
-        let overlay = state.for_document(&uri, text, path, &config, &roots, &crate::context::test_support::resolution_for(path));
-        let source_map = SourceMap::new(uri.clone(), 1, PositionEncoding::Utf16, Arc::from(text));
+        let overlay = state.for_document(&uri, text, path, config, &roots, &crate::context::test_support::resolution_for(path));
+        let source_map = SourceMap::new(uri.clone(), 1, encoding, Arc::from(text));
         let graph = WorkspaceGraph::build(&BTreeMap::new(), 1, &crate::context::test_support::workspace_contexts());
-        let profile = ClientProfile::from_initialize(&InitializeParams::default(), PositionEncoding::Utf16);
+        let profile = ClientProfile::from_initialize(&InitializeParams::default(), encoding);
         let ctx = DocumentContext {
             uri: &uri,
             path,
@@ -1204,12 +1356,12 @@ mod tests {
             source_map: &source_map,
             graph: &graph,
             doc_id: None,
-            config: &config,
+            config,
             profile: &profile,
             overlay: overlay.as_ref(),
             resolution: &crate::context::test_support::resolution_for(path),
         };
-        f(&diagnostics(&ctx))
+        f(&diagnostics(&ctx), &source_map)
     }
 
     fn expression_doc(value_line: &str) -> String {
@@ -1911,6 +2063,39 @@ mod tests {
         let sm = SourceMap::new(uri, 1, PositionEncoding::Utf8, text_arc);
         let range = sm.byte_range_to_lsp(span).unwrap();
         assert_eq!(range.start.line, 2);
+    }
+
+    /// An inline `$schema` candidate whose own range crosses a fold projects
+    /// through the frontmatter offset to one range from its opening quote to
+    /// its closing quote, and converts to a two-line UTF-16 range. Non-ASCII
+    /// text on the continuation line separates UTF-16 from byte columns.
+    #[test]
+    fn a_folded_inline_suggestion_converts_to_one_two_line_range() {
+        use crate::source_map::{PositionEncoding, SourceMap};
+        use lsp_types::{Position, Range, Uri};
+
+        for newline in ["\n", "\r\n"] {
+            let text = format!(
+                "---{newline}$schema:{newline}  mode: string(min(40); suggest('first{newline}    sécond')){newline}---{newline}{newline}body{newline}"
+            );
+            let ast = crate::overlay::FrontmatterAst::parse(&text).unwrap().ast.unwrap();
+            let problems = match crate::overlay::suggestions::inline_lints(&text, Some(&ast)) {
+                crate::overlay::SuggestionState::Inline(problems) => problems,
+                other => panic!("{newline:?}: expected Inline, got {other:?}"),
+            };
+            assert_eq!(problems.len(), 1, "{newline:?}: {problems:?}");
+            let start = text.find("'first").unwrap();
+            let end = text.find("sécond'").unwrap() + "sécond'".len();
+            assert_eq!(problems[0].span, start..end, "{newline:?}");
+
+            let uri: Uri = "file:///w/test.md".parse().unwrap();
+            let source_map = SourceMap::new(uri, 1, PositionEncoding::Utf16, text.as_str().into());
+            assert_eq!(
+                source_map.byte_range_to_lsp(problems[0].span.clone()),
+                Some(Range::new(Position::new(2, 32), Position::new(3, 11))),
+                "{newline:?}"
+            );
+        }
     }
 
     /// Many aliases of one long malformed scalar whose union-typed properties

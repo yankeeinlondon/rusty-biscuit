@@ -26,26 +26,24 @@ base: main
 on_failure: ask
 report: "{{ ctx.repo_root + '/.claudine/tmp/pr/' + kebab_case(ctx.branch) + '-' + ctx.timestamp + '.md' }}"
 initialize:
-    stack:
-        - when: "!ctx.branch"
-          action:
-              - error: "the checkout is not on a branch (detached HEAD?); check out the branch you want to propose before running the PR prompt"
-        - when: "!has_command('gh')"
-          action:
-              - error: "the GitHub CLI (`gh`) is not on PATH; the PR flow needs it to open the pull request, and checking now is cheaper than finding out after the pre-push hook has run"
-        - when: "remote_vendor() != 'github'"
-          action:
-              - error: "the PR flow opens pull requests with `gh`, but this repository's remote is hosted on `{{ remote_vendor() || 'an unrecognized provider' }}`"
-        - action:
-              - ensure_dir: "{{ dirname(report) }}"
-              - ensure_file: "{{ report }}"
-              - set_frontmatter: ["{{ report }}", "status", "pending"]
-              - set_frontmatter: ["{{ report }}", "base", "{{ base }}"]
-        - when: "ctx.dirty_files"
-          action:
-              - warn: |-
-                    the working tree has {{ length(ctx.dirty_files) }} uncommitted file(s); a dirty checkout makes the pre-push hook withhold the evidence CI reuses, so they are dealt with before anything is pushed
-              - action: proxy
+    - when: "!ctx.branch"
+      then:
+          - error: "the checkout is not on a branch (detached HEAD?); check out the branch you want to propose before running the PR prompt"
+    - when: "!has_command('gh')"
+      then:
+          - error: "the GitHub CLI (`gh`) is not on PATH; the PR flow needs it to open the pull request, and checking now is cheaper than finding out after the pre-push hook has run"
+    - when: "remote_vendor() != 'github'"
+      then:
+          - error: "the PR flow opens pull requests with `gh`, but this repository's remote is hosted on `{{ remote_vendor() || 'an unrecognized provider' }}`"
+    - ensure_dir: "{{ dirname(report) }}"
+    - ensure_file: "{{ report }}"
+    - set_frontmatter: ["{{ report }}", "status", "pending"]
+    - set_frontmatter: ["{{ report }}", "base", "{{ base }}"]
+    - when: "ctx.dirty_files"
+      then:
+          - warn: |-
+                the working tree has {{ length(ctx.dirty_files) }} uncommitted file(s); a dirty checkout makes the pre-push hook withhold the evidence CI reuses, so they are dealt with before anything is pushed
+          - proxy:
                 target: ./_pr/dirty.md
                 with:
                     base: "{{ base }}"
@@ -54,16 +52,15 @@ initialize:
                     about: "{{ about || '' }}"
                     on_failure: "{{ on_failure }}"
                     report: "{{ report }}"
-        - action:
-              - action: proxy
-                target: ./_pr/push.md
-                with:
-                    base: "{{ base }}"
-                    branch: "{{ branch || '' }}"
-                    title: "{{ title || '' }}"
-                    about: "{{ about || '' }}"
-                    on_failure: "{{ on_failure }}"
-                    report: "{{ report }}"
+    - proxy:
+          target: ./_pr/push.md
+          with:
+              base: "{{ base }}"
+              branch: "{{ branch || '' }}"
+              title: "{{ title || '' }}"
+              about: "{{ about || '' }}"
+              on_failure: "{{ on_failure }}"
+              report: "{{ report }}"
 blocked:
     message: "💥  the PR flow for `{{ctx.branch}}` in {{ ctx.area_description || ctx.repo }} was **blocked** before any stage started: {{err.msg}}"
     say: "The pull request flow was blocked before it started."

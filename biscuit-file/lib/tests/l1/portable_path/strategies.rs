@@ -12,6 +12,53 @@ use super::*;
 // ---- relative preferences ---------------------------------------------------
 
 #[test]
+fn tree_root_relative_verifies_files_directories_and_local_shadowing() {
+    let fx = Fixture::new();
+    let docs = fx.dir("repo/research/terminals");
+    let target = fx.file("repo/standards/modes/focus.md");
+    let ctx = fx.ctx(&docs, &[]);
+    let strategy = [P::TreeRootRelative, P::RepoRoot(None)];
+
+    let found = evaluate(PortablePath::from_path(&target).with_ctx(&ctx));
+    assert_eq!(found.reference().raw(), "standards/modes/focus.md");
+    assert_eq!(found.strategy(), &P::TreeRootRelative);
+    assert_eq!(found.attempts().len(), 2);
+
+    let directory = fx.path("repo/standards/modes");
+    let found = evaluate(PortablePath::from_path(&directory).with_ctx(&ctx).with_strategy(strategy.clone()));
+    assert_eq!(found.reference().raw(), "standards/modes");
+    assert_eq!(found.findings(), [Finding::TargetNotFile]);
+
+    let shadow = fx.file("repo/research/terminals/standards/modes/focus.md");
+    let found = evaluate(PortablePath::from_path(&target).with_ctx(&ctx).with_strategy(strategy.clone()));
+    assert_eq!(found.reference().raw(), "&standards/modes/focus.md");
+    match &attempt_for(found.attempts(), &P::TreeRootRelative).outcome {
+        AttemptOutcome::Shadowed { resolves_to, .. } => assert_eq!(resolves_to, &shadow),
+        other => panic!("expected a shadowed bare reference, got {other:?}"),
+    }
+
+    let found = evaluate(PortablePath::from_path(&directory).with_ctx(&ctx).with_strategy(strategy));
+    assert_eq!(found.reference().raw(), "&standards/modes");
+    assert!(matches!(attempt_for(found.attempts(), &P::TreeRootRelative).outcome, AttemptOutcome::Shadowed { .. }));
+}
+
+#[test]
+fn tree_root_relative_requires_a_verified_lookup_outside_a_repository() {
+    let fx = Fixture::new();
+    let tree = fx.dir("tree");
+    let target = fx.file("tree/docs/x.md");
+    let at_root = fx.bare_ctx(&tree, &[]).with_base_dir(&tree);
+    let found = evaluate(PortablePath::from_path(&target).with_ctx(&at_root));
+    assert_eq!(found.reference().raw(), "docs/x.md");
+    assert_eq!(found.strategy(), &P::TreeRootRelative);
+
+    let nested = fx.bare_ctx(&fx.dir("tree/child"), &[]).with_base_dir(&tree);
+    let found = evaluate(PortablePath::from_path(&target).with_ctx(&nested));
+    assert_eq!(found.reference().raw(), "../docs/x.md");
+    assert_eq!(found.strategy(), &P::PeerDir);
+}
+
+#[test]
 fn each_relative_preference_writes_its_own_route_shape() {
     let fx = Fixture::new();
     let docs = fx.dir("repo/apps/web/docs");
@@ -25,7 +72,7 @@ fn each_relative_preference_writes_its_own_route_shape() {
         ("repo/foo.md", "&foo.md", P::RepoRoot(None)),
     ];
     for (rel, expected, strategy) in cases {
-        let portable = evaluate(PortablePath::from_path(fx.file(rel)).with_ctx(&ctx));
+        let portable = evaluate(PortablePath::from_path(fx.file(rel)).with_ctx(&ctx).with_strategy([strategy.clone()]));
         assert_eq!(portable.reference().raw(), expected, "{rel}");
         assert_eq!(portable.strategy(), &strategy, "{rel}");
         let last = portable.attempts().last().unwrap();
@@ -87,17 +134,17 @@ fn parent_dir_is_the_in_tree_catch_all_and_absent_from_the_default() {
 }
 
 #[test]
-fn a_target_equal_to_cwd_is_dot_slash_with_a_not_file_finding() {
+fn directory_links_use_the_root_spelling_with_a_not_file_finding() {
     let fx = Fixture::new();
     let docs = fx.dir("repo/docs");
     let portable = evaluate(PortablePath::from_path(&docs).with_ctx(&fx.ctx(&docs, &[])));
-    assert_eq!(portable.reference().raw(), "./");
-    assert_eq!(portable.strategy(), &P::SameDirRelative);
+    assert_eq!(portable.reference().raw(), "docs");
+    assert_eq!(portable.strategy(), &P::TreeRootRelative);
     assert_eq!(portable.findings(), [Finding::TargetNotFile]);
 
     let child_dir = fx.dir("repo/docs/sub");
     let portable = evaluate(PortablePath::from_path(&child_dir).with_ctx(&fx.ctx(&docs, &[])));
-    assert_eq!(portable.reference().raw(), "./sub");
+    assert_eq!(portable.reference().raw(), "docs/sub");
     assert_eq!(portable.findings(), [Finding::TargetNotFile]);
 }
 
@@ -233,7 +280,7 @@ fn a_reordered_strategy_prefers_searched_forms_the_default_never_writes() {
     ];
 
     let default = evaluate(PortablePath::from_path(&package_prompt).with_ctx(&ctx));
-    assert_eq!(default.reference().raw(), "./a.md");
+    assert_eq!(default.reference().raw(), "pkg/prompts/a.md");
     let reordered = evaluate(PortablePath::from_path(&package_prompt).with_ctx(&ctx).with_strategy(claudine.clone()));
     assert_eq!(reordered.reference().raw(), "^prompts/a.md");
     assert_eq!(reordered.strategy(), &P::RepoMultiPath(Some("prompts".into())));

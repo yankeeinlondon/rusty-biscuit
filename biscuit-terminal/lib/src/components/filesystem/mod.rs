@@ -90,7 +90,7 @@
 //!   file/directory icons stay fixed across width modes.
 //! - The public [`TerminalRenderable::render`](crate::components::renderable::TerminalRenderable)
 //!   path remains deferred to the bespoke Nerd-Font renderer; the matrix and
-//!   parity coverage use the tree projection, which emits Unicode icons.
+//!   parity coverage use the tree projection, which selects icons at render time.
 //!
 //! Markdown degrades layout/appearance attrs by Decision D1 and preserves the
 //! structural file-tree syntax where the target renderer supports it.
@@ -237,17 +237,12 @@ impl RootIconKind {
 /// - A fractional `Fixed(50%)` is resolved exactly once by the fold; the
 ///   tree never re-resolves the raw percentage against its own narrowed box.
 ///
-/// ### Terminal render gap (deferred flip)
+/// ### Terminal rendering paths
 ///
-/// The bespoke [`TerminalRenderable::render`] path remains the production
-/// terminal renderer because the target-agnostic projection emits Unicode
-/// fallback icons (📂 / 📄) that cannot reproduce the bespoke Nerd Font
-/// icons the terminal path chooses based on the live terminal's font
-/// support. The tree path's box-model contract is honored today
-/// (`margin` / `alignment` / `max_width` / `width`), and the bespoke
-/// terminal path applies the same [`Layout`] via `apply_block_layout`. A
-/// future flip will route the terminal target through the tree path once
-/// icon parity is achieved.
+/// [`TerminalRenderable::render`] uses the bespoke renderer. The tree projection
+/// also preserves terminal-aware icon variants, while Markdown and browser
+/// targets use Unicode fallbacks. Both paths honor the box-model contract
+/// (`margin` / `alignment` / `max_width` / `width`).
 ///
 /// [`Width::Auto`]: renderable::layout::Width::Auto
 /// [`Width::Fixed`]: renderable::layout::Width::Fixed
@@ -2044,7 +2039,8 @@ impl FileSystem {
     /// Shows the directory icon and name (e.g., ` docs`), styled bold blue
     /// when connected to a TTY. When a [`with_dimmed_root_prefix`](Self::with_dimmed_root_prefix)
     /// is configured, the prefix is rendered dimmed and the target name is
-    /// rendered bold blue separately.
+    /// rendered bold blue separately. The header is a context label and never
+    /// receives a file hyperlink.
     fn render_root_line(&self, output: &mut String, is_nerd_font: Option<bool>, is_tty: bool) {
         let use_nerd = is_nerd_font.unwrap_or(false);
 
@@ -2087,42 +2083,20 @@ impl FileSystem {
         // When no dimmed prefix is configured, preserve the original rendering.
         let Some(prefix) = &self.root_prefix else {
             if is_tty {
-                let display_name = if self.file_links {
-                    match file_url(&self.root_path) {
-                        Some(url) => InlineProse::new(format!("<a href=\"{url}\">{name}</a>"))
-                            .render_optimistic(None),
-                        None => name,
-                    }
-                } else {
-                    name
-                };
-                output.push_str(&format!("\x1b[1;34m{}{}\x1b[0m\n", icon_str, display_name));
+                output.push_str(&format!("\x1b[1;34m{}{}\x1b[0m\n", icon_str, name));
             } else {
                 output.push_str(&format!("{}{}\n", icon_str, name));
             }
             return;
         };
 
-        // Dimmed-prefix root line:
-        // `{icon} {dim}{prefix}{reset}{bold-blue}{target}{reset}`
-        let target = if self.file_links && is_tty {
-            match file_url(&self.root_path) {
-                Some(url) => {
-                    InlineProse::new(format!("<a href=\"{url}\">{name}</a>")).render_optimistic(None)
-                }
-                None => name,
-            }
-        } else {
-            name
-        };
-
         if is_tty {
             output.push_str(&format!(
                 "{}\x1b[2m{}\x1b[0m\x1b[1;34m{}\x1b[0m\n",
-                icon_str, prefix, target
+                icon_str, prefix, name
             ));
         } else {
-            output.push_str(&format!("{}{}{}\n", icon_str, prefix, target));
+            output.push_str(&format!("{}{}{}\n", icon_str, prefix, name));
         }
     }
 
@@ -2744,11 +2718,7 @@ fn fs_universal_color(color: Color) -> RTargetValue<PerMode<PaintColor>> {
 
 /// Returns the Unicode fallback glyph for a [`TreeNode`].
 ///
-/// The canonical projection always uses the Unicode fallback set because the
-/// projection is target-agnostic and Nerd Font glyphs are not portable to
-/// Markdown or HTML. The bespoke terminal renderer continues to swap in Nerd
-/// Font icons via [`FileSystem::get_icon_with_padding`] when the terminal
-/// advertises Nerd Font support.
+/// Used by Markdown, browser output, and terminals without Nerd Font support.
 fn fs_unicode_icon(node: &TreeNode) -> &'static str {
     match node {
         TreeNode::Dir {
@@ -2777,6 +2747,25 @@ fn fs_unicode_file_icon(name: &str) -> &'static str {
         Some("xls" | "xlsx") => "📗",
         _ => "📄",
     }
+}
+
+/// Keeps font-specific glyph selection at the terminal fold. Other targets
+/// render the Unicode child without needing the terminal icon payload.
+fn fs_icon_node(nerd: char, unicode: &str) -> RenderNode {
+    let payload = serde_json::json!({
+        "nerd_font": format!("{nerd} "),
+        "nerd_font_auto": true,
+        "unicode": unicode,
+        "text": unicode,
+    });
+    RenderNode::span(
+        vec![CLASS_ICON.to_string()],
+        vec![RenderNode::extended(
+            "icon",
+            vec![RenderNode::text(unicode)],
+            Some(payload.to_string()),
+        )],
+    )
 }
 
 /// Recursively removes every `fs-icon` [`Span`](renderable::tree::NodeKind::Span)
@@ -2967,16 +2956,10 @@ impl FileSystem {
     /// `current_path` is the absolute path of the directory containing `node`.
     /// The caller is responsible for canonicalizing the root once (see
     /// [`fs_render_tree_inner`]) so `file://` URLs do not embed `./` or `..`.
-    fn fs_project_tree_node(&self, node: &TreeNode, current_path: &Path) -> RenderNode {
+    fn fs_project_tree_node(&self, node: &TreeNode, current_path: &Path, depth: u32) -> RenderNode {
         let name = node.name();
 
-        // ── Icon span (semantic class only; the bespoke renderer selects
-        // Nerd Font icons on its own; the projection prefers Unicode).
-        let icon_glyph = fs_unicode_icon(node);
-        let icon_span = RenderNode::span(
-            vec![CLASS_ICON.to_string()],
-            vec![RenderNode::text(icon_glyph)],
-        );
+        let icon_span = fs_icon_node(self.get_icon(node, depth, Some(true)), fs_unicode_icon(node));
 
         // ── Name (or Link when file_links is enabled).
         // The caller threads an already-canonicalized `current_path`, so
@@ -3028,7 +3011,7 @@ impl FileSystem {
             let nested_path = current_path.join(name);
             let nested_items: Vec<RenderNode> = children
                 .iter()
-                .map(|child| self.fs_project_tree_node(child, &nested_path))
+                .map(|child| self.fs_project_tree_node(child, &nested_path, depth + 1))
                 .collect();
             let mut nested_list = RenderNode::list(false, None, nested_items);
             nested_list
@@ -3128,7 +3111,8 @@ impl FileSystem {
     /// When a [`with_dimmed_root_prefix`](FileSystem::with_dimmed_root_prefix)
     /// is configured, the prefix is projected as a separate dimmed span and the
     /// target name as a bold-blue span. Without a prefix the original
-    /// paragraph-level bold-blue style is preserved.
+    /// paragraph-level bold-blue style is preserved. The header is an unlinked
+    /// context label even when file links are enabled.
     fn fs_project_root_header(&self) -> RenderNode {
         let name = self.root_display_name.clone().unwrap_or_else(|| {
             self.root_path
@@ -3143,28 +3127,8 @@ impl FileSystem {
                 .unwrap_or_else(|| self.root_path.display().to_string())
         });
 
-        // Choose the root icon glyph: custom override or default folder emoji.
-        let icon_glyph = match self.root_icon {
-            Some(kind) => kind.unicode_str(),
-            None => "📂",
-        };
-        let icon_span = RenderNode::span(
-            vec![CLASS_ICON.to_string()],
-            vec![RenderNode::text(icon_glyph)],
-        );
-
-        let name_node = if self.file_links {
-            let abs_path = self
-                .root_path
-                .canonicalize()
-                .unwrap_or_else(|_| self.root_path.clone());
-            match file_url(&abs_path) {
-                Some(url) => RenderNode::link(url, None, vec![RenderNode::text(&name)]),
-                None => RenderNode::text(&name),
-            }
-        } else {
-            RenderNode::text(&name)
-        };
+        let icon_kind = self.root_icon.unwrap_or_default();
+        let icon_span = fs_icon_node(icon_kind.nerd_char(), icon_kind.unicode_str());
 
         let bold_blue_style = Style {
             color: Some(fs_universal_color(Color::BasicColor(BasicColor::Blue))),
@@ -3175,8 +3139,7 @@ impl FileSystem {
             ..Style::default()
         };
 
-        let mut paragraph = if let Some(prefix) = &self.root_prefix {
-            // Dimmed-prefix root header: icon + dim prefix + bold-blue target.
+        let label = if let Some(prefix) = &self.root_prefix {
             let mut prefix_span = RenderNode::span(
                 vec![CLASS_ROOT_PREFIX.to_string()],
                 vec![RenderNode::text(prefix.clone())],
@@ -3189,22 +3152,20 @@ impl FileSystem {
                 ..Style::default()
             });
 
-            let mut target_span = RenderNode::span(Vec::new(), vec![name_node]);
+            let mut target_span = RenderNode::span(Vec::new(), vec![RenderNode::text(&name)]);
             target_span.attrs.set_style(&bold_blue_style);
 
-            RenderNode::paragraph(vec![
-                icon_span,
-                RenderNode::text(" "),
-                prefix_span,
-                target_span,
-            ])
+            vec![prefix_span, target_span]
         } else {
-            // Default root header: icon + name with paragraph-level bold blue.
-            let mut para =
-                RenderNode::paragraph(vec![icon_span, RenderNode::text(" "), name_node]);
-            para.attrs.set_style(&bold_blue_style);
-            para
+            vec![RenderNode::text(&name)]
         };
+
+        let mut children = vec![icon_span, RenderNode::text(" ")];
+        children.extend(label);
+        let mut paragraph = RenderNode::paragraph(children);
+        if self.root_prefix.is_none() {
+            paragraph.attrs.set_style(&bold_blue_style);
+        }
 
         // Root header classes mark it as both `fs-root` and `fs-dir` for CSS hooks.
         paragraph.attrs.classes = vec![CLASS_ROOT.to_string(), CLASS_DIR.to_string()];
@@ -3259,7 +3220,7 @@ impl FileSystem {
         {
             let entries: Vec<RenderNode> = tree
                 .iter()
-                .map(|node| self.fs_project_tree_node(node, &base_path))
+                .map(|node| self.fs_project_tree_node(node, &base_path, 0))
                 .collect();
             let mut list = RenderNode::list(false, None, entries);
             list.attrs
@@ -8358,22 +8319,84 @@ mod tests {
 
     #[test]
     fn test_dimmed_root_prefix_with_file_links() {
-        // When both file_links and root_prefix are set, the target should
-        // still be wrapped in an OSC8 hyperlink in the bespoke TTY renderer.
         let temp = tempfile::tempdir().expect("temp");
-        std::fs::write(temp.path().join("a.txt"), "x").unwrap();
+        for prefix in [None, Some("docs/")] {
+            let mut fs = FileSystem::new(temp.path())
+                .unwrap()
+                .with_root_display_name("topics/")
+                .with_file_links();
+            if let Some(prefix) = prefix {
+                fs = fs.with_dimmed_root_prefix(prefix);
+            }
+            let mut output = String::new();
+            fs.render_root_line(&mut output, Some(true), true);
+            assert!(output.contains("topics/"), "{output:?}");
+            assert!(!output.contains("\x1b]8;"), "{output:?}");
+        }
+    }
+
+    #[test]
+    fn root_header_is_unlinked_while_files_remain_linked() {
+        let temp = tempfile::tempdir().expect("temp");
+        std::fs::write(temp.path().join("a.md"), "# A").unwrap();
         let mut fs = FileSystem::new(temp.path())
             .unwrap()
-            .with_dimmed_root_prefix("/docs/")
-            .with_root_display_name("topics")
+            .with_dimmed_root_prefix("docs/")
+            .with_root_display_name("topics/")
             .with_file_links();
         fs.ensure_tree_built();
+        let node = fs.render_tree();
+        let output = render_markdown_node(&node, &MarkdownRenderOptions {
+            strictness: RenderStrictness::Lossy,
+            ..MarkdownRenderOptions::default()
+        }).unwrap().output;
 
-        // render_optimistic does not use TTY so no OSC8 wrapping occurs,
-        // but the content should survive.
-        let output = fs.render_optimistic(Some(120));
-        let first_line = output.lines().next().expect("root line");
-        assert!(first_line.contains("topics"), "target in: {first_line:?}");
+        assert!(output.starts_with("📂 docs/topics/"), "{output}");
+        let links = collect_link_urls(&node);
+        assert_eq!(links.len(), 1);
+        assert!(links[0].ends_with("/a.md"));
+        let style = first_style_for_span_class(&node, CLASS_ROOT_PREFIX).unwrap();
+        assert!(style.emphasis.dim);
+    }
+
+    #[test]
+    fn projected_icons_follow_terminal_capabilities_and_keep_portable_fallbacks() {
+        use crate::render_tree::{TerminalRenderOptions, render_terminal_node};
+
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("guide.md"), "# Guide").unwrap();
+        let mut fs = FileSystem::new(temp.path()).unwrap();
+        fs.ensure_tree_built();
+        let node = fs.render_tree();
+        for nerd_font in [Some(true), Some(false), None] {
+            let mut term = Terminal::new_optimistic(120);
+            term.is_nerd_font = nerd_font;
+            let output = render_terminal_node(
+                &node,
+                &TerminalRenderOptions::new(&term, RenderStrictness::Lossy),
+            ).unwrap().output;
+            if nerd_font == Some(true) {
+                assert!(output.contains(icons::nerd::dir::BASE), "{output:?}");
+                assert!(output.contains(icons::nerd::file::MARKDOWN), "{output:?}");
+                assert!(!output.contains("📄"), "{output:?}");
+            } else {
+                assert!(output.contains("📂"), "{output:?}");
+                assert!(output.contains("📄"), "{output:?}");
+            }
+        }
+        let markdown = render_markdown_node(&node, &MarkdownRenderOptions {
+            strictness: RenderStrictness::Lossy,
+            ..MarkdownRenderOptions::default()
+        }).unwrap().output;
+        let html = render_browser_node(&node, &BrowserRenderOptions {
+            strictness: RenderStrictness::Lossy,
+            ..BrowserRenderOptions::default()
+        }).unwrap().output;
+        for output in [markdown, html.render()] {
+            assert!(output.contains("📂"), "{output}");
+            assert!(output.contains("📄"), "{output}");
+            assert!(!output.contains(icons::nerd::file::MARKDOWN), "{output}");
+        }
     }
 
     // --- Helper function tests ---

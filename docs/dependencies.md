@@ -27,6 +27,14 @@
   dev-dependencies `wiremock`, `rcgen`, and `tokio-rustls` for local HTTP and
   TLS mocks. All were already in the workspace graph and in
   `schematic/schema/Cargo.lock`; the lockfile gains no package.
+- `darkmatter` adds `content-policy` as a normal dependency with
+  `default-features = false` (2026-10-12). It is a workspace member, so the
+  lockfile gains one edge and no package. The runtime baseline imports its
+  `EDITOR_SCHEMA` to type `content_policy`, and Darkmatter's tests compare
+  Content Policy's declaration parser with that typing. The edge runs from
+  Darkmatter to Content Policy only; Content Policy's `just deps-check` still
+  forbids the reverse, and `file-adapter` stays off.
+
 - `tree-hugger-cli` adds a direct local `renderable` edge for the render-tree
   node types of biscuit-terminal's `InlineProse::to_render_nodes`, which its
   Markdown and plain Prose exports read. biscuit-terminal already depends on

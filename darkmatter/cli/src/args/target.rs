@@ -67,9 +67,16 @@ pub enum SchemaTarget {
         )]
         inputs: Vec<String>,
 
-        /// Baseline schema path (YAML SimplifiedSchema or JSON Schema)
-        #[arg(long, value_name = "PATH")]
+        /// Custom baseline schema path (YAML SimplifiedSchema or JSON
+        /// Schema) replacing the built-in Darkmatter baseline; used even when
+        /// `DARKMATTER_NO_BASELINE_SCHEMA` is set
+        #[arg(long, value_name = "PATH", conflicts_with = "no_baseline_schema")]
         schema: Option<PathBuf>,
+
+        /// Validate without any baseline schema, ignoring `BASELINE_SCHEMA`;
+        /// the document's `$schema` and trigger schemas still apply
+        #[arg(long)]
+        no_baseline_schema: bool,
 
         /// Output format
         #[arg(long, value_enum, default_value_t = SchemaValidateFormat::Pretty)]

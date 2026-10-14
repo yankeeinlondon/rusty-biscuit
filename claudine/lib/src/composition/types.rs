@@ -151,42 +151,42 @@ pub enum LoopAction {
     },
 }
 
-/// Ambient loop variables injected into each loop iteration.
+/// The members of the `loop` global, the values each loop iteration exposes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AmbientVariable {
-    /// 1-based loop iteration number.
+    /// 1-based loop iteration number (`loop.count`).
     Iteration,
-    /// Whether the current iteration is the first.
+    /// Whether the current iteration is the first (`loop.is_first`).
     IsFirst,
-    /// Whether the current iteration is expected to be the last.
+    /// Whether the current iteration is expected to be the last (`loop.is_last`).
     IsLast,
-    /// Captured output from the previous iteration.
+    /// Captured output from the previous iteration (`loop.last_output`).
     LastOutput,
-    /// Exit code from the previous iteration.
+    /// Exit code from the previous iteration (`loop.last_exit_code`).
     LastExitCode,
 }
 
 impl AmbientVariable {
-    /// Reserved ambient variable names.
-    ///
-    /// All loop ambient variables are namespaced under the `_loop_` prefix
-    /// to avoid shadowing user-defined frontmatter properties named
-    /// `iteration`, `is_first`, `last_output`, etc.
-    pub const NAMES: &[&str] = super::reserved::AMBIENT_VARIABLE_NAMES;
+    /// Every member, in the order the `loop` object lists them.
+    pub const ALL: [Self; 5] = [
+        Self::Iteration,
+        Self::IsFirst,
+        Self::IsLast,
+        Self::LastOutput,
+        Self::LastExitCode,
+    ];
 
-    /// Returns true when `name` is a reserved ambient variable.
-    pub fn is_reserved(name: &str) -> bool {
-        Self::NAMES.contains(&name)
-    }
+    /// The root every member is read through.
+    pub const ROOT: &str = super::reserved::LOOP_ROOT;
 
-    /// Return the frontmatter/template key for this ambient variable.
+    /// The member's name under [`Self::ROOT`].
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Iteration => Self::NAMES[0],
-            Self::IsFirst => Self::NAMES[1],
-            Self::IsLast => Self::NAMES[2],
-            Self::LastOutput => Self::NAMES[3],
-            Self::LastExitCode => Self::NAMES[4],
+            Self::Iteration => "count",
+            Self::IsFirst => "is_first",
+            Self::IsLast => "is_last",
+            Self::LastOutput => "last_output",
+            Self::LastExitCode => "last_exit_code",
         }
     }
 }
@@ -531,6 +531,13 @@ pub struct CallerInputLayers {
     /// context resolves both to the `"unknown"`/`"default"` fallbacks even
     /// though the run has a resolved provider.
     pub env_overrides: BTreeMap<String, String>,
+    /// The `loop` global of the loop iteration these layers prepare
+    /// ([`PrepareOptions::loop_values`][super::PrepareOptions]).
+    ///
+    /// Not caller input: carried here so every re-preparation of one
+    /// iteration (stabilized reread, retry, resume) composes with the same
+    /// values. A `proxy` target is not an iteration and clears it.
+    pub loop_values: Option<super::looping::LoopAmbient>,
 }
 
 impl CallerInputLayers {
@@ -544,6 +551,7 @@ impl CallerInputLayers {
             file_resolution_context,
             pre_approved_commands: None,
             env_overrides: BTreeMap::new(),
+            loop_values: None,
         }
     }
 
@@ -590,6 +598,7 @@ impl CallerInputLayers {
             file_resolution_context: options.file_resolution_context.clone(),
             pre_approved_commands: options.pre_approved_commands.clone(),
             env_overrides: options.env_overrides.clone(),
+            loop_values: options.loop_values.clone(),
         }
     }
 
@@ -614,6 +623,7 @@ impl CallerInputLayers {
         options.file_resolution_context = self.file_resolution_context.clone();
         options.pre_approved_commands = self.pre_approved_commands.clone();
         options.env_overrides = self.env_overrides.clone();
+        options.loop_values = self.loop_values.clone();
         options
     }
 
@@ -678,7 +688,7 @@ pub struct PreparedComposition {
     /// re-resolves the declaration, so a run cannot weaken its own contract by
     /// editing `$schema` mid-run.
     pub launch_schema: Option<LaunchSchema>,
-    /// Parsed lifecycle notification config from effective frontmatter.
+    /// Parsed lifecycle stacks from effective frontmatter.
     pub lifecycle: LifecycleConfig,
     /// Darkmatter composition performance report, when enabled.
     pub compose_perf: Option<ComposePerfReport>,

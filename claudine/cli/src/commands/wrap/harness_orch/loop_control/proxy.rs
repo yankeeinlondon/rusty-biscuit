@@ -96,7 +96,7 @@ pub(super) fn run_target_initialize(
             } => TargetInitializeAction::Reproxy(EvaluatedProxyRequest::new(
                 target.clone(),
                 overlay.clone(),
-                ProxyProvenance::new(source_path.to_path_buf(), *location, chain.to_vec()),
+                ProxyProvenance::new(source_path.to_path_buf(), location.clone(), chain.to_vec()),
             )),
             StackControl::Stop => TargetInitializeAction::Proceed,
             // Authored placement is legal — `is_valid_for` makes every control

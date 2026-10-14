@@ -1,7 +1,8 @@
 # content-policy Dependencies
 
-The library is read by tools that evaluate many documents, and by Darkmatter as
-a later consumer, so its graph stays small and must never reach Darkmatter.
+The library is read by tools that evaluate many documents, and by Darkmatter,
+which depends on it with `default-features = false` to compile in its editor
+schema, so its graph stays small and must never reach Darkmatter.
 `just deps-check` (run by `just lint`) enforces two rules for the default
 features and for `--all-features`:
 

@@ -17,7 +17,7 @@ yolo: true
 plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
 phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || frontmatter(plan, 'phase') || 1 : null }}"
 area: "{{ ctx.area ? ctx.area : ctx.is_monorepo ? 'monorepo-root' : 'repo-root' }}"
-pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
+pass_icon: "{{ loop.is_last ? '✅' : '🧑‍💻' }}"
 total_phases: |-
     {{
         file_exists(plan)
@@ -35,61 +35,58 @@ spec: |-
 # The implementation's log file
 log: "{{ dirname(spec || plan) + '/implementation-log.md' }}"
 initialize:
-    stack:
-        # Inside the review-loop sequence the step list is static; a plan whose
-        # spec is already implemented opts out here and launches nothing.
-        - when: "in_loop && spec && frontmatter(spec, 'implemented') == true"
-          action:
-              - message: "implementation skipped: `{{parent_dir(spec)}}` is already marked implemented"
-              - skip
-        - action:
-            - ensure_file: "{{log}}"
-        - when: "phase != 1"
-          action:
-              - set:
-                    epilog: null
-        - when: "!total_phases || total_phases <= 0"
-          action:
-              - warn: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
-              - message: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
-              - error: "for a plan to be implemented using the **implement-plan** prompt, you need to ensure the plan ({{plan}}) has set either `total_phases` or `phases` Frontmatter property!"
-        - when: "file_exists(log) && frontmatter(log, 'message_to_agent')"
-          action:
-              - stderr: |-
-                    The previous phase's agent has passed a message to this agent:
+    # Inside the review-loop sequence the step list is static; a plan whose
+    # spec is already implemented opts out here and launches nothing.
+    - when: "in_loop && spec && frontmatter(spec, 'implemented') == true"
+      then:
+          - message: "implementation skipped: `{{parent_dir(spec)}}` is already marked implemented"
+          - skip
+    - ensure_file: "{{log}}"
+    - when: "phase != 1"
+      then:
+          - set:
+                epilog: null
+    - when: "!total_phases || total_phases <= 0"
+      then:
+          - warn: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
+          - message: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
+          - error: "for a plan to be implemented using the **implement-plan** prompt, you need to ensure the plan ({{plan}}) has set either `total_phases` or `phases` Frontmatter property!"
+    - when: "file_exists(log) && frontmatter(log, 'message_to_agent')"
+      then:
+          - stderr: |-
+                The previous phase's agent has passed a message to this agent:
 
-                    > {{frontmatter(log, 'message_to_agent')}}
-              - message: |-
-                    The previous phase's agent has passed a message to this agent:
+                > {{frontmatter(log, 'message_to_agent')}}
+          - message: |-
+                The previous phase's agent has passed a message to this agent:
 
-                    > {{frontmatter(log, 'message_to_agent')}}
-              - set:
-                    epilog: "{{message_to_agent}}"
-                    message_to_agent: null
+                > {{frontmatter(log, 'message_to_agent')}}
+          - set:
+                epilog: "{{message_to_agent}}"
+                message_to_agent: null
 
 
 start:
     message: "🎬  implementing phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{ ctx.area || ctx.repo }}, **agent:** {{ctx.agent}}/{{ctx.model}})"
 success:
-    message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{area}}, {{ctx.agent}}/{{ctx.model}})"
-    success: "Completed the implementation of <b>phase <yellow>{{phase}}</yellow></b> of the {{link(plan)}} plan"
-    stack:
-        - when: "ctx.dirty_files && !commit_message"
-          action:
-            - message: |-
-                staging dirty files [{{ length(ctx.dirty_files) }}] from phase **#{{phase}}** in preparation for the git commit:
+    - success: "Completed the implementation of <b>phase <yellow>{{phase}}</yellow></b> of the {{link(plan)}} plan"
+    - message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{area}}, {{ctx.agent}}/{{ctx.model}})"
+    - when: "ctx.dirty_files && !commit_message"
+      then:
+        - message: |-
+            staging dirty files [{{ length(ctx.dirty_files) }}] from phase **#{{phase}}** in preparation for the git commit:
 
-                {{ as_unordered_list(ctx.dirty_files) }}
-        - when: "ctx.dirty_files && commit_message"
-          action:
-            - message: |-
-                staging all files from phase **#{{phase}}** in preparation for the git commit:
+            {{ as_unordered_list(ctx.dirty_files) }}
+    - when: "ctx.dirty_files && commit_message"
+      then:
+        - message: |-
+            staging all files from phase **#{{phase}}** in preparation for the git commit:
 
-                {{ as_unordered_list(ctx.dirty_files) }}
-        - when: "!ctx.dirty_files"
-          action:
-              - message: phase {{phase}} of the plan made no file changes!
-              - warn: phase {{phase}} of the plan made no file changes!
+            {{ as_unordered_list(ctx.dirty_files) }}
+    - when: "!ctx.dirty_files"
+      then:
+          - message: phase {{phase}} of the plan made no file changes!
+          - warn: phase {{phase}} of the plan made no file changes!
 blocked:
     message: "💥  phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved for execution!"
 failure:
@@ -242,7 +239,7 @@ The following Frontmatter properties must be set on the spec file ({{spec}}):
             - you must recommend one of these options and explain why you're recommending it
         - you can use Markdown formatting to help produce a nice looking and clear message
 - if something happened during the implementation that you think is important to know for the agent who will implement the next phase then set the `message_to_agent` property with that message and it will be passed to the agent; be sure you've provided enough context that what you're communicating is clear.
-::block when="_loop_is_last"
+::block when="loop.is_last"
 - set the `implemented` frontmatter to `true`
 ::end-block
 ::end-block

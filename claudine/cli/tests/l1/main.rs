@@ -46,7 +46,12 @@ mod compose_initialize_staged_boot;
 #[cfg(unix)]
 mod compose_interactive_timeout_cli;
 #[cfg(unix)]
+mod compose_removed_grammar;
+#[cfg(unix)]
 mod compose_removed_validation_keys;
+#[cfg(unix)]
+mod compose_retry_overlay;
+mod compose_presence_parity;
 mod compose_prompt_tiers;
 mod context_construction_guard;
 mod compose_repository_context;
@@ -67,6 +72,7 @@ mod ctx_per_run;
 mod detached_audio;
 mod diagnostic_discovery;
 mod dispatch_inventory;
+mod document_environment_routes;
 mod effective_diagnostic_render;
 mod entry_point_parity;
 mod error_guards;
@@ -125,6 +131,8 @@ mod mcp_cli;
 mod override_boundary_guard;
 mod path_lookup_guard;
 mod preflight_execution_parity;
+#[cfg(unix)]
+mod lifecycle_mixed_span_validation;
 mod lifecycle_set_shell_values;
 mod literal_glob_hint;
 #[cfg(unix)]

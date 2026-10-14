@@ -416,6 +416,33 @@ fn test_json_report_only_diagnostic_has_empty_repairs_array() {
     assert_eq!(report["applied"], Value::Array(vec![]));
 }
 
+/// A report-only schema finding names the instance path of a nested problem,
+/// beside its span: in block form, and in flow form, where the span cannot
+/// locate the node.
+#[test]
+fn test_json_schema_finding_names_its_instance_path() {
+    let fixture = CliProcessFixture::named("clean-json-test-json-schema-finding-names-its-instance-path");
+    for (frontmatter, start_line) in [
+        ("content_policy:\n  - TimeSensitive\n  - Duration(3mo)\n", Some(4)),
+        ("content_policy: [TimeSensitive, Duration(3mo)]\n", None),
+    ] {
+        let (_dir, path) = doc(&format!("---\n{frontmatter}---\n\n# Body\n"));
+        let report = envelope(&fixture, &path, &[]);
+        let findings: Vec<&Value> = report["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|d| d["code"] == json!("schema.shape-repair"))
+            .collect();
+        assert_eq!(findings.len(), 1, "{frontmatter}: {report:#}");
+        let message = findings[0]["message"].as_str().unwrap();
+        assert!(message.ends_with("(at `/content_policy/1`)"), "{frontmatter}: {message}");
+        if let Some(line) = start_line {
+            assert_eq!(findings[0]["span"]["start_line"], json!(line), "{report:#}");
+        }
+    }
+}
+
 /// Both tiers share one v1 diagnostic shape and retain their code ownership.
 #[test]
 fn test_json_combines_syntax_and_schema_diagnostics() {

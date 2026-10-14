@@ -3,7 +3,9 @@
 use crate::common;
 
 use common::CliProcessFixture;
-use darkmatter::markdown::schemas::{schema_constraint_descriptors, schema_type_descriptors};
+use darkmatter::markdown::schemas::{
+    alphanumeric_option_descriptors, schema_constraint_descriptors, schema_type_descriptors,
+};
 use darkmatter::testing::strip_ansi_codes;
 use predicates::prelude::*;
 
@@ -211,6 +213,98 @@ fn schema_about_lists_every_supported_type_keyword() {
             "type table missing the `{keyword}` row required by AC8"
         );
     }
+}
+
+/// The table cells of the type-table row whose `Type` cell is `keyword`,
+/// followed by its continuation rows, one `Vec` of trimmed cells per line.
+fn table_row_lines(section: &str, keyword: &str) -> Vec<Vec<String>> {
+    let mut lines = Vec::new();
+    for line in section.lines() {
+        let Some(after_border) = line.trim_start().strip_prefix('│') else {
+            continue;
+        };
+        let cells: Vec<String> = after_border
+            .split('│')
+            .map(|cell| cell.trim().to_string())
+            .collect();
+        let first = cells.first().map(String::as_str).unwrap_or_default();
+        if first == keyword {
+            lines.push(cells);
+        } else if !lines.is_empty() {
+            if !first.is_empty() && !first.starts_with("alias:") && !first.starts_with('-') {
+                break;
+            }
+            lines.push(cells);
+        }
+    }
+    lines
+}
+
+/// AC10: the core schema types reach `md schema about` from the shared
+/// catalog — `unknown` with its `any` alias, `null`, `shell`, and
+/// `alphanumeric` with every type option and its effect.
+#[test]
+fn schema_about_lists_core_types_aliases_and_alphanumeric_options() {
+    let process = CliProcessFixture::new();
+    let output = process
+        .command()
+        .args(["schema", "about"])
+        .output()
+        .expect("run md schema about");
+    assert!(output.status.success(), "schema about should succeed");
+    let plain = strip_ansi_codes(&String::from_utf8_lossy(&output.stdout));
+
+    let type_table = plain
+        .split("Type System")
+        .nth(1)
+        .and_then(|after_heading| after_heading.split("Any of the above types").next())
+        .expect("type system table should render before the array note");
+    for keyword in ["unknown", "null", "alphanumeric", "shell"] {
+        assert!(type_table_has_row(type_table, keyword), "type table missing `{keyword}`");
+    }
+    let unknown = table_row_lines(type_table, "unknown");
+    assert_eq!(
+        unknown.get(1).and_then(|cells| cells.first()).map(String::as_str),
+        Some("alias: any"),
+        "`unknown` names its `any` alias under the keyword: {unknown:#?}"
+    );
+    assert!(
+        !type_table_has_row(type_table, "any"),
+        "`any` is an alias of `unknown`, not a row of its own"
+    );
+
+    let options_section = plain
+        .split("Type Options: alphanumeric")
+        .nth(1)
+        .and_then(|after_heading| after_heading.split("Constraint Vocabulary").next())
+        .expect("alphanumeric options render between the type notes and the constraints");
+    let effects: Vec<(String, String)> = options_section
+        .lines()
+        .filter_map(|line| line.trim_start().strip_prefix('│'))
+        .map(|row| {
+            let cells: Vec<&str> = row.split('│').map(str::trim).collect();
+            (cells[0].to_string(), cells.get(1).copied().unwrap_or_default().to_string())
+        })
+        .filter(|(option, _)| !option.is_empty() && option != "Option")
+        .collect();
+    let rendered: Vec<&str> = effects.iter().map(|(option, _)| option.as_str()).collect();
+    let catalog: Vec<&str> = alphanumeric_option_descriptors()
+        .iter()
+        .map(|option| option.keyword())
+        .collect();
+    assert_eq!(rendered, catalog, "every option, in canonical order: {options_section}");
+    for ((_, effect), option) in effects.iter().zip(alphanumeric_option_descriptors()) {
+        assert!(
+            effect.eq_ignore_ascii_case(&option.effect().replace('`', "")),
+            "`{}` shows its effect: {effect:?}",
+            option.keyword()
+        );
+    }
+    assert!(
+        options_section.contains("- redundant without allow-dashes")
+            && options_section.contains("- redundant with leading-alpha"),
+        "redundancy rules are shown beside the options: {options_section}"
+    );
 }
 
 #[test]

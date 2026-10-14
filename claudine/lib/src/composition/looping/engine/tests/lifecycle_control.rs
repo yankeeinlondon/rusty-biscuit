@@ -151,8 +151,8 @@ fn run_loop_lifecycle_with_engine_path(
 fn loop_initialize_skip_ends_run_with_zero_iterations() {
     let config = counter_loop(3);
     let lifecycle = lifecycle_from(json!({
-        "initialize": { "stack": [{ "action": "skip" }] },
-        "finalize": { "stack": [{ "action": {"append_line": ["never.log", "finalize"]} }] },
+        "initialize": ["skip"],
+        "finalize": [{"append_line": ["never.log", "finalize"]}],
     }));
     let emitter = SignalRecorder::default();
     let invocations = RefCell::new(0usize);
@@ -195,7 +195,7 @@ fn loop_initialize_skip_ends_run_with_zero_iterations() {
 fn loop_initialize_error_routes_to_failure_and_finalize() {
     let config = counter_loop(3);
     let lifecycle = lifecycle_from(json!({
-        "initialize": { "stack": [{ "action": {"error": "preflight refused"} }] },
+        "initialize": [{"error": "preflight refused"}],
         "failure": { "stderr": "fail" },
         "finalize": { "stderr": "final" },
     }));
@@ -244,7 +244,7 @@ fn loop_initialize_stop_proceeds_into_iterations() {
     let run = |action: serde_json::Value| {
         let config = counter_loop(3);
         let lifecycle = lifecycle_from(json!({
-            "initialize": { "stack": [{ "action": action }] },
+            "initialize": [action],
         }));
         let emitter = SignalRecorder::default();
         let invocations = RefCell::new(0usize);
@@ -289,7 +289,7 @@ fn loop_initialize_proxy_hands_off_without_iterating() {
 
     let config = counter_loop(3);
     let lifecycle = lifecycle_from(json!({
-        "initialize": { "stack": [{ "action": {"proxy": "target.md"} }] },
+        "initialize": [{"proxy": "target.md"}],
         "finalize": { "stderr": "final" },
     }));
     let emitter = SignalRecorder::default();
@@ -352,7 +352,7 @@ fn loop_initialize_proxy_defers_resolution_to_the_coordinator() {
 
     let config = counter_loop(3);
     let lifecycle = lifecycle_from(json!({
-        "initialize": { "stack": [{ "action": {"proxy": "does-not-exist.md"} }] },
+        "initialize": [{"proxy": "does-not-exist.md"}],
         "finalize": { "stderr": "final" },
     }));
     let emitter = SignalRecorder::default();
@@ -411,7 +411,7 @@ fn loop_gate_explicit_error_fails_and_exits_without_mutation() {
         on_rate_limit: None,
     };
     let lifecycle = lifecycle_from(json!({
-        "loop": { "stack": [{ "action": {"error": "gate rejected final state"} }] },
+        "loop": { "gate": [{"error": "gate rejected final state"}] },
     }));
     let emitter = SignalRecorder::default();
     let invocations = RefCell::new(0usize);
@@ -468,7 +468,7 @@ fn loop_gate_unintentional_error_does_not_invert_outcome() {
         on_rate_limit: None,
     };
     let lifecycle = lifecycle_from(json!({
-        "loop": { "stack": [{ "action": {"shell": "false"} }] },
+        "loop": { "gate": [{"shell": "false"}] },
     }));
     let emitter = SignalRecorder::default();
     let invocations = RefCell::new(0usize);
@@ -513,7 +513,7 @@ fn loop_gate_evaluation_error_fails_before_condition_and_mutation() {
     // The gate item's `when:` calls an unknown function, so it *raises*
     // at event time rather than evaluating cleanly to false.
     let lifecycle = lifecycle_from(json!({
-        "loop": { "stack": [{ "when": "missing_root() == true", "action": {"stderr": "x"} }] },
+        "loop": { "gate": [{ "when": "missing_root() == true", "then": [{"stderr": "x"}] }] },
     }));
     let emitter = SignalRecorder::default();
     let invocations = RefCell::new(0usize);
@@ -557,11 +557,11 @@ fn loop_initialize_error_with_failure_raise_surfaces_failure_evaluation_error() 
     // to `failure`. The `failure.when:` calls an unknown function, so it
     // *raises* at event time rather than evaluating cleanly to false.
     let lifecycle = lifecycle_from(json!({
-        "initialize": { "stack": [{ "action": {"error": "preflight refused"} }] },
-        "failure": {
-            "stderr": "fail",
-            "stack": [{ "when": "missing_root() == true", "action": {"stderr": "never"}}]
-        },
+        "initialize": [{"error": "preflight refused"}],
+        "failure": [
+            { "stderr": "fail" },
+            { "when": "missing_root() == true", "then": [{"stderr": "never"}] },
+        ],
         "finalize": { "stderr": "final" },
     }));
     let emitter = SignalRecorder::default();
@@ -671,6 +671,7 @@ fn run_loop_lifecycle_emitting_terminal(
                 crate::test_support::process_context(),
                 Some(&timing),
                 None,
+                Some(&ctx.ambient),
             );
             guard.execute_event(LifecycleSignal::Success, &success_ctx);
             Ok(LoopIterationOutput::success("ran"))
@@ -681,7 +682,7 @@ fn run_loop_lifecycle_emitting_terminal(
 
 /// A late-binding **evaluation** error in the `loop:` gate is a
 /// terminal-phase raise (Decision #3): it must fire `finalize` exactly once
-/// carrying the loop error as the `err` global, so a `finalize.stack` can
+/// carrying the loop error as the `err` global, so a `finalize` stack can
 /// react. Proven by a `finalize` stack whose `append_line` is gated on
 /// `err.variant` — the line only lands if `err` reached `finalize`.
 #[test]
@@ -704,14 +705,14 @@ fn loop_gate_evaluation_error_fires_finalize_with_err() {
     // signal) writes the threaded `err` fields to a log, gated on the
     // canonical `when: "err"` truthiness guard.
     let lifecycle = lifecycle_from(json!({
-        "loop": { "stack": [{ "when": "missing_root() == true", "action": {"stderr": "x"} }] },
-        "finalize": {
-            "stderr": "done",
-            "stack": [{
+        "loop": { "gate": [{ "when": "missing_root() == true", "then": [{"stderr": "x"}] }] },
+        "finalize": [
+            { "stderr": "done" },
+            {
                 "when": "err",
-                "action": {"append_line": ["err.log", "{{ err.variant + '|' + err.msg }}"]}
-            }]
-        },
+                "then": [{"append_line": ["err.log", "{{ err.variant + '|' + err.msg }}"]}]
+            },
+        ],
     }));
     let emitter = SignalRecorder::default();
     let invocations = RefCell::new(0usize);
@@ -767,11 +768,11 @@ fn loop_gate_evaluation_error_with_finalize_raise_surfaces_finalize() {
     // `finalize` top-level `stderr` fires (recorder logs the signal) before
     // its stack `when:` raises on an unknown function.
     let lifecycle = lifecycle_from(json!({
-        "loop": { "stack": [{ "when": "missing_root() == true", "action": {"stderr": "x"} }] },
-        "finalize": {
-            "stderr": "done",
-            "stack": [{ "when": "also_missing() == true", "action": {"stderr": "never"} }]
-        },
+        "loop": { "gate": [{ "when": "missing_root() == true", "then": [{"stderr": "x"}] }] },
+        "finalize": [
+            { "stderr": "done" },
+            { "when": "also_missing() == true", "then": [{"stderr": "never"}] },
+        ],
     }));
     let emitter = SignalRecorder::default();
     let invocations = RefCell::new(0usize);
@@ -814,15 +815,15 @@ fn loop_gate_evaluation_error_with_finalize_raise_surfaces_finalize() {
 fn loop_initialize_error_with_failure_and_finalize_raise_surfaces_finalize() {
     let config = counter_loop(3);
     let lifecycle = lifecycle_from(json!({
-        "initialize": { "stack": [{ "action": {"error": "preflight refused"} }] },
-        "failure": {
-            "stderr": "fail",
-            "stack": [{ "when": "missing_root() == true", "action": {"stderr": "never"}}]
-        },
-        "finalize": {
-            "stderr": "final",
-            "stack": [{ "when": "also_missing() == true", "action": {"stderr": "never"}}]
-        },
+        "initialize": [{"error": "preflight refused"}],
+        "failure": [
+            { "stderr": "fail" },
+            { "when": "missing_root() == true", "then": [{"stderr": "never"}] },
+        ],
+        "finalize": [
+            { "stderr": "final" },
+            { "when": "also_missing() == true", "then": [{"stderr": "never"}] },
+        ],
     }));
     let emitter = SignalRecorder::default();
     let invocations = RefCell::new(0usize);

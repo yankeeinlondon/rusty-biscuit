@@ -4,7 +4,7 @@
 //! trees, but a nested-span lint must read the authored text: a synthesized
 //! literal and an authored quoted literal are indistinguishable once parsed.
 //! [`LifecycleSourceMap`] projects the frontmatter the lifecycle config was
-//! parsed from onto the paths `iter_stack_expression_surfaces` emits, so a
+//! parsed from onto the paths `walk_stack` emits, so a
 //! validator can look up the authored scalar for each surface the one canonical
 //! iterator yields. Structural fields, arbitrary overlay keys, and array
 //! indices are distinct path segments; display punctuation is never used as
@@ -18,7 +18,9 @@ use std::fmt;
 use serde_json::Value;
 
 use super::LifecycleSignal;
+use super::action_shape::positional_operand_field;
 use super::actions::{CommunicationChannel, expression_function_signature, side_effect_signature};
+use super::parse::LOOP_ITERATION_KEYS;
 
 /// An authored lifecycle value at one canonical property path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,42 +31,79 @@ pub(super) enum AuthoredValue {
     NonText,
 }
 
+/// One segment of a [`LifecyclePath`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum LifecyclePathSegment {
+    /// A grammar key: an event, `then`, `else`, a verb, or a parameter.
     Field(String),
+    /// An arbitrary authored mapping key, such as a `set` or `with` key.
     MapKey(String),
+    /// A list position.
     Index(usize),
 }
 
-/// Structural identity for one lifecycle expression surface.
+/// The authored location of a lifecycle node, action, or operand.
+///
+/// Paths name what the author wrote, never an execution position: expanding a
+/// dictionary bundle keeps each action at its verb key, so the second action of
+/// `failure[0].else` written as `- shell: …` is `failure[0].else[1].shell`, and
+/// its command operand is `failure[0].else[1].shell.command`. Diagnostics carry
+/// the rendered form; the source map and the expression walker key on the
+/// structural form, so display punctuation is never identity.
+///
+/// A [`MapKey`](LifecyclePathSegment::MapKey) segment that is not an
+/// identifier renders bracket-quoted (`with["a.b"]`) so a key containing a dot
+/// cannot read as two segments.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(super) struct LifecycleSurfacePath(Vec<LifecyclePathSegment>);
+pub struct LifecyclePath(Vec<LifecyclePathSegment>);
 
-impl LifecycleSurfacePath {
-    pub(super) fn root(field: impl Into<String>) -> Self {
+impl LifecyclePath {
+    /// A path rooted at `field`: an event name, or a task's source-rooted
+    /// stack property such as `tasks[0].setup`.
+    pub fn root(field: impl Into<String>) -> Self {
         Self(vec![LifecyclePathSegment::Field(field.into())])
     }
 
-    pub(super) fn field(&self, field: impl Into<String>) -> Self {
+    #[allow(missing_docs)]
+    pub fn field(&self, field: impl Into<String>) -> Self {
         let mut path = self.clone();
         path.0.push(LifecyclePathSegment::Field(field.into()));
         path
     }
 
-    pub(super) fn map_key(&self, key: impl Into<String>) -> Self {
+    #[allow(missing_docs)]
+    pub fn map_key(&self, key: impl Into<String>) -> Self {
         let mut path = self.clone();
         path.0.push(LifecyclePathSegment::MapKey(key.into()));
         path
     }
 
-    pub(super) fn index(&self, index: usize) -> Self {
+    #[allow(missing_docs)]
+    pub fn index(&self, index: usize) -> Self {
         let mut path = self.clone();
         path.0.push(LifecyclePathSegment::Index(index));
         path
     }
+
+    /// The path without its last segment; the root is its own parent.
+    pub fn parent(&self) -> Self {
+        let mut path = self.clone();
+        if path.0.len() > 1 {
+            path.0.pop();
+        }
+        path
+    }
+
+    /// The first segment as authored: the event name or task stack property.
+    pub fn root_name(&self) -> &str {
+        match self.0.first() {
+            Some(LifecyclePathSegment::Field(field) | LifecyclePathSegment::MapKey(field)) => field,
+            _ => "",
+        }
+    }
 }
 
-impl fmt::Display for LifecycleSurfacePath {
+impl fmt::Display for LifecyclePath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (position, segment) in self.0.iter().enumerate() {
             match segment {
@@ -91,7 +130,7 @@ impl fmt::Display for LifecycleSurfacePath {
 /// Authored lifecycle scalars keyed by canonical typed paths.
 #[derive(Debug, Default)]
 pub(super) struct LifecycleSourceMap {
-    entries: HashMap<LifecycleSurfacePath, AuthoredValue>,
+    entries: HashMap<LifecyclePath, AuthoredValue>,
 }
 
 impl LifecycleSourceMap {
@@ -103,32 +142,28 @@ impl LifecycleSourceMap {
         };
         for signal in LifecycleSignal::ALL {
             let event = signal.property_name();
+            let path = LifecyclePath::root(event);
+            if signal != LifecycleSignal::Loop {
+                if let Some(stack) = root.get(event) {
+                    map.record_stack(&path, stack);
+                }
+                continue;
+            }
             let Some(Value::Object(block)) = root.get(event) else {
                 continue;
             };
-            if signal == LifecycleSignal::Loop {
-                for predicate in ["while", "until"] {
-                    map.record(
-                        LifecycleSurfacePath::root(event).field(predicate),
-                        block.get(predicate),
-                    );
-                }
+            for predicate in ["while", "until"] {
+                map.record(path.field(predicate), block.get(predicate));
             }
-            let Some(Value::Array(stack)) = block.get("stack") else {
-                continue;
-            };
-            for (idx, item) in stack.iter().enumerate() {
-                let Value::Object(item) = item else { continue };
-                let prefix = LifecycleSurfacePath::root(event).field("stack").index(idx);
-                map.record(prefix.field("when"), item.get("when"));
-                match item.get("action") {
-                    Some(Value::Array(actions)) => {
-                        for (action_idx, action) in actions.iter().enumerate() {
-                            map.record_action(&prefix.field("action").index(action_idx), action);
-                        }
-                    }
-                    Some(action) => map.record_action(&prefix.field("action").index(0), action),
-                    None => {}
+            match block.get("gate") {
+                Some(gate) => map.record_stack(&path.field("gate"), gate),
+                None => {
+                    let concerns: serde_json::Map<String, Value> = block
+                        .iter()
+                        .filter(|(key, _)| !LOOP_ITERATION_KEYS.contains(&key.as_str()))
+                        .map(|(key, value)| (key.clone(), value.clone()))
+                        .collect();
+                    map.record_dictionary(&path, &concerns);
                 }
             }
         }
@@ -136,11 +171,11 @@ impl LifecycleSourceMap {
     }
 
     /// The authored value at `path`, or `None` when nothing was recorded.
-    pub(super) fn get(&self, path: &LifecycleSurfacePath) -> Option<&AuthoredValue> {
+    pub(super) fn get(&self, path: &LifecyclePath) -> Option<&AuthoredValue> {
         self.entries.get(path)
     }
 
-    fn record(&mut self, path: LifecycleSurfacePath, value: Option<&Value>) {
+    fn record(&mut self, path: LifecyclePath, value: Option<&Value>) {
         let authored = match value {
             Some(Value::String(text)) => AuthoredValue::Text(text.clone()),
             Some(Value::Number(_) | Value::Bool(_)) => AuthoredValue::NonText,
@@ -149,44 +184,55 @@ impl LifecycleSourceMap {
         self.entries.insert(path, authored);
     }
 
-    /// Record one action object's operands under `prefix` (`…action[j]`).
-    fn record_action(&mut self, prefix: &LifecycleSurfacePath, action: &Value) {
-        let Value::Object(obj) = action else { return };
-        if let Some(value) = obj.get("set")
-            && obj.keys().all(|key| matches!(key.as_str(), "set" | "no_error"))
-        {
-            self.record_with_value(&prefix.field("set"), value);
-            return;
-        }
-        if let Some(Value::String(verb)) = obj.get("action") {
-            self.record_key_value_action(prefix, verb, obj);
-        } else if let [(verb, value)] = obj.iter().collect::<Vec<_>>().as_slice() {
-            self.record_positional_action(prefix, verb, value);
+    /// A stack or `then`/`else` body: a list of items or a dictionary.
+    fn record_stack(&mut self, path: &LifecyclePath, value: &Value) {
+        match value {
+            Value::Array(items) => {
+                for (index, item) in items.iter().enumerate() {
+                    if let Value::Object(item) = item {
+                        self.record_item(&path.index(index), item);
+                    }
+                }
+            }
+            Value::Object(map) => self.record_dictionary(path, map),
+            _ => {}
         }
     }
 
-    /// `{verb: value}` or `{verb: [values…]}`: argument `k` is the scalar or
-    /// the array's `k`th element.
-    fn record_positional_action(
-        &mut self,
-        prefix: &LifecycleSurfacePath,
-        verb: &str,
-        value: &Value,
-    ) {
+    /// One list item: an optional guard and branches, then its verbs.
+    fn record_item(&mut self, path: &LifecyclePath, item: &serde_json::Map<String, Value>) {
+        self.record(path.field("when"), item.get("when"));
+        for branch in ["then", "else"] {
+            if let Some(body) = item.get(branch) {
+                self.record_stack(&path.field(branch), body);
+            }
+        }
+        self.record_dictionary(path, item);
+    }
+
+    /// Every verb of a dictionary, each at `{path}.{verb}`.
+    fn record_dictionary(&mut self, path: &LifecyclePath, map: &serde_json::Map<String, Value>) {
+        for (verb, value) in map {
+            if matches!(verb.as_str(), "when" | "then" | "else" | "no_error") {
+                continue;
+            }
+            let verb_path = path.field(verb.as_str());
+            match value {
+                _ if verb == "set" => self.record_with_value(&verb_path, value),
+                Value::Object(params) => self.record_long_form(&verb_path, verb, params),
+                _ => self.record_short_form(&verb_path, verb, value),
+            }
+        }
+    }
+
+    /// `verb: value` or `verb: [values…]`: argument `k` is the scalar or the
+    /// array's `k`th element, named the way the walker names the operand.
+    fn record_short_form(&mut self, prefix: &LifecyclePath, verb: &str, value: &Value) {
         let args: Vec<&Value> = match value {
             Value::Array(items) => items.iter().collect(),
             scalar => vec![scalar],
         };
-        let single_field = match verb {
-            "error" => Some("reason"),
-            "proxy" => Some("target"),
-            "retry" => Some("max_attempts"),
-            "resume" => Some("message"),
-            "defer" => Some("delay"),
-            "shell" => Some("command"),
-            _ if CommunicationChannel::from_verb(verb).is_some() => Some("message"),
-            _ => None,
-        };
+        let single_field = positional_operand_field(verb);
         for (k, arg) in args.into_iter().enumerate() {
             let path = match single_field {
                 Some(field) => prefix.field(field),
@@ -196,17 +242,17 @@ impl LifecycleSourceMap {
         }
     }
 
-    /// `{action: verb, param: value, …}`, named the way `build_action_from_params`
+    /// `verb: { param: value, … }`, named the way `build_action_from_params`
     /// stores each parameter.
-    fn record_key_value_action(
+    fn record_long_form(
         &mut self,
-        prefix: &LifecycleSurfacePath,
+        prefix: &LifecyclePath,
         verb: &str,
         obj: &serde_json::Map<String, Value>,
     ) {
         let params: Vec<(&String, &Value)> = obj
             .iter()
-            .filter(|(key, _)| !matches!(key.as_str(), "action" | "no_error" | "with"))
+            .filter(|(key, _)| !matches!(key.as_str(), "no_error" | "with"))
             .collect();
         if let Some(with) = obj.get("with") {
             self.record_with_value(&prefix.field("with"), with);
@@ -218,16 +264,12 @@ impl LifecycleSourceMap {
         );
         if is_control || verb == "shell" {
             for (key, value) in params {
-                self.record(prefix.field(key), Some(value));
+                self.record(prefix.field(key.as_str()), Some(value));
             }
             return;
         }
         if CommunicationChannel::from_verb(verb).is_some() {
-            let message = ["message", "text", "sound"]
-                .into_iter()
-                .find_map(|key| obj.get(key));
-            self.record(prefix.field("message"), message);
-            self.record(prefix.field("route"), obj.get("route"));
+            self.record(prefix.field("text"), obj.get("text"));
             return;
         }
 
@@ -253,7 +295,7 @@ impl LifecycleSourceMap {
         }
     }
 
-    fn record_with_value(&mut self, path: &LifecycleSurfacePath, value: &Value) {
+    fn record_with_value(&mut self, path: &LifecyclePath, value: &Value) {
         match value {
             Value::Array(items) => {
                 for (i, item) in items.iter().enumerate() {
@@ -262,7 +304,7 @@ impl LifecycleSourceMap {
             }
             Value::Object(map) => {
                 for (key, item) in map {
-                    self.record_with_value(&path.map_key(key), item);
+                    self.record_with_value(&path.map_key(key.as_str()), item);
                 }
             }
             scalar => self.record(path.clone(), Some(scalar)),

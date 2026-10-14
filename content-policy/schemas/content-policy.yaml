@@ -13,8 +13,6 @@
 #   a leading `/`, `~`, `@`, `%`, or `{{`. Without groups or lookaround a `{{`
 #   after the first character cannot be expressed, so evaluation alone rejects
 #   a path such as `docs/{{HOME}}.md`.
-# - `rule` on `long_form` is not `(required)`: a union-typed reference cannot
-#   take constraints today, so evaluation alone reports a missing `rule`.
 kind: schema
 types:
   short_form:
@@ -27,8 +25,8 @@ types:
     - 'string(pattern(^ValidUntil\x28\x20*@[A-Za-z_][A-Za-z0-9_-]*\x20*\x29$)) -> Deadline held in a property'
     - 'string(pattern(^FileChanged\x28[^\s\x2C\x29\x5C/~@%]\x2C\x20*@[A-Za-z_][A-Za-z0-9_-]*\x20*\x29$|^FileChanged\x28[^\s\x2C\x29\x5C/~@%{][^\x2C\x29\x5C]*[^\s\x2C\x29\x5C]\x2C\x20*@[A-Za-z_][A-Za-z0-9_-]*\x20*\x29$|^FileChanged\x28\{[^\s\x2C\x29\x5C{]\x2C\x20*@[A-Za-z_][A-Za-z0-9_-]*\x20*\x29$|^FileChanged\x28\{[^\x2C\x29\x5C{][^\x2C\x29\x5C]*[^\s\x2C\x29\x5C]\x2C\x20*@[A-Za-z_][A-Za-z0-9_-]*\x20*\x29$)) -> Content change of a file, fingerprint held in a property'
   long_form:
-    rule: "short_form@./content-policy.yaml"
+    rule: "short_form(required)"
     action: "enum(refresh, archive, remove; required)"
   policy:
-    - "short_form@./content-policy.yaml"
-    - "long_form@./content-policy.yaml"
+    - short_form
+    - long_form

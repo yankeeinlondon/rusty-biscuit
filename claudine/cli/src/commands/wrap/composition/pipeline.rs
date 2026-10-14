@@ -896,6 +896,7 @@ fn construct_argv_and_system_prompt(
                 target.model.as_deref(),
                 effective_non_interactive,
                 has_model_env,
+                &super::target::request_environment(request),
                 &mut |key, value| {
                     env_plan.env.insert(key.into(), value.into());
                 },
@@ -1181,6 +1182,7 @@ fn construct_argv_and_system_prompt(
                 has_model_env: env_plan
                     .env
                     .contains_key(&std::ffi::OsString::from("MODEL")),
+                environment: super::target::request_environment(request),
                 mcp: mcp_rebuild.clone(),
                 opencode_config_base: opencode_config_base.clone(),
                 kilo_config_base: kilo_config_base.clone(),
@@ -1540,7 +1542,7 @@ pub(super) fn route_initialize(
                         overlay.clone(),
                         ProxyProvenance::new(
                             source_path.to_path_buf(),
-                            *location,
+                            location.clone(),
                             vec![source_path.to_path_buf()],
                         ),
                     ));
@@ -1755,6 +1757,7 @@ fn provider_run_handoff(
             .as_ref()
             .map(darkmatter::markdown::compose::CurrentAuthority::memoized),
         group: None,
+        loop_values: None,
         base_dir,
         ctx_base_dir: Some(launch_workspace.launch_cwd.as_path()),
         prepared_context: Some(lifecycle_context),
@@ -1882,8 +1885,8 @@ pub(super) struct InitializeCatchSurface<'a> {
     pub launch_area: &'a Path,
     pub context: &'a darkmatter::markdown::compose::ComposeContext,
     pub file_resolution_context: &'a biscuit_file::FileResolutionContext,
-    /// The invocation's refresh authority for the lazy `current`/`current_env`
-    /// roots; `None` when there is no invocation, so every read fails closed.
+    /// The invocation's refresh authority for the lazy `current` root; `None`
+    /// when there is no invocation, so every read fails closed.
     pub current: Option<darkmatter::markdown::compose::CurrentAuthority>,
     pub frontmatter: &'a serde_json::Map<String, serde_json::Value>,
     pub document_start: Instant,
@@ -1910,6 +1913,8 @@ impl InitializeCatchSurface<'_> {
             Some(self.launch_area),
             Some(self.context),
             self.file_resolution_context,
+            // `initialize` and its catch stacks run before any iteration.
+            None,
             self.current.clone(),
             self.frontmatter,
             self.document_start,

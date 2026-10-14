@@ -180,9 +180,9 @@ pub(crate) struct StagedDocument<'a> {
     pub term: &'a Terminal,
     pub repo_root: Option<&'a Path>,
     pub launch_area: &'a Path,
-    /// The invocation's refresh authority for the lazy `current`/`current_env`
-    /// roots, resolved once by the caller; `None` when there is no invocation,
-    /// so every `current.*` read in the staged boot fails closed.
+    /// The invocation's refresh authority for the lazy `current` root, resolved
+    /// once by the caller; `None` when there is no invocation, so every
+    /// `current.*` read in the staged boot fails closed.
     pub current: Option<darkmatter::markdown::compose::CurrentAuthority>,
     pub document_start: Instant,
 }
@@ -263,6 +263,7 @@ pub(crate) fn route_staged_initialize(
             .as_ref()
             .map(darkmatter::markdown::compose::CurrentAuthority::memoized),
         group: None,
+        loop_values: None,
         base_dir: surface.source_path.parent().or(document.repo_root),
         ctx_base_dir: Some(document.launch_area),
         prepared_context: Some(surface.context),
@@ -305,7 +306,8 @@ pub(crate) fn route_staged_initialize(
 ///
 /// `options` are the options the bootstrap read was assembled from — caller
 /// layers, file-resolution context, epoch, and snapshot — so nothing is
-/// recaptured. The retained snapshot is only extended for context groups the
+/// recaptured: the document environment the epoch's invocation view entered
+/// before the bootstrap is the one the reread reads. The retained snapshot is only extended for context groups the
 /// rewritten document newly names. Approvals accumulate: `approved` (from the
 /// bootstrap) plus every command the body audit approves.
 ///

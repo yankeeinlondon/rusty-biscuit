@@ -25,7 +25,7 @@ The `loop:` iteration condition (`while`/`until`) is a separate mechanism. It do
 
 ### Budgets
 
-`max_attempts` counts attempts *beyond* the one that just ran. The budget is fixed the first time a given directive fires, so re-running the prompt cannot reset it. Once the budget is spent the directive behaves like `stop`: the stack ends and the run keeps the outcome it had.
+`max_attempts` counts attempts *beyond* the one that just ran. The budget is fixed the first time a given directive fires, so re-running the prompt cannot reset it. Once the budget is spent the directive behaves like `stop`: the event ends and the run keeps the outcome it had.
 
 With `backoff: exponential`, the first retry waits `delay`, and each later retry waits twice as long as the one before. `delay` uses the same duration syntax as `timeout` (`"30s"`, `"5m"`).
 
@@ -42,6 +42,8 @@ Both directives replace only the **provider attempt**. The active document stays
 
 - The document is re-read from disk and fully validated again.
 - The `proxy` `with:` overlay, the proxy history, and the remaining attempt budgets are kept.
+- A `retry` that carries its own `with:` layers it over that fresh read, for that one attempt only (see [Retry overlays](#retry-overlays)). A `resume` never carries one.
+- The document's environment is kept: `env.*`, env-expanded file references, and shell commands read the map the document captured when it started, not a new one.
 - `initialize` does **not** fire again. It fires once per active document, not once per attempt.
 - Launch settings are recomputed from the freshly read document. A `model:` edited between attempts takes effect on the next attempt.
 
@@ -56,6 +58,8 @@ Before continuing a session, `resume` compares a session-compatibility key acros
 A run has exactly one **active document**. `proxy` replaces it. The target enters at its own `initialize` and owns everything after that: the remaining events, the completion step, and the output.
 
 A clean handoff fires no further events for the source document. A `proxy` from `success` or `failure` skips that attempt's `finalize`, and a `proxy` from `finalize` does not re-enter `finalize`.
+
+The target is a new document, so it captures its own environment after it is resolved and before its `initialize` runs; its `env.*`, file references, model selection, and shell commands read that map, while the source keeps reading its own. The target is resolved in the source's file context, so a `{{VAR}}` in the `proxy` path reads the source's map. See [Composition — One Environment per Document](../composition.md#one-environment-per-document).
 
 The target is bootstrapped by the same preparation service that prepares a directly invoked document. `claudine compose target.md` and a `proxy` to `target.md` therefore go through the same `initialize`, schema validation, shell discovery and approval, and diagnostics. See [Composition — Document Handoffs and the Equivalence Contract](../composition.md#document-handoffs-and-the-equivalence-contract) for what the target recalculates for itself.
 
@@ -78,35 +82,40 @@ The target must exist. A missing target fails with a typed `Unresolvable file re
 
 ### Passing values with `with:`
 
-`with:` is a transient overlay of top-level frontmatter properties for the immediate target.
+`with:` is a transient overlay of top-level frontmatter properties for the document a transition reads next. Two directives accept it:
+
+- on `proxy` it parameterizes the **target** of the handoff;
+- on `retry` it parameterizes the **fresh re-read of the same document** for the retried attempt (see [Retry overlays](#retry-overlays)).
+
+`resume` takes no `with:`: it continues a live session rather than reading a document anew. `prep` will accept one when it is built (**planned**).
 
 ```yaml
 success:
-  stack:
-    - action:
-        action: proxy
-        target: "@prompts/next.md"
-        with:
-          attempt: "{{ iteration }}"
-          ready: "{{ true }}"
-          label: "phase-{{ iteration }}"
-          files: "{{ changed_files }}"
-          metadata:
-            source: router
-            area: "{{ ctx.area }}"
+  - proxy:
+      target: "@prompts/next.md"
+      with:
+        attempt: "{{ iteration }}"
+        ready: "{{ true }}"
+        label: "phase-{{ iteration }}"
+        files: "{{ changed_files }}"
+        metadata:
+          source: router
+          area: "{{ ctx.area }}"
 ```
+
+The rules below hold for both directives unless a section says otherwise.
 
 #### Shape rules
 
-`with:` is accepted only in key/value form. `with: {}` means the same as leaving it out. Each of these is a typed frontmatter error that points at the source:
+`with:` is accepted only in the long form. `with: {}` means the same as leaving it out. Each of these is a typed frontmatter error that points at the source:
 
 | Mistake | Error |
 |---------|-------|
-| `with:` is not a mapping | `LifecycleProxyWithNotMapping` |
-| A key contains `{{ … }}` | `LifecycleProxyWithDynamicKey` |
-| The whole mapping is one span, such as `with: "{{ payload }}"` | `LifecycleProxyWithWholeMapping` (out of scope for v1) |
-| `with:` appears on a directive other than `proxy` | `LifecycleProxyOnlyParameter` |
-| Positional `proxy:` with a sibling `with:` | `LifecycleStackAmbiguous`, which suggests the key/value form |
+| `with:` is not a mapping | `LifecycleWithNotMapping` |
+| A key contains `{{ … }}` | `LifecycleWithDynamicKey` |
+| The whole mapping is one span, such as `with: "{{ payload }}"` | `LifecycleWithWholeMapping` (out of scope for v1) |
+| `with:` appears on a directive other than `proxy` or `retry`, `resume` included | `LifecycleWithUnsupported` |
+| `with:` written beside a short-form directive in the same item (`- proxy: "x"` plus a sibling `with:`) | `LifecycleUnknownVerb`, because a sibling key is read as a verb; use the long form |
 
 #### Value types
 
@@ -116,17 +125,19 @@ Keys are static strings that name target properties. They are never interpolated
 - A string that is **exactly one** span keeps the expression's type. `"{{ true }}"` becomes boolean `true`, not the string `"true"`.
 - YAML numbers, booleans, arrays, objects, and nulls keep their authored types.
 
-Nested mappings are data here. This is the only place in the lifecycle surface where a nested mapping is a legal action value.
+Nested mappings are data here. This is the only place in the lifecycle surface where a nested mapping is a legal parameter value.
 
 #### Evaluation
 
-The whole mapping is evaluated **once, in the source document**, when the directive fires. Evaluation uses Darkmatter subtree composition against the source's live frontmatter plus the globals the event declares (`err`, `timing`, `group`; see [Lifecycle](lifecycle.md#binding-time-early-vs-late)) and the `current`/`current_env` roots. An absent property is `null`; a genuine evaluation error leaves no overlay at all. A `set_frontmatter` earlier in the same stack is visible. The target receives resolved data, never a template: the overlay reaches the target's composition as a data layer, so a `{{ … }}` or `$( … )` inside a resolved value (for example, text an agent wrote) is kept as text and is never evaluated in the target, on its first read or on a `retry`/`resume`.
+The whole mapping is evaluated **once, in the source document**, when the directive fires. Evaluation uses Darkmatter subtree composition against the source's live frontmatter plus the globals the event declares (`err`, `timing`, `group`, `loop`; see [Lifecycle](lifecycle.md#binding-time-early-vs-late)) and the `current` root. An absent property is `null`; a genuine evaluation error leaves no overlay at all. A `set_frontmatter` earlier in the same event is visible. The target receives resolved data, never a template: the overlay reaches the target's composition as a data layer, so a `{{ … }}` or `$( … )` inside a resolved value (for example, text an agent wrote) is kept as text and is never evaluated in the target, on its first read or on a `retry`/`resume`.
 
-A `with:` value for a lifecycle key (`initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, `loop`) is the exception. The target re-parses it as its own stack or loop and evaluates those strings at event time, so a resolved value that still holds a `{{ … }}` span there fails with `LifecycleProxyWithEvaluationFailed` instead of becoming an instruction.
+A `with:` value for a lifecycle key (`initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, `loop`) is the exception. The target re-parses it as its own event or loop and evaluates those strings at event time, so a resolved value that still holds a `{{ … }}` span there fails with `LifecycleWithEvaluationFailed` instead of becoming an instruction.
 
-Evaluation is atomic. The target and the whole mapping resolve before anything changes. If any value fails (a malformed expression, an unknown function, or an out-of-scope variable such as `group` outside a group), no overlay is installed, the target is never touched, the source stays active, and the run follows the normal failure path for the event that fired. `no_error` does not suppress this, because it is an expression error rather than a side-effect failure. The error, `LifecycleProxyWithEvaluationFailed`, names the event, the directive, the target, and the deepest path inside `with:` that it can identify. It never prints a resolved value, which could be a secret.
+Evaluation is atomic. The target and the whole mapping resolve before anything changes. If any value fails (a malformed expression, an unknown function, or an out-of-scope variable such as `group` outside a group), no overlay is installed, no transition happens, and the run follows the normal failure path for the event that fired: a `proxy` never touches its target and the source stays active; a `retry` starts no attempt and spends none of its budget. `no_error` does not suppress this, because it is an expression error rather than a side-effect failure. The error, `LifecycleWithEvaluationFailed`, names the event, the directive, the document the overlay was for (the `proxy` target, or the current document for `retry`), and the deepest path inside `with:` that it can identify, for example `` `failure[0].then[0].retry.with.reason` could not be resolved for the `retry` to `<current document>` ``. It never prints a resolved value, which could be a secret.
 
 #### Precedence and lifetime
+
+This section describes a `proxy` overlay; [Retry overlays](#retry-overlays) covers how a `retry` overlay differs.
 
 The overlay is merged into every read of the target's frontmatter, both the bootstrap read before `initialize` and the fresh read after it, before composition and schema validation, and composition receives the same values as data. From lowest to highest precedence:
 
@@ -148,21 +159,44 @@ The overlay applies to the immediate target only:
 Forwarding a value down a chain must be explicit. A second-hop `proxy` without `with:` installs an **empty** overlay; it does not inherit the first hop's:
 
 ```yaml
-- action: proxy
-  target: "@prompts/final.md"
-  with:
-    spec: "{{ spec }}"      # forwarded only because it is named here
+success:
+  - proxy:
+      target: "@prompts/final.md"
+      with:
+        spec: "{{ spec }}"      # forwarded only because it is named here
 ```
 
 An overlay does not give a document a distinct identity for cycle detection.
 
+#### Retry overlays
+
+A `retry` overlay is evaluated exactly like a `proxy` overlay, but it applies to **one transition** of the same document:
+
+```yaml
+failure:
+  - when: "err.is_transient"
+    then:
+      - retry:
+          max_attempts: 3
+          with:
+            reason: "{{ err.msg }}"
+```
+
+- **One transition.** The overlay applies to the retried attempt's fresh read of the document, and to nothing after it. Both reads that attempt makes see it: the shell pre-flight read and the read the provider runs against. The prompt can read it as `fm.reason`.
+- **Layered over a retained `proxy` overlay.** On a document that a `proxy` handed to, the retained `proxy` overlay still applies, and the `retry` overlay is merged key by key on top of it, so the `retry` value wins a shared key. Caller overrides (`--set`) still win over both.
+- **Never carried forward.** A later `retry` without `with:`, a `resume`, and a `proxy` adoption never see it. A later `retry` with its own `with:` replaces it.
+- **Data, not templates, and never on disk.** Values reach the fresh read as resolved data, are never evaluated again as templates, and are never written to the file.
+- **A failure spends nothing.** If any value fails to evaluate, the `retry` takes no transition and spends none of its attempt budget; `no_error` cannot hide the failure. An overlay that the document's `$schema` rejects fails that attempt's refresh, as any invalid frontmatter would.
+
+Attempt budgets, `delay`, `backoff`, and re-entry are unchanged: an overlay cannot reset a budget or skip the refresh validation.
+
 #### `with:` compared with `set_frontmatter`
 
-| | `proxy` `with:` | `set_frontmatter` / `merge_frontmatter` |
+| | `proxy` / `retry` `with:` | `set_frontmatter` / `merge_frontmatter` |
 |---|---|---|
-| Persistence | In memory, for one target activation | Written to the file on disk |
-| Scope | The immediate proxy target | Whichever file the action names |
-| Lifetime | Discarded at the next hop | Until something rewrites it |
+| Persistence | In memory, for one target activation (`proxy`) or one attempt (`retry`) | Written to the file on disk |
+| Scope | The immediate proxy target, or the retried document | Whichever file the action names |
+| Lifetime | Discarded at the next hop (`proxy`) or after one attempt (`retry`) | Until something rewrites it |
 | Visible to | That target's composition, events, schema, and body | Any later reader of the file |
 | A `{{ … }}` or `$( … )` in a resolved value | Data in the target; never evaluated | Stored as a literal token; read back as the same text |
 
@@ -190,4 +224,4 @@ These guarantees hold regardless:
 
 ## `--dry-run`
 
-`--dry-run` fires no lifecycle events. It returns before the lifecycle runtime is constructed, so no stack is evaluated, no side effect touches the workspace, and no dynamic `proxy` is followed. Turning a dry run into a lifecycle simulation is an explicit non-goal. See [Composition — Dry Run](../composition.md#dry-run).
+`--dry-run` fires no lifecycle events. It returns before the lifecycle runtime is constructed, so no event runs, no side effect touches the workspace, and no dynamic `proxy` is followed. Turning a dry run into a lifecycle simulation is an explicit non-goal. See [Composition — Dry Run](../composition.md#dry-run).

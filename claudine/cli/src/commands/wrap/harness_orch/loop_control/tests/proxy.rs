@@ -36,7 +36,7 @@ fn dispatch_proxy_requests_a_handoff_without_touching_active_document() {
     let outcome = outcome_with(StackControl::Proxy {
         target: target.display().to_string(),
         overlay,
-        location: claudine::composition::ActionLocation::new(LifecycleSignal::Failure, 0, 1),
+        location: claudine::composition::ActionLocation::new(LifecycleSignal::Failure, claudine::composition::LifecyclePath::root("failure").index(1).field("proxy")),
     });
     let action = dispatch_terminal_control(
         &outcome,
@@ -69,7 +69,7 @@ fn dispatch_proxy_requests_a_handoff_without_touching_active_document() {
     );
     assert_eq!(
         request.provenance().location().to_string(),
-        "failure.stack[0].action[1]",
+        "failure[1].proxy",
         "provenance names the exact property that requested the hop"
     );
     assert_eq!(
@@ -120,7 +120,7 @@ fn dispatch_proxy_to_missing_target_still_only_requests() {
     let outcome = outcome_with(StackControl::Proxy {
         target: missing.display().to_string(),
         overlay: indexmap::IndexMap::new(),
-        location: claudine::composition::ActionLocation::new(LifecycleSignal::Failure, 0, 0),
+        location: claudine::composition::ActionLocation::new(LifecycleSignal::Failure, claudine::composition::LifecyclePath::root("failure").index(0).field("proxy")),
     });
     let action = dispatch_terminal_control(
         &outcome,

@@ -1,0 +1,6 @@
+$schema:
+  title: string(min(3); max(40)) -> the display title
+  tags:
+    - string(min(2))
+    - number(max(9))
+  next: boolean

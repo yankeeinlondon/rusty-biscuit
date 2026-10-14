@@ -296,8 +296,7 @@ fn plan_with_union_templated_sibling(root: &Path) -> PathBuf {
             "    doc: file\n",
             "doc: \"{{spec || design}}\"\n",
             "initialize:\n",
-            "  stack:\n",
-            "    - action: {append_line: [\"events.log\", \"initialize\"]}\n",
+            "  - {append_line: [\"events.log\", \"initialize\"]}\n",
             "---\n",
             "Spec document: {{spec}}\n",
         ),
@@ -611,7 +610,7 @@ fn assert_d1_union_chooser_lists_both_trees_and_the_fixes_pick_composes(
         "    spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n",
         "    count: 'number'\n",
     );
-    let initialize = "initialize:\n  stack:\n    - action: {append_line: [\"events.log\", \"initialize\"]}\n";
+    let initialize = "initialize:\n  - {append_line: [\"events.log\", \"initialize\"]}\n";
     let (label, extra) = if with_initialize {
         ("with initialize", initialize)
     } else {
