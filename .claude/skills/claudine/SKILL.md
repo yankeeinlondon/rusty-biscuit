@@ -15,16 +15,49 @@ Lifecycle audio is published in stack order: put `effect` before `say` to hear i
 phrases ahead of their events. Each top-level command (compose,
 inline-compose, sequence, provider wrapper) owns one deferred
 `PrewarmWorker`. The worker starts on the first submission that speaks and
-is cancelled on drop. Its `PrewarmHandle` travels on `InvocationContext`
+is cancelled on drop. Its gates read only the user's bridged settings
+(`tts_prewarm`); each submission also carries the settings of the speech path
+that plays it, and each candidate is prepared and keyed (`PrewarmKey`) with
+that path's `TtsConfig`. Document lifecycles play with the user's settings;
+sequence task `setup:`/`teardown:` stacks play with
+`sequence::task::task_playback_settings()`, which `run_step_task` and
+preflight both use. Its `PrewarmHandle` travels on `InvocationContext`
 (`with_prewarm`; `DocumentEpoch::prewarm`). Every preparation site calls
 `prewarm::collect_and_submit`: the pipeline's lifecycle phase, the staged
 bootstrap, the loop bootstrap, and harness re-materialization. Sequence
-preflight calls `submit_sequence_preflight`. A sequence step or prompt task
+preflight calls `submit_sequence_preflight`; a task's `setup:`/`teardown:` is
+reconsidered by `submit_task_stacks` wherever the task's context is
+established (`run_step_task`, `open_member_run`, `open_leg_run` in
+`cli/src/commands/wrap/sequence/task_run.rs`), against the step's effective
+frontmatter and the task's captured `ctx`/`env`. A sequence step or prompt task
 scopes the handle with `with_prewarm_injected_keys` so per-step values stay
 late. A new preparation site submits through the same entry point. CLI tests
 observe preparations through the `test-fixtures` seam
 `CLAUDINE_TEST_PREWARM=record:<path>` or `block:<path>`, with
 `PLAYA_DRY_RUN=0` and only never-firing phrases (`cli/tests/l1/tts_prewarm.rs`).
+Only phrases *ready early* are submitted: literal text, or reads of `fm`/bare
+properties, `ctx`, `env` with no function call and no `$(`/backtick
+(`prewarm/classify.rs`); late globals, sequence overlay keys, `--set` keys and
+task `params` wait for their event. A lifecycle `set` changes runtime state,
+not the reread, so a phrase reading a `set` key misses the cache (never wrong
+audio). User docs: [Lifecycle → pre-warm](topics/flow-control/lifecycle.md#speech-is-prepared-ahead-of-time-pre-warm).
+
+**`tts` in `~/.claudine/config.json`** (`config/tts.rs::TtsValue`) is `true`,
+`false`, or an object whose keys are all optional: `provider` (absent = default
+provider, as `true`), `voice` (string or `{ male, female }`), `gender`
+(`female` default), `prewarm` (default `true`). Explicit `null` is rejected
+(`present` deserializer), unknown keys are rejected. `bridge_tts_settings` maps
+it to `GlobalSettings { tts, tts_prewarm }`; read the switch only through
+`TtsValue::prewarm_enabled`.
+
+| Value | Hook `speak` | Lifecycle `say` config | Pre-warm |
+| --- | --- | --- | --- |
+| absent / `false` | off | auto-detect | on |
+| `true` | on, auto-detect | auto-detect | on |
+| object with `provider` | on, object's provider/voice | object's provider/voice | `prewarm` (default on) |
+| object without `provider` | on, as `true` | as `true` | `prewarm` (default on) |
+
+Full table and validation rules: [Configuring Actions → `tts`](topics/configuring-actions.md#text-to-speech-settings-tts).
 
 **Lifecycle grammar.** Each lifecycle stack (the six events, the `loop:`
 block's loose verbs or `gate:` list, and a task's `setup:`/`teardown:`) parses
