@@ -37,6 +37,32 @@ execution-time gate degrades to a pure membership check: the command is already
 approved, so it runs with no prompt — this run or any later loop iteration with
 flipped conditions. A dead-branch command is **approved but never executed**.
 
+### Missing values
+
+A shell command never runs with a missing value. A placeholder is missing
+when its expression evaluates to `null`, which is also what an absent
+property reads as. Pre-flight evaluates every placeholder of every
+`::shell`, `::shell-block`, and frontmatter `$( … )` command, in every
+branch, and fails with `MissingValue` before any command runs:
+
+```md
+---
+target: null
+---
+::shell ls {{ target }}
+```
+
+```text
+shell command 'ls {{ target }}' reads 'target', which is missing (line 4)
+```
+
+An empty string, `0`, and `false` are present, and so is a fallback that
+yields a value (`{{ target || 'src' }}`). The error names the command and
+the expression, never the value. Like `NotPreApproved`, it always fails the
+composition: no `--when-error`, timeout fallback, transclusion notice, or
+`as_markdown(…) || fallback` absorbs it. Everywhere outside a shell command
+(body text, other frontmatter), `null` still renders as an empty string.
+
 Collection resolves every transclusion target the way composition does, from
 the same repository-aware context, so a `::file &README.md` or
 `::file ^docs/guide.md` reaches the same file in both, whatever directory `md`
@@ -170,6 +196,56 @@ A library caller that sets no policy root (`ComposeOptions::with_shell_policy_ro
 gets the request context's repository root, else its home directory, else the
 request directory. Pre-flight and execution read the same files.
 
+#### File format
+
+Each file is UTF-8 text with one rule per line. Blank lines and lines starting
+with `#` are ignored.
+
+```text
+# whitelist
+exact just ci-local --plan
+prefix ls
+template just clean --out {{ string }}/build
+```
+
+| Rule | Matches |
+|------|---------|
+| `exact <command>` | that command, argument for argument |
+| `prefix <executable>` | the executable with any arguments |
+| `template <shape>` | a command with the same argument list, where each `{{ type }}` hole stands for one argument value of that type |
+
+A `template` hole holds one type with its options and nothing else:
+`{{ string }}` or a narrower string-like type such as
+`{{ alphanumeric(allow-slashes) }}`. A literal containing spaces, quotes,
+braces, or shell characters is double-quoted, with `\\`, `\"`, `\{`, `\}`,
+`\n`, `\r`, and `\t` as escapes; `"{{ x }}"` inside quotes is literal text, so
+write it `"\{\{ x \}\}"`. A line the loader cannot read is skipped with a
+warning naming the file and line, and the other rules still load. These
+template lines are skipped:
+
+| Line | Why |
+|------|-----|
+| `template build {{ alphanumeric(allow-slashes; min(3)) }}` | a constraint |
+| `template build {{ alphanumeric(min(3)) }}` | a constraint, written without `;` |
+| `template build {{ number }}` | not a string-like type |
+| `template build {{ slug }}` | a named type |
+| `template {{ string }} run` | a hole in the program word |
+
+In the blacklist, a `template` line blocks any command whose arguments it
+matches, whatever the hole types: `template deploy {{ string }}` blocks
+`deploy prod`, including a command written without any placeholder. A
+single-command rule blocks that command anywhere in an `&&`/`||` chain.
+
+A whitelist `template` rule approves a command at pre-flight when no `exact`
+rule covers its bytes: an `exact` rule wins, then a `template` rule, then a
+`prefix` rule. The approval records the command's shape, not its bytes.
+
+**Planned:** running a shape-approved command in template mode (each value
+type-checked and passed as exactly one argument). Until then, a command
+approved only by its shape is refused at execution with `NotPreApproved`
+rather than run as interpolated bytes; an `exact` or `prefix` rule still runs
+it as before.
+
 ## Interactive Approval
 
 When a command does not match the blacklist and is not in the whitelist, the user is prompted with these options:
@@ -181,6 +257,22 @@ When a command does not match the blacklist and is not in the whitelist, the use
 | Allow once | Execute this session only; cached but not persisted |
 | Deny | Abort the pipeline with an error; nothing is persisted |
 | Blacklist | Abort the pipeline and add the command to `.darkmatter-shell-blacklist` |
+
+`md compose` decides each command site once, before anything runs, and
+writes the row the chosen option names. A choice that cannot be written (for
+example, the whitelist path is not writable) fails with a policy I/O error and
+approves nothing; it never falls back to "allow once".
+
+The approval request a handler receives says which choices it may offer
+(`ShellApprovalRequest::offered`) and, for a command with a placeholder,
+carries its template (`ShellApprovalRequest::template`): the shape a
+"this command shape" choice persists, and the display form
+`git --version {{ word: string }}`. A command whose value is produced later
+in the run (see below) has no bytes yet, so it is never offered the exact
+choice, and its request leaves `normalized_exact` empty.
+
+**Planned:** the `md` prompt showing the template and offering "this command
+shape" (`ShellApprovalDecision::AllowTemplatePersist`).
 
 ## Timeouts
 
@@ -212,7 +304,19 @@ Each resolved `::code` and `::toc-linking` target appears in `ComposePreflightRe
 
 **Claudine's role is authorization.** It takes the approval set from Darkmatter, merges in commands from its harness, checks everything against the whitelist, and prompts the user once for anything missing. The merged, authorized set is handed back to the pipeline as the execution membership source.
 
-**During composition**, Darkmatter receives the pre-approved set via `pre_approved_commands` on `ComposeOptions` and trusts it completely, bypassing its own approval flow.
+**Each command site is reported.** Besides the deduped resolved-byte entries, the report's `candidates` holds one `ShellCandidate` per command site, never merged by bytes: its authored template, typed against the schema of the document that owns it (a transcluded child uses its own), whether it may run as resolved bytes, and the bytes discovery resolved for it.
+
+**Late values.** A host whose commands read values the run produces later (Claudine's sequence outputs, for example) declares those roots with `ComposeOptions::with_deferred_shell_roots`. Discovery does not evaluate a placeholder that reads one, directly or through a frontmatter value derived from one, and marks it `HoleTiming::Deferred`. Its command has no resolved bytes, so it can be approved only as a template (`ModeRequirement::TemplateRequired`); one whose authored text is not a valid template fails pre-flight with `TemplateGrammar`. Declaring a root late does not make it readable: availability stays with the host's globals. The command's other placeholders are still checked for missing values.
+
+```md
+---
+latest: "{{ last(outputs) }}"
+---
+::shell just test {{ last(outputs) }} --package {{ pkg }}   <!-- template only; `pkg` must be present -->
+::shell just clean {{ latest }}                              <!-- template only, through `latest` -->
+```
+
+**During composition**, Darkmatter receives the pre-approved set via `pre_approved_commands` on `ComposeOptions` (a `ShellPreApprovals` holding resolved bytes and template shapes) and bypasses its own approval flow. Each command must prove membership: its resolved bytes are in the exact set, or its authored shape, re-typed against its owner's schema, is in the template set. A template-only site is never admitted by bytes, and execution never adds the bytes it resolved to either set.
 
 This separation ensures:
 

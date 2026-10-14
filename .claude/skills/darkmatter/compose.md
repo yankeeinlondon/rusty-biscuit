@@ -949,6 +949,50 @@ candidates. The lower-level `collect_shell_commands(&md, &options)` returns the
 raw `ShellCommandEntry` list. See
 `docs/inline/preflight-checks.md`.
 
+### Typed shell templates (`shell_expansion/template/`)
+
+The shared model for template-mode approval. `parse_authored` parses
+*authored* command text (holes found with `ExpressionFinder::scan_plain` before
+quotes, spaces, or operators are read) into a `CommandTemplate`; never
+interpolate and then tokenize. `project_types` types each hole from the owning
+document's `EffectiveSchema.simplified`, and only a bare top-level property
+(`dir`, `fm.dir`) reads a declaration. Each `HoleType` keeps the approval type
+(`BroadString` or `StringLike`) separate from its validator, so a numeric
+declaration is approved as `{{ string }}` but still validated as a number.
+`TemplateShape` is what a `template` rule stores and matches, and
+`canonical_text`/`parse_rule` round-trip it. Covers is `rule_covers`, which
+gates `schemas::is_subtype` behind `is_string_like`, because `is_subtype`
+accepts any identical pair. Blacklist matching errs toward refusing: holes
+ignore type, redirects are ignored, a one-segment rule matches any chain
+segment, and `blocks_filled` treats holes as `*` against filled argv.
+`check_user_blacklist` already applies template blacklist rules to
+resolved-byte commands. `store::load_ruleset_with_warnings` returns the
+skipped lines with file and line; `load_ruleset` logs them.
+
+Discovery (`preflight/collect.rs`) also reads each command site as authored
+(`parser::authored_directive_commands` + `authored_template`, which drops
+directive options; shell-block lines; `authored_shell_template` for
+frontmatter `$( … )`) and reports one `ShellCandidate` per site in
+`ComposePreflightReport::candidates`, never merged by bytes. A site is matched
+to its resolved bytes by document order (`resolved`); a count mismatch leaves
+it unlinked rather than guessed. `CandidateScope::build` types holes from the
+owner's schema (assembled lazily, only for a site with holes), marks a hole
+`HoleTiming::Deferred` when it reads a root from
+`ComposeOptions::with_deferred_shell_roots` directly or through a derived
+frontmatter key (`derived_deferred_keys`, inherited by children), and raises
+`ShellExpansionError::MissingValue` for an approval-time hole that evaluates
+to `null`. A deferred site is `ModeRequirement::TemplateRequired`, contributes
+no entry, and is `TemplateGrammar` if its text is not a template.
+`MissingValue`/`TemplateGrammar` are `shell_input_violation()`s, fatal through
+transclusion notices and nested `||`. `ComposeOptions.pre_approved_commands`
+is `ShellPreApprovals` (exact bytes + shapes; a `HashSet<String>` converts to
+exact only); `validate_pre_approved` admits a site by bytes or shape, and
+`prepare_directive` runs only exact members until template execution lands.
+The runtime allow-once set and Claudine's session cache key on `ApprovalKey`
+(mode + policy root). `compose_preflight_approvals` decides per site (exact
+rule, template rule, prefix rule, then the handler with
+`ShellApprovalRequest::offered`/`template`) and persists every chosen row.
+
 ### Frontmatter-surface projection
 
 `ComposeOptions::only_frontmatter_surface()` narrows a compose to frontmatter
