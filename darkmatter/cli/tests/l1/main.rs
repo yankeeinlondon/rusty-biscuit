@@ -17,6 +17,7 @@ mod position_fixtures;
 #[path = "../../../lib/tests/content_policy_fixtures/mod.rs"]
 mod content_policy_fixtures;
 
+mod claudine_schema_bundle;
 mod clean;
 mod clean_fidelity;
 mod clean_frontmatter;
