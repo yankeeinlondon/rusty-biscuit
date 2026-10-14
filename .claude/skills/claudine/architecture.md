@@ -509,6 +509,12 @@ Markdown frontmatter-based composition pipelines for delivering prompts to provi
 - **Inline composition** (`--frontmatter-prompt`): reads frontmatter `prompt` field as input; the agent edits the document itself, then the closure repairs, restores, encodes, hashes, and writes it once (see Agent text is data below)
 - **Chained composition** (`--compose`): composes full document as prompt without file mutation
 
+`prepare_direct` and `prepare_inline` export the composed body through
+Darkmatter's `render_tree::embedded::without_embedded_metadata` before storing
+the provider prompt. Keep Markdown fallbacks and portable links; internal
+component metadata belongs to Darkmatter's terminal/browser document folds,
+not provider delivery or dry-run stdout.
+
 The CLI executor under `cli/src/commands/wrap/composition/` keeps stable entry
 points and public re-exports in `mod.rs`. `pipeline.rs` owns one
 `CompositionAttempt` across ordered selection/launch, environment/MCP,

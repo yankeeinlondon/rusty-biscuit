@@ -7,6 +7,55 @@ use std::fs;
 use crate::common;
 use common::{CliProcessFixture, init_git_repo, strip_ansi, write, write_executable};
 
+#[test]
+fn compose_dry_run_file_links_exports_both_listings_without_render_metadata() {
+    let fixture = CliProcessFixture::named("compose-file-links");
+    write(&fixture.cwd().join("modes/mode-1004.md"), "# Focus\n");
+    write(&fixture.cwd().join("osc/osc-8.md"), "# Hyperlinks\n");
+    write(
+        &fixture.cwd().join("fleet.md"),
+        "### Modes Standards\n\n::file-links ./modes/*.md\n\n### OSC Standards\n\n::file-links ./osc/*.md\n\n## After\n\nKeep **this** text.\n",
+    );
+    let output = fixture.command()
+        .args(["compose", "fleet.md", "--dry-run"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let prompt = String::from_utf8(output).unwrap();
+    assert!(!prompt.contains("bt:render-tree"), "internal metadata leaked into dry run");
+    assert!(prompt.contains("[mode-1004.md](modes/mode-1004.md)"), "{prompt}");
+    assert!(prompt.contains("[osc-8.md](osc/osc-8.md)"), "{prompt}");
+    assert!(prompt.contains("## After\n\nKeep **this** text."));
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_file_links_delivers_plain_markdown_to_provider() {
+    let fixture = CliProcessFixture::named("compose-file-links-provider");
+    write(&fixture.cwd().join("modes/mode-1004.md"), "# Focus\n");
+    write(&fixture.cwd().join("osc/osc-8.md"), "# Hyperlinks\n");
+    write(
+        &fixture.cwd().join("fleet.md"),
+        "### Modes Standards\n\n::file-links ./modes/*.md\n\n### OSC Standards\n\n::file-links ./osc/*.md\n",
+    );
+    let records = common::launch_recorder::install(
+        &fixture,
+        "claude",
+        "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"Done\"}'",
+    );
+    fixture.command()
+        .args(["compose", "fleet.md", "--claude", "--silent"])
+        .assert()
+        .success();
+    let prompts = common::launch_recorder::prompts(&records);
+    assert_eq!(prompts.len(), 1);
+    assert!(!prompts[0].contains("bt:render-tree"), "internal metadata reached the provider");
+    assert!(prompts[0].contains("[mode-1004.md](modes/mode-1004.md)"));
+    assert!(prompts[0].contains("[osc-8.md](osc/osc-8.md)"));
+}
+
 // ============================================================================
 // Phase 1: convergence between non-harness and harness-enabled direct compose
 // ============================================================================

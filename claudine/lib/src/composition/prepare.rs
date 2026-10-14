@@ -593,8 +593,9 @@ use darkmatter::markdown::schemas::SchemaPhase;
 /// Prepare a direct (chained) composition with effective frontmatter.
 ///
 /// Composes the entire document through Darkmatter and extracts the
-/// effective frontmatter from the composed state. The closure is
-/// [`CompositionClosurePlan::Direct`] — no file mutation occurs.
+/// effective frontmatter from the composed state. The prompt exports plain
+/// Markdown, retaining component fallbacks without internal render metadata.
+/// The closure is [`CompositionClosurePlan::Direct`] — no file mutation occurs.
 pub fn prepare_direct(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
@@ -657,7 +658,9 @@ pub(super) fn prepare_direct_with_prompt(
 
     let prompt = match prompt_source {
         PromptSource::ComposedBody => {
-            let prompt = composed.content().to_string();
+            let prompt = darkmatter::markdown::render_tree::embedded::without_embedded_metadata(
+                composed.content(),
+            );
             if prompt.trim().is_empty() && !options.allow_empty_body {
                 return Err(CompositionError::ComposedBodyEmpty {
                     source_path: source.resolved_path.clone(),
@@ -708,8 +711,9 @@ pub(super) fn prepare_direct_with_prompt(
 /// The delivered `prompt` is read from the effective input layer (caller
 /// overlay over authored frontmatter), composed as the body of a temporary
 /// document so it interpolates against the same frontmatter, and wrapped in
-/// the file-aware header and guardrails. The schema verdict is judged at
-/// [`SchemaPhase::Launch`]: a `required; eager` property must be present and
+/// the file-aware header and guardrails. Component fallbacks are exported as
+/// plain Markdown without internal render metadata. The schema verdict is judged
+/// at [`SchemaPhase::Launch`]: a `required; eager` property must be present and
 /// valid, while an eager-only or required-but-not-eager property may stay
 /// absent for the agent to supply.
 pub fn prepare_inline(
@@ -765,7 +769,9 @@ pub fn prepare_inline(
     let (selection_hints, lifecycle) =
         effective_surface(&composed, &effective_frontmatter, &ctx, source, &options)?;
 
-    let body = composed.content().to_string();
+    let body = darkmatter::markdown::render_tree::embedded::without_embedded_metadata(
+        composed.content(),
+    );
     if body.trim().is_empty() && !options.allow_empty_body {
         return Err(CompositionError::ComposedBodyEmpty {
             source_path: source.resolved_path.clone(),
