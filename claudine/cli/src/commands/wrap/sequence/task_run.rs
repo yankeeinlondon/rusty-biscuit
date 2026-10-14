@@ -552,10 +552,13 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         // The document the task runs in: a group leg's own view, or the
         // step's. Everything below — composition, the prompt document's
         // lifecycle, and the launch — reads that document's environment.
+        // The task's `params` are injected into its prompt document per task,
+        // so pre-warm treats them as late there.
         let document = request
             .document
             .clone()
-            .unwrap_or_else(|| self.run.prep_context.invocation.clone());
+            .unwrap_or_else(|| self.run.prep_context.invocation.clone())
+            .with_prewarm_injected_keys(request.set_overrides.values().keys().cloned());
         // Just-in-time, like the step itself: the referenced document is read
         // now, so a document an earlier step rewrote is composed as it stands.
         let source = composition::resolve_composition_source_in_context(

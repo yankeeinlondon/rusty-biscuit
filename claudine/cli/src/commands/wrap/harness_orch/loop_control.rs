@@ -854,6 +854,12 @@ fn run_initialize_stages(
     };
 
     lifecycle.guard.set_config(bootstrap_lifecycle);
+    // The adopted target's bootstrap walk, before its `initialize` fires.
+    prewarm_materialized(
+        lifecycle.guard.context().settings,
+        prompt.prompt_state.invocation_context.as_ref(),
+        materialized,
+    );
 
     // Stage 3 — `initialize`, through the normal evaluator.
     let chain = control.coordinator.ledger().chain().to_vec();
@@ -1445,6 +1451,35 @@ fn emit_launch_warnings(launch: &RebuiltLaunchIdentity, verbosity: Verbosity) {
     }
 }
 
+/// Submit a freshly read document's early phrases for TTS pre-warm, resolved
+/// against the frontmatter and `ctx`/`env` binding its events are spoken with.
+fn prewarm_materialized(
+    settings: &claudine::events::GlobalSettings,
+    invocation: Option<&claudine::invocation_context::InvocationContext>,
+    materialized: &MaterializedHarnessPrompt,
+) {
+    let (Some(lifecycle), Some(context)) =
+        (materialized.lifecycle.as_ref(), materialized.compose_context.as_ref())
+    else {
+        return;
+    };
+    let handle = match (materialized.document_epoch.as_ref(), invocation) {
+        (Some(epoch), _) => epoch.prewarm(),
+        (None, Some(invocation)) => invocation.prewarm(),
+        (None, None) => return,
+    };
+    claudine::composition::lifecycle::prewarm::collect_and_submit(handle, settings, lifecycle, || {
+        let mut context = context.clone();
+        for (key, value) in &materialized.env_overrides {
+            context.env_mut().insert(key.clone(), value.clone());
+        }
+        claudine::composition::lifecycle::prewarm::PrewarmInputs::captured(
+            &materialized.frontmatter,
+            context,
+        )
+    });
+}
+
 fn materialize_attempt_prompt_phase(
     prompt: &mut AttemptPromptPreparation<'_>,
     lifecycle: &mut AttemptLifecycleExecution<'_, '_>,
@@ -1547,6 +1582,13 @@ fn materialize_attempt_prompt_phase(
     .and_then(|mut materialized| {
         let launch = rebuild(&materialized).map_err(launch_plan_report)?;
         apply_target_env_overrides(&mut materialized, &launch.env_overrides);
+        // A fresh read — retry, resume, a stabilized reread, or loop refresh —
+        // is a new snapshot; already-queued phrases are not queued again.
+        prewarm_materialized(
+            lifecycle_guard.context().settings,
+            prompt_state.invocation_context.as_ref(),
+            &materialized,
+        );
         Ok(AttemptDocument {
             materialized,
             launch,

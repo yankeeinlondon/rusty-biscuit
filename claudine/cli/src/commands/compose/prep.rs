@@ -198,8 +198,12 @@ pub(crate) fn run_composition_inner(
     let frontmatter_load_t = std::time::Instant::now();
     // The caller's document reads the launch map; each `proxy` target below
     // replaces this with the view it captures for itself.
+    // One TTS pre-warm worker for the whole command, shared by every document
+    // a handoff adopts; dropping it on return cancels unfinished preparation.
+    let prewarm = claudine::composition::lifecycle::prewarm::PrewarmWorker::deferred(shared.dry_run);
     let mut invocation = InvocationContext::capture(crate::request::snapshot())?
-        .with_environment_source(crate::request::document_environment_source());
+        .with_environment_source(crate::request::document_environment_source())
+        .with_prewarm(prewarm.handle());
     let provisional_context = invocation.launch_file_resolution_context().clone();
     let source = resolve_composition_source(&file, kind, &shared, &provisional_context)?;
     // Derive the definitive source bundle from the same owner so a
@@ -1035,6 +1039,19 @@ fn build_and_run_loop(
     let effective_repo_root = prep_context.source_repo_root.as_deref();
     let (lifecycle_settings, lifecycle_messaging) =
         staged_boot::lifecycle_settings(&lifecycle_config, effective_repo_root);
+    // The loop's bootstrap walk, before the engine fires `initialize`; every
+    // iteration's own preparation submits again with its live values.
+    claudine::composition::lifecycle::prewarm::collect_and_submit(
+        document_epoch.prewarm(),
+        &lifecycle_settings,
+        &lifecycle_config,
+        || {
+            claudine::composition::lifecycle::prewarm::PrewarmInputs::captured(
+                &serde_json::Value::Object(loop_seed.initialize_frontmatter.clone()),
+                prepared_context.clone(),
+            )
+        },
+    );
 
     let term = wrap_terminal();
     let lifecycle_ctx = LifecycleRuntimeContext {

@@ -130,6 +130,21 @@ impl StagedLifecycleRuntime {
         for (key, value) in env_overrides {
             context.env_mut().insert(key.clone(), value.clone());
         }
+        // The bootstrap walk, before `initialize` fires: initialization may
+        // change these phrases, and the stabilized reread submits again.
+        if let Some(epoch) = bootstrap.document_epoch.as_ref() {
+            claudine::composition::lifecycle::prewarm::collect_and_submit(
+                epoch.prewarm(),
+                &settings,
+                &bootstrap.lifecycle,
+                || {
+                    claudine::composition::lifecycle::prewarm::PrewarmInputs::captured(
+                        &bootstrap.effective_frontmatter,
+                        context.clone(),
+                    )
+                },
+            );
+        }
         Self {
             settings,
             messaging,

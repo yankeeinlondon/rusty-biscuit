@@ -141,6 +141,42 @@ fn approve_preflight_graph(
     Ok(result.approved_commands)
 }
 
+/// Submit every early lifecycle phrase the preflight graph reaches for TTS
+/// pre-warm, before step one launches.
+///
+/// Settings load only when pre-warm is live; submission never waits for
+/// synthesis.
+fn submit_preflight_prewarm(
+    graph: &composition::PreflightGraph,
+    source: &ResolvedCompositionSource,
+    user_set_overrides: Option<&serde_json::Value>,
+    repo_root: Option<&std::path::Path>,
+    invocation: &claudine::invocation_context::InvocationContext,
+    graph_context: &darkmatter::markdown::compose::ComposeContext,
+) {
+    let handle = invocation.prewarm();
+    if !handle.is_enabled() {
+        return;
+    }
+    // As lifecycle playback does, an unreadable configuration plays with the
+    // defaults.
+    let settings = claudine::dispatch::loader::load_claudine_config(None, repo_root)
+        .map(|config| claudine::dispatch::loader::bridge_tts_settings(&config))
+        .unwrap_or_default();
+    let caller_keys = user_set_overrides
+        .and_then(serde_json::Value::as_object)
+        .map(|setters| setters.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    claudine::composition::lifecycle::prewarm::submit_sequence_preflight(
+        handle,
+        &settings,
+        graph,
+        source,
+        caller_keys,
+        graph_context,
+    );
+}
+
 /// Whether static preflight failed because a prompt document's `::file`
 /// target does not exist.
 ///
@@ -336,6 +372,14 @@ pub(crate) fn execute_sequence(
     // single-pass lifecycle literals are checked here, before any approval
     // prompt or step can run.
     graph.validate_prompt_lifecycle_literals()?;
+    submit_preflight_prewarm(
+        &graph,
+        source,
+        user_set_overrides.as_ref(),
+        source_repo_root.as_deref(),
+        &prep_context.invocation,
+        &graph_context,
+    );
     let preflight_approved = approve_preflight_graph(
         &graph,
         source,

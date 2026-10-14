@@ -282,8 +282,12 @@ fn run_sequence_inner(
     let stderr_is_tty = std::io::stderr().is_terminal()
         || std::env::var_os("FORCE_COLOR").is_some();
 
+    // One TTS pre-warm worker for the whole sequence, shared by every step and
+    // task; dropping it on return cancels unfinished preparation.
+    let prewarm = claudine::composition::lifecycle::prewarm::PrewarmWorker::deferred(shared.dry_run);
     let invocation = claudine::invocation_context::InvocationContext::capture(request)?
-        .with_environment_source(documents);
+        .with_environment_source(documents)
+        .with_prewarm(prewarm.handle());
     let file_resolution_context = invocation.launch_file_resolution_context().clone();
     let source = match resolve_sequence_source(&file, &file_resolution_context) {
         Ok(source) => source,

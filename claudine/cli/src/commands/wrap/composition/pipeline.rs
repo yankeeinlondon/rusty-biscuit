@@ -1393,6 +1393,23 @@ fn construct_lifecycle_runtime(
             ctx
         };
 
+        // Every prepared document reaches this phase before its provider
+        // launches: an eager read, a stabilized reread, a loop iteration, a
+        // `proxy` target, and a sequence step. Submission never waits.
+        if let Some(invocation) = request.invocation_context.as_ref() {
+            claudine::composition::lifecycle::prewarm::collect_and_submit(
+                invocation.prewarm(),
+                &lifecycle_settings,
+                lifecycle,
+                || {
+                    claudine::composition::lifecycle::prewarm::PrewarmInputs::captured(
+                        &request.prepared.effective_frontmatter,
+                        lifecycle_context.clone(),
+                    )
+                },
+            );
+        }
+
         Ok(LifecyclePhase {
             shell_options,
             emitter,

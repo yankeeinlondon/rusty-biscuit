@@ -345,7 +345,19 @@ fn run_one_step(
     // retry/resume, handlers, and `finalize` — reads that one map. The run
     // context below carries the step's view, so nothing downstream reaches
     // back to the launch document's.
-    let step_invocation = run.prep_context.invocation.capture_document();
+    // Everything this step injects into frontmatter — the per-step overlay
+    // and its caller layers — differs per step, so pre-warm treats it as late
+    // in every document the step prepares.
+    let step_invocation = run
+        .prep_context
+        .invocation
+        .capture_document()
+        .with_prewarm_injected_keys(
+            claudine::composition::sequence::reserved::ROOT_OVERLAY_KEYS
+                .iter()
+                .map(|key| (*key).to_string())
+                .chain(set_overrides.values().keys().cloned()),
+        );
     // The planned target as this step's own map selects its model.
     let target = run
         .resolved_targets
