@@ -28,7 +28,7 @@ $schema:
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
-review_iterations: 0
+review_iterations: 2
 human_review: false
 pipeline_step: 10
 formerly: 2026-09-21-lifecycle-ergonomics
@@ -41,6 +41,7 @@ related:
     - 2026-10-24-sequence-containers
     - 2026-10-27-darkmatter-lifecycle-ownership
 implemented: true
+completed: true
 ---
 # Lifecycle Grammar
 
