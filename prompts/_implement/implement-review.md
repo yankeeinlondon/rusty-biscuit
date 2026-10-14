@@ -16,17 +16,16 @@ report: "{{ dirname(target) + '/' + 'implementation-report-' + iteration + '.md'
 initial_review: "{{ review }}"
 yolo: true
 initialize:
-    stack:
-        - when: "frontmatter(target, 'implemented')"
-          action:
-              - message: "😵  `{{target}}` is the most recent review of `{{parent_dir(review)}}` and it is already _implemented_! Nothing to implement."
-              - error: "the review `{{target}}` and the follow-on review/implement cycle is ready for another _review_ not an _implementation_!"
-        - when: "target == review"
-          action:
-              - message: "🏃  starting the _implementation_ of the findings/suggestions in the review {{parent_dir(review)}}"
-        - when: "target != review"
-          action:
-              - message: "🏃  implementing the findings/suggestions of review iteration #{{iteration}} (`{{target}}`) in {{parent_dir(review)}}"
+    - when: "frontmatter(target, 'implemented')"
+      then:
+          - message: "😵  `{{target}}` is the most recent review of `{{parent_dir(review)}}` and it is already _implemented_! Nothing to implement."
+          - error: "the review `{{target}}` and the follow-on review/implement cycle is ready for another _review_ not an _implementation_!"
+    - when: "target == review"
+      then:
+          - message: "🏃  starting the _implementation_ of the findings/suggestions in the review {{parent_dir(review)}}"
+    - when: "target != review"
+      then:
+          - message: "🏃  implementing the findings/suggestions of review iteration #{{iteration}} (`{{target}}`) in {{parent_dir(review)}}"
 ---
 ::file "../_no_formatting.md"
 

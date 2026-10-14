@@ -49,49 +49,47 @@ next_plan: |-
 
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 initialize:
-    stack:
-        # Inside the review-loop sequence the step list is static, so a review
-        # whose predecessor already closed the loop opts out here and launches
-        # nothing. A direct `claudine compose` never sets `in_loop`.
-        - when: "in_loop && previous_review && frontmatter(previous_review, 'ready') == true"
-          action:
-              - message: "review #{{iteration}} skipped: {{basename(previous_review)}} already marked `{{parent_dir(spec)}}` production ready"
-              - skip
+    # Inside the review-loop sequence the step list is static, so a review
+    # whose predecessor already closed the loop opts out here and launches
+    # nothing. A direct `claudine compose` never sets `in_loop`.
+    - when: "in_loop && previous_review && frontmatter(previous_review, 'ready') == true"
+      then:
+          - message: "review #{{iteration}} skipped: {{basename(previous_review)}} already marked `{{parent_dir(spec)}}` production ready"
+          - skip
 start:
     message: "🏃‍♂️ starting review #{{iteration}} of `{{parent_dir(spec)}}` (_{{feature_or_fix}} in the **{{ctx.area || ctx.repo}}**_)"
 success:
-    stack:
-        - when: "frontmatter(review,'ready') == true"
-          action:
-              - success: "{{feature_or_fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in **{{ctx.area}}** finished and deemed code to be **production ready**"
-              - message: |-
-                    ✅  review #{{iteration}} of `{{parent_dir(spec)}}` in **{{ctx.area || ctx.repo}}** completed successfully (_**production ready**_)
-              - effect: small-group-cheer
-        - when: "frontmatter(review,'ready') == true && frontmatter(review,'human_review') == true"
-          action:
-              - message: |-
-                    🤷  {{feature_or_fix}} review of `{{ parent_dir(spec) }}` -- while production ready -- requires human review. Review items include:
+    - when: "frontmatter(review,'ready') == true"
+      then:
+          - success: "{{feature_or_fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in **{{ctx.area}}** finished and deemed code to be **production ready**"
+          - message: |-
+                ✅  review #{{iteration}} of `{{parent_dir(spec)}}` in **{{ctx.area || ctx.repo}}** completed successfully (_**production ready**_)
+          - effect: small-group-cheer
+    - when: "frontmatter(review,'ready') == true && frontmatter(review,'human_review') == true"
+      then:
+          - message: |-
+                🤷  {{feature_or_fix}} review of `{{ parent_dir(spec) }}` -- while production ready -- requires human review. Review items include:
 
-                    {{ as_ordered_list(frontmatter(review,"human_review_items") || []) }}    
-              - info: |-
-                    review #{{iteration}} of `{{ upper(feature_or_fix) + ' ' + parent_dir(spec) }}` -- _while production ready_ -- requires human review ({{length(frontmatter(review, 'human_review_items') || [])}} items):
+                {{ as_ordered_list(frontmatter(review,"human_review_items") || []) }}    
+          - info: |-
+                review #{{iteration}} of `{{ upper(feature_or_fix) + ' ' + parent_dir(spec) }}` -- _while production ready_ -- requires human review ({{length(frontmatter(review, 'human_review_items') || [])}} items):
     
-                    {{ as_ordered_list(frontmatter(review, 'human_review_items') || []) }}
-        - when: "frontmatter(review,'ready') != true"
-          action:
-              - warn: |-
-                    {{feature_or_fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in the {{ctx.area}} package area has completed successfully but <i><yellow>not</yellow></i> production ready: <blue>{{link(review)}}</blue>
-              - message: |-
-                    ⚠️  review #{{iteration}} for the _{{feature_or_fix}}_ `{{parent_dir(spec)}}` in the **{{ctx.area_description || ctx.repo}}** _completed_ but is NOT production ready! Findings include:
+                {{ as_ordered_list(frontmatter(review, 'human_review_items') || []) }}
+    - when: "frontmatter(review,'ready') != true"
+      then:
+          - warn: |-
+                {{feature_or_fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in the {{ctx.area}} package area has completed successfully but <i><yellow>not</yellow></i> production ready: <blue>{{link(review)}}</blue>
+          - message: |-
+                ⚠️  review #{{iteration}} for the _{{feature_or_fix}}_ `{{parent_dir(spec)}}` in the **{{ctx.area_description || ctx.repo}}** _completed_ but is NOT production ready! Findings include:
 
-                    {{ as_ordered_list( frontmatter(review,"findings") || [] ) }}
+                {{ as_ordered_list( frontmatter(review,"findings") || [] ) }}
 
-                    {{ 
-                        frontmatter(review,'human_review') == true
-                            ? '- in addition to the code findings blocking readiness there are some rulings that require **human review**:\n' + as_ordered_list( frontmatter(review, 'human_review_items') || [] )
-                            : '- no _human review_ is required at this point'
-                    }}
-              - effect: sad-trombone
+                {{ 
+                    frontmatter(review,'human_review') == true
+                        ? '- in addition to the code findings blocking readiness there are some rulings that require **human review**:\n' + as_ordered_list( frontmatter(review, 'human_review_items') || [] )
+                        : '- no _human review_ is required at this point'
+                }}
+          - effect: sad-trombone
 failure:
     stderr: |-
         {{feature_or_fix}} review {{iteration}} for `{{parent_dir(spec)}}` in the {{ctx.area}} package area failed to complete!
@@ -99,55 +97,54 @@ failure:
         💥 {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in **{{ ctx.area || ctx.repo }}** failed to complete ({{err.msg}})!
     effect: phase-jump-3
 finalize:
-    stack:
-        - when: "human_in_the_loop && !err"
-          message: |-
-            - the first review after the implementation of `{{spec_name}}` was conducted and there are decisions that require your attention:
+    - when: "human_in_the_loop && !err"
+      message: |-
+        - the first review after the implementation of `{{spec_name}}` was conducted and there are decisions that require your attention:
 
-            {{human_in_the_loop}}
-          info: |-
-              - the first review after the implementation of {{ link(spec) }} was conducted and there are decisions that require your attention:
+        {{human_in_the_loop}}
+      info: |-
+          - the first review after the implementation of {{ link(spec) }} was conducted and there are decisions that require your attention:
     
-              {{human_in_the_loop}}
-          stop
-        - when: "refreshed && !err"
-          message: |-
-            - we have finished the review/fix cycle for `{{spec_name}}` but we are in a multi-spec pipeline
-            - the next spec which will be implemented is `{{parent_dir(next_spec)}}`
-            - the spec and plan have been refreshed:
+          {{human_in_the_loop}}
+      stop: null
+    - when: "refreshed && !err"
+      message: |-
+        - we have finished the review/fix cycle for `{{spec_name}}` but we are in a multi-spec pipeline
+        - the next spec which will be implemented is `{{parent_dir(next_spec)}}`
+        - the spec and plan have been refreshed:
 
-            {{refreshed}}
+        {{refreshed}}
 
-            > **Note:** no human review was needed for this refresh
-          info: |-
-            - we have finished the review/fix cycle for `{{link(spec)}}` but we are in a multi-spec pipeline
-            - the next spec which will be implemented is `{{link(next_spec)}}`
-            - the spec and plan have been refreshed:
+        > **Note:** no human review was needed for this refresh
+      info: |-
+        - we have finished the review/fix cycle for `{{link(spec)}}` but we are in a multi-spec pipeline
+        - the next spec which will be implemented is `{{link(next_spec)}}`
+        - the spec and plan have been refreshed:
 
-            {{refreshed}}
+        {{refreshed}}
 
-            > **Note:** no human review was needed for this refresh
-        - when: "refresh_review && !err"
-          message: |-
-            - we have finished the review/fix cycle for `{{spec_name}}` but we are in a multi-spec pipeline
-            - the next spec which will be implemented is `{{parent_dir(next_spec)}}`
-            - the spec and plan have decisions that require human intervention:
+        > **Note:** no human review was needed for this refresh
+    - when: "refresh_review && !err"
+      message: |-
+        - we have finished the review/fix cycle for `{{spec_name}}` but we are in a multi-spec pipeline
+        - the next spec which will be implemented is `{{parent_dir(next_spec)}}`
+        - the spec and plan have decisions that require human intervention:
   
-            {{refresh_review}}
-          info: |-
-            - we have finished the review/fix cycle for `{{link(spec)}}` but we are in a multi-spec pipeline
-            - the next spec which will be implemented is `{{link(next_spec)}}`
-            - the spec and plan have been refreshed:
+        {{refresh_review}}
+      info: |-
+        - we have finished the review/fix cycle for `{{link(spec)}}` but we are in a multi-spec pipeline
+        - the next spec which will be implemented is `{{link(next_spec)}}`
+        - the spec and plan have been refreshed:
   
-            {{refreshed}}     
-          stop
-        - when: "no_refresh && !err"
-          message: |-
-            - we have finished the review/fix cycle for `{{spec_name}}` and are in a multi-spec pipeline
-            - the next _spec_ and _plan_ -- {{parent_dir(next_spec)}} -- was evaluated but did not need to be refreshed to be ready for implementation
-          info: |-
-              - we have finished the review/fix cycle for `{{spec_name}}` and are in a multi-spec pipeline
-              - the next _spec_ and _plan_ -- {{parent_dir(next_spec)}} -- was evaluated but did not need to be refreshed to be ready for implementation
+        {{refreshed}}     
+      stop: null
+    - when: "no_refresh && !err"
+      message: |-
+        - we have finished the review/fix cycle for `{{spec_name}}` and are in a multi-spec pipeline
+        - the next _spec_ and _plan_ -- {{parent_dir(next_spec)}} -- was evaluated but did not need to be refreshed to be ready for implementation
+      info: |-
+          - we have finished the review/fix cycle for `{{spec_name}}` and are in a multi-spec pipeline
+          - the next _spec_ and _plan_ -- {{parent_dir(next_spec)}} -- was evaluated but did not need to be refreshed to be ready for implementation
 ---
 # Review of {{title_case(without_date(parent_dir(spec)))}}
 

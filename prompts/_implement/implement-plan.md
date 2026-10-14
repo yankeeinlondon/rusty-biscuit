@@ -17,7 +17,7 @@ yolo: true
 plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
 phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || frontmatter(plan, 'phase') || 1 : null }}"
 area: "{{ ctx.area ? ctx.area : ctx.is_monorepo ? 'monorepo-root' : 'repo-root' }}"
-pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
+pass_icon: "{{ loop.is_last ? '✅' : '🧑‍💻' }}"
 total_phases: |-
     {{
         file_exists(plan)
@@ -35,57 +35,53 @@ spec: |-
 # The implementation's log file
 log: "{{ dirname(spec || plan) + '/implementation-log.md' }}"
 initialize:
-    stack:
-        # Inside the review-loop sequence the step list is static; a plan whose
-        # spec is already implemented opts out here and launches nothing.
-        - when: "in_loop && spec && frontmatter(spec, 'implemented') == true"
-          action:
-              - message: "implementation skipped: `{{parent_dir(spec)}}` is already marked implemented"
-              - skip
-        - action:
-            - ensure_file: "{{log}}"
-        - when: "!total_phases || total_phases <= 0"
-          action:
-              - warn: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
-              - message: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
-              - error: "for a plan to be implemented using the **implement-plan** prompt, you need to ensure the plan ({{plan}}) has set either `total_phases` or `phases` Frontmatter property!"
+    # Inside the review-loop sequence the step list is static; a plan whose
+    # spec is already implemented opts out here and launches nothing.
+    - when: "in_loop && spec && frontmatter(spec, 'implemented') == true"
+      then:
+          - message: "implementation skipped: `{{parent_dir(spec)}}` is already marked implemented"
+          - skip
+    - ensure_file: "{{log}}"
+    - when: "!total_phases || total_phases <= 0"
+      then:
+          - warn: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
+          - message: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
+          - error: "for a plan to be implemented using the **implement-plan** prompt, you need to ensure the plan ({{plan}}) has set either `total_phases` or `phases` Frontmatter property!"
 
 start:
-    message: "🎬  implementing phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{ ctx.area || ctx.repo }}, **agent:** {{ctx.agent}}/{{ctx.model}})"
+    - message: "🎬  implementing phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{ ctx.area || ctx.repo }}, **agent:** {{ctx.agent}}/{{ctx.model}})"
     # `start` (not `initialize`) because a loop re-enters each phase here; the
     # body renders the same message for the agent itself.
-    stack:
-        - when: "file_exists(log) && frontmatter(log, 'message_to_agent')"
-          action:
-              - message: |-
-                    The previous phase's agent has passed a message to this agent:
+    - when: "file_exists(log) && frontmatter(log, 'message_to_agent')"
+      then:
+          - message: |-
+                The previous phase's agent has passed a message to this agent:
 
-                    {{frontmatter(log, 'message_to_agent')}}
+                {{frontmatter(log, 'message_to_agent')}}
 success: 
-    say: "Phase {{phase}} of the plan in the {{area}} {{ctx.area_description}}, was implemented successfully"
-    message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{area}}, {{ctx.agent}}/{{ctx.model}})"
-    success: "Completed the implementation of <b>phase <yellow>{{phase}}</yellow></b> of the {{link(plan)}} plan"
-    stack:
-        - when: "ctx.dirty_files && !commit_message"
-          action:
-            - message: |-
-                staging dirty files [{{ length(ctx.dirty_files) }}] from phase **#{{phase}}** in preparation for the git commit:
+    - success: "Completed the implementation of <b>phase <yellow>{{phase}}</yellow></b> of the {{link(plan)}} plan"
+    - message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{area}}, {{ctx.agent}}/{{ctx.model}})"
+    - say: "Phase {{phase}} of the plan in the {{area}} {{ctx.area_description}}, was implemented successfully"
+    - when: "ctx.dirty_files && !commit_message"
+      then:
+        - message: |-
+            staging dirty files [{{ length(ctx.dirty_files) }}] from phase **#{{phase}}** in preparation for the git commit:
 
-                {{ as_unordered_list(ctx.dirty_files) }}
-            - shell: "git add {{ctx.repo_root}}"
-            - shell: just commit
-        - when: "ctx.dirty_files && commit_message"
-          action:
-            - message: |-
-                staging all files from phase **#{{phase}}** in preparation for the git commit:
+            {{ as_unordered_list(ctx.dirty_files) }}
+        - shell: "git add {{ctx.repo_root}}"
+        - shell: just commit
+    - when: "ctx.dirty_files && commit_message"
+      then:
+        - message: |-
+            staging all files from phase **#{{phase}}** in preparation for the git commit:
 
-                {{ as_unordered_list(ctx.dirty_files) }}
-            - shell: git add ..
-            - shell: git commit -m "{{commit_message}}"
-        - when: "!ctx.dirty_files"
-          action:
-              - message: phase {{phase}} of the plan made no file changes!
-              - warn: phase {{phase}} of the plan made no file changes!
+            {{ as_unordered_list(ctx.dirty_files) }}
+        - shell: git add ..
+        - shell: git commit -m "{{commit_message}}"
+    - when: "!ctx.dirty_files"
+      then:
+          - message: phase {{phase}} of the plan made no file changes!
+          - warn: phase {{phase}} of the plan made no file changes!
 blocked:
     message: "💥  phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved for execution!"
 failure:
@@ -256,7 +252,7 @@ The following Frontmatter properties must be set on the spec file ({{spec}}):
 ::block when="!frontmatter(spec, '$schema')"
 ::file ../_set_spec_schema.md 
 ::end-block
-::block when="_loop_is_last"
+::block when="loop.is_last"
 - set the `implemented` frontmatter to `true`
 ::end-block
 ::end-block

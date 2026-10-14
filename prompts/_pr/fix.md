@@ -16,31 +16,28 @@ step_timeout: 60m
 timeout: 3h
 max_attempts: 3
 start:
-    stack:
-        # `start` fires again on every retry, so this counts attempts in the one
-        # place that outlives them.
-        - action:
-              - increment_frontmatter: ["{{ report }}", "fix_attempts"]
-              - message: "🔧  fixing the local test failures on `{{branch}}` in {{ ctx.area_description || ctx.repo }} (attempt {{ frontmatter(report, 'fix_attempts') }} of {{ max_attempts }})"
+    # `start` fires again on every retry, so this counts attempts in the one
+    # place that outlives them.
+    - increment_frontmatter: ["{{ report }}", "fix_attempts"]
+    - message: "🔧  fixing the local test failures on `{{branch}}` in {{ ctx.area_description || ctx.repo }} (attempt {{ frontmatter(report, 'fix_attempts') }} of {{ max_attempts }})"
 success:
-    stack:
-        - when: "frontmatter(report, 'status') == 'fixed' && committed"
-          action:
-              - warn: "the fix is staged but not committed: the commit prompt already ran once in this invocation. Run the commit prompt, then run the PR prompt again to push"
-              - message: |-
-                    🔧  the local test failures on `{{branch}}` are fixed and **staged, but not committed**: the commit prompt already ran once in this invocation and cannot be entered twice. Run the commit prompt, then run the PR prompt again to push.
+    - when: "frontmatter(report, 'status') == 'fixed' && committed"
+      then:
+          - warn: "the fix is staged but not committed: the commit prompt already ran once in this invocation. Run the commit prompt, then run the PR prompt again to push"
+          - message: |-
+                🔧  the local test failures on `{{branch}}` are fixed and **staged, but not committed**: the commit prompt already ran once in this invocation and cannot be entered twice. Run the commit prompt, then run the PR prompt again to push.
 
-                    {{ frontmatter(report, 'summary') }}
-              - say: "The local test failures are fixed and staged. Run the commit prompt, then run the pull request prompt again."
-              - stop
-        - when: "frontmatter(report, 'status') == 'fixed'"
-          action:
-              - success: "the local test failures on `{{branch}}` are fixed and staged; handing them to the commit prompt"
-              - message: |-
-                    🔧  the local test failures on `{{branch}}` are fixed and staged; handing them to the commit prompt
+                {{ frontmatter(report, 'summary') }}
+          - say: "The local test failures are fixed and staged. Run the commit prompt, then run the pull request prompt again."
+          - stop
+    - when: "frontmatter(report, 'status') == 'fixed'"
+      then:
+          - success: "the local test failures on `{{branch}}` are fixed and staged; handing them to the commit prompt"
+          - message: |-
+                🔧  the local test failures on `{{branch}}` are fixed and staged; handing them to the commit prompt
 
-                    {{ frontmatter(report, 'summary') }}
-              - action: proxy
+                {{ frontmatter(report, 'summary') }}
+          - proxy:
                 target: ../commit.md
                 with:
                     message: "These staged files repair local test failures that blocked the push of `{{ branch }}`. {{ frontmatter(report, 'summary') }}"
@@ -48,24 +45,23 @@ success:
                         success: "the fix is committed. Run the PR prompt again to push it; the pre-push hook reuses the passing evidence this run already produced"
                         message: "🗳️  the fix for the local test failures on `{{ branch }}` is committed. Run the PR prompt again to push it; the pre-push hook reuses the passing evidence this run already produced"
                         say: "The fix is committed. Run the pull request prompt again to push it."
-        - when: "frontmatter(report, 'status') == 'error'"
-          action:
-              - message: |-
-                    ⏸️  the local test failures on `{{branch}}` were not fixed here
+    - when: "frontmatter(report, 'status') == 'error'"
+      then:
+          - message: |-
+                ⏸️  the local test failures on `{{branch}}` were not fixed here
 
-                    {{ frontmatter(report, 'summary') }}
-              - say: "The local test failures were not fixed. {{ frontmatter(report, 'summary') }}"
-              - error: "{{ frontmatter(report, 'summary') }}"
-        - when: "frontmatter(report, 'fix_attempts') >= max_attempts"
-          action:
-              - message: "💥  the local test failures on `{{branch}}` are still not fixed after {{ max_attempts }} attempts; what each attempt tried is in `{{report}}`"
-              - say: "The local test failures are still not fixed after {{ max_attempts }} attempts."
-              - error: "the fix did not verify within {{ max_attempts }} attempts"
-        # Each retry is a fresh session that starts from the `## Fix attempt` notes
-        # its predecessors left in the report. The budget matches `max_attempts`.
-        - action:
-              - warn: "attempt {{ frontmatter(report, 'fix_attempts') }} of {{ max_attempts }} did not produce a verified fix; starting a fresh attempt"
-              - retry: 2
+                {{ frontmatter(report, 'summary') }}
+          - say: "The local test failures were not fixed. {{ frontmatter(report, 'summary') }}"
+          - error: "{{ frontmatter(report, 'summary') }}"
+    - when: "frontmatter(report, 'fix_attempts') >= max_attempts"
+      then:
+          - message: "💥  the local test failures on `{{branch}}` are still not fixed after {{ max_attempts }} attempts; what each attempt tried is in `{{report}}`"
+          - say: "The local test failures are still not fixed after {{ max_attempts }} attempts."
+          - error: "the fix did not verify within {{ max_attempts }} attempts"
+    # Each retry is a fresh session that starts from the `## Fix attempt` notes
+    # its predecessors left in the report. The budget matches `max_attempts`.
+    - warn: "attempt {{ frontmatter(report, 'fix_attempts') }} of {{ max_attempts }} did not produce a verified fix; starting a fresh attempt"
+    - retry: 2
 failure:
     message: "❌  fixing the local test failures on `{{branch}}` failed ({{ctx.agent}}/{{ctx.model}}: {{err.msg}})"
     say: "Fixing the local test failures failed."
