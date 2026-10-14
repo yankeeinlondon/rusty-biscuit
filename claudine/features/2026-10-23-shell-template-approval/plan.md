@@ -4,6 +4,11 @@ created: 2026-10-12
 phase: 1
 agent: codex/gpt-6.1-sol
 yolo: true
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages: []
 ---
 
 # Shell Template Approval Implementation Plan
@@ -27,12 +32,12 @@ Implement reusable typed shell approval across Darkmatter composition and Claudi
 
 ### Wave 1 — Contract Review
 
-- [ ] **Dependency Gate**
+- [x] **Dependency Gate**
   - Confirm the core-schema dependency's implementation and tests expose the covers relation required by specification section 7; name the API in the implementation log.
   - Inventory today's sequence/group surfaces and map future-name examples to their current equivalents. Record deferred integration cases without expanding this feature's scope.
   - Prerequisite for Phase 2: dependency behavior is available and verified, not merely planned.
 
-- [ ] **Boundary Inventory**
+- [x] **Boundary Inventory**
   - Trace Darkmatter `compose/preflight/{collect,approval,lifecycle}.rs`, `shell_expansion/{types,tokenize,policy,store,executor,mod}.rs`, inline expansion, shell blocks, and frontmatter expansion.
   - Trace Claudine `composition/preflight.rs`, `sequence/preflight/{mod,shape}.rs`, prepared task/document storage, `prepare.rs`, `types.rs`, CLI compose preparation, lifecycle shell and `set` runners, and `harness/shell.rs`.
   - Identify every byte-only `HashSet<String>` approval, result-cache key, and error-suppression boundary. Record affected consumers and comment drift, especially the current assertion that all sequence commands execute preflight-resolved bytes.
@@ -40,7 +45,7 @@ Implement reusable typed shell approval across Darkmatter composition and Claudi
 
 ### Wave 2 — Shared Design
 
-- [ ] **Contract Definition**
+- [x] **Contract Definition**
   - After Wave 1, define the minimal shared Darkmatter representations for authored argument segments, expression spans, resolved declaration/validator, approval type, canonical shape, source owner/site, execution mode, and filled chain with ordered redirects.
   - Define structured membership proof and mode-tagged approval keys scoped to policy root; specify result keys separately using filled argv boundaries, operators, redirects, and execution context. Use biscuit-hash if hashing is needed.
   - Define candidate eligibility, missing/invalid/unsupported-template typed errors, step-barrier ownership, and runner adapters. Keep schema/type/matching/value-validation authority in Darkmatter; retain operational execution ownership in each runner.
