@@ -128,6 +128,14 @@ filter. A Cargo build flag (`--features`, `--all-features`,
 switches *every* host to plain `cargo nextest run` with no tier filter and no
 receipt; every other argument goes to the run.
 
+Arguments are re-split by a shell on each side, so a filterset with
+parentheses (`-E 'test(/a|b/)'`) fails: `just cross-check` drops the quotes
+locally, and calling `./scripts/cross-check.sh` directly still fails in the
+Windows leg's `just` recipes ("syntax error near unexpected token `('").
+Narrow a run with plain positional name substrings instead
+(`./scripts/cross-check.sh claudine --os windows claudine_schemas composition::schema`).
+A filtered run tests only what it selects; treat it as targeted evidence.
+
 Every archive-mode `wsl` or `windows` leg prints `cross-check-*:` markers
 (`tree`, `dirty`, `key`, `digest`, `manifest-exit`, `exit`, `duration`) and
 leaves its whole staging directory (`manifest.jsonl`, `L1/<package>.xml`, and
