@@ -101,7 +101,7 @@ fn a_proxy_target_derives_sibling_paths_from_the_callers_package_relative_file()
     let router = fixture.cwd().join("prompts/router.md");
     write(
         &router,
-        "---\n$schema:\n  spec: 'file(required;eager)'\ninitialize:\n  stack:\n    - action: {proxy: './_derive/target.md'}\n---\nRouter.\n",
+        "---\n$schema:\n  spec: 'file(required;eager)'\ninitialize:\n    - {proxy: './_derive/target.md'}\n---\nRouter.\n",
     );
     write(
         &fixture.cwd().join("prompts/_derive/target.md"),
@@ -190,7 +190,7 @@ fn direct_and_proxy_targets_agree_and_caller_values_outrank_proxy_with() {
     let router = fixture.cwd().join("prompts/router.md");
     write(
         &router,
-        "---\ninitialize:\n  stack:\n    - action: {action: proxy, target: './target.md', with: {spec: 'cases/decoy/spec.md', choice: overlay}}\n---\nRouter.\n",
+        "---\ninitialize:\n    - {proxy: {target: './target.md', with: {spec: 'cases/decoy/spec.md', choice: overlay}}}\n---\nRouter.\n",
     );
     let setters = ["spec=cases/original/spec.md", "choice=caller"];
 
@@ -229,7 +229,7 @@ fn setters_after_a_provider_switch_keep_caller_file_provenance() {
     let router = fixture.cwd().join("prompts/router.md");
     write(
         &router,
-        "---\ninitialize:\n  stack:\n    - action: {action: proxy, target: './target.md', with: {spec: 'cases/decoy/spec.md', choice: overlay}}\n---\nRouter.\n",
+        "---\ninitialize:\n    - {proxy: {target: './target.md', with: {spec: 'cases/decoy/spec.md', choice: overlay}}}\n---\nRouter.\n",
     );
     // `--fixture-flag` is no researched Goose switch, so it never takes a setter.
     let arguments = ["--fixture-flag", "spec=cases/original/spec.md", "choice=caller"];
@@ -264,11 +264,11 @@ fn a_second_proxy_hop_drops_the_first_overlay_but_keeps_caller_records() {
     let first = fixture.cwd().join("prompts/first.md");
     write(
         &first,
-        "---\ninitialize:\n  stack:\n    - action: {action: proxy, target: './middle.md', with: {spec: 'cases/decoy/spec.md', ephemeral: first-hop}}\n---\nFirst.\n",
+        "---\ninitialize:\n    - {proxy: {target: './middle.md', with: {spec: 'cases/decoy/spec.md', ephemeral: first-hop}}}\n---\nFirst.\n",
     );
     write(
         &fixture.cwd().join("prompts/middle.md"),
-        "---\ninitialize:\n  stack:\n    - action: {proxy: './final.md'}\n---\nMiddle.\n",
+        "---\ninitialize:\n    - {proxy: './final.md'}\n---\nMiddle.\n",
     );
     write(
         &fixture.cwd().join("prompts/final.md"),
@@ -304,11 +304,11 @@ fn a_proxied_retry_rematerializes_from_the_original_caller_record() {
     let router = fixture.cwd().join("prompts/router.md");
     write(
         &router,
-        "---\ninitialize:\n  stack:\n    - action: {proxy: './retry-target.md'}\n---\nRouter.\n",
+        "---\ninitialize:\n    - {proxy: './retry-target.md'}\n---\nRouter.\n",
     );
     write(
         &fixture.cwd().join("prompts/retry-target.md"),
-        "---\n$schema:\n  spec: 'file(required)'\nmarker: \"{{ frontmatter(spec, 'marker') }}\"\nstart:\n  stack:\n    - action: {append_line: ['events.log', 'retry={{ marker }}']}\nfailure:\n  stack:\n    - action: {retry: 1}\n---\nRETRY={{ marker }}\n",
+        "---\n$schema:\n  spec: 'file(required)'\nmarker: \"{{ frontmatter(spec, 'marker') }}\"\nstart:\n    - {append_line: ['events.log', 'retry={{ marker }}']}\nfailure:\n    - {retry: 1}\n---\nRETRY={{ marker }}\n",
     );
 
     let output = run_compose(
@@ -344,11 +344,11 @@ fn a_proxied_resume_rematerializes_from_the_original_caller_record() {
     let router = fixture.cwd().join("prompts/router.md");
     write(
         &router,
-        "---\ninitialize:\n  stack:\n    - action: {proxy: './resume-target.md'}\n---\nRouter.\n",
+        "---\ninitialize:\n    - {proxy: './resume-target.md'}\n---\nRouter.\n",
     );
     write(
         &fixture.cwd().join("prompts/resume-target.md"),
-        "---\n$schema:\n  spec: 'file(required)'\nmarker: \"{{ frontmatter(spec, 'marker') }}\"\nstart:\n  stack:\n    - action: {append_line: ['events.log', 'resume={{ marker }}']}\nfailure:\n  stack:\n    - action: {resume: 'continue'}\n---\nRESUME={{ marker }}\n",
+        "---\n$schema:\n  spec: 'file(required)'\nmarker: \"{{ frontmatter(spec, 'marker') }}\"\nstart:\n    - {append_line: ['events.log', 'resume={{ marker }}']}\nfailure:\n    - {resume: 'continue'}\n---\nRESUME={{ marker }}\n",
     );
 
     let assertion = fixture
@@ -393,11 +393,11 @@ fn a_proxied_loop_reuses_the_same_materialized_caller_identity() {
     let router = fixture.cwd().join("prompts/router.md");
     write(
         &router,
-        "---\ninitialize:\n  stack:\n    - action: {proxy: './loop-target.md'}\n---\nRouter.\n",
+        "---\ninitialize:\n    - {proxy: './loop-target.md'}\n---\nRouter.\n",
     );
     write(
         &fixture.cwd().join("prompts/loop-target.md"),
-        "---\n$schema:\n  spec: 'file(required)'\nmarker: \"{{ frontmatter(spec, 'marker') }}\"\nphase: 1\nloop:\n  until: 'phase > 2'\n  action: 'increment(phase)'\n  max: 5\nfinalize:\n  stack:\n    - action: {append_line: ['events.log', 'loop={{ marker }}:{{ phase }}']}\n---\nLOOP={{ marker }}\n",
+        "---\n$schema:\n  spec: 'file(required)'\nmarker: \"{{ frontmatter(spec, 'marker') }}\"\nphase: 1\nloop:\n  until: 'phase > 2'\n  action: 'increment(phase)'\n  max: 5\nfinalize:\n    - {append_line: ['events.log', 'loop={{ marker }}:{{ phase }}']}\n---\nLOOP={{ marker }}\n",
     );
 
     let stderr = run_compose(
@@ -436,11 +436,11 @@ fn a_sequence_prompt_task_proxy_reads_the_invocation_wide_caller_file() {
     );
     write(
         &package.join("task-router.md"),
-        "---\ninitialize:\n  stack:\n    - action: {proxy: './task-target.md'}\n---\nRouter.\n",
+        "---\ninitialize:\n    - {proxy: './task-target.md'}\n---\nRouter.\n",
     );
     write(
         &package.join("task-target.md"),
-        "---\n$schema:\n  spec: 'file(required)'\nmarker: \"{{ frontmatter(spec, 'marker') }}\"\nstart:\n  stack:\n    - action: {append_line: ['events.log', 'sequence={{ marker }}']}\n---\nTARGET={{ marker }}\n",
+        "---\n$schema:\n  spec: 'file(required)'\nmarker: \"{{ frontmatter(spec, 'marker') }}\"\nstart:\n    - {append_line: ['events.log', 'sequence={{ marker }}']}\n---\nTARGET={{ marker }}\n",
     );
 
     // Escape: exercise invocation from the fixture's package directory.
@@ -484,11 +484,11 @@ fn sequence_task_params_and_cli_file_inputs_keep_distinct_authoring_origins() {
     );
     write(
         &package.join("prompts/router.md"),
-        "---\ninitialize:\n  stack:\n    - action: {proxy: './target.md'}\n---\nRouter.\n",
+        "---\ninitialize:\n    - {proxy: './target.md'}\n---\nRouter.\n",
     );
     write(
         &package.join("prompts/target.md"),
-        "---\n$schema:\n  caller_spec: 'file(required)'\n  task_spec: 'file(required)'\ncaller_marker: \"{{ frontmatter(caller_spec, 'marker') }}\"\ntask_marker: \"{{ frontmatter(task_spec, 'marker') }}\"\nstart:\n  stack:\n    - action: {append_line: ['events.log', 'mixed={{ caller_marker }}:{{ task_marker }}']}\n---\nMIXED.\n",
+        "---\n$schema:\n  caller_spec: 'file(required)'\n  task_spec: 'file(required)'\ncaller_marker: \"{{ frontmatter(caller_spec, 'marker') }}\"\ntask_marker: \"{{ frontmatter(task_spec, 'marker') }}\"\nstart:\n    - {append_line: ['events.log', 'mixed={{ caller_marker }}:{{ task_marker }}']}\n---\nMIXED.\n",
     );
 
     // Escape: exercise invocation from the fixture's package directory.
@@ -534,11 +534,11 @@ fn a_sequence_cli_setter_shadows_the_same_named_task_file_param() {
     );
     write(
         &fixture.cwd().join("router.md"),
-        "---\ninitialize:\n  stack:\n    - action: {proxy: './target.md'}\n---\nRouter.\n",
+        "---\ninitialize:\n    - {proxy: './target.md'}\n---\nRouter.\n",
     );
     write(
         &fixture.cwd().join("target.md"),
-        "---\n$schema:\n  spec: file(required)\nmarker: \"{{ frontmatter(spec, 'marker') }}\"\nstart:\n  stack:\n    - action: {append_line: ['events.log', 'winner={{ marker }}']}\n---\nTarget.\n",
+        "---\n$schema:\n  spec: file(required)\nmarker: \"{{ frontmatter(spec, 'marker') }}\"\nstart:\n    - {append_line: ['events.log', 'winner={{ marker }}']}\n---\nTarget.\n",
     );
 
     let assertion = fixture
@@ -581,15 +581,15 @@ fn a_sequence_runtime_mutation_shadows_the_same_named_task_file_param() {
     );
     write(
         &fixture.cwd().join("mutator.md"),
-        "---\nsuccess:\n  stack:\n    - action: {set: {spec: runtime/spec.md}}\n---\nMutator.\n",
+        "---\nsuccess:\n    - {set: {spec: runtime/spec.md}}\n---\nMutator.\n",
     );
     write(
         &fixture.cwd().join("router.md"),
-        "---\ninitialize:\n  stack:\n    - action: {proxy: './target.md'}\n---\nRouter.\n",
+        "---\ninitialize:\n    - {proxy: './target.md'}\n---\nRouter.\n",
     );
     write(
         &fixture.cwd().join("target.md"),
-        "---\n$schema:\n  spec: file(required)\nmarker: \"{{ frontmatter(spec, 'marker') }}\"\nstart:\n  stack:\n    - action: {append_line: ['events.log', 'winner={{ marker }}']}\n---\nTarget.\n",
+        "---\n$schema:\n  spec: file(required)\nmarker: \"{{ frontmatter(spec, 'marker') }}\"\nstart:\n    - {append_line: ['events.log', 'winner={{ marker }}']}\n---\nTarget.\n",
     );
 
     let assertion = fixture
@@ -623,11 +623,11 @@ fn a_sequence_reserved_overlay_shadows_a_same_named_caller_file_input() {
     );
     write(
         &fixture.cwd().join("router.md"),
-        "---\ninitialize:\n  stack:\n    - action: {proxy: './target.md'}\n---\nRouter.\n",
+        "---\ninitialize:\n    - {proxy: './target.md'}\n---\nRouter.\n",
     );
     write(
         &fixture.cwd().join("target.md"),
-        "---\n$schema:\n  state:\n    - file(required)\n    - object(required)\nreserved_name: \"{{ state.name }}\"\nstart:\n  stack:\n    - action: {append_line: ['events.log', 'winner={{ reserved_name }}']}\n---\nTarget.\n",
+        "---\n$schema:\n  state:\n    - file(required)\n    - object(required)\nreserved_name: \"{{ state.name }}\"\nstart:\n    - {append_line: ['events.log', 'winner={{ reserved_name }}']}\n---\nTarget.\n",
     );
 
     let assertion = fixture
@@ -662,7 +662,7 @@ fn inline_compose_proxy_uses_the_caller_origin_and_closes_over_the_target() {
     let router = fixture.cwd().join("prompts/inline-router.md");
     write(
         &router,
-        "---\nprompt: Router.\ninitialize:\n  stack:\n    - action: {proxy: './inline-target.md'}\n---\nRouter body.\n",
+        "---\nprompt: Router.\ninitialize:\n    - {proxy: './inline-target.md'}\n---\nRouter body.\n",
     );
     let target = fixture.cwd().join("prompts/inline-target.md");
     write(
@@ -717,7 +717,7 @@ fn assert_direct_and_proxy_file_failure_agree(case: &str, schema: &str, expressi
     let router = fixture.cwd().join("prompts/router.md");
     write(
         &router,
-        "---\ninitialize:\n  stack:\n    - action: {proxy: './target.md'}\n---\nRouter.\n",
+        "---\ninitialize:\n    - {proxy: './target.md'}\n---\nRouter.\n",
     );
     let setter = format!("spec={raw}");
 
@@ -846,7 +846,7 @@ fn dynamic_array_selection_keeps_complete_direct_and_proxy_diagnostics() {
     let router = fixture.cwd().join("prompts/router.md");
     write(
         &router,
-        "---\ninitialize:\n  stack:\n    - action: {proxy: './target.md'}\n---\nRouter.\n",
+        "---\ninitialize:\n    - {proxy: './target.md'}\n---\nRouter.\n",
     );
     let files = r#"files=["missing.md","./missing.md"]"#;
     let caller_root = std::fs::canonicalize(fixture.cwd()).unwrap();
@@ -1008,7 +1008,7 @@ fn proxy_target_partial_is_resolved_before_the_target_initialize() {
     let entry = fixture.cwd().join("prompts/entry.md");
     write(
         &entry,
-        "---\ninitialize:\n  stack:\n    - action:\n        - proxy: ./review.md\n---\nEntry without a schema.\n",
+        "---\ninitialize:\n    - proxy: ./review.md\n---\nEntry without a schema.\n",
     );
 
     let mut command = fixture.command_builder().ambient_context(&package).build();

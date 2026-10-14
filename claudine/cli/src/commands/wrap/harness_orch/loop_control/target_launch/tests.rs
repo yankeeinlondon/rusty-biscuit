@@ -265,6 +265,7 @@ fn document_with_tags(
         document_epoch: None,
         lifecycle: None,
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
+        loop_values: None,
         mcp_body_tags,
     }
 }

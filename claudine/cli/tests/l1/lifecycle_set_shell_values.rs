@@ -42,17 +42,15 @@ const SUCCEEDING: &str = "git check-ref-format --branch ran/x";
 
 const DOCUMENT: &str = r#"---
 start:
-  stack:
-    - action:
-        - set:
-            diff: "$(git rev-parse --verify nope)::result"
-            named: "$(git check-ref-format --branch ran/x)::ok"
-    - when: "!diff.ok && diff.code == 128 && named"
-      action:
-        - stderr: "diff code={{ diff.code }} ok={{ diff.ok }} fatal={{ starts_with(diff.stderr, 'fatal:') }}"
-    - when: "diff.ok"
-      action:
-        - stderr: "diff unexpectedly ok"
+  - set:
+      diff: "$(git rev-parse --verify nope)::result"
+      named: "$(git check-ref-format --branch ran/x)::ok"
+  - when: "!diff.ok && diff.code == 128 && named"
+    then:
+      - stderr: "diff code={{ diff.code }} ok={{ diff.ok }} fatal={{ starts_with(diff.stderr, 'fatal:') }}"
+  - when: "diff.ok"
+    then:
+      - stderr: "diff unexpectedly ok"
 ---
 Body.
 "#;
@@ -149,7 +147,7 @@ const MARKING: &str = "git config --add claudine.marker ran";
 
 fn marking_document() -> String {
     format!(
-        "---\nstart:\n  stack:\n    - action:\n        - set:\n            marked: \"$({MARKING})::ok\"\n    - when: \"marked\"\n      action:\n        - stderr: \"marked={{{{ marked }}}}\"\n---\nBody.\n"
+        "---\nstart:\n  - set:\n      marked: \"$({MARKING})::ok\"\n  - when: \"marked\"\n    then:\n      - stderr: \"marked={{{{ marked }}}}\"\n---\nBody.\n"
     )
 }
 
@@ -195,7 +193,7 @@ fn compose_set(name: &str, value: &str) -> Run {
     let fixture = CliProcessFixture::named(name);
     fixture.seed_user_config();
     let document = format!(
-        "---\nstart:\n  stack:\n    - action:\n        - set:\n            v: \"{value}\"\n    - action:\n        - stderr: \"start ran\"\n---\nBody.\n"
+        "---\nstart:\n  - set:\n      v: \"{value}\"\n  - stderr: \"start ran\"\n---\nBody.\n"
     );
     spawn(&fixture, &document, &["git status"], &["compose", "--claude", "doc.md"])
 }

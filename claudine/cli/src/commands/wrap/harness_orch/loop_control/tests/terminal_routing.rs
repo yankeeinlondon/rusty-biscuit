@@ -165,17 +165,16 @@ fn dispatch_no_control_falls_through() {
 #[test]
 fn emit_blocked_finalize_pre_launch_runs_blocked_then_finalize_with_err() {
     let fx = fixture(serde_json::json!({
-        "blocked": {
-            "stack": [
-                {"action": {"append_line": ["events.log", "{{ 'blocked-kind=' + err.kind }}"]}},
-                {"action": {"append_line": ["events.log", "{{ 'blocked-variant=' + err.variant }}"]}},
-            ]
-        },
-        "finalize": {
-            "stack": [
-                {"when": "err", "action": {"append_line": ["events.log", "{{ 'finalize-msg=' + err.msg }}"]}},
-            ]
-        }
+        "blocked": [
+            {"append_line": ["events.log", "{{ 'blocked-kind=' + err.kind }}"]},
+            {"append_line": ["events.log", "{{ 'blocked-variant=' + err.variant }}"]}
+        ],
+        "finalize": [
+            {
+                "when": "err",
+                "then": [{"append_line": ["events.log", "{{ 'finalize-msg=' + err.msg }}"]}]
+            }
+        ]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -223,12 +222,8 @@ fn emit_blocked_finalize_pre_launch_runs_blocked_then_finalize_with_err() {
 #[test]
 fn emit_blocked_finalize_post_launch_selects_failure() {
     let fx = fixture(serde_json::json!({
-        "failure": {
-            "stack": [{"action": {"append_line": ["events.log", "failure-ran"]}}]
-        },
-        "finalize": {
-            "stack": [{"action": {"append_line": ["events.log", "finalize-ran"]}}]
-        }
+        "failure": [{"append_line": ["events.log", "failure-ran"]}],
+        "finalize": [{"append_line": ["events.log", "finalize-ran"]}]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -273,12 +268,8 @@ fn emit_blocked_finalize_post_launch_selects_failure() {
 #[test]
 fn emit_blocked_finalize_tolerates_null_frontmatter_materialized() {
     let fx = fixture(serde_json::json!({
-        "blocked": {
-            "stack": [{"action": {"append_line": ["events.log", "{{ 'blocked-kind=' + err.kind }}"]}}]
-        },
-        "finalize": {
-            "stack": [{"action": {"append_line": ["events.log", "finalize-ran"]}}]
-        }
+        "blocked": [{"append_line": ["events.log", "{{ 'blocked-kind=' + err.kind }}"]}],
+        "finalize": [{"append_line": ["events.log", "finalize-ran"]}]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -330,18 +321,17 @@ fn emit_blocked_finalize_tolerates_null_frontmatter_materialized() {
 #[test]
 fn emit_failure_finalize_forces_failure_when_not_launched() {
     let fx = fixture(serde_json::json!({
-        "failure": {
-            "stderr": "failed",
-            "stack": [
-                {"action": {"append_line": ["events.log", "{{ 'failure-kind=' + err.kind }}"]}},
-                {"action": {"append_line": ["events.log", "{{ 'failure-variant=' + err.variant }}"]}},
-            ]
-        },
-        "finalize": {
-            "stack": [
-                {"when": "err", "action": {"append_line": ["events.log", "{{ 'finalize-msg=' + err.msg }}"]}},
-            ]
-        }
+        "failure": [
+            {"stderr": "failed"},
+            {"append_line": ["events.log", "{{ 'failure-kind=' + err.kind }}"]},
+            {"append_line": ["events.log", "{{ 'failure-variant=' + err.variant }}"]}
+        ],
+        "finalize": [
+            {
+                "when": "err",
+                "then": [{"append_line": ["events.log", "{{ 'finalize-msg=' + err.msg }}"]}]
+            }
+        ]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -401,12 +391,8 @@ fn emit_failure_finalize_forces_failure_when_not_launched() {
 #[test]
 fn emit_failure_finalize_tolerates_null_frontmatter() {
     let fx = fixture(serde_json::json!({
-        "failure": {
-            "stack": [{"action": {"append_line": ["events.log", "failure-ran"]}}]
-        },
-        "finalize": {
-            "stack": [{"action": {"append_line": ["events.log", "finalize-ran"]}}]
-        }
+        "failure": [{"append_line": ["events.log", "failure-ran"]}],
+        "finalize": [{"append_line": ["events.log", "finalize-ran"]}]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {

@@ -4,12 +4,7 @@ use super::*;
 
 #[test]
 fn success_stack_side_effects_run_exactly_once() {
-    let fx = fixture(serde_json::json!({
-        "success": {
-            "stderr": "succeeded",
-            "stack": [{"action": {"append_line": ["events.log", "ran"]}}]
-        }
-    }));
+    let fx = fixture(serde_json::json!({"success": [{"stderr": "succeeded"}, {"append_line": ["events.log", "ran"]}]}));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
         settings: &fx.settings,
@@ -62,13 +57,7 @@ fn success_stack_side_effects_run_exactly_once() {
 /// outcome is wired in Phase 3.
 #[test]
 fn success_when_evaluation_error_is_not_swallowed_as_action_error() {
-    let fx = fixture(serde_json::json!({
-        "success": {
-            "stack": [
-                {"when": "missing_root() == true", "action": {"stderr": "ready"}}
-            ]
-        }
-    }));
+    let fx = fixture(serde_json::json!({"success": [{"when": "missing_root() == true", "then": [{"stderr": "ready"}]}]}));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
         settings: &fx.settings,
@@ -121,12 +110,8 @@ fn success_when_evaluation_error_is_not_swallowed_as_action_error() {
 #[test]
 fn success_evaluation_error_runs_finalize_with_err_and_returns_failure() {
     let fx = fixture(serde_json::json!({
-        "success": {
-            "stack": [{"when": "missing_root() == true", "action": {"stderr": "ready"}}]
-        },
-        "finalize": {
-            "stack": [{"when": "err", "action": {"append_line": ["events.log", "finalized-with-err"]}}]
-        }
+        "success": [{"when": "missing_root() == true", "then": [{"stderr": "ready"}]}],
+        "finalize": [{"when": "err", "then": [{"append_line": ["events.log", "finalized-with-err"]}]}]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -198,12 +183,8 @@ fn success_evaluation_error_runs_finalize_with_err_and_returns_failure() {
 #[test]
 fn downgraded_success_failure_raise_reports_failure_event() {
     let fx = fixture(serde_json::json!({
-        "success": {
-            "stack": [{"action": {"error": "downgraded"}}]
-        },
-        "failure": {
-            "stack": [{"when": "missing_root() == true", "action": {"stderr": "unreachable"}}]
-        }
+        "success": [{"error": "downgraded"}],
+        "failure": [{"when": "missing_root() == true", "then": [{"stderr": "unreachable"}]}]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -271,11 +252,7 @@ fn downgraded_success_failure_raise_reports_failure_event() {
 /// not break the non-downgrading path.
 #[test]
 fn success_evaluation_error_non_downgrading_reports_success_event() {
-    let fx = fixture(serde_json::json!({
-        "success": {
-            "stack": [{"when": "missing_root() == true", "action": {"stderr": "unreachable"}}]
-        }
-    }));
+    let fx = fixture(serde_json::json!({"success": [{"when": "missing_root() == true", "then": [{"stderr": "unreachable"}]}]}));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
         settings: &fx.settings,
@@ -317,11 +294,7 @@ fn success_evaluation_error_non_downgrading_reports_success_event() {
 /// `finalize`, so the caller keeps today's log-and-continue policy.
 #[test]
 fn terminal_dispatch_failure_keeps_previous_outcome() {
-    let fx = fixture(serde_json::json!({
-        "finalize": {
-            "stack": [{"action": {"append_line": ["events.log", "finalized"]}}]
-        }
-    }));
+    let fx = fixture(serde_json::json!({"finalize": [{"append_line": ["events.log", "finalized"]}]}));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
         settings: &fx.settings,
@@ -365,11 +338,7 @@ fn terminal_dispatch_failure_keeps_previous_outcome() {
 /// with a swallowed raise.
 #[test]
 fn terminal_clean_false_guard_skips_without_halting() {
-    let fx = fixture(serde_json::json!({
-        "success": {
-            "stack": [{"when": "1 == 2", "action": {"append_line": ["events.log", "ran"]}}]
-        }
-    }));
+    let fx = fixture(serde_json::json!({"success": [{"when": "1 == 2", "then": [{"append_line": ["events.log", "ran"]}]}]}));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
         settings: &fx.settings,
@@ -426,12 +395,8 @@ fn terminal_clean_false_guard_skips_without_halting() {
 #[test]
 fn setup_evaluation_error_routes_through_failure_and_finalize() {
     let fx = fixture(serde_json::json!({
-        "failure": {
-            "stack": [{"when": "err", "action": {"append_line": ["events.log", "failure-ran"]}}]
-        },
-        "finalize": {
-            "stack": [{"when": "err", "action": {"append_line": ["events.log", "finalize-ran"]}}]
-        }
+        "failure": [{"when": "err", "then": [{"append_line": ["events.log", "failure-ran"]}]}],
+        "finalize": [{"when": "err", "then": [{"append_line": ["events.log", "finalize-ran"]}]}]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -496,11 +461,7 @@ fn setup_evaluation_error_routes_through_failure_and_finalize() {
 /// exactly once and the recovery path returns `Abort` with the typed error.
 #[test]
 fn finalize_evaluation_error_aborts_without_reentry() {
-    let fx = fixture(serde_json::json!({
-        "finalize": {
-            "stack": [{"when": "missing_root() == true", "action": {"stderr": "x"}}]
-        }
-    }));
+    let fx = fixture(serde_json::json!({"finalize": [{"when": "missing_root() == true", "then": [{"stderr": "x"}]}]}));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
         settings: &fx.settings,
@@ -553,14 +514,12 @@ fn finalize_evaluation_error_aborts_without_reentry() {
 #[test]
 fn success_stack_error_routes_to_failure_keeps_success_comm_before_failure() {
     let fx = fixture(serde_json::json!({
-        "success": {
-            "stderr": "succeeded",
-            "stack": [{"action": [{"append_line": ["events.log", "ran"]}, {"error": "downgraded"}]}]
-        },
-        "failure": {
-            "stderr": "failed",
-            "stack": [{"action": {"append_line": ["events.log", "failure-ran"]}}]
-        }
+        "success": [
+            {"stderr": "succeeded"},
+            {"append_line": ["events.log", "ran"]},
+            {"error": "downgraded"}
+        ],
+        "failure": [{"stderr": "failed"}, {"append_line": ["events.log", "failure-ran"]}]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -597,10 +556,9 @@ fn success_stack_error_routes_to_failure_keeps_success_comm_before_failure() {
         vec!["ran", "failure-ran"],
         "success stack and failure stack each ran exactly once"
     );
-    // The success top-level comm fired FIRST (top-level-before-stack), then
-    // the downgrade fired the failure top-level comm. The success comm is
-    // NOT suppressed — the spec requires top-level to fire before stack
-    // processing, so a later `error()` cannot un-fire it.
+    // The success `stderr` item fired FIRST, then the downgrade fired the
+    // failure `stderr` item. The success item is NOT suppressed: it ran
+    // before the `error` directive, so the directive cannot un-fire it.
     assert_eq!(
         emitter.events(),
         vec![
@@ -614,12 +572,7 @@ fn success_stack_error_routes_to_failure_keeps_success_comm_before_failure() {
 
 #[test]
 fn blocked_stack_side_effects_run_exactly_once() {
-    let fx = fixture(serde_json::json!({
-        "blocked": {
-            "stderr": "blocked",
-            "stack": [{"action": {"append_line": ["events.log", "ran"]}}]
-        }
-    }));
+    let fx = fixture(serde_json::json!({"blocked": [{"stderr": "blocked"}, {"append_line": ["events.log", "ran"]}]}));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
         settings: &fx.settings,
@@ -654,16 +607,10 @@ fn blocked_stack_side_effects_run_exactly_once() {
     assert_eq!(guard.terminal_signal(), Some(LifecycleSignal::Blocked));
 }
 
-/// Top-level communication for `success` fires before any `stack:`
-/// communication in the same event.
+/// Communication items in a `success` list fire in authored order.
 #[test]
-fn success_top_level_communication_fires_before_stack_communication() {
-    let fx = fixture(serde_json::json!({
-        "success": {
-            "stderr": "success-top",
-            "stack": [{"action": {"stderr": "success-stack"}}]
-        }
-    }));
+fn success_communication_fires_in_authored_order() {
+    let fx = fixture(serde_json::json!({"success": [{"stderr": "success-top"}, {"stderr": "success-stack"}]}));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
         settings: &fx.settings,
@@ -697,20 +644,14 @@ fn success_top_level_communication_fires_before_stack_communication() {
             Emitted::Stderr(LifecycleSignal::Success, "success-top".to_string()),
             Emitted::Stderr(LifecycleSignal::Success, "success-stack".to_string()),
         ],
-        "top-level communication must fire before stack communication"
+        "communication must fire in authored list order"
     );
 }
 
-/// Top-level communication for `blocked` fires before any `stack:`
-/// communication in the same event.
+/// Communication items in a `blocked` list fire in authored order.
 #[test]
-fn blocked_top_level_communication_fires_before_stack_communication() {
-    let fx = fixture(serde_json::json!({
-        "blocked": {
-            "stderr": "blocked-top",
-            "stack": [{"action": {"stderr": "blocked-stack"}}]
-        }
-    }));
+fn blocked_communication_fires_in_authored_order() {
+    let fx = fixture(serde_json::json!({"blocked": [{"stderr": "blocked-top"}, {"stderr": "blocked-stack"}]}));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
         settings: &fx.settings,
@@ -743,7 +684,7 @@ fn blocked_top_level_communication_fires_before_stack_communication() {
             Emitted::Stderr(LifecycleSignal::Blocked, "blocked-top".to_string()),
             Emitted::Stderr(LifecycleSignal::Blocked, "blocked-stack".to_string()),
         ],
-        "top-level communication must fire before stack communication"
+        "communication must fire in authored list order"
     );
 }
 
@@ -756,14 +697,8 @@ fn blocked_top_level_communication_fires_before_stack_communication() {
 #[test]
 fn start_stack_action_error_records_failure_then_runs_finalize() {
     let fx = fixture(serde_json::json!({
-        "failure": {
-            "stderr": "failed",
-            "stack": [{"action": {"append_line": ["events.log", "failure-ran"]}}]
-        },
-        "finalize": {
-            "stderr": "finalized",
-            "stack": [{"action": {"append_line": ["events.log", "finalize-ran"]}}]
-        }
+        "failure": [{"stderr": "failed"}, {"append_line": ["events.log", "failure-ran"]}],
+        "finalize": [{"stderr": "finalized"}, {"append_line": ["events.log", "finalize-ran"]}]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -828,7 +763,7 @@ fn start_stack_action_error_records_failure_then_runs_finalize() {
         vec!["failure-ran", "finalize-ran"],
         "failure stack and finalize stack each ran exactly once"
     );
-    // Both top-level comms fired, failure before finalize.
+    // Both `stderr` items fired, failure before finalize.
     assert_eq!(
         emitter.events(),
         vec![
@@ -845,12 +780,8 @@ fn start_stack_action_error_records_failure_then_runs_finalize() {
 #[test]
 fn failure_stack_without_record_skips_finalize() {
     let fx = fixture(serde_json::json!({
-        "failure": {
-            "stack": [{"action": {"append_line": ["events.log", "failure-ran"]}}]
-        },
-        "finalize": {
-            "stack": [{"action": {"append_line": ["events.log", "finalize-ran"]}}]
-        }
+        "failure": [{"append_line": ["events.log", "failure-ran"]}],
+        "finalize": [{"append_line": ["events.log", "finalize-ran"]}]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -913,14 +844,12 @@ fn failure_stack_without_record_skips_finalize() {
 #[test]
 fn blocked_stack_error_routes_to_failure_keeps_blocked_comm_before_failure() {
     let fx = fixture(serde_json::json!({
-        "blocked": {
-            "stderr": "blocked",
-            "stack": [{"action": [{"append_line": ["events.log", "ran"]}, {"error": "downgraded"}]}]
-        },
-        "failure": {
-            "stderr": "failed",
-            "stack": [{"action": {"append_line": ["events.log", "failure-ran"]}}]
-        }
+        "blocked": [
+            {"stderr": "blocked"},
+            {"append_line": ["events.log", "ran"]},
+            {"error": "downgraded"}
+        ],
+        "failure": [{"stderr": "failed"}, {"append_line": ["events.log", "failure-ran"]}]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -953,8 +882,8 @@ fn blocked_stack_error_routes_to_failure_keeps_blocked_comm_before_failure() {
         vec!["ran", "failure-ran"],
         "blocked stack and failure stack each ran exactly once"
     );
-    // The blocked top-level comm fired FIRST (top-level-before-stack), then
-    // the downgrade fired the failure top-level comm.
+    // The blocked `stderr` item fired FIRST, then the downgrade fired the
+    // failure `stderr` item.
     assert_eq!(
         emitter.events(),
         vec![
@@ -975,7 +904,7 @@ fn blocked_stack_error_routes_to_failure_keeps_blocked_comm_before_failure() {
 // to bare-`?` the failure, which had a visible consequence on the terminal
 // routes: `failure` had already fired, so the guard's `Drop` net stayed silent
 // (it only fires when `start_emitted && !terminal_emitted`) and the run exited
-// **without its owed `finalize`**. A `finalize.stack` that releases a lock or
+// **without its owed `finalize`**. A `finalize` stack that releases a lock or
 // posts a status simply never ran, on the path where it mattered most.
 //
 // Event-awareness is not branched on here — it falls out of the guard's
@@ -987,12 +916,10 @@ fn blocked_stack_error_routes_to_failure_keeps_blocked_comm_before_failure() {
 #[test]
 fn a_handoff_failure_after_the_terminal_event_still_runs_the_owed_finalize() {
     let fx = fixture(serde_json::json!({
-        "finalize": {
-            "stack": [
-                {"when": "err", "action": {"append_line": ["events.log", "finalize-saw-err"]}},
-                {"action": {"append_line": ["events.log", "finalize-ran"]}}
-            ]
-        }
+        "finalize": [
+            {"when": "err", "then": [{"append_line": ["events.log", "finalize-saw-err"]}]},
+            {"append_line": ["events.log", "finalize-ran"]}
+        ]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -1059,12 +986,8 @@ fn a_handoff_failure_after_the_terminal_event_still_runs_the_owed_finalize() {
 #[test]
 fn a_handoff_failure_before_the_terminal_event_routes_blocked_then_finalize() {
     let fx = fixture(serde_json::json!({
-        "blocked": {
-            "stack": [{"when": "err", "action": {"append_line": ["events.log", "blocked-ran"]}}]
-        },
-        "finalize": {
-            "stack": [{"action": {"append_line": ["events.log", "finalize-ran"]}}]
-        }
+        "blocked": [{"when": "err", "then": [{"append_line": ["events.log", "blocked-ran"]}]}],
+        "finalize": [{"append_line": ["events.log", "finalize-ran"]}]
     }));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
@@ -1112,11 +1035,7 @@ fn a_handoff_failure_before_the_terminal_event_routes_blocked_then_finalize() {
 /// true for hand-offs too.
 #[test]
 fn a_handoff_failure_after_finalize_surfaces_without_re_emitting() {
-    let fx = fixture(serde_json::json!({
-        "finalize": {
-            "stack": [{"action": {"append_line": ["events.log", "finalize-ran"]}}]
-        }
-    }));
+    let fx = fixture(serde_json::json!({"finalize": [{"append_line": ["events.log", "finalize-ran"]}]}));
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
         settings: &fx.settings,

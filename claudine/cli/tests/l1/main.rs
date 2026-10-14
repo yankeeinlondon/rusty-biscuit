@@ -46,7 +46,11 @@ mod compose_initialize_staged_boot;
 #[cfg(unix)]
 mod compose_interactive_timeout_cli;
 #[cfg(unix)]
+mod compose_removed_grammar;
+#[cfg(unix)]
 mod compose_removed_validation_keys;
+#[cfg(unix)]
+mod compose_retry_overlay;
 mod compose_presence_parity;
 mod compose_prompt_tiers;
 mod context_construction_guard;

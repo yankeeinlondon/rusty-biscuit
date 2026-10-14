@@ -645,13 +645,11 @@ sequence:
         - name: early
           shell: "sleep 1; printf 'e\n'"
           setup:
-            - action:
-                - set: {shared: from-early}
+            - set: {shared: from-early}
         - name: late
           shell: "printf 'l\n'"
           setup:
-            - action:
-                - set: {shared: from-late}
+            - set: {shared: from-late}
   - name: beta
     prompt: reader.md
 ---
@@ -1136,7 +1134,7 @@ fn parallel_members_do_not_depend_on_the_default_thread_stack() {
     fs::create_dir_all(fixture.cwd().join("prompts")).unwrap();
     fs::write(
         fixture.cwd().join("prompts/router.md"),
-        "---\ninitialize:\n  stack:\n    - action: {proxy: './loop-target.md'}\n---\nRouter.\n",
+        "---\ninitialize:\n  - {proxy: './loop-target.md'}\n---\nRouter.\n",
     )
     .unwrap();
     fs::write(

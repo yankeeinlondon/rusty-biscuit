@@ -263,6 +263,7 @@ pub(crate) fn route_staged_initialize(
             .as_ref()
             .map(darkmatter::markdown::compose::CurrentAuthority::memoized),
         group: None,
+        loop_values: None,
         base_dir: surface.source_path.parent().or(document.repo_root),
         ctx_base_dir: Some(document.launch_area),
         prepared_context: Some(surface.context),

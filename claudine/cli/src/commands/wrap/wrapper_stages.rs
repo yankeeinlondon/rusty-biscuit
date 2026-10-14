@@ -560,6 +560,7 @@ pub(crate) fn run_execution_stage(
             source_path,
             base_prompt: Some(base_prompt),
             overlay: indexmap::IndexMap::new(),
+            pending_retry_overlay: None,
             prompt_tail: Vec::new(),
             // A direct wrapper run is one invocation with no caller-owned
             // accumulator, so it owns its own cell.

@@ -52,6 +52,15 @@ pub(crate) struct HarnessPromptState {
     /// Empty for a directly invoked document. Replaced wholesale — never merged
     /// — when this document proxies on.
     pub(crate) overlay: indexmap::IndexMap<String, serde_json::Value>,
+    /// The evaluated `retry.with` mapping of the retry that is re-entering this
+    /// document — in memory only, never written to disk.
+    ///
+    /// Layered key-wise over [`Self::overlay`] (the retry wins a shared key)
+    /// for the reads of exactly one retried attempt, then consumed by that
+    /// attempt's canonical materialization. Set by the retry dispatch (`None`
+    /// for a retry without `with`) and cleared by a resume and by proxy
+    /// adoption, so a later retry or resume never sees it.
+    pub(crate) pending_retry_overlay: Option<indexmap::IndexMap<String, serde_json::Value>>,
     pub(crate) prompt_tail: Vec<String>,
     /// The caller's input layers, reapplied at every canonical preparation of
     /// this document. Sourced from
@@ -178,6 +187,10 @@ pub(crate) struct MaterializedHarnessPrompt {
     /// [`HarnessPromptState`]. Threaded into every lifecycle event so a `set`
     /// accumulates across attempts instead of dying with `live_frontmatter`.
     pub(crate) runtime_state: std::sync::Arc<claudine::composition::RuntimeState>,
+    /// The `loop` global of the loop iteration this materialization belongs
+    /// to, read by every lifecycle event it fires. `None` outside an
+    /// iteration.
+    pub(crate) loop_values: Option<claudine::composition::LoopAmbient>,
     /// The MCP `#tag`s this document's **canonically composed** body selects,
     /// sorted and deduped.
     ///

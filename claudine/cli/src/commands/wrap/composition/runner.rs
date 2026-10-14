@@ -204,6 +204,7 @@ pub(super) fn run_composition_body(
                     Some(launch_workspace.launch_cwd.as_path()),
                     Some(lifecycle_context),
                     &request.prepared.input_layers.file_resolution_context,
+                    request.prepared.input_layers.loop_values.as_ref(),
                     request
                         .invocation_context
                         .as_ref()
@@ -266,6 +267,7 @@ pub(super) fn run_composition_body(
                 Some(launch_workspace.launch_cwd.as_path()),
                 Some(lifecycle_context),
                 &request.prepared.input_layers.file_resolution_context,
+                request.prepared.input_layers.loop_values.as_ref(),
                 request
                     .invocation_context
                     .as_ref()
@@ -438,6 +440,7 @@ pub(super) fn run_composition_body(
         // built from `request.prepared` (overlay already baked in during canonical
         // preparation), so the overlay is applied exactly once per attempt.
         overlay: request.proxy_overlay.clone(),
+        pending_retry_overlay: None,
         prompt_tail: Vec::new(),
         runtime_state: std::sync::Arc::clone(&runtime_state),
         suppress_output_commit: request.suppress_output_commit,

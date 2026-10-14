@@ -230,6 +230,9 @@ impl ActiveDocumentCoordinator {
         });
 
         prompt_state.overlay = handoff.overlay().clone();
+        // A retry overlay belongs to the source's retried attempt, never the
+        // target's.
+        prompt_state.pending_retry_overlay = None;
         prompt_state.source_path = handoff.resolved_target().to_path_buf();
         prompt_state.original_ref = handoff.authored_target().to_string();
         prompt_state.entry = DocumentEntryReason::ProxyTarget;
@@ -242,6 +245,8 @@ impl ActiveDocumentCoordinator {
             prompt_state.input_layers.file_resolution_context =
                 source_context.file_resolution_context().clone();
         }
+        // The target is a fresh run, never an iteration of the source's loop.
+        prompt_state.input_layers.loop_values = None;
         prompt_state.source_context = source_context;
     }
 }

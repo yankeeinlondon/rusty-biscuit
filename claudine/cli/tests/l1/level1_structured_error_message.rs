@@ -84,13 +84,11 @@ fn structured_provider_error_message_reaches_failure_and_finalize_err_msg() {
         r#"---
 title: structured provider error propagation
 failure:
-  stack:
-    - action: {append_line: ["events.log", "{{ 'failure-err-msg=' + err.msg }}"]}
+  - {append_line: ["events.log", "{{ 'failure-err-msg=' + err.msg }}"]}
 finalize:
-  stack:
-    - when: "err"
-      action: {append_line: ["events.log", "{{ 'finalize-err-msg=' + err.msg }}"]}
-    - action: {append_line: ["events.log", "finalize"]}
+  - when: "err"
+    then: {append_line: ["events.log", "{{ 'finalize-err-msg=' + err.msg }}"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Structured error seam probe.
 "#,

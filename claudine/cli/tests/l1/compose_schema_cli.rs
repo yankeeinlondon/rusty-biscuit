@@ -172,22 +172,19 @@ Plan for {{topic}}.
 #[test]
 fn a_required_property_violation_stops_before_lifecycle_actions_under_existing_recovery_policy() {
     const STACKS: &str = r#"start:
-  stack:
-    - action: {append_line: ["events.log", "start"]}
+    - {append_line: ["events.log", "start"]}
 blocked:
-  stack:
-    - when: "plan"
-      action: {append_line: ["events.log", "guard over an absent property"]}
-    - action: {append_line: ["events.log", "blocked {{ err.code }} plan=[{{ plan }}]"]}
+  - when: "plan"
+    then: {append_line: ["events.log", "guard over an absent property"]}
+  - {append_line: ["events.log", "blocked {{ err.code }} plan=[{{ plan }}]"]}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 "#;
     for (case, initialize, expected) in [
         ("eager", "", vec![]),
         (
             "staged",
-            "initialize:\n  stack:\n    - action: {append_line: [\"events.log\", \"initialize\"]}\n",
+            "initialize:\n    - {append_line: [\"events.log\", \"initialize\"]}\n",
             vec!["initialize", "blocked composition.missing_properties plan=[]", "finalize"],
         ),
     ] {
@@ -640,7 +637,7 @@ $schema:
   topic: 'string(required)'
 loop:
   max: 2
-  condition: '{{ _loop_count < 1 }}'
+  condition: '{{ loop.count < 1 }}'
 ---
 Plan for {{topic}}.
 "#,
@@ -2148,8 +2145,7 @@ fn compose_late_caller_file_verdict_names_the_launch_directory() {
             "    spec: 'file(required;match(**/*note*.md);eager)[]'\n",
             "kind: \"{{ 'feature' }}\"\n",
             "initialize:\n",
-            "  stack:\n",
-            "    - action: {append_line: [\"events.log\", \"initialize\"]}\n",
+            "    - {append_line: [\"events.log\", \"initialize\"]}\n",
             "---\n",
             "Spec: {{spec}}\n",
         ),
@@ -2205,7 +2201,7 @@ fn compose_unresolved_caller_file_fails_before_initialize_when_non_interactive()
     let (fixture, count_path, events) = caller_file_fixture("compose-early-caller-file");
     let prompts = fixture.cwd().join("prompts");
     fs::create_dir_all(&prompts).unwrap();
-    let initialize = "initialize:\n  stack:\n    - action: {append_line: [\"events.log\", \"initialize\"]}\n";
+    let initialize = "initialize:\n    - {append_line: [\"events.log\", \"initialize\"]}\n";
     for (label, schema) in [
         (
             "templated sibling",

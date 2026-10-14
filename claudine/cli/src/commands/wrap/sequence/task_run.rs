@@ -121,6 +121,7 @@ pub(super) fn run_step_task(
         timing: None,
         current: None,
         group: None,
+        loop_values: None,
         base_dir: Some(task_source_context.base_dir()),
         ctx_base_dir: Some(run.prep_context.launch_workspace.launch_cwd.as_path()),
         prepared_context: Some(&task_context),

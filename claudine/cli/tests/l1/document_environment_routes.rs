@@ -164,14 +164,14 @@ fn appending_task(label: &str) -> String {
 /// One lifecycle stack item appending `label` and what its document reads.
 fn trail(event: &str, label: &str) -> String {
     format!(
-        "{event}:\n    stack:\n        - action:\n              - append_line: [\"events.log\", '{label} {READS}']\n"
+        "{event}:\n        - append_line: [\"events.log\", '{label} {READS}']\n"
     )
 }
 
 /// A lifecycle stack item appending `label` and then proxying to `./target.md`.
 fn trail_then_proxy(event: &str, label: &str) -> String {
     format!(
-        "{event}:\n    stack:\n        - action:\n              - append_line: [\"events.log\", '{label} {READS}']\n              - proxy: ./target.md\n"
+        "{event}:\n        - append_line: [\"events.log\", '{label} {READS}']\n        - proxy: ./target.md\n"
     )
 }
 
@@ -291,7 +291,7 @@ fn re_entering_a_document_reads_its_map_without_capturing_again() {
     fixture.write_doc(
         "target.md",
         &format!(
-            "---\nn: 0\nloop:\n    while: \"n < 2\"\n    action: \"increment(n)\"\n{}success:\n    stack:\n        - when: \"!file_exists('retried.txt')\"\n          action:\n              - append_line: [\"retried.txt\", \"once\"]\n              - append_line: [\"events.log\", 'target retry {READS}']\n              - retry: 1\n        - action:\n              - append_line: [\"events.log\", 'target success {READS}']\n{}---\nloop body\n",
+            "---\nn: 0\nloop:\n    while: \"n < 2\"\n    action: \"increment(n)\"\n{}success:\n        - when: \"!file_exists('retried.txt')\"\n          then:\n              - append_line: [\"retried.txt\", \"once\"]\n              - append_line: [\"events.log\", 'target retry {READS}']\n              - retry: 1\n        - append_line: [\"events.log\", 'target success {READS}']\n{}---\nloop body\n",
             trail("start", "target start"),
             trail("finalize", "target finalize"),
         ),
@@ -432,7 +432,7 @@ fn a_failure_handler_and_its_retry_read_the_documents_map() {
     fixture.write_doc(
         "target.md",
         &format!(
-            "---\nfailure:\n    stack:\n        - action:\n              - append_line: [\"events.log\", 'target failure {READS}']\n              - retry: 1\n{}{}---\ntarget body\n",
+            "---\nfailure:\n        - append_line: [\"events.log\", 'target failure {READS}']\n        - retry: 1\n{}{}---\ntarget body\n",
             trail("success", "target success"),
             trail("finalize", "target finalize"),
         ),
@@ -476,12 +476,10 @@ fn shell_task(label: &str, indent: &str) -> String {
     format!(
         "shell: '{shell}'\n\
          {indent}setup:\n\
-         {indent}  - action:\n\
-         {indent}      - append_line: [events.log, '{label}-reads {READS}']\n\
-         {indent}      - shell: '{setup}'\n\
+         {indent}  - append_line: [events.log, '{label}-reads {READS}']\n\
+         {indent}  - shell: '{setup}'\n\
          {indent}teardown:\n\
-         {indent}  - action:\n\
-         {indent}      - shell: '{teardown}'\n",
+         {indent}  - shell: '{teardown}'\n",
         shell = echo("task"),
         setup = echo("setup"),
         teardown = echo("teardown"),
@@ -578,7 +576,7 @@ fn a_later_step_selects_its_model_and_starts_its_shells_from_its_own_map() {
     let sequence = fixture.write_doc(
         "seq.md",
         &format!(
-            "---\nsequence:\n  - name: first\n  - name: second\nstart:\n    stack:\n        - action:\n              - set:\n                    shell_mark: \"$(printenv DOC_MARK)\"\n              - shell: 'echo start-shell $DOC_MARK>>events.log'\n              - append_line: [\"events.log\", 'start set={{{{ shell_mark }}}} {READS}']\n---\nmodel={{{{ env.MODEL }}}} {READS}\n\n::shell printenv DOC_MARK\n"
+            "---\nsequence:\n  - name: first\n  - name: second\nstart:\n        - set:\n              shell_mark: \"$(printenv DOC_MARK)\"\n        - shell: 'echo start-shell $DOC_MARK>>events.log'\n        - append_line: [\"events.log\", 'start set={{{{ shell_mark }}}} {READS}']\n---\nmodel={{{{ env.MODEL }}}} {READS}\n\n::shell printenv DOC_MARK\n"
         ),
     );
     let map = |name: &str, model: &str| {
@@ -685,7 +683,7 @@ fn a_resumed_attempt_reads_the_map_its_document_captured() {
     fixture.write_doc(
         "target.md",
         &format!(
-            "---\n{}failure:\n    stack:\n        - action:\n              - append_line: [\"events.log\", 'target failure {READS}']\n              - resume: 'continue {{{{ env.DOC_MARK }}}}'\n{}---\ntarget body\n",
+            "---\n{}failure:\n        - append_line: [\"events.log\", 'target failure {READS}']\n        - resume: 'continue {{{{ env.DOC_MARK }}}}'\n{}---\ntarget body\n",
             trail("start", "target start"),
             trail("success", "target success"),
         ),

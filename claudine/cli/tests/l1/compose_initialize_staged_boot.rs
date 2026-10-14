@@ -31,16 +31,16 @@ const GENERATED_MARKER: &str = "GENERATED-BY-INITIALIZE";
 const BODY_MARKER: &str = "STAGED-BODY";
 
 /// The `initialize` stack that creates the included file with content.
-const CREATING_INITIALIZE: &str = "initialize:\n  stack:\n    \
-     - action: {append_line: ['events.log', 'initialize']}\n    \
-     - action: {ensure_file: 'generated/notes.md'}\n    \
-     - action: {append_line: ['generated/notes.md', 'GENERATED-BY-INITIALIZE']}\n";
+const CREATING_INITIALIZE: &str = "initialize:\n    \
+     - {append_line: ['events.log', 'initialize']}\n    \
+     - {ensure_file: 'generated/notes.md'}\n    \
+     - {append_line: ['generated/notes.md', 'GENERATED-BY-INITIALIZE']}\n";
 
 /// `blocked`/`finalize` markers, so a test can count the catch events.
-const CATCH_MARKERS: &str = "blocked:\n  stack:\n    \
-     - action: {append_line: ['events.log', 'blocked']}\n\
-     finalize:\n  stack:\n    \
-     - action: {append_line: ['events.log', 'finalize']}\n";
+const CATCH_MARKERS: &str = "blocked:\n    \
+     - {append_line: ['events.log', 'blocked']}\n\
+     finalize:\n    \
+     - {append_line: ['events.log', 'finalize']}\n";
 
 struct Staged {
     fixture: CliProcessFixture,
@@ -196,9 +196,9 @@ fn a_proxied_target_initialize_creates_a_file_the_target_body_includes() {
     staged.write_doc("target.md", &creating_doc("phase: 2\n"));
     let router = staged.write_doc(
         "router.md",
-        "---\ntitle: router\ninitialize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'router-initialize']}\n    \
-         - action: {proxy: 'target.md'}\n---\nROUTER-BODY\n",
+        "---\ntitle: router\ninitialize:\n    \
+         - {append_line: ['events.log', 'router-initialize']}\n    \
+         - {proxy: 'target.md'}\n---\nROUTER-BODY\n",
     );
 
     let (success, output) = staged.run(&["compose", router.to_str().unwrap(), "-y", "--claude"]);
@@ -228,8 +228,8 @@ fn a_looping_target_first_iteration_includes_what_initialize_created() {
     );
     let router = staged.write_doc(
         "router.md",
-        "---\ntitle: router\ninitialize:\n  stack:\n    \
-         - action: {proxy: 'target.md'}\n---\nROUTER-BODY\n",
+        "---\ntitle: router\ninitialize:\n    \
+         - {proxy: 'target.md'}\n---\nROUTER-BODY\n",
     );
 
     let (success, output) = staged.run(&["compose", router.to_str().unwrap(), "-y", "--claude"]);
@@ -269,9 +269,9 @@ fn a_sequence_task_proxy_target_initialize_creates_a_file_its_body_includes() {
     staged.write_doc("target.md", &creating_doc("phase: 3\n"));
     staged.write_doc(
         "router.md",
-        "---\ntitle: router\ninitialize:\n  stack:\n    \
-         - action: {append_line: ['events.log', 'router-initialize']}\n    \
-         - action: {proxy: 'target.md'}\n---\nROUTER-BODY\n",
+        "---\ntitle: router\ninitialize:\n    \
+         - {append_line: ['events.log', 'router-initialize']}\n    \
+         - {proxy: 'target.md'}\n---\nROUTER-BODY\n",
     );
     let sequence = staged.write_doc(
         "seq.md",
@@ -303,8 +303,8 @@ fn a_file_still_missing_after_initialize_blocks_once_without_launching() {
     let doc = staged.write_doc(
         "doc.md",
         &format!(
-            "---\ntitle: never creates\ninitialize:\n  stack:\n    \
-             - action: {{append_line: ['events.log', 'initialize']}}\n\
+            "---\ntitle: never creates\ninitialize:\n    \
+             - {{append_line: ['events.log', 'initialize']}}\n\
              {CATCH_MARKERS}---\n{BODY_MARKER}\n\n::file {GENERATED}\n"
         ),
     );
@@ -378,9 +378,9 @@ fn an_initialize_skip_ends_the_run_before_the_body_is_discovered() {
     let doc = staged.write_doc(
         "doc.md",
         &format!(
-            "---\ntitle: skipped\ninitialize:\n  stack:\n    \
-             - action: {{append_line: ['events.log', 'initialize']}}\n    \
-             - action: skip\n{CATCH_MARKERS}---\n{BODY_MARKER}\n\n::file {GENERATED}\n"
+            "---\ntitle: skipped\ninitialize:\n    \
+             - {{append_line: ['events.log', 'initialize']}}\n    \
+             - skip\n{CATCH_MARKERS}---\n{BODY_MARKER}\n\n::file {GENERATED}\n"
         ),
     );
 
@@ -402,8 +402,8 @@ fn an_unapproved_initialize_shell_is_refused_before_the_body_is_discovered() {
     let doc = staged.write_doc(
         "doc.md",
         &format!(
-            "---\ntitle: gated\ninitialize:\n  stack:\n    \
-             - action: {{shell: \"touch {effect}\"}}\n\
+            "---\ntitle: gated\ninitialize:\n    \
+             - {{shell: \"touch {effect}\"}}\n\
              {CATCH_MARKERS}---\n{BODY_MARKER}\n\n::file {GENERATED}\n",
             effect = effect.display(),
         ),
@@ -436,10 +436,10 @@ fn initialize_shells_are_forbidden_even_with_yolo_across_entry_paths() {
         staged.install_compose_provider();
         let effect = staged.fixture.workspace_path().join("forbidden.txt");
         staged.write_doc("target.md", &format!(
-            "---\nprompt: Do the task\n{}initialize:\n  stack:\n    - when: 'false'\n      action: {{shell: \"touch {}\"}}\n---\nBody\n",
+            "---\nprompt: Do the task\n{}initialize:\n    - when: 'false'\n      then: {{shell: \"touch {}\"}}\n---\nBody\n",
             if looping { "loop:\n  until: 'true'\n  max: 2\n" } else { "" }, effect.display(),
         ));
-        staged.write_doc("router.md", "---\nprompt: Route the task\ninitialize:\n  stack:\n    - action: {proxy: './target.md'}\n---\nRouter\n");
+        staged.write_doc("router.md", "---\nprompt: Route the task\ninitialize:\n    - {proxy: './target.md'}\n---\nRouter\n");
         staged.write_doc("seq.md", "---\nsequence:\n  - name: one\n    prompt: router.md\n---\nSequence\n");
         staged.write_doc(".darkmatter-shell-whitelist", "prefix touch\n");
         let entry = if command == "sequence" { "seq.md" } else if proxy { "router.md" } else { "target.md" };
@@ -472,19 +472,19 @@ fn early_catch_shells_cannot_run_or_enable_another_catch_shell() {
             for event in ["blocked", "failure", "finalize"] {
                 let marker = staged.fixture.workspace_path().join(format!("{event}-shell"));
                 catches.push_str(&format!(
-                    "{event}:\n  stack:\n    - action: {{append_line: ['events.log', '{event}']}}\n",
+                    "{event}:\n    - {{append_line: ['events.log', '{event}']}}\n",
                 ));
                 if trigger == "evaluation" && event == "blocked" {
-                    catches.push_str("    - action: {info: '{{ definitely_missing_value }}'}\n");
+                    catches.push_str("    - {info: '{{ definitely_missing_value }}'}\n");
                 }
                 catches.push_str(&format!(
-                    "    - action:\n        action: shell\n        command: \"touch {}\"\n        no_error: true\n", marker.display(),
+                    "    - shell:\n        command: \"touch {}\"\n        no_error: true\n", marker.display(),
                 ));
             }
             staged.write_doc("doc.md", &format!(
-                "---\n{schema}initialize:\n  stack:\n    - action: {action}\n{catches}---\n{body}\n",
+                "---\n{schema}initialize:\n    - {action}\n{catches}---\n{body}\n",
             ));
-            staged.write_doc("router.md", "---\ninitialize:\n  stack:\n    - action: {proxy: './doc.md'}\n---\nRouter\n");
+            staged.write_doc("router.md", "---\ninitialize:\n    - {proxy: './doc.md'}\n---\nRouter\n");
             staged.write_doc("seq.md", "---\nsequence:\n  - name: one\n    prompt: router.md\n---\nSequence\n");
             let mut args = if trigger == "adopted" {
                 vec!["sequence", "seq.md", "--claude"]
@@ -525,14 +525,14 @@ fn the_reviewed_early_catch_shell_trigger_is_refused_on_every_entry_path() {
             let blocked = staged.fixture.workspace_path().join("unapproved-blocked");
             let finalize = staged.fixture.workspace_path().join("unapproved-finalize");
             staged.write_doc("doc.md", &format!(
-                "---\n{}initialize:\n  stack:\n    - action: {{ensure_file: marker.md}}\n\
-                 blocked:\n  stack:\n    - action: {{append_line: ['events.log', 'blocked']}}\n    \
-                 - action: {{shell: \"touch {}\"}}\n\
-                 finalize:\n  stack:\n    - action: {{append_line: ['events.log', 'finalize']}}\n    \
-                 - action: {{shell: \"touch {}\"}}\n---\n::file ./missing.md\n",
+                "---\n{}initialize:\n    - {{ensure_file: marker.md}}\n\
+                 blocked:\n    - {{append_line: ['events.log', 'blocked']}}\n    \
+                 - {{shell: \"touch {}\"}}\n\
+                 finalize:\n    - {{append_line: ['events.log', 'finalize']}}\n    \
+                 - {{shell: \"touch {}\"}}\n---\n::file ./missing.md\n",
                 if looping { LOOP } else { "" }, blocked.display(), finalize.display(),
             ));
-            staged.write_doc("router.md", "---\ninitialize:\n  stack:\n    - action: {proxy: './doc.md'}\n---\nRouter\n");
+            staged.write_doc("router.md", "---\ninitialize:\n    - {proxy: './doc.md'}\n---\nRouter\n");
             let mut args = vec!["compose", entry, "--claude"];
             if yolo {
                 args.push("-y");
@@ -556,7 +556,7 @@ fn approved_start_shell_runs_once_after_shell_free_initialization() {
     staged.install_compose_provider();
     let effect = staged.fixture.workspace_path().join("start-shell.txt");
     staged.write_doc("doc.md", &format!(
-        "---\n{CREATING_INITIALIZE}start:\n  stack:\n    - action: {{shell: \"printf 'ran\\n' >> {}\"}}\n---\n::file {GENERATED}\n",
+        "---\n{CREATING_INITIALIZE}start:\n    - {{shell: \"printf 'ran\\n' >> {}\"}}\n---\n::file {GENERATED}\n",
         effect.display(),
     ));
     let (success, output) = staged.run(&["compose", "doc.md", "--claude", "-y"]);

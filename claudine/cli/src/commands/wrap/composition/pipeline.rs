@@ -1542,7 +1542,7 @@ pub(super) fn route_initialize(
                         overlay.clone(),
                         ProxyProvenance::new(
                             source_path.to_path_buf(),
-                            *location,
+                            location.clone(),
                             vec![source_path.to_path_buf()],
                         ),
                     ));
@@ -1757,6 +1757,7 @@ fn provider_run_handoff(
             .as_ref()
             .map(darkmatter::markdown::compose::CurrentAuthority::memoized),
         group: None,
+        loop_values: None,
         base_dir,
         ctx_base_dir: Some(launch_workspace.launch_cwd.as_path()),
         prepared_context: Some(lifecycle_context),
@@ -1912,6 +1913,8 @@ impl InitializeCatchSurface<'_> {
             Some(self.launch_area),
             Some(self.context),
             self.file_resolution_context,
+            // `initialize` and its catch stacks run before any iteration.
+            None,
             self.current.clone(),
             self.frontmatter,
             self.document_start,

@@ -93,7 +93,7 @@ macro_rules! presence_rows {
 
 /// A `start` effect that rewrites values between the two gates, so the
 /// completion gate judges what the launch gate never saw.
-const CLEAR_AT_START: &str = "start:\n  stack:\n    - action: {set: {a: null, b: null, c: null}}\n";
+const CLEAR_AT_START: &str = "start:\n    - {set: {a: null, b: null, c: null}}\n";
 
 presence_rows! {
     // Control row: every concrete requirement met, every nullable omitted.
@@ -110,9 +110,9 @@ presence_rows! {
     nullables_cleared_by_start_pass_completion:
         &format!("a: 1\nb: x\nc: abc\nd: present\ne: []\n{CLEAR_AT_START}") => Outcome::Succeeded, None::<&str>;
     a_required_string_cleared_by_start_fails_completion:
-        "d: present\ne: []\nstart:\n  stack:\n    - action: {set: {d: null}}\n" => Outcome::FailedAtCompletion, Some("completion schema");
+        "d: present\ne: []\nstart:\n    - {set: {d: null}}\n" => Outcome::FailedAtCompletion, Some("completion schema");
     a_required_unknown_list_cleared_by_start_fails_completion:
-        "d: present\ne: []\nstart:\n  stack:\n    - action: {set: {e: null}}\n" => Outcome::FailedAtCompletion, Some("completion schema");
+        "d: present\ne: []\nstart:\n    - {set: {e: null}}\n" => Outcome::FailedAtCompletion, Some("completion schema");
     // Claudine's consumer policy for an invalid *optional* value: it is
     // dropped with a warning rather than failing the run. The nullable union
     // is optional, so `ab` (rejected by Darkmatter's validator) is dropped.

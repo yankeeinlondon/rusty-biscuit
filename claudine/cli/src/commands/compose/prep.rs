@@ -1120,6 +1120,10 @@ fn build_and_run_loop(
                         None,
                     ),
                 );
+                // The `loop` global for this iteration's body, compose-time
+                // frontmatter, shell audit, and — carried on the prepared
+                // input layers — every lifecycle event it fires.
+                iteration_options.loop_values = Some(ctx.ambient.clone());
                 // Every iteration after the first is a composition run of its
                 // own: its epoch observes Git working state as the previous
                 // iterations left it, while stable launch evidence is reused.
@@ -1534,6 +1538,8 @@ fn execute_loop_or_single(
             == claudine::composition::SchemaStage::DeferToStabilizedReread,
         data_override_keys: caller_data_keys(step_scope),
         proxy_overlay: proxy_overlay.clone(),
+        // Each iteration supplies its own (`run_loop_with_overrides` below).
+        loop_values: None,
     };
 
     let is_proxy_target = adopted_handoff.is_some();
@@ -1729,7 +1735,7 @@ fn execute_loop_or_single(
 /// Discover and approve the template shell commands one loop iteration will
 /// execute, and add them to the set it prepares with.
 ///
-/// The iteration composes against loop state (`_loop_*`, carried values,
+/// The iteration composes against loop state (carried values,
 /// lifecycle `set`) that the document-level audit never saw, so its commands
 /// are discovered through the same canonical options and state its
 /// preparation uses. Iteration 1 may still prompt, as nothing has launched;

@@ -125,14 +125,14 @@ fn runs(fixture: &CliProcessFixture) -> Vec<String> {
 /// A stack item appending what this run's `ctx` holds, under `label`.
 fn record(label: &str) -> String {
     format!(
-        "        - action:\n              - append_line: [\"runs.log\", \"{label} staged={{{{ length(ctx.staged_files) }}}}\"]\n"
+        "        - append_line: [\"runs.log\", \"{label} staged={{{{ length(ctx.staged_files) }}}}\"]\n"
     )
 }
 
 /// `record`, adding the stable identity a hop must not move and the branch.
 fn record_identity(label: &str) -> String {
     format!(
-        "        - action:\n              - append_line: [\"runs.log\", \"{label} staged={{{{ length(ctx.staged_files) }}}} branch={{{{ ctx.branch }}}} cwd={{{{ ctx.cwd }}}} root={{{{ ctx.repo_root }}}}\"]\n"
+        "        - append_line: [\"runs.log\", \"{label} staged={{{{ length(ctx.staged_files) }}}} branch={{{{ ctx.branch }}}} cwd={{{{ ctx.cwd }}}} root={{{{ ctx.repo_root }}}}\"]\n"
     )
 }
 
@@ -171,7 +171,7 @@ fn a_run_keeps_its_own_observation_after_it_stages() {
         &fixture,
         "direct.md",
         &format!(
-            "---\nstart:\n    stack:\n        - action:\n              - shell: \"git add a.txt\"\nsuccess:\n    stack:\n{}---\nBODY staged={{{{ length(ctx.staged_files) }}}}\n",
+            "---\nstart:\n        - shell: \"git add a.txt\"\nsuccess:\n{}---\nBODY staged={{{{ length(ctx.staged_files) }}}}\n",
             record("direct")
         ),
     );
@@ -189,7 +189,7 @@ fn a_run_keeps_its_own_observation_after_it_stages() {
 #[test]
 fn a_proxy_target_observes_its_sources_staging_regardless_of_first_mention() {
     let target = format!(
-        "---\nsuccess:\n    stack:\n{}---\ntarget body\n",
+        "---\nsuccess:\n{}---\ntarget body\n",
         record_identity("target")
     );
     for (label, source_mentions) in [("mentioned", true), ("unmentioned", false)] {
@@ -203,7 +203,7 @@ fn a_proxy_target_observes_its_sources_staging_regardless_of_first_mention() {
             &fixture,
             "router.md",
             &format!(
-                "---\nstart:\n    stack:\n{source_record}        - action:\n              - shell: \"git add a.txt\"\n              - proxy: ./target.md\n---\nrouter body\n"
+                "---\nstart:\n{source_record}        - shell: \"git add a.txt\"\n        - proxy: ./target.md\n---\nrouter body\n"
             ),
         );
 
@@ -230,13 +230,13 @@ fn a_proxy_target_observes_a_branch_its_source_created() {
     doc(
         &fixture,
         "target.md",
-        &format!("---\nsuccess:\n    stack:\n{}---\ntarget body\n", record_identity("target")),
+        &format!("---\nsuccess:\n{}---\ntarget body\n", record_identity("target")),
     );
     let file = doc(
         &fixture,
         "router.md",
         &format!(
-            "---\nstart:\n    stack:\n        - action:\n              - shell: \"git checkout -q -b feature\"\n{}        - action:\n              - proxy: ./target.md\n---\nrouter body\n",
+            "---\nstart:\n        - shell: \"git checkout -q -b feature\"\n{}        - proxy: ./target.md\n---\nrouter body\n",
             record_identity("source")
         ),
     );
@@ -261,19 +261,19 @@ fn a_proxy_target_observes_a_working_tree_edit_its_source_made() {
     let fixture = repo("ctx-per-run-worktree");
     let record_dirty = |label: &str| {
         format!(
-            "        - action:\n              - append_line: [\"runs.log\", \"{label} dirty={{{{ ctx.dirty_files }}}} cwd={{{{ ctx.cwd }}}} root={{{{ ctx.repo_root }}}}\"]\n"
+            "        - append_line: [\"runs.log\", \"{label} dirty={{{{ ctx.dirty_files }}}} cwd={{{{ ctx.cwd }}}} root={{{{ ctx.repo_root }}}}\"]\n"
         )
     };
     doc(
         &fixture,
         "target.md",
-        &format!("---\nsuccess:\n    stack:\n{}---\ntarget body\n", record_dirty("target")),
+        &format!("---\nsuccess:\n{}---\ntarget body\n", record_dirty("target")),
     );
     let file = doc(
         &fixture,
         "router.md",
         &format!(
-            "---\nstart:\n    stack:\n{}        - action:\n              - append_line: [\"README.md\", \"edited\"]\n              - proxy: ./target.md\n---\nrouter body\n",
+            "---\nstart:\n{}        - append_line: [\"README.md\", \"edited\"]\n        - proxy: ./target.md\n---\nrouter body\n",
             record_dirty("source")
         ),
     );
@@ -299,7 +299,7 @@ fn a_later_sequence_step_observes_an_earlier_steps_staging() {
         doc(
             &fixture,
             name,
-            &format!("---\nsuccess:\n    stack:\n{}---\nstep body\n", record_identity(label)),
+            &format!("---\nsuccess:\n{}---\nstep body\n", record_identity(label)),
         );
     }
     let file = doc(
@@ -326,7 +326,7 @@ fn a_later_loop_iteration_observes_the_previous_iterations_staging() {
     let file = doc(
         &fixture,
         "loop.md",
-        "---\nn: 0\nloop:\n    while: \"n < 1\"\n    action: \"increment(n)\"\nsuccess:\n    stack:\n        - action:\n              - append_line: [\"runs.log\", \"iteration{{ _loop_count }} staged={{ length(ctx.staged_files) }} cwd={{ ctx.cwd }} root={{ ctx.repo_root }}\"]\n              - shell: \"git add a.txt\"\n---\nloop body\n",
+        "---\nn: 0\nloop:\n    while: \"n < 1\"\n    action: \"increment(n)\"\nsuccess:\n        - append_line: [\"runs.log\", \"iteration{{ loop.count }} staged={{ length(ctx.staged_files) }} cwd={{ ctx.cwd }} root={{ ctx.repo_root }}\"]\n        - shell: \"git add a.txt\"\n---\nloop body\n",
     );
 
     let run = run(&fixture, &["compose", "--claude", &file]);
@@ -344,7 +344,7 @@ fn a_later_loop_iteration_observes_the_previous_iterations_staging() {
 /// (while `marker.txt` is absent), stage the file, then recover with `verb`.
 fn first_attempt_stages(event: &str, recovery: &str) -> String {
     format!(
-        "{event}:\n    stack:\n        - when: \"!file_exists('marker.txt')\"\n          action:\n              - append_line: [\"marker.txt\", \"first\"]\n              - shell: \"git add a.txt\"\n{recovery}"
+        "{event}:\n        - when: \"!file_exists('marker.txt')\"\n          then:\n              - append_line: [\"marker.txt\", \"first\"]\n              - shell: \"git add a.txt\"\n{recovery}"
     )
 }
 
@@ -356,10 +356,10 @@ fn a_retry_attempt_observes_the_previous_attempts_staging() {
         &fixture,
         "retry.md",
         &format!(
-            "---\nsuccess:\n    stack:\n{}{}---\nbody\n",
+            "---\nsuccess:\n{}{}---\nbody\n",
             record_identity("attempt"),
             first_attempt_stages("finalize", "              - retry: 1\n")
-                .replacen("finalize:\n    stack:\n", "", 1),
+                .replacen("finalize:\n", "", 1),
         )
         .replacen("---\nbody", "---\nbody", 1),
     );
@@ -383,10 +383,10 @@ fn a_resumed_attempt_observes_the_previous_attempts_staging() {
         &fixture,
         "resume.md",
         &format!(
-            "---\nsuccess:\n    stack:\n{}{}failure:\n    stack:\n        - action:\n              - action: resume\n                message: \"again\"\n                max_attempts: 1\n---\nbody\n",
+            "---\nsuccess:\n{}{}failure:\n        - resume:\n              message: \"again\"\n              max_attempts: 1\n---\nbody\n",
             record_identity("attempt"),
             first_attempt_stages("success", "              - error: \"again\"\n")
-                .replacen("success:\n    stack:\n", "", 1),
+                .replacen("success:\n", "", 1),
         ),
     );
 
@@ -409,7 +409,7 @@ fn a_serial_group_member_observes_an_earlier_members_staging() {
     doc(
         &fixture,
         "read.md",
-        &format!("---\nsuccess:\n    stack:\n{}---\nmember body\n", record_identity("member")),
+        &format!("---\nsuccess:\n{}---\nmember body\n", record_identity("member")),
     );
     let file = doc(
         &fixture,
@@ -439,7 +439,7 @@ fn parallel_siblings_share_one_capture_until_one_reenters() {
         &fixture,
         "read.md",
         &format!(
-            "---\nsuccess:\n    stack:\n{}finalize:\n    stack:\n        - when: \"!file_exists('marker.txt')\"\n          action:\n              - append_line: [\"marker.txt\", \"first\"]\n              - retry: 1\n---\nmember body\n",
+            "---\nsuccess:\n{}finalize:\n        - when: \"!file_exists('marker.txt')\"\n          then:\n              - append_line: [\"marker.txt\", \"first\"]\n              - retry: 1\n---\nmember body\n",
             record_identity("member")
         ),
     );
@@ -576,7 +576,7 @@ fn a_partial_shares_its_parents_observation() {
     doc(
         &fixture,
         "parent.md",
-        "---\nstart:\n    stack:\n        - action:\n              - shell: \"git add a.txt\"\n---\nPARENT staged={{ length(ctx.staged_files) }}\n\n::file ./kid.md\n",
+        "---\nstart:\n        - shell: \"git add a.txt\"\n---\nPARENT staged={{ length(ctx.staged_files) }}\n\n::file ./kid.md\n",
     );
 
     let run = run(&fixture, &["compose", "--claude", "--perf", "parent.md"]);
@@ -621,7 +621,7 @@ fn a_fenced_example_in_a_partial_observes_no_git_state() {
 
 /// `initialize` of both staged rows writes `new.txt`, a second untracked file.
 const INITIALIZE_WRITES: &str =
-    "initialize:\n    stack:\n        - action:\n              - append_line: [\"new.txt\", \"created by initialize\"]\n";
+    "initialize:\n        - append_line: [\"new.txt\", \"created by initialize\"]\n";
 
 /// A document with `initialize` reads its root page before `initialize` runs,
 /// so a property its body names is captured before `initialize` changes the
@@ -672,7 +672,7 @@ fn current_is_observed_once_per_event() {
     let file = doc(
         &fixture,
         "current.md",
-        "---\nstart:\n    stack:\n        - action:\n              - append_line: [\"runs.log\", \"start-before {{ length(current.staged_files) }}\"]\n              - shell: \"git add a.txt\"\n              - append_line: [\"runs.log\", \"start-after {{ length(current.staged_files) }}\"]\nsuccess:\n    stack:\n        - action:\n              - append_line: [\"runs.log\", \"success {{ length(current.staged_files) }}\"]\n---\nbody\n",
+        "---\nstart:\n        - append_line: [\"runs.log\", \"start-before {{ length(current.staged_files) }}\"]\n        - shell: \"git add a.txt\"\n        - append_line: [\"runs.log\", \"start-after {{ length(current.staged_files) }}\"]\nsuccess:\n        - append_line: [\"runs.log\", \"success {{ length(current.staged_files) }}\"]\n---\nbody\n",
     );
 
     let run = run(&fixture, &["compose", "--claude", &file]);
@@ -775,7 +775,7 @@ fn a_lifecycle_only_property_is_captured_before_initialize() {
         &fixture,
         "staged.md",
         &format!(
-            "---\n{INITIALIZE_WRITES}success:\n    stack:\n        - action:\n              - append_line: [\"runs.log\", \"root untracked={{{{ ctx.untracked_files }}}}\"]\n---\nStaged document.\n\n::file ./part.md\n"
+            "---\n{INITIALIZE_WRITES}success:\n        - append_line: [\"runs.log\", \"root untracked={{{{ ctx.untracked_files }}}}\"]\n---\nStaged document.\n\n::file ./part.md\n"
         ),
     );
 
@@ -825,7 +825,7 @@ fn an_included_files_lifecycle_is_scanned_but_not_run() {
     doc(
         &fixture,
         "part.md",
-        "---\nsuccess:\n    stack:\n        - action:\n              - append_line: [\"runs.log\", \"part staged={{ length(ctx.staged_files) }}\"]\n---\nPART body\n",
+        "---\nsuccess:\n        - append_line: [\"runs.log\", \"part staged={{ length(ctx.staged_files) }}\"]\n---\nPART body\n",
     );
     doc(&fixture, "parent.md", "Parent line.\n\n::file ./part.md\n");
 

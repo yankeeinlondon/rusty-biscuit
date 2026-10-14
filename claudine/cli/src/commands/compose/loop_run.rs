@@ -100,7 +100,7 @@ pub(crate) fn build_loop_iteration_output(
 
     let mut output = if outcome.exit_code == 0 {
         // The captured entry this iteration committed to `outputs` is the same
-        // text `_loop_last_output` names, so the two agree by construction
+        // text `loop.last_output` names, so the two agree by construction
         // rather than the ambient reporting a placeholder empty string.
         claudine::composition::LoopIterationOutput::success(
             outcome.final_output.unwrap_or_default(),
