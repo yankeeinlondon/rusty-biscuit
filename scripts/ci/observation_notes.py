@@ -21,7 +21,9 @@ A failure at any point leaves the local ref intact and is reported; the cells
 the unpublished observations cover simply stay scheduled for everyone else.
 
 Two producers call this module. The pre-push hook publishes a version-2
-receipt's cells (`publish-receipt`, kind `hook`). A rig run of
+receipt's cells (`publish-receipt`, kind `hook`), with the plan it ran under so
+each observation records its package's feature arguments ([`hook_features`]).
+A rig run of
 `scripts/cross-check.sh` publishes one cell per finished leg (`publish-receipt
 --kind rig`, [`publish_rig_cell`]): the fetched staging directory is judged by
 `completion.py`, the documents the proof cites are retained under the evidence
@@ -118,6 +120,7 @@ def receipt_observations(
     kind: str = "hook",
     proof: dict[str, str] | None = None,
     features: str = "",
+    package_features: dict[str, str] | None = None,
     run_id: str = "",
 ) -> list[dict[str, Any]]:
     """One observation per cell of a valid version-2 receipt.
@@ -125,7 +128,9 @@ def receipt_observations(
     Each cell's report is digested from `receipt.host.report_dir`, where the
     recorder already verified it exists. `proof`, `features`, and `run_id` are
     carried onto every observation; a `hook` observation proves through its
-    report counts and takes no proof.
+    report counts and takes no proof. `package_features` gives a cell's
+    feature arguments by package when they differ per cell, as a hook
+    receipt's do; `features` overrides it.
 
     ## Errors
 
@@ -164,10 +169,22 @@ def receipt_observations(
         }
         if proof is not None:
             observation["proof"] = dict(proof)
-        if features:
-            observation["features"] = features
+        cell_features = features or (package_features or {}).get(cell["package"], "")
+        if cell_features:
+            observation["features"] = cell_features
         observations.append(with_identity(observation))
     return sorted(observations, key=lambda observation: observation["observation_id"])
+
+
+def hook_features(plan: dict[str, Any]) -> dict[str, str]:
+    """Each package's feature arguments in a hook run under `plan`.
+
+    `just ci-local` passes a package's plan `test_args` verbatim to `_test`
+    and `_test_l2`, the only gates a hook receipt records, and the plan keys
+    that package's builds on the same string, so this is both what ran and
+    what the verifier compares.
+    """
+    return {package["package"]: package.get("test_args", "") for package in plan["packages"]}
 
 
 def collection_of(
@@ -760,7 +777,7 @@ def main() -> None:
     receipt.add_argument("--no-push", action="store_true")
     receipt.add_argument("--json", action="store_true", help="print the result as JSON")
     rig = receipt.add_argument_group("kind rig")
-    rig.add_argument("--plan", help="the resolved plan the leg ran under")
+    receipt.add_argument("--plan", help="the resolved plan the run or leg ran under")
     rig.add_argument("--package")
     rig.add_argument("--reports-dir", help="the leg's fetched staging directory")
     rig.add_argument("--evidence-dir", help="where the per-run proof directory is created")
@@ -819,8 +836,8 @@ def main() -> None:
                 build_digest=args.build_digest,
             )
         )
-    if not args.receipt:
-        parser.error("--kind hook needs --receipt")
+    if not args.receipt or not args.plan:
+        parser.error("--kind hook needs --receipt and --plan")
     if args.retry_of:
         parser.error("--retry-of names one cell's predecessor; a hook receipt retries nothing")
 
@@ -829,10 +846,12 @@ def main() -> None:
         result = publish(
             args.environment,
             args.head,
-            receipt_observations(document),
+            receipt_observations(
+                document, package_features=hook_features(local_evidence.load_plan(args.plan))
+            ),
             remote=None if args.no_push else args.remote,
         )
-    except (PublicationError, ValueError) as error:
+    except (PublicationError, ValueError, OSError, KeyError) as error:
         print(f"publish-receipt: no observation recorded - {error}", file=sys.stderr)
         raise SystemExit(3) from error
     if args.json:
