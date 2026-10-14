@@ -32,6 +32,88 @@ pub(crate) fn initialize(launch_dir: &Path) -> std::io::Result<&'static RequestS
     Ok(LAUNCH_SNAPSHOT.get_or_init(|| snapshot))
 }
 
+/// Where every document after the launch document captures its environment:
+/// this process's environment at the moment the document is entered.
+///
+/// The launch document reads the snapshot [`initialize`] captured; a sequence
+/// task, group leg, or `proxy` target captures again through
+/// `InvocationContext::capture_document`, so the library never reads the
+/// process itself.
+pub(crate) fn document_environment_source() -> claudine::invocation_context::EnvironmentSource {
+    #[cfg(feature = "test-fixtures")]
+    if let Some(scripted) = scripted_document_environments() {
+        return scripted;
+    }
+    claudine::invocation_context::EnvironmentSource::new(capture_document_environment)
+}
+
+/// This process's environment as a newly entered document sees it.
+///
+/// `PWD` keeps the launch snapshot's value: Claudine rewrites its own `PWD`
+/// when it switches into a document's child working directory
+/// (`switch_process_cwd`), and that bookkeeping is not a change to the
+/// environment a later document should observe.
+fn capture_document_environment() -> std::collections::HashMap<String, String> {
+    let mut env = biscuit_file::capture_env();
+    match snapshot().env().get("PWD") {
+        Some(pwd) => {
+            env.insert("PWD".to_string(), pwd.clone());
+        }
+        None => {
+            env.remove("PWD");
+        }
+    }
+    env
+}
+
+/// Test seam, compiled only with the `test-fixtures` feature (never into a
+/// default or installed build): `CLAUDINE_TEST_DOCUMENT_ENVIRONMENTS=<path>`
+/// names a JSON array of overlays, and the `n`th document captured after
+/// launch reads this process's environment with the `n`th overlay applied
+/// (`null` removes a variable; past the end, no overlay). Each capture appends
+/// its ordinal to `<path>.captures`, so a test can count them.
+///
+/// A process cannot change its own environment between documents the way a
+/// user's shell can between tasks, so this is how a spawned test supplies a
+/// different map to each document.
+#[cfg(feature = "test-fixtures")]
+fn scripted_document_environments() -> Option<claudine::invocation_context::EnvironmentSource> {
+    use std::io::Write as _;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let path = snapshot().env().get("CLAUDINE_TEST_DOCUMENT_ENVIRONMENTS")?.clone();
+    let overlays: Vec<serde_json::Map<String, serde_json::Value>> = serde_json::from_str(
+        &std::fs::read_to_string(&path).expect("read the scripted document environments"),
+    )
+    .expect("scripted document environments are a JSON array of objects");
+    let captures = format!("{path}.captures");
+    let next = AtomicUsize::new(0);
+    Some(claudine::invocation_context::EnvironmentSource::new(move || {
+        let ordinal = next.fetch_add(1, Ordering::SeqCst);
+        let mut env = capture_document_environment();
+        for (name, value) in overlays.get(ordinal).into_iter().flatten() {
+            match value {
+                serde_json::Value::Null => {
+                    env.remove(name);
+                }
+                serde_json::Value::String(text) => {
+                    env.insert(name.clone(), text.clone());
+                }
+                other => {
+                    env.insert(name.clone(), other.to_string());
+                }
+            }
+        }
+        let mut log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&captures)
+            .expect("open the document capture log");
+        writeln!(log, "{ordinal}").expect("record a document capture");
+        env
+    }))
+}
+
 /// The snapshot `dispatch` captured.
 ///
 /// ## Panics

@@ -27,7 +27,9 @@ use crate::markdown::{schemas::SchemaError, span::SourceSpan};
 
 use super::{
     Constraint, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema,
-    SimplifiedType, TypeExpr, convert::suggestion_target_schema,
+    SimplifiedType, TypeExpr,
+    convert::suggestion_target_schema,
+    query::{Alternative, flattened_alternatives},
 };
 
 /// Stable category describing why a suggestion candidate failed its target.
@@ -95,6 +97,13 @@ pub struct SuggestionLintProblem {
 /// against its target schema — the non-null scalar fragment or array-item
 /// fragment, with `x-darkmatter-suggest` excluded — using the existing JSON
 /// Schema validator so numeric and string constraints are single-sourced.
+/// In a union the target is the property's effective type at the candidate's
+/// insertion site: a candidate fails only when no alternative there (scalar
+/// alternatives, or element alternatives for an array form) accepts it, since
+/// a property's one `suggest(...)` list sits on a single alternative.
+/// Candidates on a named-type reference (`Name(suggest(…))`) are skipped
+/// until the schema is resolved; lint the resolved schema to judge them
+/// against the referenced type.
 ///
 /// ## Errors versus lint
 ///
@@ -160,27 +169,41 @@ fn lint_property(
     property_path: &[String],
     problems: &mut Vec<SuggestionLintProblem>,
 ) -> Result<(), SchemaError> {
-    match def {
-        PropertyDef::Single(atom) => lint_atom(atom, root_arm, None, property_path, problems),
-        PropertyDef::Union(atoms) => {
-            for (property_arm, atom) in atoms.iter().enumerate() {
-                lint_atom(atom, root_arm, Some(property_arm), property_path, problems)?;
+    let alternatives = flattened_alternatives(def);
+    for alternative in &alternatives {
+        match &alternative.atom.ty {
+            TypeExpr::InlineObject(shape) => lint_shape(shape, root_arm, property_path, problems)?,
+            // A named reference's target is known only after resolution, which a
+            // passive lint never performs; linting the resolved schema judges its
+            // candidates against the resolved target.
+            TypeExpr::Imported { .. } => {}
+            // Flattening never yields a union atom.
+            TypeExpr::Union(_) => {}
+            TypeExpr::Primitive(_) => {
+                lint_candidates(alternative, &alternatives, root_arm, property_path, problems)?;
             }
-            Ok(())
         }
     }
+    Ok(())
 }
 
-fn lint_atom(
-    atom: &PropertyAtom,
+/// Lints the candidates of one primitive alternative against the property's
+/// effective type.
+///
+/// A candidate is offered wherever the property's value (or, for an array
+/// alternative, one of its elements) is completed, so it is valid when **any**
+/// alternative at that insertion site accepts it, not only the alternative that
+/// stores the `suggest(...)` list. A union keeps one shared list on one arm, so
+/// judging that arm alone would reject every candidate meant for its siblings.
+/// The reported reason is the storing alternative's own failure.
+fn lint_candidates(
+    alternative: &Alternative<'_>,
+    alternatives: &[Alternative<'_>],
     root_arm: Option<usize>,
-    property_arm: Option<usize>,
     property_path: &[String],
     problems: &mut Vec<SuggestionLintProblem>,
 ) -> Result<(), SchemaError> {
-    if let TypeExpr::InlineObject(shape) = &atom.ty {
-        lint_shape(shape, root_arm, property_path, problems)?;
-    }
+    let atom = alternative.atom;
     let Some(candidates) = atom.constraints.iter().find_map(|constraint| match constraint {
         Constraint::Suggest(candidates) => Some(candidates),
         _ => None,
@@ -192,6 +215,7 @@ fn lint_atom(
     let target = suggestion_target_schema(&property, atom)?;
     let validator = super::super::validate::build_structural_validator(&target)?;
     let is_number = matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::Number));
+    let mut siblings: Option<Vec<jsonschema::Validator>> = None;
 
     for candidate in candidates {
         let reason = if is_number && candidate.canonical_decimal.is_none() {
@@ -203,13 +227,21 @@ fn lint_atom(
                 .iter_errors(&candidate.interpreted)
                 .next()
                 .map(|error| classify_validation_error(error.kind(), atom, &candidate.interpreted))
+                .filter(|_| {
+                    let siblings = siblings.get_or_insert_with(|| {
+                        sibling_validators(alternative, alternatives, &property)
+                    });
+                    !siblings
+                        .iter()
+                        .any(|sibling| sibling.is_valid(&candidate.interpreted))
+                })
         };
         if let Some(reason) = reason {
             problems.push(SuggestionLintProblem {
                 property: property.clone(),
                 property_path: property_path.to_vec(),
                 root_arm,
-                property_arm,
+                property_arm: alternative.arm,
                 decoded: candidate.decoded.clone(),
                 interpreted: candidate.interpreted.clone(),
                 reason,
@@ -218,6 +250,30 @@ fn lint_atom(
         }
     }
     Ok(())
+}
+
+/// Validators for every other alternative at `alternative`'s insertion site
+/// (scalar value or array element).
+///
+/// An unresolved named reference has no known target and is left out, as is a
+/// sibling whose fragment cannot be built; neither can vouch for a candidate.
+fn sibling_validators(
+    alternative: &Alternative<'_>,
+    alternatives: &[Alternative<'_>],
+    property: &str,
+) -> Vec<jsonschema::Validator> {
+    alternatives
+        .iter()
+        .filter(|sibling| {
+            !std::ptr::eq(sibling.atom, alternative.atom)
+                && sibling.is_array == alternative.is_array
+                && !matches!(sibling.atom.ty, TypeExpr::Imported { .. } | TypeExpr::Union(_))
+        })
+        .filter_map(|sibling| {
+            let target = suggestion_target_schema(property, sibling.atom).ok()?;
+            super::super::validate::build_structural_validator(&target).ok()
+        })
+        .collect()
 }
 
 fn classify_validation_error(

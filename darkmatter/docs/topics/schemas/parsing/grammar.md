@@ -162,7 +162,7 @@ come from `--set` values the editor cannot see.
 
 A subtraction chain that spells a known key — `foo--bar` when the frontmatter
 has `foo--bar` — is reported once as a dash-separated key, with a quick-fix that
-rewrites it to a reference the grammar can read, such as `doc['foo--bar']`.
+rewrites it to a reference the grammar can read, such as `fm['foo--bar']`.
 
 These editor diagnostics are the earliest place an authoring mistake surfaces.
 They are not the last: a malformed or unevaluatable expression also fails

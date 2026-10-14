@@ -368,8 +368,8 @@ fn compose_initialize_when_evaluation_error_exits_non_zero() {
     let md_file = fixture.cwd().join("prompt.md");
     fs::write(
         &md_file,
-        "---\nname: late-bind\nagent: goose\ninitialize:\n  stack:\n    \
-         - when: \"missing_root() == true\"\n      action: {stderr: \"ready\"}\n---\nBODY_MARKER_QQQ\n",
+        "---\nname: late-bind\nagent: goose\ninitialize:\n  \
+         - when: \"missing_root() == true\"\n    then: {stderr: \"ready\"}\n---\nBODY_MARKER_QQQ\n",
     )
     .unwrap();
 
@@ -424,9 +424,9 @@ fn compose_initialize_error_with_failure_raise_surfaces_failure_evaluation_error
     let md_file = fixture.cwd().join("prompt.md");
     fs::write(
         &md_file,
-        "---\nname: explicit-error\nagent: goose\ninitialize:\n  stack:\n    \
-         - action: {error: \"preflight refused\"}\nfailure:\n  stderr: \"fail\"\n  stack:\n    \
-         - when: \"missing_root() == true\"\n      action: {stderr: \"unreachable\"}\n---\nBODY_MARKER_QQQ\n",
+        "---\nname: explicit-error\nagent: goose\ninitialize:\n  \
+         - {error: \"preflight refused\"}\nfailure:\n  - stderr: \"fail\"\n  \
+         - when: \"missing_root() == true\"\n    then: {stderr: \"unreachable\"}\n---\nBODY_MARKER_QQQ\n",
     )
     .unwrap();
 
@@ -489,8 +489,8 @@ fn compose_success_when_evaluation_error_surfaces_before_finalize_marker() {
     // `finalize.stderr` emits a marker the catch event prints to stderr.
     fs::write(
         &md_file,
-        "---\nname: late-bind-success\nagent: goose\nsuccess:\n  stack:\n    \
-         - when: \"missing_root() == true\"\n      action: {stderr: \"unreachable\"}\n\
+        "---\nname: late-bind-success\nagent: goose\nsuccess:\n  \
+         - when: \"missing_root() == true\"\n    then: {stderr: \"unreachable\"}\n\
          finalize:\n  stderr: \"FINALIZE_MARKER_ZZZ\"\n---\nBODY_MARKER_QQQ\n",
     )
     .unwrap();
@@ -738,7 +738,7 @@ fn proxy_to_the_incident_is_rejected_before_any_provider_starts() {
     let entry = fixture.cwd().join("entry.md");
     fs::write(
         &entry,
-        "---\ninitialize:\n    stack:\n        - action:\n              proxy: ./review-spec-inline.md\n---\nEntry body\n",
+        "---\ninitialize:\n    proxy: ./review-spec-inline.md\n---\nEntry body\n",
     )
     .unwrap();
 
@@ -818,16 +818,16 @@ fn predicates_operands_and_proxy_with_values_are_rejected_before_launch() {
     let marker = install_marker_provider(&fixture);
     let cases = [
         (
-            "start:\n    stack:\n        - when: \"label == 'in {{area}}'\"\n          action: stop\n",
-            "start.stack[0].when",
+            "start:\n    - when: \"label == 'in {{area}}'\"\n      then: [stop]\n",
+            "start[0].when",
         ),
         (
-            "start:\n    stack:\n        - action:\n              info: \"{{ ok ? 'in {{area}}' : 'x' }}\"\n",
-            "start.stack[0].action[0].message",
+            "start:\n    info: \"{{ ok ? 'in {{area}}' : 'x' }}\"\n",
+            "start.info",
         ),
         (
-            "failure:\n    stack:\n        - action:\n              action: proxy\n              target: ./next.md\n              with:\n                  note: \"{{ 'in {{area}}' }}\"\n",
-            "failure.stack[0].action[0].with.note",
+            "failure:\n    proxy:\n        target: ./next.md\n        with:\n            note: \"{{ 'in {{area}}' }}\"\n",
+            "failure.proxy.with.note",
         ),
         (
             "loop:\n    while: \"status != 'at {{step}}'\"\n    max: 2\n",
@@ -853,14 +853,14 @@ fn colliding_proxy_overlay_paths_are_rejected_before_launch() {
     let doc = fixture.cwd().join("collision.md");
     fs::write(
         &doc,
-        "---\nfailure:\n    stack:\n        - action:\n              action: proxy\n              target: ./next.md\n              with:\n                  a:\n                      b: \"{{ ok ? 'bad {{ x }}' : 'fine' }}\"\n                  \"a.b\": fine\n---\nBody\n",
+        "---\nfailure:\n    proxy:\n        target: ./next.md\n        with:\n            a:\n                b: \"{{ ok ? 'bad {{ x }}' : 'fine' }}\"\n            \"a.b\": fine\n---\nBody\n",
     )
     .unwrap();
 
     let (success, stderr) =
         run_with_marker(&fixture, &marker, &["compose", "--goose", doc.to_str().unwrap()]);
     assert!(!success, "the colliding nested defect must be refused: {stderr}");
-    assert_nested_span_rejection(&stderr, "failure.stack[0].action[0].with.a.b");
+    assert_nested_span_rejection(&stderr, "failure.proxy.with.a.b");
     assert_eq!(provider_runs(&marker), 0, "no provider may start");
 }
 
@@ -879,7 +879,7 @@ fn synthesized_mixed_and_ordinary_frontmatter_values_still_launch() {
     let doc = fixture.cwd().join("controls.md");
     fs::write(
         &doc,
-        "---\narea: claudine\nresides_in: \"{{ area ? 'in {{area}}' : 'nowhere' }}\"\nstart:\n    info: \"starting in {{area}}\"\n    stack:\n        - action:\n              - info: \"running {{area}}\"\n              - action: info\n                message: \"Deployed {{area}}\"\nsuccess:\n    info: \"a {{ area ? 'in ' + area : 'x' }} b\"\n    stdout: \"{{ 'done in ' + area }}\"\n---\nBody {{resides_in}}\n",
+        "---\narea: claudine\nresides_in: \"{{ area ? 'in {{area}}' : 'nowhere' }}\"\nstart:\n    - info: \"starting in {{area}}\"\n    - info: \"running {{area}}\"\n    - info: { text: \"Deployed {{area}}\" }\nsuccess:\n    info: \"a {{ area ? 'in ' + area : 'x' }} b\"\n    stdout: \"{{ 'done in ' + area }}\"\n---\nBody {{resides_in}}\n",
     )
     .unwrap();
 
@@ -931,8 +931,8 @@ fn reentry_refuses_a_defect_introduced_by_the_previous_attempt() {
     // reports one on the stream before failing.
     let claude_init = "echo '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s-1\",\"model\":\"m\",\"tools\":[]}'\n";
     let cases = [
-        ("retry", "goose", "", "failure:\n    stack:\n        - action:\n              retry: 2\n", 1),
-        ("resume", "claude", claude_init, "failure:\n    stack:\n        - action:\n              resume: continue\n", 1),
+        ("retry", "goose", "", "failure:\n    retry: 2\n", 1),
+        ("resume", "claude", claude_init, "failure:\n    resume: continue\n", 1),
     ];
     for (label, provider, stream, recovery, exit_code) in cases {
         let _ = fs::remove_file(&marker);

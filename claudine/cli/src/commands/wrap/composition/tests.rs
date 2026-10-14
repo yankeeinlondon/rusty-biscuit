@@ -420,8 +420,8 @@ fn make_hints_with_model(model: &str) -> claudine::composition::EffectiveSelecti
 #[test]
 #[serial_test::serial]
 fn opencode_model_env_skips_refresh_for_frontmatter_model() {
-    let _g = EnvGuard::set("OPENCODE_MODEL", "fast");
-    let _g2 = EnvGuard::clear("MODEL");
+    let environment: claudine::invocation_context::DocumentEnvironment =
+        [("OPENCODE_MODEL", "fast")].into_iter().collect();
 
     let tmp = tempfile::tempdir().unwrap();
     let catalog =
@@ -430,7 +430,7 @@ fn opencode_model_env_skips_refresh_for_frontmatter_model() {
 
     // Probe resolution without catalog tells us the model comes from env
     let (_, probe_reason) =
-        claudine::composition::resolve_model_with_hints(Provider::OpenCode, &hints, None, None);
+        claudine::composition::resolve_model_with_hints(Provider::OpenCode, &hints, None, None, &environment);
     assert!(matches!(
         probe_reason,
         ModelResolutionReason::ProviderEnv("OPENCODE_MODEL")
@@ -445,8 +445,8 @@ fn opencode_model_env_skips_refresh_for_frontmatter_model() {
 #[test]
 #[serial_test::serial]
 fn generic_model_env_skips_refresh_for_frontmatter_model() {
-    let _g = EnvGuard::set("MODEL", "fast");
-    let _g2 = EnvGuard::clear("OPENCODE_MODEL");
+    let environment: claudine::invocation_context::DocumentEnvironment =
+        [("MODEL", "fast")].into_iter().collect();
 
     let tmp = tempfile::tempdir().unwrap();
     let catalog =
@@ -454,7 +454,7 @@ fn generic_model_env_skips_refresh_for_frontmatter_model() {
     let hints = make_hints_with_model("slow");
 
     let (_, probe_reason) =
-        claudine::composition::resolve_model_with_hints(Provider::OpenCode, &hints, None, None);
+        claudine::composition::resolve_model_with_hints(Provider::OpenCode, &hints, None, None, &environment);
     assert!(matches!(probe_reason, ModelResolutionReason::GenericEnv));
 
     refresh_for_model_validation(&catalog, Provider::OpenCode, &hints, Some(&probe_reason));
@@ -465,8 +465,8 @@ fn generic_model_env_skips_refresh_for_frontmatter_model() {
 #[test]
 #[serial_test::serial]
 fn provider_specific_model_env_skips_refresh_for_frontmatter_model() {
-    let _g = EnvGuard::set("CLAUDE_MODEL", "claude-3-7-sonnet-20250219");
-    let _g2 = EnvGuard::clear("MODEL");
+    let environment: claudine::invocation_context::DocumentEnvironment =
+        [("CLAUDE_MODEL", "claude-3-7-sonnet-20250219")].into_iter().collect();
 
     let tmp = tempfile::tempdir().unwrap();
     let catalog =
@@ -474,7 +474,7 @@ fn provider_specific_model_env_skips_refresh_for_frontmatter_model() {
     let hints = make_hints_with_model("slow");
 
     let (_, probe_reason) =
-        claudine::composition::resolve_model_with_hints(Provider::Claude, &hints, None, None);
+        claudine::composition::resolve_model_with_hints(Provider::Claude, &hints, None, None, &environment);
     assert!(matches!(
         probe_reason,
         ModelResolutionReason::ProviderEnv("CLAUDE_MODEL")
@@ -491,8 +491,7 @@ fn provider_specific_model_env_skips_refresh_for_frontmatter_model() {
 #[test]
 #[serial_test::serial]
 fn frontmatter_model_without_env_override_refreshes_dynamic_provider() {
-    let _g1 = EnvGuard::clear("OPENCODE_MODEL");
-    let _g2 = EnvGuard::clear("MODEL");
+    let environment = claudine::invocation_context::DocumentEnvironment::default();
 
     let tmp = tempfile::tempdir().unwrap();
     let catalog =
@@ -500,7 +499,7 @@ fn frontmatter_model_without_env_override_refreshes_dynamic_provider() {
     let hints = make_hints_with_model("slow");
 
     let (_, probe_reason) =
-        claudine::composition::resolve_model_with_hints(Provider::OpenCode, &hints, None, None);
+        claudine::composition::resolve_model_with_hints(Provider::OpenCode, &hints, None, None, &environment);
     assert!(matches!(
         probe_reason,
         ModelResolutionReason::FrontmatterSingle | ModelResolutionReason::ProviderDefault
@@ -582,6 +581,7 @@ fn live_selected_auto_selects_regardless_of_tty() {
             refresh: true,
             warn: false,
         },
+        &claudine::invocation_context::DocumentEnvironment::default(),
     );
     let target = result.expect("should auto-select");
     assert_eq!(target.provider, Provider::Claude);
@@ -622,6 +622,7 @@ fn live_list_one_installed_auto_selects_regardless_of_tty() {
             refresh: true,
             warn: false,
         },
+        &claudine::invocation_context::DocumentEnvironment::default(),
     );
     let target = result.expect("should auto-select from list");
     assert_eq!(target.provider, Provider::Claude);
@@ -652,6 +653,7 @@ fn live_no_agent_aborts_when_not_tty() {
             refresh: true,
             warn: false,
         },
+        &claudine::invocation_context::DocumentEnvironment::default(),
     );
     assert_agent_resolution_failed(&result, state);
 }
@@ -682,6 +684,7 @@ fn live_single_invalid_aborts_when_not_tty() {
             refresh: true,
             warn: false,
         },
+        &claudine::invocation_context::DocumentEnvironment::default(),
     );
     assert_agent_resolution_failed(&result, state);
 }
@@ -712,6 +715,7 @@ fn live_single_not_installed_aborts_when_not_tty() {
             refresh: true,
             warn: false,
         },
+        &claudine::invocation_context::DocumentEnvironment::default(),
     );
     assert_agent_resolution_failed(&result, state);
 }
@@ -747,6 +751,7 @@ fn live_list_multiple_installed_aborts_when_not_tty() {
             refresh: true,
             warn: false,
         },
+        &claudine::invocation_context::DocumentEnvironment::default(),
     );
     assert_agent_resolution_failed(&result, state);
 }
@@ -781,6 +786,7 @@ fn live_zero_installed_list_aborts_when_not_tty() {
             refresh: true,
             warn: false,
         },
+        &claudine::invocation_context::DocumentEnvironment::default(),
     );
     assert_agent_resolution_failed(&result, state);
 }
@@ -1033,9 +1039,7 @@ fn inline_interactive_unsupported_names_flag_source() {
 /// Recording emitter that captures the `signal` + `text` of every `stderr`
 /// action, mirroring the pattern in `claudine/lib/.../lifecycle.rs`'s test
 /// module. Used to prove [`emit_preflight_blocked_and_finalize`] fires both
-/// the `blocked` and `finalize` events through the stack-aware runner (i.e.
-/// top-level communication AND typed stack), not just the legacy top-level
-/// surface.
+/// the `blocked` and `finalize` events through the stack runner.
 struct PreflightRecordingEmitter {
     stderr_calls: std::sync::Mutex<Vec<(claudine::composition::LifecycleSignal, String)>>,
 }
@@ -1081,14 +1085,13 @@ impl claudine::composition::LifecycleEmitter for PreflightRecordingEmitter {
     fn emit_notification(&self, _title: &str) {}
 }
 
-/// The helper fires BOTH `blocked` and `finalize`, each with its top-level
-/// communication AND its typed stack. The doc under test carries a
-/// top-level `stderr` line plus a stack `stderr` action on each event,
-/// so a successful invocation records exactly four stderr emissions in the
-/// order: blocked top-level, blocked stack, finalize top-level, finalize
-/// stack. This is the L1 invariant for review-3 Finding 1.
+/// The helper fires BOTH `blocked` and `finalize`, running every item of each
+/// list. The doc under test carries two `stderr` items on each event, so a
+/// successful invocation records exactly four stderr emissions in authored
+/// order, blocked before finalize. This is the L1 invariant for review-3
+/// Finding 1.
 #[test]
-fn emit_preflight_blocked_and_finalize_runs_top_level_and_stack_for_both_events() {
+fn emit_preflight_blocked_and_finalize_runs_every_item_for_both_events() {
     use claudine::composition::{
         LifecycleErrorInfo, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal,
         parse_lifecycle_config,
@@ -1096,14 +1099,8 @@ fn emit_preflight_blocked_and_finalize_runs_top_level_and_stack_for_both_events(
     use serde_json::json;
 
     let fm = json!({
-        "blocked": {
-            "stderr": "blocked-toplevel",
-            "stack": [{"action": {"stderr": "blocked-stack"}}]
-        },
-        "finalize": {
-            "stderr": "finalize-toplevel",
-            "stack": [{"action": {"stderr": "finalize-stack"}}]
-        }
+        "blocked": [{"stderr": "blocked-toplevel"}, {"stderr": "blocked-stack"}],
+        "finalize": [{"stderr": "finalize-toplevel"}, {"stderr": "finalize-stack"}]
     });
     let config = parse_lifecycle_config(&fm, Path::new("/tmp/test.md")).unwrap();
     let settings = claudine::events::GlobalSettings::default();
@@ -1133,7 +1130,7 @@ fn emit_preflight_blocked_and_finalize_runs_top_level_and_stack_for_both_events(
     );
 
     let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
-    let outcome = emit_preflight_blocked_and_finalize(&mut guard, &effect_engine, &emitter, &settings, &messaging, &term, Path::new("/tmp/test.md"), None, None, None, None, crate::request::test_context_ref(), None, &frontmatter, std::time::Instant::now(), err_info);
+    let outcome = emit_preflight_blocked_and_finalize(&mut guard, &effect_engine, &emitter, &settings, &messaging, &term, Path::new("/tmp/test.md"), None, None, None, None, crate::request::test_context_ref(), None, None, &frontmatter, std::time::Instant::now(), err_info);
     assert!(
         matches!(outcome, PreflightBlockedOutcome::Control(None)),
         "no evaluation error and no flow-control action → Control(None); got {outcome:?}"
@@ -1149,8 +1146,8 @@ fn emit_preflight_blocked_and_finalize_runs_top_level_and_stack_for_both_events(
             LifecycleSignal::Finalize,
             LifecycleSignal::Finalize,
         ],
-        "emit_preflight_blocked_and_finalize must fire blocked (top-level + stack) \
-         then finalize (top-level + stack); got {calls:?}"
+        "emit_preflight_blocked_and_finalize must fire both blocked items \
+         then both finalize items; got {calls:?}"
     );
     let texts: Vec<&str> = calls.iter().map(|(_, t)| t.as_str()).collect();
     assert_eq!(
@@ -1161,7 +1158,7 @@ fn emit_preflight_blocked_and_finalize_runs_top_level_and_stack_for_both_events(
             "finalize-toplevel",
             "finalize-stack",
         ],
-        "top-level + stack texts must appear in order per event; got {calls:?}"
+        "texts must appear in authored order per event; got {calls:?}"
     );
 
     // Guard state: blocked is the recorded terminal, finalize fired exactly once.
@@ -1199,18 +1196,8 @@ fn preflight_blocked_and_finalize_stacks_reuse_prepared_file_resolution() {
     let prepared_context =
         darkmatter::markdown::compose::ComposeContext::capture_for_content(&source_dir, "");
     let fm = json!({
-        "blocked": {
-            "stack": [{
-                "when": "file_exists('owned.flag')",
-                "action": {"stderr": "blocked-owned"}
-            }]
-        },
-        "finalize": {
-            "stack": [{
-                "when": "file_exists('owned.flag')",
-                "action": {"stderr": "finalize-owned"}
-            }]
-        }
+        "blocked": [{"when": "file_exists('owned.flag')", "then": [{"stderr": "blocked-owned"}]}],
+        "finalize": [{"when": "file_exists('owned.flag')", "then": [{"stderr": "finalize-owned"}]}]
     });
     let config = parse_lifecycle_config(&fm, &source_path).unwrap();
     let settings = claudine::events::GlobalSettings::default();
@@ -1250,6 +1237,7 @@ fn preflight_blocked_and_finalize_stacks_reuse_prepared_file_resolution() {
         Some(&prepared_context),
         &resolution,
         None,
+        None,
         &frontmatter,
         std::time::Instant::now(),
         LifecycleErrorInfo::from_action_failure("preflight", "blocked".to_string()),
@@ -1265,7 +1253,7 @@ fn preflight_blocked_and_finalize_stacks_reuse_prepared_file_resolution() {
 }
 
 /// The `err` global carried into the blocked stack must surface the
-/// preflight failure message so a user-authored `blocked.stack` can reference
+/// preflight failure message so a user-authored `blocked` stack can reference
 /// `{{ err.msg }}` meaningfully. Verifies the err_info contract: the helper
 /// threads the failure description into the stack evaluation context.
 #[test]
@@ -1279,14 +1267,7 @@ fn emit_preflight_blocked_and_finalize_propagates_err_msg_into_blocked_stack() {
     // `err` reaches a message via `{{ … }}` interpolation (resolved at render
     // time against the runtime stack context), not a bare expression arg — a
     // single-parameter action body is literal text.
-    let fm = json!({
-        "blocked": {
-            "stack": [{"action": {"stderr": "{{err.msg}}"}}]
-        },
-        "finalize": {
-            "stack": [{"action": {"stderr": "finalize"}}]
-        }
-    });
+    let fm = json!({"blocked": [{"stderr": "{{err.msg}}"}], "finalize": [{"stderr": "finalize"}]});
     let config = parse_lifecycle_config(&fm, Path::new("/tmp/test.md")).unwrap();
     let settings = claudine::events::GlobalSettings::default();
     let messaging = claudine::messaging::RuntimeMessagingSettings {
@@ -1311,7 +1292,7 @@ fn emit_preflight_blocked_and_finalize_propagates_err_msg_into_blocked_stack() {
     let frontmatter = serde_json::Map::new();
 
     let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
-    let outcome = emit_preflight_blocked_and_finalize(&mut guard, &effect_engine, &emitter, &settings, &messaging, &term, Path::new("/tmp/test.md"), None, None, None, None, crate::request::test_context_ref(), None, &frontmatter, std::time::Instant::now(), LifecycleErrorInfo::from_action_failure(
+    let outcome = emit_preflight_blocked_and_finalize(&mut guard, &effect_engine, &emitter, &settings, &messaging, &term, Path::new("/tmp/test.md"), None, None, None, None, crate::request::test_context_ref(), None, None, &frontmatter, std::time::Instant::now(), LifecycleErrorInfo::from_action_failure(
             "shell_approval",
             "shell command 'rm' is blacklisted".to_string(),
         ));
@@ -1360,15 +1341,9 @@ fn emit_preflight_blocked_and_finalize_surfaces_blocked_evaluation_error() {
     // `failure` and `finalize` stacks each append a marker so we can prove
     // both events fired carrying the evaluation error as `err`.
     let fm = json!({
-        "blocked": {
-            "stack": [{"when": "missing_root() == true", "action": {"stderr": "unreachable"}}]
-        },
-        "failure": {
-            "stack": [{"when": "err", "action": {"append_line": ["events.log", "failure-saw-err"]}}]
-        },
-        "finalize": {
-            "stack": [{"when": "err", "action": {"append_line": ["events.log", "{{err.msg}}"]}}]
-        }
+        "blocked": [{"when": "missing_root() == true", "then": [{"stderr": "unreachable"}]}],
+        "failure": [{"when": "err", "then": [{"append_line": ["events.log", "failure-saw-err"]}]}],
+        "finalize": [{"when": "err", "then": [{"append_line": ["events.log", "{{err.msg}}"]}]}]
     });
     let config = parse_lifecycle_config(&fm, &source_path).unwrap();
     let settings = claudine::events::GlobalSettings::default();
@@ -1398,7 +1373,7 @@ fn emit_preflight_blocked_and_finalize_surfaces_blocked_evaluation_error() {
     );
 
     let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
-    let outcome = emit_preflight_blocked_and_finalize(&mut guard, &effect_engine, &emitter, &settings, &messaging, &term, &source_path, Some(dir.path()), Some(dir.path()), None, None, crate::request::test_context_ref(), None, &frontmatter, std::time::Instant::now(), err_info);
+    let outcome = emit_preflight_blocked_and_finalize(&mut guard, &effect_engine, &emitter, &settings, &messaging, &term, &source_path, Some(dir.path()), Some(dir.path()), None, None, crate::request::test_context_ref(), None, None, &frontmatter, std::time::Instant::now(), err_info);
     drop(guard);
 
     let ce = match outcome {
@@ -1467,15 +1442,9 @@ fn emit_preflight_blocked_and_finalize_blocked_raise_then_finalize_raise_surface
     // `finalize` stack's `when:` also raises, so the surfaced error must name
     // `finalize`.
     let fm = json!({
-        "blocked": {
-            "stack": [{"when": "missing_root() == true", "action": {"stderr": "unreachable"}}]
-        },
-        "failure": {
-            "stack": [{"when": "err", "action": {"append_line": ["events.log", "failure-ran"]}}]
-        },
-        "finalize": {
-            "stack": [{"when": "also_missing() == true", "action": {"stderr": "unreachable"}}]
-        }
+        "blocked": [{"when": "missing_root() == true", "then": [{"stderr": "unreachable"}]}],
+        "failure": [{"when": "err", "then": [{"append_line": ["events.log", "failure-ran"]}]}],
+        "finalize": [{"when": "also_missing() == true", "then": [{"stderr": "unreachable"}]}]
     });
     let config = parse_lifecycle_config(&fm, &source_path).unwrap();
     let settings = claudine::events::GlobalSettings::default();
@@ -1505,7 +1474,7 @@ fn emit_preflight_blocked_and_finalize_blocked_raise_then_finalize_raise_surface
     );
 
     let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
-    let outcome = emit_preflight_blocked_and_finalize(&mut guard, &effect_engine, &emitter, &settings, &messaging, &term, &source_path, Some(dir.path()), Some(dir.path()), None, None, crate::request::test_context_ref(), None, &frontmatter, std::time::Instant::now(), err_info);
+    let outcome = emit_preflight_blocked_and_finalize(&mut guard, &effect_engine, &emitter, &settings, &messaging, &term, &source_path, Some(dir.path()), Some(dir.path()), None, None, crate::request::test_context_ref(), None, None, &frontmatter, std::time::Instant::now(), err_info);
     drop(guard);
 
     let ce = match outcome {
@@ -1550,12 +1519,8 @@ fn emit_preflight_blocked_and_finalize_surfaces_finalize_evaluation_error_withou
     // the finalize stack's `when:` raises, so `finalize` runs exactly once
     // and the helper returns the typed error without re-entering finalize.
     let fm = json!({
-        "blocked": {
-            "stack": [{"action": {"append_line": ["events.log", "blocked-ran"]}}]
-        },
-        "finalize": {
-            "stack": [{"when": "missing_root() == true", "action": {"stderr": "unreachable"}}]
-        }
+        "blocked": [{"append_line": ["events.log", "blocked-ran"]}],
+        "finalize": [{"when": "missing_root() == true", "then": [{"stderr": "unreachable"}]}]
     });
     let config = parse_lifecycle_config(&fm, &source_path).unwrap();
     let settings = claudine::events::GlobalSettings::default();
@@ -1583,7 +1548,7 @@ fn emit_preflight_blocked_and_finalize_surfaces_finalize_evaluation_error_withou
         LifecycleErrorInfo::from_action_failure("harness_plan", "preflight-failure".to_string());
 
     let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
-    let outcome = emit_preflight_blocked_and_finalize(&mut guard, &effect_engine, &emitter, &settings, &messaging, &term, &source_path, Some(dir.path()), Some(dir.path()), None, None, crate::request::test_context_ref(), None, &frontmatter, std::time::Instant::now(), err_info);
+    let outcome = emit_preflight_blocked_and_finalize(&mut guard, &effect_engine, &emitter, &settings, &messaging, &term, &source_path, Some(dir.path()), Some(dir.path()), None, None, crate::request::test_context_ref(), None, None, &frontmatter, std::time::Instant::now(), err_info);
     drop(guard);
 
     let ce = match outcome {
@@ -1622,14 +1587,8 @@ fn emit_preflight_blocked_and_finalize_returns_control_when_no_evaluation_error(
     let dir = tempfile::tempdir().unwrap();
     let source_path = dir.path().join("test.md");
     let fm = json!({
-        "blocked": {
-            "stderr": "blocked",
-            "stack": [{"action": {"stderr": "blocked-stack"}}]
-        },
-        "finalize": {
-            "stderr": "finalize",
-            "stack": [{"action": {"stderr": "finalize-stack"}}]
-        }
+        "blocked": [{"stderr": "blocked"}, {"stderr": "blocked-stack"}],
+        "finalize": [{"stderr": "finalize"}, {"stderr": "finalize-stack"}]
     });
     let config = parse_lifecycle_config(&fm, &source_path).unwrap();
     let settings = claudine::events::GlobalSettings::default();
@@ -1657,7 +1616,7 @@ fn emit_preflight_blocked_and_finalize_returns_control_when_no_evaluation_error(
         LifecycleErrorInfo::from_action_failure("harness_plan", "preflight-failure".to_string());
 
     let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
-    let outcome = emit_preflight_blocked_and_finalize(&mut guard, &effect_engine, &emitter, &settings, &messaging, &term, &source_path, Some(dir.path()), Some(dir.path()), None, None, crate::request::test_context_ref(), None, &frontmatter, std::time::Instant::now(), err_info);
+    let outcome = emit_preflight_blocked_and_finalize(&mut guard, &effect_engine, &emitter, &settings, &messaging, &term, &source_path, Some(dir.path()), Some(dir.path()), None, None, crate::request::test_context_ref(), None, None, &frontmatter, std::time::Instant::now(), err_info);
     drop(guard);
 
     assert!(

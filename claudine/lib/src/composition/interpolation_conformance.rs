@@ -159,8 +159,8 @@ fn overlap_cases() -> Vec<OverlapCase> {
             expected: json!("1+2"),
         },
         OverlapCase {
-            name: "doc namespace whole-value",
-            input: json!("{{doc.count}}"),
+            name: "fm namespace whole-value",
+            input: json!("{{fm.count}}"),
             frontmatter: obj(json!({ "count": 3 })),
             expected: json!(3),
         },
@@ -254,10 +254,10 @@ pub(crate) fn missing_property_cases() -> Vec<OverlapCase> {
     };
     vec![
         case("absent bare whole value", "{{ missing }}", json!({}), json!(null)),
-        case("absent doc whole value", "{{ doc.missing }}", json!({}), json!(null)),
+        case("absent fm whole value", "{{ fm.missing }}", json!({}), json!(null)),
         case("absent descendant", "{{ missing.deep }}", json!({}), json!(null)),
         case("absent in mixed text", "x {{ missing }} y", json!({}), json!("x  y")),
-        case("absent bare and doc in mixed text", "[{{ missing }}][{{ doc.missing }}]", json!({}), json!("[][]")),
+        case("absent bare and fm in mixed text", "[{{ missing }}][{{ fm.missing }}]", json!({}), json!("[][]")),
         case("absent is null", "{{ is_null(missing) }}", json!({}), json!(true)),
         case("ternary falsy branch", "{{ missing ? 'yes' : 'no' }}", json!({}), json!("no")),
         case(

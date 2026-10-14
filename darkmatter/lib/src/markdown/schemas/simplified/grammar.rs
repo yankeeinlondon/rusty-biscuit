@@ -8,15 +8,16 @@
 //! type_expr_string := type_expr ( "->" description )?
 //! type_expr        := simple_type
 //!                   | inline_object
-//!                   | import
+//!                   | reference
 //! simple_type      := type_name ( "(" item_constraints ")" )?
 //!                                ( "[]" ( "(" arr_constraints ")" )? )?
 //! inline_object    := "{" ws* property_list? ws* "}"
 //!                     ( "(" item_constraints ")"
 //!                     | "[]" ( "(" arr_constraints ")" )?
 //!                     )?
-//! import           := identifier ( "[]" )? ( "(" item_constraints ")" )?
-//!                     "@" fileref                             (Feature B, O-B1)
+//! reference        := identifier ( "(" item_constraints ")" )?
+//!                                 ( "[]" ( "(" arr_constraints ")" )? )?
+//!                     ( "@" fileref )?
 //! property_list    := property_def ( "," ws* property_def )* ","?
 //! property_def     := ( identifier | pattern_key ) ws* ":" ws* type_expr_string
 //! pattern_key      := "<" pattern_body ">"                   (Feature C)
@@ -26,8 +27,14 @@
 //!                   | "numberlike" | "boolean" | "boolish" | "object"
 //!                   | "file" | "enum" | "url" | "email" | "yaml" | "json"
 //!                   | "literal" | "expression" | "type-definition" | "schema"
-//!                   | "any"
-//! item_constraints := constraint ( ";" constraint )*
+//!                   | "unknown" | "any" | "null" | "alphanumeric" | "shell"
+//! item_constraints := options ( ";" constraint )*
+//!                   | constraint ( ";" constraint )*
+//! options          := option ( "," option )*          (alphanumeric, reference)
+//! option           := "allow-dashes" | "allow-underscores" | "allow-slashes"
+//!                   | "allow-periods" | "allow-whitespace"
+//!                   | "block-double-periods" | "block-leading-dash"
+//!                   | "block-leading-slash" | "leading-alpha"
 //! arr_constraints  := constraint ( ";" constraint )*
 //! constraint       := IDENT
 //!                   | IDENT "(" arglist ")"
@@ -37,11 +44,24 @@
 //! description      := <rest-of-top-level-field, trimmed>
 //! ```
 //!
-//! An `import` (`Name@fileref`) inlines a named type from another schema file
-//! and is represented as [`TypeExpr::Imported`] until the resolver expands it.
+//! A `reference` names a type defined in a schema and is represented as
+//! [`TypeExpr::Imported`] until the resolver expands it. With `@fileref` it
+//! names a type in that file (`this` is the current schema). Without `@`, an
+//! identifier that is a `type_name` is the built-in `simple_type`; any other
+//! identifier is a bare local reference, the same value as `Name@this`. So
+//! `string` is the built-in and `string@this` is a local type named `string`.
+//! A misspelled built-in therefore parses, and fails during resolution unless
+//! a local type has that name. A reference's lists mean nothing until its
+//! target is known, so the resolver, not this parser, decides what each may
+//! carry (only a union accepts a list before `[]`). A reference's leading
+//! `alphanumeric` options are kept for the resolver to compare with its
+//! target's options.
+//!
+//! `any` parses as `unknown`. An unknown, repeated, or post-`;` option, and a
+//! list without `;` that mixes options and constraints, are grammar errors.
+//!
 //! A `pattern_key` (`<string>`, `<starting::P>`, `<ending::S>`, `<pattern::RE>`)
-//! keys a dictionary/pattern-keyed object; see [`PatternKey`]. Both are
-//! additive — a schema using neither parses exactly as before.
+//! keys a dictionary/pattern-keyed object; see [`PatternKey`].
 //!
 //! Inside an `inline_object`, `description` consumes text only until the
 //! next top-level comma or closing brace (Decision #9). Inline object
@@ -54,6 +74,7 @@ use std::{ops::Range, str::FromStr};
 
 use crate::markdown::schemas::errors::SchemaError;
 
+use super::alphanumeric::AlphanumericOption;
 use super::types::{
     Constraint, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaShape, SimplifiedType,
     SuggestionCandidate, TypeExpr,
@@ -355,11 +376,84 @@ enum LexMode {
     ArgList,
 }
 
+/// What a constraint list belongs to, which decides how its keywords read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ListOwner {
+    /// A built-in type keyword.
+    Type(SimplifiedType),
+    /// An inline object literal.
+    InlineObject,
+    /// A named-type reference, whose target is known only after resolution.
+    Reference,
+}
+
+impl ListOwner {
+    /// Whether the list may open with `alphanumeric` options.
+    fn takes_options(self) -> bool {
+        matches!(self, Self::Type(SimplifiedType::Alphanumeric) | Self::Reference)
+    }
+
+    /// Whether `min`/`max` count characters rather than bound a number.
+    fn counts_characters(self) -> bool {
+        matches!(self, Self::Type(SimplifiedType::String | SimplifiedType::Alphanumeric))
+    }
+
+    fn describe(self, is_array_level: bool) -> String {
+        let place = match self {
+            Self::Type(ty) => format!("`{}`", ty.as_keyword()),
+            Self::InlineObject => "an inline object".to_string(),
+            Self::Reference => "a named-type reference".to_string(),
+        };
+        if is_array_level {
+            format!("{place} arrays")
+        } else {
+            place
+        }
+    }
+}
+
+const MIXED_OPTIONS_MESSAGE: &str = "separate `alphanumeric` options from constraints with `;`, \
+     as in `alphanumeric(allow-dashes; min(1))`";
+
+fn unknown_option_message(name: &str) -> String {
+    format!(
+        "unknown `alphanumeric` option `{name}`; expected one of {}",
+        AlphanumericOption::ALL
+            .iter()
+            .map(|option| format!("`{option}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+/// Whether `name` is a constraint keyword of the grammar, with or without
+/// arguments.
+fn is_constraint_keyword(name: &str) -> bool {
+    matches!(
+        name,
+        "required"
+            | "eager"
+            | "not-empty"
+            | "integer"
+            | "unique"
+            | "generated"
+            | "default"
+            | "min"
+            | "max"
+            | "pattern"
+            | "suggest"
+            | "match"
+            | "scheme"
+            | "example"
+            | "min-keys"
+            | "max-keys"
+    )
+}
+
 struct Parser<'a> {
     property: &'a str,
     src: &'a str,
     lex: Lexer<'a>,
-    defer_suggestion_target: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -368,7 +462,6 @@ impl<'a> Parser<'a> {
             property,
             src,
             lex: Lexer::new(src),
-            defer_suggestion_target: false,
         }
     }
 
@@ -545,7 +638,7 @@ impl<'a> Parser<'a> {
         self.lex.skip_ws();
         if self.lex.peek_byte() == Some(b'(') {
             self.lex.pos += 1;
-            value_constraints = self.parse_constraint_list(SimplifiedType::Any, false)?;
+            value_constraints = self.parse_constraint_list(ListOwner::InlineObject, false)?;
             self.expect(Tok::RParen)?;
         }
 
@@ -565,7 +658,7 @@ impl<'a> Parser<'a> {
             self.lex.skip_ws();
             if self.lex.peek_byte() == Some(b'(') {
                 self.lex.pos += 1;
-                array_constraints = self.parse_constraint_list(SimplifiedType::Any, true)?;
+                array_constraints = self.parse_constraint_list(ListOwner::InlineObject, true)?;
                 self.expect(Tok::RParen)?;
             }
         }
@@ -840,20 +933,17 @@ impl<'a> Parser<'a> {
                 );
             }
         };
-        // A cross-file named-type import (`Name@fileref`, Feature B) is
-        // detected here: after the base name the grammar is
-        // `('[]')? ('(' constraints ')')? '@' fileref` (O-B1). The base name
-        // is an arbitrary named type, not a built-in keyword, so import
-        // detection runs *before* the `SimplifiedType::from_keyword` check.
+        // An explicit `@` reference is detected before the keyword check so
+        // that `string@this` names a local type called `string`.
         if self.looks_like_import_suffix() {
-            return self.parse_import(name);
+            return self.parse_named_reference(name, true);
         }
 
-        let ty = SimplifiedType::from_keyword(&name).ok_or_else(|| SchemaError::Grammar {
-            property: self.property.to_string(),
-            message: format!("unknown type `{name}`"),
-            span: name_span.clone(),
-        })?;
+        // Built-in keywords win; any other identifier is a bare local
+        // reference, identical to `Name@this`.
+        let Some(ty) = SimplifiedType::from_keyword(&name) else {
+            return self.parse_named_reference(name, false);
+        };
 
         // Optional first paren list (item constraints, or value constraints
         // for non-array atoms).
@@ -862,7 +952,7 @@ impl<'a> Parser<'a> {
         if self.lex.peek_byte() == Some(b'(') {
             // consume (
             self.lex.pos += 1;
-            item_constraints = self.parse_constraint_list(ty, false)?;
+            item_constraints = self.parse_constraint_list(ListOwner::Type(ty), false)?;
             self.expect(Tok::RParen)?;
         }
 
@@ -877,7 +967,7 @@ impl<'a> Parser<'a> {
             self.lex.skip_ws();
             if self.lex.peek_byte() == Some(b'(') {
                 self.lex.pos += 1;
-                array_constraints = self.parse_constraint_list(ty, true)?;
+                array_constraints = self.parse_constraint_list(ListOwner::Type(ty), true)?;
                 self.expect(Tok::RParen)?;
             }
         }
@@ -990,9 +1080,9 @@ impl<'a> Parser<'a> {
 
     /// Pure lookahead: returns `true` when the token stream immediately after
     /// the base identifier matches the import postfix
-    /// `('[]')? ('(' … ')')?` followed by `@`. Does not consume input and does
-    /// not interpret constraint contents (so it never raises spurious errors on
-    /// non-import expressions like `enum(a, b, c)`).
+    /// `('(' … ')')? ('[]' ('(' … ')')?)?` followed by `@`. Does not consume
+    /// input and does not interpret constraint contents (so it never raises
+    /// spurious errors on non-import expressions like `enum(a, b, c)`).
     fn looks_like_import_suffix(&self) -> bool {
         let bytes = self.lex.bytes;
         let mut pos = self.lex.pos;
@@ -1001,27 +1091,20 @@ impl<'a> Parser<'a> {
                 *pos += 1;
             }
         };
-        skip_ws(&mut pos);
-        // optional `[]`
-        if bytes.get(pos) == Some(&b'[') {
-            if bytes.get(pos + 1) == Some(&b']') {
-                pos += 2;
-                skip_ws(&mut pos);
-            } else {
-                return false;
+        // optional balanced `(...)`, quote-aware; `false` when unbalanced
+        let skip_parens = |pos: &mut usize| -> bool {
+            if bytes.get(*pos) != Some(&b'(') {
+                return true;
             }
-        }
-        // optional balanced `(...)`, quote-aware
-        if bytes.get(pos) == Some(&b'(') {
-            pos += 1;
+            *pos += 1;
             let mut depth = 1usize;
             let mut quote: Option<u8> = None;
-            while pos < bytes.len() && depth > 0 {
-                let b = bytes[pos];
+            while *pos < bytes.len() && depth > 0 {
+                let b = bytes[*pos];
                 match quote {
                     Some(q) => {
                         if b == b'\\' {
-                            pos += 1;
+                            *pos += 1;
                         } else if b == q {
                             quote = None;
                         }
@@ -1033,9 +1116,23 @@ impl<'a> Parser<'a> {
                         _ => {}
                     },
                 }
-                pos += 1;
+                *pos += 1;
             }
-            if depth != 0 {
+            depth == 0
+        };
+        skip_ws(&mut pos);
+        if !skip_parens(&mut pos) {
+            return false;
+        }
+        skip_ws(&mut pos);
+        // optional `[]`, then its optional container list
+        if bytes.get(pos) == Some(&b'[') {
+            if bytes.get(pos + 1) != Some(&b']') {
+                return false;
+            }
+            pos += 2;
+            skip_ws(&mut pos);
+            if !skip_parens(&mut pos) {
                 return false;
             }
             skip_ws(&mut pos);
@@ -1043,39 +1140,61 @@ impl<'a> Parser<'a> {
         bytes.get(pos) == Some(&b'@')
     }
 
-    /// Parses the import postfix after the base `name` has been read:
-    /// `('[]')? ('(' constraints ')')? '@' fileref` (O-B1). Postfix `[]` and
-    /// constraints ride on the enclosing [`PropertyAtom`]; the constraints are
-    /// re-interpreted against the resolved type in Phase 4, so they are parsed
-    /// here with a neutral type.
-    fn parse_import(&mut self, name: String) -> Result<PropertyAtom, SchemaError> {
+    /// Parses the named-reference postfix after the base `name` has been read:
+    /// `('(' constraints ')')? ('[]' ('(' constraints ')')?)?`, followed by
+    /// `'@' fileref` when `explicit` is set. Without `explicit` the result is
+    /// the local reference [`TypeExpr::local`], the same value `name@this`
+    /// produces.
+    ///
+    /// As on a primitive atom, the list before `[]` lands in `constraints`
+    /// and the list after it in `array_constraints`. Both are parsed with a
+    /// neutral type because their meaning depends on the target, which is
+    /// known only after resolution; the resolver decides which constraints a
+    /// list before `[]` may carry. A leading `alphanumeric` option list is
+    /// kept as [`Constraint::Options`] for the resolver to compare with the
+    /// target's options.
+    fn parse_named_reference(
+        &mut self,
+        name: String,
+        explicit: bool,
+    ) -> Result<PropertyAtom, SchemaError> {
+        let mut constraints = Vec::new();
+        self.lex.skip_ws();
+        if self.lex.peek_byte() == Some(b'(') {
+            self.lex.pos += 1;
+            constraints = self.parse_constraint_list(ListOwner::Reference, false)?;
+            self.expect(Tok::RParen)?;
+        }
+
         let mut is_array = false;
+        let mut array_constraints = Vec::new();
         self.lex.skip_ws();
         if self.lex.peek_byte() == Some(b'[') {
             self.lex.pos += 1;
             self.expect(Tok::RBracket)?;
             is_array = true;
+            self.lex.skip_ws();
+            if self.lex.peek_byte() == Some(b'(') {
+                self.lex.pos += 1;
+                array_constraints = self.parse_constraint_list(ListOwner::Reference, true)?;
+                self.expect(Tok::RParen)?;
+            }
         }
 
-        let mut constraints = Vec::new();
-        self.lex.skip_ws();
-        if self.lex.peek_byte() == Some(b'(') {
-            self.lex.pos += 1;
-            self.defer_suggestion_target = !is_array;
-            constraints = self.parse_constraint_list(SimplifiedType::Any, is_array)?;
-            self.defer_suggestion_target = false;
-            self.expect(Tok::RParen)?;
-        }
-
-        self.lex.skip_ws();
-        self.expect_byte(b'@', "expected `@` in an imported type reference")?;
-        let reference = self.read_fileref()?;
+        let ty = if explicit {
+            self.lex.skip_ws();
+            self.expect_byte(b'@', "expected `@` in an imported type reference")?;
+            let reference = self.read_fileref()?;
+            TypeExpr::Imported { name, reference }
+        } else {
+            TypeExpr::local(name)
+        };
 
         Ok(PropertyAtom {
-            ty: TypeExpr::Imported { name, reference },
+            ty,
             is_array,
             constraints,
-            array_constraints: Vec::new(),
+            array_constraints,
             description: None,
         })
     }
@@ -1115,7 +1234,7 @@ impl<'a> Parser<'a> {
 
     fn parse_constraint_list(
         &mut self,
-        ty: SimplifiedType,
+        owner: ListOwner,
         is_array_level: bool,
     ) -> Result<Vec<Constraint>, SchemaError> {
         // Special-case enum: the first ident inside the list may be either
@@ -1134,7 +1253,7 @@ impl<'a> Parser<'a> {
         // Enum gets the special path that accumulates positional members.
         // Item constraints for an enum are members; the array-level paren
         // list, if present, is just regular array constraints (min/max/etc.).
-        if matches!(ty, SimplifiedType::Enum) && !is_array_level {
+        if owner == ListOwner::Type(SimplifiedType::Enum) && !is_array_level {
             let (members, mut tail) = self.parse_enum_members()?;
             if !members.is_empty() {
                 constraints.push(Constraint::Members(members));
@@ -1146,14 +1265,28 @@ impl<'a> Parser<'a> {
         // `literal` mirrors the enum delimiter rules but takes exactly one
         // positional (typed) value, then `;`-separated constraints. The
         // array-level paren list is regular array constraints.
-        if matches!(ty, SimplifiedType::Literal) && !is_array_level {
+        if owner == ListOwner::Type(SimplifiedType::Literal) && !is_array_level {
             return self.parse_literal_value();
+        }
+
+        // `alphanumeric` options precede the first `;`; a list that opens
+        // with a constraint is constraints only.
+        let mut separated = false;
+        if owner.takes_options() && !is_array_level {
+            let options;
+            (options, separated) = self.parse_option_prefix(owner)?;
+            if !options.is_empty() {
+                constraints.push(Constraint::Options(options));
+                if !separated {
+                    return Ok(constraints);
+                }
+            }
         }
 
         loop {
             self.lex.skip_ws();
             let constraint_start = self.lex.pos;
-            let constraint = self.parse_one_constraint(ty, is_array_level)?;
+            let constraint = self.parse_one_constraint(owner, is_array_level)?;
             if matches!(constraint, Constraint::Suggest(_))
                 && constraints
                     .iter()
@@ -1169,9 +1302,13 @@ impl<'a> Parser<'a> {
             match self.lex.peek_byte() {
                 Some(b';') => {
                     self.lex.pos += 1;
+                    separated = true;
                     continue;
                 }
                 Some(b')') => break,
+                Some(b',') if owner.takes_options() && !is_array_level && !separated => {
+                    return self.err(MIXED_OPTIONS_MESSAGE, self.lex.pos..self.lex.pos + 1);
+                }
                 Some(other) => {
                     let span = self.lex.pos..self.lex.pos + 1;
                     return self.err(
@@ -1189,6 +1326,83 @@ impl<'a> Parser<'a> {
             }
         }
         Ok(constraints)
+    }
+
+    /// Parses the `alphanumeric` options that open a constraint list: a
+    /// comma-separated list of option keywords ended by `;` or `)`. Returns
+    /// the options in authored order and whether the `;` was consumed. When
+    /// the list opens with anything but an option keyword, nothing is
+    /// consumed and the list is read as constraints only, except that an
+    /// unrecognized word in an `alphanumeric` list is an unknown option.
+    fn parse_option_prefix(
+        &mut self,
+        owner: ListOwner,
+    ) -> Result<(Vec<AlphanumericOption>, bool), SchemaError> {
+        self.lex.skip_ws();
+        let start = self.lex.pos;
+        let (first, first_span) = self.lex.read_ident();
+        self.lex.pos = start;
+        if AlphanumericOption::from_keyword(&first).is_none() {
+            if owner == ListOwner::Type(SimplifiedType::Alphanumeric)
+                && !first.is_empty()
+                && !is_constraint_keyword(&first)
+            {
+                return self.err(unknown_option_message(&first), first_span);
+            }
+            return Ok((Vec::new(), false));
+        }
+
+        let mut options = Vec::new();
+        loop {
+            self.lex.skip_ws();
+            let tok = self.next_token(LexMode::ConstraintList)?;
+            let Tok::Ident(name) = tok.tok else {
+                return self.err(
+                    format!("expected an `alphanumeric` option, found `{:?}`", tok.tok),
+                    tok.span,
+                );
+            };
+            match AlphanumericOption::from_keyword(&name) {
+                Some(option) if options.contains(&option) => {
+                    return self.err(format!("repeated `alphanumeric` option `{name}`"), tok.span);
+                }
+                Some(option) => options.push(option),
+                None if is_constraint_keyword(&name) => {
+                    return self.err(MIXED_OPTIONS_MESSAGE, tok.span);
+                }
+                None => return self.err(unknown_option_message(&name), tok.span),
+            }
+            self.lex.skip_ws();
+            match self.lex.peek_byte() {
+                Some(b',') => self.lex.pos += 1,
+                Some(b';') => {
+                    self.lex.pos += 1;
+                    return Ok((options, true));
+                }
+                Some(b')') => return Ok((options, false)),
+                Some(b'(') => {
+                    return self.err(
+                        format!("`alphanumeric` option `{name}` does not take arguments"),
+                        tok.span,
+                    );
+                }
+                Some(other) => {
+                    return self.err(
+                        format!(
+                            "expected `,`, `;`, or `)` after an `alphanumeric` option, found `{}`",
+                            other as char
+                        ),
+                        self.lex.pos..self.lex.pos + 1,
+                    );
+                }
+                None => {
+                    return self.err(
+                        "unterminated constraint list (missing `)`)",
+                        self.lex.pos..self.lex.pos,
+                    );
+                }
+            }
+        }
     }
 
     /// Parses members until we either hit the end of the list or a `;`
@@ -1223,7 +1437,8 @@ impl<'a> Parser<'a> {
             if is_constraint_call {
                 // Rewind and let the standard constraint parser handle it.
                 self.lex.pos = saved;
-                let constraint = self.parse_one_constraint(SimplifiedType::Enum, false)?;
+                let constraint =
+                    self.parse_one_constraint(ListOwner::Type(SimplifiedType::Enum), false)?;
                 tail.push(constraint);
                 self.lex.skip_ws();
                 match self.lex.peek_byte() {
@@ -1233,7 +1448,10 @@ impl<'a> Parser<'a> {
                         // constraints are parsed normally.
                         return Ok((
                             members,
-                            self.parse_remaining_constraints(SimplifiedType::Enum, tail)?,
+                            self.parse_remaining_constraints(
+                                ListOwner::Type(SimplifiedType::Enum),
+                                tail,
+                            )?,
                         ));
                     }
                     Some(b')') => return Ok((members, tail)),
@@ -1278,7 +1496,10 @@ impl<'a> Parser<'a> {
                     self.lex.pos += 1;
                     return Ok((
                         members,
-                        self.parse_remaining_constraints(SimplifiedType::Enum, tail)?,
+                        self.parse_remaining_constraints(
+                            ListOwner::Type(SimplifiedType::Enum),
+                            tail,
+                        )?,
                     ));
                 }
                 Some(b')') => return Ok((members, tail)),
@@ -1302,7 +1523,7 @@ impl<'a> Parser<'a> {
 
     fn parse_remaining_constraints(
         &mut self,
-        ty: SimplifiedType,
+        owner: ListOwner,
         mut acc: Vec<Constraint>,
     ) -> Result<Vec<Constraint>, SchemaError> {
         loop {
@@ -1310,7 +1531,7 @@ impl<'a> Parser<'a> {
             if self.lex.peek_byte() == Some(b')') {
                 return Ok(acc);
             }
-            let c = self.parse_one_constraint(ty, false)?;
+            let c = self.parse_one_constraint(owner, false)?;
             acc.push(c);
             self.lex.skip_ws();
             match self.lex.peek_byte() {
@@ -1379,7 +1600,7 @@ impl<'a> Parser<'a> {
             Some(b';') => {
                 self.lex.pos += 1;
                 // Tail constraints accumulate after the leading `LiteralValue`.
-                self.parse_remaining_constraints(SimplifiedType::Literal, constraints)
+                self.parse_remaining_constraints(ListOwner::Type(SimplifiedType::Literal), constraints)
             }
             Some(b')') => Ok(constraints),
             Some(other) => self.err(
@@ -1395,7 +1616,7 @@ impl<'a> Parser<'a> {
 
     fn parse_one_constraint(
         &mut self,
-        ty: SimplifiedType,
+        owner: ListOwner,
         is_array_level: bool,
     ) -> Result<Constraint, SchemaError> {
         let kw_tok = self.next_token(LexMode::ConstraintList)?;
@@ -1408,6 +1629,18 @@ impl<'a> Parser<'a> {
                 );
             }
         };
+
+        if AlphanumericOption::from_keyword(&keyword).is_some() {
+            let message = if owner.takes_options() && !is_array_level {
+                format!("`alphanumeric` option `{keyword}` must be written before the first `;`")
+            } else {
+                format!(
+                    "`{keyword}` is an `alphanumeric` option and is not valid on {}",
+                    owner.describe(is_array_level)
+                )
+            };
+            return self.err(message, kw_span);
+        }
 
         // Distinguish bare-keyword constraints from those taking arguments.
         self.lex.skip_ws();
@@ -1439,7 +1672,19 @@ impl<'a> Parser<'a> {
                         kw_span,
                     );
                 }
-                Constraint::Default(arg_to_json(&args[0]))
+                let value = arg_to_json(&args[0]);
+                if owner == ListOwner::Type(SimplifiedType::Null)
+                    && !is_array_level
+                    && !value.is_null()
+                {
+                    return self.err(
+                        format!(
+                            "`default({value})` is not valid on `null`; a `null` default must be null"
+                        ),
+                        args[0].span.clone(),
+                    );
+                }
+                Constraint::Default(value)
             }
             ("min", true) => {
                 self.lex.pos += 1;
@@ -1459,7 +1704,7 @@ impl<'a> Parser<'a> {
                 if is_array_level {
                     let n_usize = number_to_usize(n, "min", &args[0], self.property)?;
                     Constraint::MinItems(n_usize)
-                } else if matches!(ty, SimplifiedType::String) {
+                } else if owner.counts_characters() {
                     let n_usize = number_to_usize(n, "min", &args[0], self.property)?;
                     Constraint::MinLen(n_usize)
                 } else {
@@ -1484,7 +1729,7 @@ impl<'a> Parser<'a> {
                 if is_array_level {
                     let n_usize = number_to_usize(n, "max", &args[0], self.property)?;
                     Constraint::MaxItems(n_usize)
-                } else if matches!(ty, SimplifiedType::String) {
+                } else if owner.counts_characters() {
                     let n_usize = number_to_usize(n, "max", &args[0], self.property)?;
                     Constraint::MaxLen(n_usize)
                 } else {
@@ -1513,27 +1758,26 @@ impl<'a> Parser<'a> {
                         kw_span.start..self.lex.pos,
                     );
                 }
-                let deferred_import = self.defer_suggestion_target && matches!(ty, SimplifiedType::Any);
-                if is_array_level
-                    || (!deferred_import
-                        && !matches!(ty, SimplifiedType::String | SimplifiedType::Number))
-                {
-                    return self.err(
-                        format!("`suggest` is not valid on `{}`", ty.as_keyword()),
-                        kw_span.start..self.lex.pos,
-                    );
-                }
+                // A reference's target is not known yet: its candidates are
+                // read as strings until the resolver reinterprets them.
+                let target = match owner {
+                    ListOwner::Type(
+                        ty @ (SimplifiedType::String
+                        | SimplifiedType::Number
+                        | SimplifiedType::Alphanumeric),
+                    ) if !is_array_level => ty,
+                    ListOwner::Reference if !is_array_level => SimplifiedType::String,
+                    _ => {
+                        return self.err(
+                            format!("`suggest` is not valid on {}", owner.describe(is_array_level)),
+                            kw_span.start..self.lex.pos,
+                        );
+                    }
+                };
 
                 let mut candidates = Vec::with_capacity(args.len());
                 for arg in args {
-                    let candidate = interpret_suggestion(
-                        &arg,
-                        if deferred_import {
-                            SimplifiedType::String
-                        } else {
-                            ty
-                        },
-                    );
+                    let candidate = interpret_suggestion(&arg, target);
                     if candidates.iter().any(|existing: &SuggestionCandidate| {
                         existing.interpreted == candidate.interpreted
                     }) {
@@ -1713,7 +1957,7 @@ fn interpret_suggestion_parts(
     span: Range<usize>,
     ty: SimplifiedType,
 ) -> SuggestionCandidate {
-    if matches!(ty, SimplifiedType::String) {
+    if matches!(ty, SimplifiedType::String | SimplifiedType::Alphanumeric) {
         return SuggestionCandidate {
             decoded: decoded.to_string(),
             interpreted: serde_json::Value::String(decoded.to_string()),
@@ -2016,7 +2260,10 @@ mod tests {
             SimplifiedType::Email,
             SimplifiedType::Yaml,
             SimplifiedType::Json,
-            SimplifiedType::Any,
+            SimplifiedType::Unknown,
+            SimplifiedType::Null,
+            SimplifiedType::Alphanumeric,
+            SimplifiedType::Shell,
         ] {
             let atom = parse(ty.as_keyword());
             assert_eq!(atom.ty, TypeExpr::Primitive(ty));
@@ -2024,12 +2271,257 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_type() {
-        let err = parse_err("widget");
-        let SchemaError::Grammar { message, .. } = err else {
-            panic!("expected Grammar error, got {err:?}")
+    fn any_parses_as_unknown_and_new_keywords_take_constraints() {
+        assert_eq!(parse("any"), parse("unknown"));
+        assert_eq!(parse("any(required)"), parse("unknown(required)"));
+        assert_eq!(parse("null(required)").constraints, vec![Constraint::Required]);
+        assert_eq!(parse("shell(required)").constraints, vec![Constraint::Required]);
+        assert!(parse("shell[]").is_array);
+        assert!(parse("unknown[](required)").is_array);
+        assert!(parse("null[]").is_array);
+    }
+
+    #[test]
+    fn keyword_collisions_need_an_explicit_local_reference() {
+        for keyword in ["unknown", "null", "alphanumeric", "shell"] {
+            assert!(matches!(parse(keyword).ty, TypeExpr::Primitive(_)), "{keyword}");
+            assert_eq!(parse(&format!("{keyword}@this")).ty, TypeExpr::local(keyword));
+        }
+        assert_eq!(
+            parse("shell@./shell.yaml").ty,
+            TypeExpr::Imported {
+                name: "shell".into(),
+                reference: "./shell.yaml".into(),
+            }
+        );
+    }
+
+    fn options_of(atom: &PropertyAtom) -> Vec<AlphanumericOption> {
+        atom.constraints
+            .iter()
+            .find_map(|constraint| match constraint {
+                Constraint::Options(options) => Some(options.clone()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn alphanumeric_options_precede_the_separator() {
+        let atom = parse("alphanumeric(allow-slashes, allow-periods, block-double-periods; min(1); max(40))");
+        assert_eq!(
+            atom.constraints,
+            vec![
+                Constraint::Options(vec![
+                    AlphanumericOption::AllowSlashes,
+                    AlphanumericOption::AllowPeriods,
+                    AlphanumericOption::BlockDoublePeriods,
+                ]),
+                Constraint::MinLen(1),
+                Constraint::MaxLen(40),
+            ]
+        );
+        let only = parse("alphanumeric(leading-alpha, allow-underscores)");
+        assert_eq!(
+            options_of(&only),
+            [AlphanumericOption::LeadingAlpha, AlphanumericOption::AllowUnderscores]
+        );
+        assert_eq!(only.constraints.len(), 1);
+    }
+
+    #[test]
+    fn alphanumeric_without_options_reads_constraints_only() {
+        assert_eq!(parse("alphanumeric(min(1))").constraints, vec![Constraint::MinLen(1)]);
+        assert_eq!(parse("alphanumeric(required)").constraints, vec![Constraint::Required]);
+        assert_eq!(
+            parse("alphanumeric(required; not-empty)").constraints,
+            vec![Constraint::Required, Constraint::NotEmpty]
+        );
+        assert_eq!(parse("alphanumeric()").constraints, vec![]);
+        assert_eq!(parse("alphanumeric").alphanumeric_options(), Some(Default::default()));
+    }
+
+    #[test]
+    fn alphanumeric_options_on_an_array_bind_to_items() {
+        let atom = parse("alphanumeric(allow-dashes)[](min(1))");
+        assert!(atom.is_array);
+        assert_eq!(options_of(&atom), [AlphanumericOption::AllowDashes]);
+        assert_eq!(atom.array_constraints, vec![Constraint::MinItems(1)]);
+    }
+
+    #[test]
+    fn alphanumeric_option_grammar_errors() {
+        let cases = [
+            ("alphanumeric(allow-dash)", "unknown `alphanumeric` option `allow-dash`"),
+            ("alphanumeric(allow-dashes, nope)", "unknown `alphanumeric` option `nope`"),
+            ("alphanumeric(allow-dashes, allow-dashes)", "repeated `alphanumeric` option `allow-dashes`"),
+            ("alphanumeric(min(1); allow-dashes)", "must be written before the first `;`"),
+            ("alphanumeric(allow-dashes; allow-periods)", "must be written before the first `;`"),
+            ("alphanumeric(allow-dashes, min(1))", "separate `alphanumeric` options from constraints with `;`"),
+            ("alphanumeric(required, allow-dashes)", "separate `alphanumeric` options from constraints with `;`"),
+            ("alphanumeric(allow-dashes(1))", "does not take arguments"),
+            ("alphanumeric[](allow-dashes)", "is not valid on `alphanumeric` arrays"),
+            ("string(allow-dashes)", "`allow-dashes` is an `alphanumeric` option and is not valid on `string`"),
+            ("{ a: string }(allow-dashes)", "not valid on an inline object"),
+        ];
+        for (input, expected) in cases {
+            let message = parse_err(input).to_string();
+            assert!(message.contains(expected), "{input}: {message}");
+        }
+    }
+
+    #[test]
+    fn alphanumeric_option_errors_point_at_the_option() {
+        let SchemaError::Grammar { span, .. } = parse_err("alphanumeric(allow-dashes, allow-dashes)") else {
+            panic!("grammar error expected");
         };
-        assert!(message.contains("unknown type"));
+        assert_eq!(span, 27..39);
+        let SchemaError::Grammar { span, .. } = parse_err("alphanumeric(min(1); allow-dashes)") else {
+            panic!("grammar error expected");
+        };
+        assert_eq!(span, 21..33);
+    }
+
+    #[test]
+    fn alphanumeric_takes_string_constraints_and_suggestions() {
+        let atom = parse("alphanumeric(allow-dashes; pattern('^a'); suggest(ab, 12); default(ab))");
+        let Constraint::Suggest(candidates) = &atom.constraints[2] else {
+            panic!("suggest expected: {atom:?}");
+        };
+        assert_eq!(candidates[1].interpreted, serde_json::json!("12"));
+    }
+
+    #[test]
+    fn named_reference_keeps_options_for_resolution() {
+        let atom = parse("slug(allow-dashes; max(10))");
+        assert_eq!(atom.ty, TypeExpr::local("slug"));
+        assert_eq!(options_of(&atom), [AlphanumericOption::AllowDashes]);
+        assert_eq!(atom.constraints[1], Constraint::Max(10.0));
+        assert_eq!(parse("slug(max(10))").constraints, vec![Constraint::Max(10.0)]);
+        assert!(
+            parse_err("slug(allow-dashes, max(10))")
+                .to_string()
+                .contains("separate `alphanumeric` options from constraints")
+        );
+    }
+
+    #[test]
+    fn unknown_identifier_parses_as_local_reference() {
+        let atom = parse("widget");
+        assert_eq!(atom.ty, TypeExpr::local("widget"));
+        assert_eq!(atom, parse("widget@this"));
+    }
+
+    #[test]
+    fn misspelled_keyword_parses_as_local_reference() {
+        assert_eq!(parse("strng").ty, TypeExpr::local("strng"));
+    }
+
+    #[test]
+    fn bare_keyword_stays_primitive_and_explicit_keyword_is_a_reference() {
+        assert_eq!(parse("string").ty, TypeExpr::Primitive(SimplifiedType::String));
+        assert_eq!(parse("string@this").ty, TypeExpr::local("string"));
+    }
+
+    #[test]
+    fn bare_reference_postfixes_match_explicit_reference() {
+        for (bare, explicit) in [
+            ("person", "person@this"),
+            ("person[]", "person[]@this"),
+            ("person(required)", "person(required)@this"),
+            ("person[](min(1))", "person[](min(1))@this"),
+            ("person(min(2); max(5))", "person(min(2); max(5))@this"),
+            ("person -> An author", "person@this -> An author"),
+            ("person[](max(3)) -> People", "person[](max(3))@this -> People"),
+        ] {
+            let bare_atom = parse(bare);
+            assert_eq!(bare_atom, parse(explicit), "{bare} vs {explicit}");
+            assert_eq!(bare_atom.ty, TypeExpr::local("person"), "{bare}");
+        }
+    }
+
+    #[test]
+    fn bare_reference_records_constraints_and_array_marker() {
+        // As on a primitive atom, the list after `[]` is parsed at the array
+        // level and lands in `array_constraints`.
+        let atom = parse("person[](min(1))");
+        assert!(atom.is_array);
+        assert!(atom.constraints.is_empty());
+        assert_eq!(atom.array_constraints, vec![Constraint::MinItems(1)]);
+
+        let atom = parse("person(required) -> The author");
+        assert!(!atom.is_array);
+        assert_eq!(atom.constraints, vec![Constraint::Required]);
+        assert_eq!(atom.description.as_deref(), Some("The author"));
+    }
+
+    #[test]
+    fn bare_reference_defers_suggestion_target() {
+        // `suggest` is invalid on most primitives, but a reference's target
+        // is unknown until resolution, so both spellings accept it.
+        let atom = parse("code(suggest(1, b))");
+        assert_eq!(atom, parse("code(suggest(1, b))@this"));
+        assert!(matches!(atom.constraints.as_slice(), [Constraint::Suggest(c)] if c.len() == 2));
+    }
+
+    #[test]
+    fn named_reference_keeps_a_list_before_the_array_marker_apart_in_every_spelling() {
+        // The passive grammar accepts either order; the resolver decides what
+        // a list before `[]` may carry once the target is known.
+        for input in [
+            "person(eager)[]",
+            "person(eager)[]@this",
+            "person(eager)[]@./people.yaml",
+        ] {
+            let atom = parse(input);
+            assert!(atom.is_array, "{input}");
+            assert_eq!(atom.constraints, vec![Constraint::Eager], "{input}");
+            assert!(atom.array_constraints.is_empty(), "{input}");
+        }
+        assert_eq!(parse("person(eager)[]"), parse("person(eager)[]@this"));
+
+        let both = parse("person(required; max(2))[](min(1); eager)@./people.yaml");
+        assert_eq!(both.constraints, vec![Constraint::Required, Constraint::Max(2.0)]);
+        assert_eq!(
+            both.array_constraints,
+            vec![Constraint::MinItems(1), Constraint::Eager]
+        );
+
+        let after = parse("person[](eager)");
+        assert!(after.constraints.is_empty());
+        assert_eq!(after.array_constraints, vec![Constraint::Eager]);
+        assert_ne!(after, parse("person(eager)[]"));
+    }
+
+    #[test]
+    fn named_reference_rejects_a_second_list_or_a_malformed_array_marker() {
+        for input in ["person(eager)[", "person(eager)(required)", "person[](min(1))(eager)"] {
+            assert!(
+                matches!(parse_err(input), SchemaError::Grammar { .. }),
+                "{input}"
+            );
+        }
+    }
+
+    #[test]
+    fn bare_reference_works_in_inline_objects() {
+        let atom = parse("{ author: person(required) -> The author, tags: tag[] }");
+        let shape = inline_shape(&atom);
+        let author = prop(shape, "author");
+        assert_eq!(author.ty, TypeExpr::local("person"));
+        assert_eq!(author.constraints, vec![Constraint::Required]);
+        assert_eq!(author.description.as_deref(), Some("The author"));
+        let tags = prop(shape, "tags");
+        assert_eq!(tags.ty, TypeExpr::local("tag"));
+        assert!(tags.is_array);
+    }
+
+    #[test]
+    fn bare_reference_identifier_characters_match_explicit_reference() {
+        for name in ["Person", "postal_code", "x-custom", "v2"] {
+            assert_eq!(parse(name).ty, TypeExpr::local(name), "{name}");
+            assert_eq!(parse(name), parse(&format!("{name}@this")), "{name}");
+        }
     }
 
     #[test]
@@ -2349,11 +2841,11 @@ mod tests {
     #[test]
     fn parameterized_expression_is_rejected() {
         // The reserved future `expression(condition)` form is rejected in v1
-        // as an unknown constraint (never the generic unknown-type error).
+        // as an unknown constraint.
         let SchemaError::Grammar { message, .. } = parse_err("expression(condition)") else {
             panic!("expected Grammar error");
         };
-        assert!(!message.contains("unknown type"), "got: {message}");
+        assert!(message.contains("unknown constraint"), "got: {message}");
     }
 
     #[test]
@@ -2663,23 +3155,14 @@ mod tests {
 
     #[test]
     fn inline_object_description_with_unescaped_comma_is_not_supported() {
-        // `second` is treated as the next property start; since `second`
-        // is not a known type and the `:` separator is missing, the
-        // parser reports a grammar error. Decision #9 leaves escaping
-        // out of scope for this feature.
+        // The comma ends the description, so `second` is read as the next
+        // property name and its missing `:` is a grammar error. Decision #9
+        // leaves escaping out of scope.
         let err = parse_err("{ foo: string -> first, second }");
         let SchemaError::Grammar { message, .. } = err else {
             panic!("expected Grammar error, got {err:?}")
         };
-        // The exact message depends on whether the trailing `}` looks
-        // like the end of a property definition or a type-name error.
-        assert!(
-            message.contains("unknown type")
-                || message.contains("expected a type name")
-                || message.contains("`:`")
-                || message.contains("expected `:`"),
-            "unexpected message: {message}"
-        );
+        assert!(message.contains("expected `:`"), "unexpected message: {message}");
     }
 
     #[test]

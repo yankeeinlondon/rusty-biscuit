@@ -20,6 +20,7 @@
 //! | Gtts | No | Playa handles playback speed |
 //! | EchoGarden | Yes | Speed baked via --speed flag |
 //! | ElevenLabs | Yes | Speed baked via API |
+//! | Say | No, the WPM rate is part of the voice ID | Rate baked via `say -r` |
 //!
 //! ## Examples
 //!

@@ -583,7 +583,7 @@ pub fn context_root() -> &'static ReservedRootDescriptor {
     eager_root(RootMembers::ContextVariables)
 }
 
-/// The reserved root whose members are the document's frontmatter (`doc`),
+/// The reserved root whose members are the document's frontmatter (`fm`),
 /// from Darkmatter's catalog.
 pub fn document_root() -> &'static ReservedRootDescriptor {
     eager_root(RootMembers::DocumentFrontmatter)
@@ -733,6 +733,8 @@ pub enum ExprCompletionKind {
     FrontmatterKey,
     /// A fully qualified `ctx.<name>` context variable.
     ContextVariable,
+    /// A reserved expression root from Darkmatter's catalog (`fm`).
+    ReservedRoot,
     /// An expression function.
     Function,
 }
@@ -759,10 +761,13 @@ pub struct ExprCompletion {
 
 /// Catalog + frontmatter-key completion candidates matching `partial`
 /// (prefix-based, case-sensitive): same-document top-level frontmatter keys,
-/// fully qualified `ctx.*` variables, and expression functions.
+/// the frontmatter root and, once `partial` starts with `fm.`, its qualified
+/// `fm.<key>` members, fully qualified `ctx.*` variables, and expression
+/// functions.
 ///
 /// The single authority for expression completion so the body-interpolation and
-/// Expression-typed-frontmatter surfaces can never drift.
+/// Expression-typed-frontmatter surfaces can never drift. A key named after a
+/// retired root (`doc`, `current_env`) is an ordinary frontmatter key here.
 pub fn completion_candidates(partial: &str, frontmatter_keys: &[String]) -> Vec<ExprCompletion> {
     let mut items = Vec::new();
 
@@ -775,6 +780,37 @@ pub fn completion_candidates(partial: &str, frontmatter_keys: &[String]) -> Vec<
                 detail: Some("frontmatter key".to_string()),
                 documentation: None,
             });
+        }
+    }
+
+    let root = document_root();
+    if root.name.starts_with(partial) {
+        items.push(ExprCompletion {
+            label: root.name.to_string(),
+            insert_text: root.name.to_string(),
+            kind: ExprCompletionKind::ReservedRoot,
+            detail: Some("reserved root".to_string()),
+            documentation: Some(root.description.to_string()),
+        });
+    }
+    if let Some(member) = partial.strip_prefix(root.name).and_then(|rest| rest.strip_prefix('.')) {
+        for key in frontmatter_keys {
+            let label = format!("{}.{key}", root.name);
+            // Only keys the dotted form reaches as one path; others need
+            // bracket access, which this completion does not author.
+            let reachable = matches!(
+                parse(&label).map(|expr| expr.kind),
+                Ok(SpannedExprKind::Variable(path)) if path == label
+            );
+            if key.starts_with(member) && reachable {
+                items.push(ExprCompletion {
+                    insert_text: label.clone(),
+                    label,
+                    kind: ExprCompletionKind::FrontmatterKey,
+                    detail: Some("frontmatter key".to_string()),
+                    documentation: None,
+                });
+            }
         }
     }
 
@@ -896,6 +932,9 @@ fn hover_markdown_from(
     let Some(name) = root_identifier(sub_expr) else {
         return value;
     };
+    let frontmatter_member = name
+        .strip_prefix(document_root().name)
+        .and_then(|rest| rest.strip_prefix('.'));
     if let Some(tail) = name
         .strip_prefix(context_root().name)
         .and_then(|rest| rest.strip_prefix('.'))
@@ -905,6 +944,16 @@ fn hover_markdown_from(
                 "\n\n{}\n\nThe `ctx` variable is evaluated at _compose_ time (rather than now).",
                 format_ctx_hover_block(descriptor)
             ));
+        }
+    } else if let Some(root) = reserved_root_descriptors().iter().find(|root| root.name == name) {
+        // A reserved root shadows a same-named frontmatter key, so its catalog
+        // description wins over any static value.
+        value.push_str(&format!("\n\n**`{}`** — {}", root.name, root.description));
+    } else if let Some(member) = frontmatter_member {
+        if let Some(scalar) = frontmatter_scalar(member) {
+            value.push_str(&format!("\n\nStatic value: `{scalar}` (from frontmatter `{member}`)"));
+        } else if let Some(block) = schema_property(member) {
+            value.push_str(&format!("\n\n{block}"));
         }
     } else if let Some(scalar) = frontmatter_scalar(&name) {
         value.push_str(&format!("\n\nStatic value: `{scalar}` (from frontmatter `{name}`)"));
@@ -975,7 +1024,7 @@ pub struct KeyReferenceFix {
     /// The frontmatter key the subtraction's source spells.
     pub key: String,
     /// The expression text that references `key`: the bare key when it lexes
-    /// as one identifier, otherwise `doc['key']`.
+    /// as one identifier, otherwise `fm['key']`.
     pub replacement: String,
 }
 
@@ -1102,7 +1151,7 @@ fn is_dash_chain(expr: &SpannedExpr) -> bool {
 }
 
 /// The first replacement for `span` that reparses as exactly one reference
-/// to `key`: the bare key, then `doc['key']`.
+/// to `key`: the bare key, then `fm['key']`.
 fn key_reference_fix(
     source: &str,
     span: &SourceSpan,
@@ -1277,7 +1326,7 @@ mod tests {
             "isEmpty(maybe)",
             "ok ? known : null",
             "current.cwd",
-            "doc.anything-at-all",
+            "fm.anything-at-all",
             "ctx.nope",
             "length",
         ] {
@@ -1287,20 +1336,60 @@ mod tests {
         assert_eq!(generic("is_empty(lower(nested))", &[]), [pair("nested", "nested")]);
         // A bare runtime-context name is a document property, never `ctx.repo`.
         assert_eq!(generic("repo", &[]), [pair("repo", "repo")]);
+        // `doc` is an ordinary property name, not a built-in root: silent when
+        // declared, an undeclared-property finding otherwise.
+        assert!(generic("doc.title", &["doc"]).is_empty());
+        assert_eq!(generic("doc.title", &[]), [pair("doc", "doc.title")]);
+        // So is the retired lazy root `current_env`.
+        assert!(generic("current_env.HOME", &["current_env"]).is_empty());
+        assert_eq!(generic("current_env.HOME", &[]), [pair("current_env", "current_env.HOME")]);
+    }
+
+    /// `current_env` is not a built-in root: completion offers it only when
+    /// the document declares it, and hover reads the declared frontmatter value
+    /// or schema property instead of a reserved-root description.
+    #[test]
+    fn current_env_completes_and_hovers_only_as_a_declared_property() {
+        let offered = |keys: &[String]| -> Vec<(String, ExprCompletionKind)> {
+            completion_candidates("current", keys)
+                .into_iter()
+                .filter(|candidate| candidate.label.starts_with("current_env"))
+                .map(|candidate| (candidate.label, candidate.kind))
+                .collect()
+        };
+        assert!(offered(&[]).is_empty(), "no built-in `current_env` root");
+        assert_eq!(
+            offered(&["current_env".to_string()]),
+            [("current_env".to_string(), ExprCompletionKind::FrontmatterKey)]
+        );
+        assert!(reserved_root_descriptors().iter().all(|root| root.name != "current_env"));
+
+        let declared = hover_markdown(
+            "current_env",
+            3,
+            |name| (name == "current_env").then(|| "userland".to_string()),
+            |_| None,
+        );
+        assert!(declared.contains("Static value: `userland` (from frontmatter `current_env`)"), "{declared}");
+        assert!(!declared.contains("reserved"), "{declared}");
+
+        let from_schema =
+            hover_markdown("current_env", 3, |_| None, |name| (name == "current_env").then(|| "SCHEMA-BLOCK".to_string()));
+        assert!(from_schema.contains("SCHEMA-BLOCK"), "{from_schema}");
     }
 
     #[test]
     fn a_subtraction_spelling_a_key_is_one_finding_with_the_right_replacement() {
         assert_eq!(
             dash("foo--bar", &["foo--bar"], None),
-            ("foo--bar".into(), "foo--bar".into(), Some("doc['foo--bar']".into()))
+            ("foo--bar".into(), "foo--bar".into(), Some("fm['foo--bar']".into()))
         );
         assert_eq!(
             dash("a- b", &["a-b"], None),
             ("a- b".into(), "a-b".into(), Some("a-b".into()))
         );
         // The YAML quote style around a frontmatter value picks the other quote.
-        assert_eq!(dash("foo--bar", &["foo--bar"], Some('\'')).2.as_deref(), Some("doc[\"foo--bar\"]"));
+        assert_eq!(dash("foo--bar", &["foo--bar"], Some('\'')).2.as_deref(), Some("fm[\"foo--bar\"]"));
         // Only the chain that spells the key is replaced; the outer subtraction
         // stays arithmetic after the fix.
         let (authored, _, fix) = match findings_for("a- b - known", &["a-b", "known"], None).as_slice() {
@@ -1327,17 +1416,17 @@ mod tests {
     fn a_key_no_replacement_can_reference_gets_no_fix() {
         assert_eq!(key_reference_fix("x", &(0..1), "it's \"q\"", parse, None), None);
         let fix = key_reference_fix("x", &(0..1), "it's", parse, None).expect("double-quoted bracket");
-        assert_eq!(fix.replacement, "doc[\"it's\"]");
+        assert_eq!(fix.replacement, "fm[\"it's\"]");
     }
 
     #[test]
     fn the_fix_payload_round_trips_through_json() {
         let fix = KeyReferenceFix {
             key: "foo--bar".into(),
-            replacement: "doc['foo--bar']".into(),
+            replacement: "fm['foo--bar']".into(),
         };
         let value = serde_json::to_value(&fix).unwrap();
-        assert_eq!(value, serde_json::json!({ "key": "foo--bar", "replacement": "doc['foo--bar']" }));
+        assert_eq!(value, serde_json::json!({ "key": "foo--bar", "replacement": "fm['foo--bar']" }));
         assert_eq!(serde_json::from_value::<KeyReferenceFix>(value).unwrap(), fix);
     }
 
@@ -1919,7 +2008,7 @@ mod tests {
         fn value_completion_partial_follows_the_same_rule() {
             for (value, partial) in [
                 ("spec-na", "spec-na"),
-                ("upper(doc.spec-", "doc.spec-"),
+                ("upper(fm.spec-", "fm.spec-"),
                 ("is-draft && has-rev", "has-rev"),
                 ("foo--ba", "ba"),
                 ("a - b", "b"),
@@ -1958,8 +2047,8 @@ mod tests {
 
         #[test]
         fn root_identifier_keeps_the_whole_kebab_path() {
-            let expr = parse("doc.spec-name").unwrap();
-            assert_eq!(root_identifier(&expr).as_deref(), Some("doc.spec-name"));
+            let expr = parse("fm.spec-name").unwrap();
+            assert_eq!(root_identifier(&expr).as_deref(), Some("fm.spec-name"));
         }
     }
 }

@@ -411,12 +411,11 @@ pub enum ExpressionError {
     /// break (**R33**).
     #[error(
         "`{path}` is not a member of the reserved `{root}` root: `current` mirrors \
-         the `ctx` variables by name and `current_env` mirrors environment \
-         variable names, so there is no `current.ctx.*`, `current.env.*`, or \
-         `current_env.ctx.*` nesting"
+         the `ctx` variables by name, so there is no `current.ctx.*` or \
+         `current.env.*` nesting"
     )]
     ReservedRootPathUnknown {
-        /// `current` or `current_env`.
+        /// The lazy root, `current`.
         root: &'static str,
         /// The full unresolvable path, root included.
         path: String,

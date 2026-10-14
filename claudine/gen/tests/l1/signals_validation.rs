@@ -211,6 +211,8 @@ fn unknown_signal_member_is_rejected() {
         GenError::ResearchInvalid { path, problems } => {
             assert!(path.ends_with("claude.md"), "{}", path.display());
             assert!(problems.contains("usage_cap_telepathy"), "{problems}");
+            // The problem names the record field it rejects.
+            assert!(problems.contains("/signal: \"usage_cap_telepathy\""), "{problems}");
         }
         other => panic!("expected ResearchInvalid, got: {other}"),
     }

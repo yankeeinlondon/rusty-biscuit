@@ -9,9 +9,12 @@
 //! expansion preserves fail-fast behavior so an invalid schema does not
 //! trigger expensive or side-effectful shell commands. When frontmatter
 //! shell expansion is enabled, values that depend on shell-expanded inputs
-//! are re-validated downstream by the caller (e.g. claudine's
-//! `prepare_*_with_schema`) against the post-shell effective frontmatter,
-//! so their problems are deferred here. When shell expansion is disabled,
+//! have their problems deferred here and judged by the pipeline's post-shell
+//! pass of this stage, whether or not trigger schemas are enabled. A caller
+//! that re-validates the post-shell frontmatter itself (claudine's
+//! `prepare_*_with_schema`) takes over that verdict with
+//! `ComposeOptions::with_caller_owned_post_shell_verdict`. When shell
+//! expansion is disabled,
 //! no later stage re-resolves those values, so every problem is reported
 //! here rather than deferred.
 //!
@@ -47,7 +50,61 @@ use crate::markdown::schemas::{
 };
 use crate::markdown::schemas::coerce::coerce_frontmatter_with_pending;
 use crate::markdown::types::{MarkdownError, MarkdownResult};
-use super::value_origin::{DataPaths, ValuePathSegment};
+use super::value_origin::{DataPaths, FrontmatterProvenance, ValuePathSegment};
+
+/// Which schema problems a pass of this stage may defer as pending
+/// composition, decided by whether a later stage resolves the value.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum PendingDeferral<'a> {
+    /// The pass before frontmatter shell expansion. A whole-value `$( … )`
+    /// key is expanded later, a `{{ … }}` template left unresolved is
+    /// rendered by interpolation pass 2, and a `provisional` key was resolved
+    /// from a command's unexpanded text and is resolved again from its
+    /// output. `$( … )` text anywhere else is never expanded, so it is judged
+    /// as written.
+    BeforeShell {
+        provenance: &'a FrontmatterProvenance,
+        provisional: &'a HashSet<String>,
+    },
+    /// The post-shell pass when the caller owns that verdict: problems on any
+    /// value still holding `$( … )` or `{{ … }}` text are left to the caller.
+    CallerOwned,
+    /// The post-shell pass compose owns: no later stage resolves frontmatter,
+    /// so every problem is final.
+    Final,
+}
+
+impl PendingDeferral<'_> {
+    /// Whether problems on top-level `key`, holding `value`, wait for a later
+    /// stage.
+    fn defers(&self, key: &str, value: Option<&serde_json::Value>, data: &DataPaths) -> bool {
+        match self {
+            Self::BeforeShell { provenance, provisional } => {
+                provisional.contains(key)
+                    || provenance.is_authored_shell_candidate(key)
+                    || value.is_some_and(|value| {
+                        let authored =
+                            data.authored_view(&mut vec![ValuePathSegment::Key(key.to_string())], value);
+                        holds_template_syntax(&authored)
+                    })
+            }
+            Self::CallerOwned => value_pending_composition(key, value, data),
+            Self::Final => false,
+        }
+    }
+
+    /// Top-level keys of `markdown` whose value waits for a later stage, beyond
+    /// those [`build_validation_instance`] finds by their text.
+    fn later_resolved_keys(&self, markdown: &Markdown, data: &DataPaths) -> Vec<String> {
+        markdown
+            .frontmatter()
+            .as_map()
+            .iter()
+            .filter(|(key, value)| self.defers(key, Some(value), data))
+            .map(|(key, _)| key.clone())
+            .collect()
+    }
+}
 
 /// Single-pass convenience wrapper used by this module's tests.
 #[cfg(test)]
@@ -59,12 +116,15 @@ pub(crate) fn run(markdown: &mut Markdown, options: &crate::markdown::compose::C
     projection.install(markdown);
     let consumer = source_path(markdown, options);
     let mut report = ComposeReport::new();
+    let provenance = FrontmatterProvenance::all_authored(markdown.frontmatter());
+    let provisional = HashSet::new();
     run_with_registry(
         markdown,
         options,
         &prepared,
         &projection,
         &data,
+        PendingDeferral::BeforeShell { provenance: &provenance, provisional: &provisional },
         &consumer,
         &mut report,
     )
@@ -231,12 +291,14 @@ pub(crate) fn prepare_schemas(
 /// frontmatter interpolation. `projection` owns launch-resolved caller values;
 /// this stage verifies their selected file mode is still stable before it
 /// mutates frontmatter for validation.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn run_with_registry(
     markdown: &mut Markdown,
     options: &crate::markdown::compose::ComposeRequest,
     prepared: &PreparedSchemas,
     projection: &CallerProjection,
     data: &DataPaths,
+    deferral: PendingDeferral<'_>,
     consumer: &Path,
     compose_report: &mut ComposeReport,
 ) -> MarkdownResult<()> {
@@ -282,7 +344,8 @@ pub(crate) fn run_with_registry(
         // Coerce schema-recognized scalars to their declared types and write the
         // coerced top-level properties back, so real types flow to every later
         // stage and into the composed output.
-        let (instance, composition_pending) = build_validation_instance(markdown, options, data);
+        let (instance, mut composition_pending) = build_validation_instance(markdown, options, data);
+        composition_pending.extend(deferral.later_resolved_keys(markdown, data));
         let outcome =
             coerce_frontmatter_with_pending(&effective.json_schema, &instance, &composition_pending);
         if outcome.changed
@@ -330,25 +393,13 @@ pub(crate) fn run_with_registry(
         compose_report.add_schema_advisory(advisory, consumer);
     }
 
-    // Defer problems whose value will be re-resolved later in composition. The
-    // compose-time validator runs after template interpolation but BEFORE shell
-    // expansion, so values that depend on `$(...)` expressions still hold their
-    // literal form here, and values whose `{{ ... }}` template could not resolve
-    // yet (because it transitively references such a `$(...)` value) still hold
-    // the unresolved template. The downstream consumer (e.g. claudine's
-    // `prepare_*_with_schema`) re-validates the post-shell effective frontmatter
-    // and reports any residual problems. See the rationale at
-    // `compose::run::compose` where this stage is invoked.
-    //
-    // Deferral is only sound when shell expansion will actually run. When
-    // `FrontmatterShellExpansion` is disabled, no later stage expands or
-    // re-validates these pending values, so deferring would silently accept a
-    // schema violation. In that case every problem is final and must be
-    // reported here.
-    // Deferral is sound when a later stage will expand and re-validate the
-    // `$(...)` value: either this pass runs frontmatter shell expansion, or the
-    // caller is a discovery pass that strips it but promises a terminal compose
-    // pass will re-validate (`defer_shell_pending_schema_problems`).
+    // Defer only the problems on values a later stage resolves; `deferral`
+    // names them for this pass (see [`PendingDeferral`]). Deferral is sound
+    // only when shell expansion will actually run: either this pass runs
+    // frontmatter shell expansion, or the caller is a discovery pass that
+    // strips it but promises a terminal compose pass will re-validate
+    // (`defer_shell_pending_schema_problems`). Otherwise nothing later expands
+    // or re-validates these values, and every problem is final here.
     let defer_shell_pending = options.is_enabled(ComposeOperation::FrontmatterShellExpansion)
         || options.defer_shell_pending_schema_problems;
     let fm_map = markdown.frontmatter().as_map();
@@ -382,7 +433,7 @@ pub(crate) fn run_with_registry(
             let Some(name) = top_level_pointer_segment(&p.path) else {
                 return true;
             };
-            !value_pending_composition(&name, fm_map.get(&name), data)
+            !deferral.defers(&name, fm_map.get(&name), data)
         })
         .cloned()
         .collect();
@@ -410,7 +461,8 @@ pub(crate) fn run_with_registry(
     // `options.exclude_keys` stay outside the write-back; pending keys are
     // skipped the same way.
     if let Some(effective) = effective.as_ref() {
-        let (instance, composition_pending) = build_validation_instance(markdown, options, data);
+        let (instance, mut composition_pending) = build_validation_instance(markdown, options, data);
+        composition_pending.extend(deferral.later_resolved_keys(markdown, data));
         let outcome = effective.normalize_frontmatter(&instance, &composition_pending);
         if outcome.changed
             && let serde_json::Value::Object(rewritten) = outcome.value
@@ -439,11 +491,11 @@ pub(crate) fn run_with_registry(
 /// Judges the values a frontmatter shell result suffix (`::ok`,
 /// `::exit-code`, `::result`) produced, after shell expansion.
 ///
-/// The first pass deferred these keys while they still held `$( … )`, and a
-/// typed value is a new kind of value no downstream owner expects to coerce,
-/// so this pass reports a problem on any of `keys` as final. Unsuffixed shell
-/// values keep their existing contract: their stdout text is left to the
-/// downstream schema owner. Nothing is written back.
+/// Runs only when the caller owns the post-shell verdict: the first pass
+/// deferred these keys while they still held `$( … )`, and a typed value is a
+/// new kind of value that caller does not expect to coerce, so this pass
+/// reports a problem on any of `keys` as final. Unsuffixed stdout text is left
+/// to that caller. Nothing is written back.
 ///
 /// ## Errors
 ///
@@ -1427,6 +1479,19 @@ fn value_pending_composition(
     let Some(value) = value else { return false };
     let authored = data.authored_view(&mut vec![ValuePathSegment::Key(key.to_string())], value);
     holds_pending_syntax(&authored)
+}
+
+/// Whether `value` holds an unresolved `{{ … }}` template; a whole-leaf
+/// literal token is data.
+fn holds_template_syntax(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::String(s) => {
+            s.contains("{{") && crate::markdown::literal_token::holds_pending_syntax(s)
+        }
+        serde_json::Value::Array(items) => items.iter().any(holds_template_syntax),
+        serde_json::Value::Object(map) => map.values().any(holds_template_syntax),
+        _ => false,
+    }
 }
 
 fn holds_pending_syntax(value: &serde_json::Value) -> bool {

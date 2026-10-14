@@ -145,11 +145,9 @@ impl PaneCompose {
 title: orphan teardown
 model: llamacpp/test-model
 failure:
-  stack:
-    - action: {append_line: ["events.log", "failure"]}
+  - {append_line: ["events.log", "failure"]}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Prompt body
 "#,
@@ -221,15 +219,12 @@ exit 1
                 r#"---
 title: terminal grace
 failure:
-  stack:
-    - action:
-        - append_line: ["events.log", "failure-started"]
-        - shell: |
-            trap '' INT; {}
-        - append_line: ["events.log", "failure-done"]
+  - append_line: ["events.log", "failure-started"]
+  - shell: |
+      trap '' INT; {}
+  - append_line: ["events.log", "failure-done"]
 finalize:
-  stack:
-    - action: {{append_line: ["events.log", "finalize"]}}
+  - {{append_line: ["events.log", "finalize"]}}
 ---
 Prompt body
 "#,

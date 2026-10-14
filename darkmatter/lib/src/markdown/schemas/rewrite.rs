@@ -224,8 +224,8 @@ fn rewrite_object(
     }
 }
 
-/// Rewrites a single property's value, descending through nullable wrappers,
-/// property-level unions, inline objects, and arrays to reach any
+/// Rewrites a single property's value (or array item), descending through
+/// nullable wrappers, unions, inline objects, and arrays to reach any
 /// eager-file markers.
 ///
 /// Returns `Some(new_value)` when the value (or a nested sub-value) was
@@ -247,9 +247,9 @@ fn rewrite_property(
     // `coerce::coerce_object`'s unwrap at the same position.
     let effective = unwrap_nullable_arm(prop_schema).unwrap_or(prop_schema);
 
-    // Property-level union (two or more genuine alternative arms). Rewrite
-    // only when exactly one validating arm carries the eager-file marker
-    // (Decision #9: "no guessing").
+    // Union (property-level, item-level, or an arm's own sentinel wrapper).
+    // Rewrite only through the one validating arm that carries the eager-file
+    // marker (Decision #9: "no guessing").
     if let Some(arms) = effective.get("anyOf").and_then(Value::as_array) {
         return rewrite_property_union(arms, value, base_dir, fallback, request_context);
     }
@@ -277,14 +277,18 @@ fn rewrite_property(
     None
 }
 
-/// Property-union pass: rewrite only when exactly one validating arm carries
-/// the eager-file marker. Zero or multiple matching arms leave the value
-/// untouched (Decision #9: "no guessing").
+/// Union pass, shared by property unions and union items (`items.anyOf`):
+/// rewrite only through the one validating arm that contains an eager-file
+/// marker. Zero or multiple such arms leave the value untouched (Decision #9:
+/// "no guessing"); an arm that merely scores closest gains no file effects.
 ///
-/// An arm "matches" when (a) its compiled schema carries
-/// `format: darkmatter-file` and (b) a validator built from the arm accepts
-/// the value. Arms without the eager marker are never counted, even if they
-/// validate, because they do not identify the value as eager-file-typed.
+/// An arm is eligible when its compiled fragment contains
+/// `format: darkmatter-file` anywhere: a scalar `file(eager)` arm, the
+/// optional `[{const: ""}, file(eager)]` sentinel wrapper, or an object arm
+/// with a nested eager field. Arms without the marker are never counted, even
+/// if they validate, because they do not identify the value as
+/// eager-file-typed. The eligible arm is then walked by [`rewrite_property`],
+/// so object arms rewrite only their own eager fields.
 fn rewrite_property_union(
     arms: &[Value],
     value: &Value,
@@ -292,13 +296,11 @@ fn rewrite_property_union(
     fallback: Option<&Path>,
     request_context: &biscuit_file::FileResolutionContext,
 ) -> Option<Value> {
-    let mut eager_matches = 0;
-    let mut rewritten: Option<Value> = None;
+    let mut selected: Option<&Value> = None;
     for arm in arms {
-        if !is_eager_file_fragment(arm) {
+        if !contains_eager_file_fragment(arm) {
             continue;
         }
-        // Anchor the validator so the eager-file format validator resolves
         // Preserve the production validator's request-scoped candidate plan
         // during arm acceptance; do not rebuild from ambient CWD.
         let Ok(validator) = validate::build_validator_in_context(
@@ -310,18 +312,14 @@ fn rewrite_property_union(
             continue;
         };
         if validator.is_valid(value) {
-            eager_matches += 1;
-            if eager_matches == 1 {
-                rewritten = rewrite_file_value(value, base_dir, fallback, request_context);
-            } else {
-                // Ambiguous: more than one validating eager-file arm. Leave
-                // the value verbatim (Decision #9).
+            if selected.is_some() {
+                // Ambiguous: more than one validating eager-file arm.
                 return None;
             }
+            selected = Some(arm);
         }
     }
-    // Exactly one matching arm: commit its rewrite (if it produced one).
-    (eager_matches == 1).then_some(rewritten).flatten()
+    rewrite_property(selected?, value, base_dir, fallback, request_context)
 }
 
 /// Rewrites a single present eager-file value to its document-relative resolved
@@ -382,7 +380,8 @@ fn rewrite_file_value(
 
 /// Recurses into each item of an array value via the `items` fragment. The
 /// fragment may itself be an eager-file marker (for `file(eager)[]`), an
-/// inline object, or any other recursable shape `rewrite_property` handles.
+/// inline object, an `anyOf` of union arms (for `U[]`, decided per item), or
+/// any other recursable shape `rewrite_property` handles.
 fn rewrite_array_items(
     items_schema: &Value,
     value: &Value,
@@ -441,6 +440,17 @@ fn rewrite_inline_object(
 /// #1). The lazy `darkmatter-file-reference` marker returns `false`.
 fn is_eager_file_fragment(schema: &Value) -> bool {
     schema.get("format").and_then(Value::as_str) == Some(DARKMATTER_FILE_FORMAT)
+}
+
+/// Whether the eager marker appears anywhere inside a compiled fragment.
+fn contains_eager_file_fragment(schema: &Value) -> bool {
+    match schema {
+        Value::Object(map) => {
+            is_eager_file_fragment(schema) || map.values().any(contains_eager_file_fragment)
+        }
+        Value::Array(values) => values.iter().any(contains_eager_file_fragment),
+        _ => false,
+    }
 }
 
 #[cfg(test)]

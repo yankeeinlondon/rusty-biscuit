@@ -1,21 +1,35 @@
 //! macOS Say TTS provider.
 //!
 //! Uses the built-in `say` command on macOS for text-to-speech.
+//!
+//! Audio is cached by voice and words-per-minute rate. With no requested voice
+//! or gender, the system voice comes from `system_defaults`; a request whose
+//! voice or rate stays unresolved is synthesized fresh and never cached, so
+//! `prepare` does nothing for it. The system rate is not read yet, so this
+//! holds for every normal-speed request.
 
+mod system_defaults;
+
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use tokio::io::AsyncWriteExt;
 use tracing::{debug, trace};
 
+use crate::audio_cache::CacheKey;
 use crate::errors::TtsError;
 use crate::gender_inference::infer_gender;
+use crate::prepared::{ResolvedSynthesis, dry_run_enabled, publish, staging_file};
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
 use crate::types::{
     Gender, HostTtsProvider, Language, SpeakResult, SpeedLevel, TtsConfig, TtsProvider, Voice,
     VoiceQuality,
 };
+use system_defaults::{OsSpeechDefaults, SystemSpeechDefaults};
 
-/// Default speaking rate for macOS `say` command in words per minute.
+/// The rate, in words per minute, an explicit speed multiplier scales.
+///
+/// Not the system's current rate, which `say` reads from user settings.
 const DEFAULT_RATE_WPM: f32 = 175.0;
 
 /// macOS Say TTS provider.
@@ -28,6 +42,13 @@ const DEFAULT_RATE_WPM: f32 = 175.0;
 /// Speech is synthesized to PCM WAV and played through Playa so volume is
 /// effective without changing the selected voice. Without `playa`, macOS
 /// `afplay -v` provides volume-controlled playback.
+///
+/// ## Caching
+///
+/// Audio is reused through the shared audio cache only when both the voice
+/// and the words-per-minute rate are known: requested, implied by gender or
+/// speed, or read from the system's effective settings. Otherwise `say`
+/// picks the missing setting and the audio is synthesized afresh each time.
 ///
 /// ## Examples
 ///
@@ -229,32 +250,97 @@ impl SayProvider {
         }
     }
 
-    #[cfg(feature = "playa")]
-    fn cache_path(text: &str, config: &TtsConfig) -> std::path::PathBuf {
-        let voice = Self::resolve_voice(config).unwrap_or("system-default");
-        let rate = Self::resolve_rate(config.speed)
-            .map_or_else(|| "system-default".into(), |rate| rate.to_string());
-        crate::audio_cache::CacheKey::new("say", format!("{voice};rate={rate}"), text, "wav")
-            .cache_path()
+    /// Resolve the voice and rate every entry point synthesizes with.
+    ///
+    /// A requested voice, then the gender's voice, then the system voice; an
+    /// explicit speed's rate, then the system rate. The system voice is only
+    /// looked up once the rate is known, since an unknown rate leaves the
+    /// request unresolved either way.
+    async fn resolve(config: &TtsConfig, defaults: &impl SystemSpeechDefaults) -> Resolution {
+        let rate_wpm = match Self::resolve_rate(config.speed) {
+            Some(rate) => Some(rate),
+            None => defaults.rate_wpm().await,
+        };
+        let voice = match Self::resolve_voice(config) {
+            Some(voice) => Some(voice.to_owned()),
+            None if rate_wpm.is_some() => defaults.voice().await,
+            None => None,
+        };
+        Resolution { voice, rate_wpm }
     }
 
-    async fn synthesize(text: &str, config: &TtsConfig) -> Result<tempfile::TempPath, TtsError> {
-        let path = tempfile::Builder::new()
-            .suffix(".wav")
-            .tempfile()?
-            .into_temp_path();
+    /// The shared-cache identity; the rate is part of it because `say` bakes
+    /// it into the audio.
+    fn cache_key(text: &str, voice: &str, rate_wpm: u32) -> CacheKey {
+        CacheKey::new("say", format!("{voice};rate={rate_wpm}"), text, "wav")
+    }
+
+    /// The cache entry for a fully resolved request, if it is published.
+    #[cfg_attr(not(feature = "playa"), allow(dead_code))]
+    fn cached_path(text: &str, resolution: &Resolution) -> Option<PathBuf> {
+        let (voice, rate_wpm) = resolution.concrete()?;
+        let path = Self::cache_key(text, voice, rate_wpm).cache_path();
+        path.is_file().then_some(path)
+    }
+
+    /// Playback settings for Say audio, whose rate is already baked in.
+    #[cfg_attr(not(feature = "playa"), allow(dead_code))]
+    fn playback_config(config: &TtsConfig) -> TtsConfig {
+        let mut playback = config.clone();
+        playback.speed = SpeedLevel::Normal;
+        playback
+    }
+
+    /// Synthesize `resolution`, through the shared cache when it is fully
+    /// resolved.
+    ///
+    /// A cache miss writes a staging file and publishes it atomically; a
+    /// failure or a dropped future kills the child and deletes the staging
+    /// file, so no partial entry is published. An unresolved request passes
+    /// only the settings it knows, so `say` keeps choosing the rest.
+    async fn synthesize(text: &str, resolution: &Resolution) -> Result<Synthesized, TtsError> {
+        let Some((voice, rate_wpm)) = resolution.concrete() else {
+            let output = tempfile::Builder::new()
+                .prefix(".biscuit-speaks-uncached-")
+                .suffix(".wav")
+                .tempfile()
+                .map_err(|source| TtsError::TempFileError { source })?
+                .into_temp_path();
+            Self::run_say(text, &output, resolution.voice.as_deref(), resolution.rate_wpm).await?;
+            return Ok(Synthesized::Uncached(output));
+        };
+
+        let cache_path = Self::cache_key(text, voice, rate_wpm).cache_path();
+        if cache_path.is_file() {
+            debug!(cache_path = %cache_path.display(), "Cache hit for Say");
+            return Ok(Synthesized::Cached { path: cache_path, hit: true });
+        }
+        debug!(cache_path = %cache_path.display(), "Cache miss for Say, generating");
+        let staged = staging_file(&cache_path)?;
+        Self::run_say(text, &staged, Some(voice), Some(rate_wpm)).await?;
+        publish(staged, &cache_path)?;
+        Ok(Synthesized::Cached { path: cache_path, hit: false })
+    }
+
+    /// Run `say` into `output`, feeding `text` on stdin.
+    async fn run_say(
+        text: &str,
+        output_path: &Path,
+        voice: Option<&str>,
+        rate_wpm: Option<u32>,
+    ) -> Result<(), TtsError> {
         let mut cmd = tokio::process::Command::new("say");
 
         cmd.arg("-o")
-            .arg(&path)
+            .arg(output_path)
             .arg("--file-format=WAVE")
             .arg("--data-format=LEI16");
 
-        if let Some(voice) = Self::resolve_voice(config) {
+        if let Some(voice) = voice {
             cmd.arg("-v").arg(voice);
         }
 
-        if let Some(rate) = Self::resolve_rate(config.speed) {
+        if let Some(rate) = rate_wpm {
             cmd.arg("-r").arg(rate.to_string());
         }
 
@@ -287,41 +373,43 @@ impl SayProvider {
             .await
             .map_err(|e| TtsError::IoError { source: e })?;
 
-        if output.status.success() {
-            Ok(path)
-        } else {
-            Err(TtsError::ProcessFailed {
+        if !output.status.success() {
+            return Err(TtsError::ProcessFailed {
                 provider: Self::PROVIDER_NAME.into(),
                 stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-            })
+            });
         }
+        // An empty file would otherwise be published and reused as speech.
+        if std::fs::metadata(output_path).map_or(true, |metadata| metadata.len() == 0) {
+            return Err(TtsError::ProcessFailed {
+                provider: Self::PROVIDER_NAME.into(),
+                stderr: "say produced no audio".into(),
+            });
+        }
+        Ok(())
     }
 
+    /// Play synthesized audio at the volume `config` requests.
     async fn play_report(
-        text: &str,
+        audio: &Path,
         config: &TtsConfig,
     ) -> Result<crate::types::SpeakPlaybackReport, TtsError> {
         #[cfg(feature = "playa")]
         {
-            let path = Self::synthesize(text, config).await?;
-            let mut playback_config = config.clone();
-            // The requested rate is already baked into the synthesized audio.
-            playback_config.speed = SpeedLevel::Normal;
             crate::playback::play_audio_file_with_report(
-                &path,
+                audio,
                 crate::types::AudioFormat::Wav,
-                &playback_config,
+                &Self::playback_config(config),
             )
             .await
         }
         #[cfg(not(feature = "playa"))]
         {
-            let path = Self::synthesize(text, config).await?;
             let started = std::time::Instant::now();
             let output = tokio::process::Command::new("afplay")
                 .arg("-v")
                 .arg(config.volume.value().to_string())
-                .arg(&path)
+                .arg(audio)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::piped())
@@ -343,15 +431,169 @@ impl SayProvider {
         }
     }
 
+    /// Prepare the cache entry and report the settings it was prepared with.
+    ///
+    /// `None` when there is nothing to prepare: dry run, or a system voice or
+    /// rate that cannot be resolved.
+    pub(crate) async fn prepare_resolved(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<Option<ResolvedSynthesis>, TtsError> {
+        Self::prepare_with(text, config, &OsSpeechDefaults).await
+    }
+
+    async fn prepare_with(
+        text: &str,
+        config: &TtsConfig,
+        defaults: &impl SystemSpeechDefaults,
+    ) -> Result<Option<ResolvedSynthesis>, TtsError> {
+        if dry_run_enabled() {
+            return Ok(None);
+        }
+        let resolution = Self::resolve(config, defaults).await;
+        let Some((voice, rate_wpm)) = resolution.concrete() else {
+            return Ok(None);
+        };
+        Self::synthesize(text, &resolution).await?;
+        Ok(Some(ResolvedSynthesis::Say {
+            voice: voice.to_owned(),
+            rate_wpm,
+        }))
+    }
+
+    /// Play `resolution` at `config`'s volume, through the shared cache when
+    /// it is fully resolved.
+    pub(crate) async fn speak_resolved(
+        text: &str,
+        resolution: &Resolution,
+        config: &TtsConfig,
+    ) -> Result<(), TtsError> {
+        let audio = Self::synthesize(text, resolution).await?;
+        Self::play_report(audio.path(), config).await.map(|_| ())
+    }
+
+    /// [`Self::speak_resolved`], reporting the voice and cache entry played.
+    ///
+    /// Without a resolved voice, the best listed match is named and spoken
+    /// with, so the metadata names the voice actually heard.
+    pub(crate) async fn speak_resolved_with_result(
+        &self,
+        text: &str,
+        mut resolution: Resolution,
+        config: &TtsConfig,
+    ) -> Result<SpeakResult, TtsError> {
+        let listed = self.list_voices().await;
+        let voice = match &resolution.voice {
+            Some(name) => listed
+                .ok()
+                .and_then(|voices| voices.into_iter().find(|voice| voice.name == *name))
+                .unwrap_or_else(|| Voice::new(name.clone()).with_language(Language::English)),
+            None => {
+                let selected = Self::select_best_voice(&listed?, config).ok_or_else(|| {
+                    TtsError::VoiceEnumerationFailed {
+                        provider: Self::PROVIDER_NAME.into(),
+                        message: "No matching voice found for the given constraints".into(),
+                    }
+                })?;
+                resolution.voice = Some(selected.name.clone());
+                selected
+            }
+        };
+
+        let audio = Self::synthesize(text, &resolution).await?;
+        let playback = Self::play_report(audio.path(), config).await?;
+        let result = SpeakResult::new(TtsProvider::Host(HostTtsProvider::Say), voice)
+            .with_codec("wav")
+            .with_playback(playback);
+        Ok(match audio {
+            Synthesized::Cached { path, hit } => result.with_audio_file(path).with_cache_hit(hit),
+            Synthesized::Uncached(_) => result,
+        })
+    }
+
+    /// A ready detached job for `resolution`, synthesizing it first on a miss.
+    #[cfg(feature = "playa")]
+    pub(crate) async fn resolved_job(
+        text: &str,
+        resolution: &Resolution,
+        config: &TtsConfig,
+    ) -> Result<playa::detached::SpoolJob, TtsError> {
+        let path = match Self::synthesize(text, resolution).await? {
+            Synthesized::Cached { path, .. } => path,
+            // Playa may delete only spool-owned files, so this uncached audio
+            // outlives the job.
+            Synthesized::Uncached(path) => path.keep().map_err(|error| TtsError::TempFileError {
+                source: error.error,
+            })?,
+        };
+        Ok(crate::playa_bridge::file_job(path, &Self::playback_config(config)))
+    }
+
+    /// A ready detached job for a fully resolved request whose file is cached.
+    #[cfg(feature = "playa")]
+    pub(crate) fn cached_resolved_job(
+        text: &str,
+        resolution: &Resolution,
+        config: &TtsConfig,
+    ) -> Option<playa::detached::SpoolJob> {
+        Self::cached_path(text, resolution)
+            .map(|path| crate::playa_bridge::file_job(path, &Self::playback_config(config)))
+    }
+
     /// Check if the `say` binary exists on the system.
     async fn say_binary_exists() -> bool {
         which::which("say").is_ok()
     }
 }
 
+/// The voice and rate a request resolved to; `None` is unresolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Resolution {
+    voice: Option<String>,
+    rate_wpm: Option<u32>,
+}
+
+impl Resolution {
+    /// The settings a preparation retained, both known.
+    pub(crate) fn retained(voice: &str, rate_wpm: u32) -> Self {
+        Self {
+            voice: Some(voice.to_owned()),
+            rate_wpm: Some(rate_wpm),
+        }
+    }
+
+    /// Both settings, when both are known: only then may the audio be cached.
+    fn concrete(&self) -> Option<(&str, u32)> {
+        Some((self.voice.as_deref()?, self.rate_wpm?))
+    }
+}
+
+/// Audio a Say entry point plays.
+enum Synthesized {
+    /// A shared cache entry, and whether it already existed.
+    Cached { path: PathBuf, hit: bool },
+    /// Audio for an unresolved request, deleted when dropped.
+    Uncached(tempfile::TempPath),
+}
+
+impl Synthesized {
+    fn path(&self) -> &Path {
+        match self {
+            Self::Cached { path, .. } => path,
+            Self::Uncached(path) => path,
+        }
+    }
+}
+
 impl TtsExecutor for SayProvider {
     async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
-        Self::play_report(text, config).await.map(|_| ())
+        let resolution = Self::resolve(config, &OsSpeechDefaults).await;
+        Self::speak_resolved(text, &resolution, config).await
+    }
+
+    async fn prepare(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
+        self.prepare_resolved(text, config).await.map(|_| ())
     }
 
     /// Check if the Say provider is ready.
@@ -376,45 +618,8 @@ impl TtsExecutor for SayProvider {
         text: &str,
         config: &TtsConfig,
     ) -> Result<SpeakResult, TtsError> {
-        // If a specific voice was requested, use it directly
-        if let Some(voice_name) = &config.requested_voice {
-            let playback = Self::play_report(text, config).await?;
-
-            // Try to find the voice in the list for full metadata
-            if let Ok(voices) = self.list_voices().await
-                && let Some(voice) = voices.iter().find(|v| v.name == *voice_name)
-            {
-                return Ok(
-                    SpeakResult::new(TtsProvider::Host(HostTtsProvider::Say), voice.clone())
-                        .with_playback(playback),
-                );
-            }
-
-            // Fallback if voice not found in list
-            return Ok(SpeakResult::new(
-                TtsProvider::Host(HostTtsProvider::Say),
-                Voice::new(voice_name.clone()).with_language(Language::English),
-            )
-            .with_playback(playback));
-        }
-
-        // No specific voice requested - select the best one based on constraints
-        let voices = self.list_voices().await?;
-        let selected_voice = Self::select_best_voice(&voices, config).ok_or_else(|| {
-            TtsError::VoiceEnumerationFailed {
-                provider: Self::PROVIDER_NAME.into(),
-                message: "No matching voice found for the given constraints".into(),
-            }
-        })?;
-
-        // Update config to use the selected voice
-        let mut config_with_voice = config.clone();
-        config_with_voice.requested_voice = Some(selected_voice.name.clone());
-
-        let playback = Self::play_report(text, &config_with_voice).await?;
-
-        Ok(SpeakResult::new(TtsProvider::Host(HostTtsProvider::Say), selected_voice)
-            .with_playback(playback))
+        let resolution = Self::resolve(config, &OsSpeechDefaults).await;
+        self.speak_resolved_with_result(text, resolution, config).await
     }
 
     #[cfg(feature = "playa")]
@@ -423,24 +628,8 @@ impl TtsExecutor for SayProvider {
         text: &str,
         config: &TtsConfig,
     ) -> Result<playa::detached::SpoolJob, TtsError> {
-        let path = Self::synthesize(text, config).await?;
-        let mut playback_config = config.clone();
-        playback_config.speed = SpeedLevel::Normal;
-        let cache = if Self::resolve_voice(config).is_some() && Self::resolve_rate(config.speed).is_some() {
-            Self::cache_path(text, config)
-        } else {
-            // Unknown system voice/rate must not let another preparation replace this audio.
-            crate::audio_cache::CacheKey::new("say", path.to_string_lossy().as_ref(), text, "wav")
-                .cache_path()
-        };
-        let audio = tokio::fs::read(&path).await?;
-        crate::audio_cache::write_atomic(&cache, &audio).map_err(|error| {
-            TtsError::ProviderFailed {
-                provider: Self::PROVIDER_NAME.into(),
-                message: error.to_string(),
-            }
-        })?;
-        Ok(crate::playa_bridge::file_job(cache, &playback_config))
+        let resolution = Self::resolve(config, &OsSpeechDefaults).await;
+        Self::resolved_job(text, &resolution, config).await
     }
 
     #[cfg(feature = "playa")]
@@ -449,16 +638,8 @@ impl TtsExecutor for SayProvider {
         text: &str,
         config: &TtsConfig,
     ) -> Result<Option<playa::detached::SpoolJob>, TtsError> {
-        // System voice and rate defaults can change independently of this config.
-        if Self::resolve_voice(config).is_none() || Self::resolve_rate(config.speed).is_none() {
-            return Ok(None);
-        }
-        let path = Self::cache_path(text, config);
-        let mut playback_config = config.clone();
-        playback_config.speed = SpeedLevel::Normal;
-        Ok(path
-            .is_file()
-            .then(|| crate::playa_bridge::file_job(path, &playback_config)))
+        let resolution = Self::resolve(config, &OsSpeechDefaults).await;
+        Ok(Self::cached_resolved_job(text, &resolution, config))
     }
 }
 
@@ -887,6 +1068,200 @@ mod tests {
     }
 
     // ========================================================================
+    // Resolution and the shared cache, with pinned system defaults
+    // ========================================================================
+
+    use system_defaults::FakeSpeechDefaults;
+
+    fn resolution(voice: &str, rate_wpm: u32) -> Resolution {
+        Resolution {
+            voice: Some(voice.into()),
+            rate_wpm: Some(rate_wpm),
+        }
+    }
+
+    #[tokio::test]
+    async fn resolution_keeps_requested_and_gender_voices_and_reads_only_missing_defaults() {
+        let cases = [
+            (TtsConfig::new().with_voice("Victoria").with_speed(SpeedLevel::Fast), Some("Victoria"), Some(219), 0),
+            (TtsConfig::new().with_gender(Gender::Male), Some("Alex"), Some(175), 1),
+            (TtsConfig::new().with_gender(Gender::Female), Some("Samantha"), Some(175), 1),
+            (TtsConfig::new(), Some("Ava (Premium)"), Some(175), 2),
+            (TtsConfig::new().with_speed(SpeedLevel::Slow), Some("Ava (Premium)"), Some(131), 1),
+        ];
+        for (config, voice, rate_wpm, lookups) in cases {
+            let defaults = FakeSpeechDefaults::new(Some("Ava (Premium)"), Some(175));
+            let resolved = SayProvider::resolve(&config, &defaults).await;
+            assert_eq!(resolved.voice.as_deref(), voice, "{config:?}");
+            assert_eq!(resolved.rate_wpm, rate_wpm, "{config:?}");
+            assert_eq!(defaults.lookups(), lookups, "{config:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unresolved_system_setting_leaves_the_request_unresolved() {
+        let no_rate = FakeSpeechDefaults::new(Some("Ava (Premium)"), None);
+        let resolved = SayProvider::resolve(&TtsConfig::new(), &no_rate).await;
+        assert_eq!(resolved, Resolution { voice: None, rate_wpm: None });
+        assert_eq!(no_rate.lookups(), 1, "the voice is not looked up without a rate");
+        let male = SayProvider::resolve(&TtsConfig::new().with_gender(Gender::Male), &no_rate).await;
+        assert_eq!(male.concrete(), None);
+
+        let no_voice = FakeSpeechDefaults::new(None, Some(175));
+        let resolved = SayProvider::resolve(&TtsConfig::new().with_speed(SpeedLevel::Fast), &no_voice).await;
+        assert_eq!(resolved, Resolution { voice: None, rate_wpm: Some(219) });
+        assert_eq!(resolved.concrete(), None);
+    }
+
+    #[test]
+    fn the_cache_key_keeps_its_existing_spelling_and_ignores_volume() {
+        let text = "This is a test message.";
+        assert_eq!(
+            SayProvider::cache_key(text, "Alex", 219).cache_path(),
+            CacheKey::new("say", "Alex;rate=219", text, "wav").cache_path()
+        );
+        assert_ne!(
+            SayProvider::cache_key(text, "Alex", 219).cache_path(),
+            SayProvider::cache_key(text, "Alex", 175).cache_path()
+        );
+        assert_ne!(
+            SayProvider::cache_key(text, "Alex", 175).cache_path(),
+            SayProvider::cache_key(text, "Samantha", 175).cache_path()
+        );
+    }
+
+    /// A `say` on a private `PATH` that writes fixed bytes to its `-o` file
+    /// and logs each argument list, with the OS temporary directory (and so
+    /// the shared audio cache) inside the same fixture.
+    #[cfg(unix)]
+    struct FakeSay {
+        root: tempfile::TempDir,
+        _env: [test_toolkit::EnvGuard; 4],
+    }
+
+    #[cfg(unix)]
+    impl FakeSay {
+        fn install() -> Self {
+            Self::writing("fake say audio")
+        }
+
+        /// A fake that writes `audio` (possibly nothing) as its output.
+        fn writing(audio: &str) -> Self {
+            use std::os::unix::fs::PermissionsExt;
+            let root = tempfile::tempdir().unwrap();
+            let bin = root.path().join("bin");
+            let tmp = root.path().join("tmp");
+            std::fs::create_dir(&bin).unwrap();
+            std::fs::create_dir(&tmp).unwrap();
+            let log = root.path().join("say.log");
+            let script = format!(
+                "#!/bin/sh\necho \"$*\" >> '{}'\n/bin/cat > /dev/null\n\
+                 while [ \"$#\" -gt 0 ]; do if [ \"$1\" = -o ]; then printf '{audio}' > \"$2\"; fi; shift; done\n",
+                log.display()
+            );
+            std::fs::write(bin.join("say"), script).unwrap();
+            std::fs::set_permissions(bin.join("say"), std::fs::Permissions::from_mode(0o755)).unwrap();
+            let env = [
+                test_toolkit::EnvGuard::set_safe("PATH", &bin),
+                test_toolkit::EnvGuard::set_safe("TMPDIR", &tmp),
+                test_toolkit::EnvGuard::remove_safe("PLAYA_DRY_RUN"),
+                test_toolkit::EnvGuard::remove_safe("TTS_PROVIDER"),
+            ];
+            Self { root, _env: env }
+        }
+
+        fn syntheses(&self) -> Vec<String> {
+            std::fs::read_to_string(self.root.path().join("say.log"))
+                .unwrap_or_default()
+                .lines()
+                .map(str::to_owned)
+                .collect()
+        }
+    }
+
+    /// With the system voice and rate both resolved, normal speed prepares
+    /// once, retains the resolved pair, and a fresh lookup finds the file. A
+    /// changed default makes the fresh lookup miss while the retained pair
+    /// still names the prepared file.
+    #[cfg(unix)]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn resolved_system_defaults_prepare_once_and_a_changed_default_misses() {
+        let say = FakeSay::install();
+        let defaults = FakeSpeechDefaults::new(Some("Ava (Premium)"), Some(175));
+        let config = TtsConfig::new();
+        let text = "This is a test message: pinned defaults";
+
+        let mut prepared = None;
+        for _ in 0..2 {
+            prepared = SayProvider::prepare_with(text, &config, &defaults).await.unwrap();
+        }
+        let expected = ResolvedSynthesis::Say { voice: "Ava (Premium)".into(), rate_wpm: 175 };
+        assert_eq!(prepared, Some(expected));
+        let syntheses = say.syntheses();
+        assert_eq!(syntheses.len(), 1, "{syntheses:?}");
+        assert!(syntheses[0].contains("-v Ava (Premium) -r 175"), "{syntheses:?}");
+
+        let fresh = SayProvider::resolve(&config, &defaults).await;
+        let path = SayProvider::cached_path(text, &fresh).expect("a fresh object finds the file");
+        assert_eq!(std::fs::read(&path).unwrap(), b"fake say audio");
+
+        defaults.set(Some("Samantha"), Some(175));
+        let changed = SayProvider::resolve(&config, &defaults).await;
+        assert_eq!(SayProvider::cached_path(text, &changed), None);
+        assert_eq!(SayProvider::cached_path(text, &resolution("Ava (Premium)", 175)), Some(path));
+        defaults.set(Some("Ava (Premium)"), Some(200));
+        let faster = SayProvider::resolve(&config, &defaults).await;
+        assert_eq!(SayProvider::cached_path(text, &faster), None, "the rate is part of the key");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn unresolved_system_defaults_prepare_nothing() {
+        let say = FakeSay::install();
+        for defaults in [
+            FakeSpeechDefaults::new(Some("Ava (Premium)"), None),
+            FakeSpeechDefaults::new(None, Some(175)),
+            FakeSpeechDefaults::new(None, None),
+        ] {
+            let prepared = SayProvider::prepare_with("This is a test message.", &TtsConfig::new(), &defaults).await;
+            assert_eq!(prepared.unwrap(), None);
+        }
+        assert!(say.syntheses().is_empty());
+        assert_eq!(std::fs::read_dir(std::env::temp_dir()).unwrap().count(), 0);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn empty_output_is_an_error_and_is_never_published() {
+        let say = FakeSay::writing("");
+        let config = TtsConfig::new().with_voice("Samantha").with_speed(SpeedLevel::Fast);
+        let defaults = FakeSpeechDefaults::default();
+        let result = SayProvider::prepare_with("This is a test message.", &config, &defaults).await;
+        assert!(
+            matches!(&result, Err(TtsError::ProcessFailed { stderr, .. }) if stderr == "say produced no audio"),
+            "{result:?}"
+        );
+        assert_eq!(say.syntheses().len(), 1);
+        assert_eq!(std::fs::read_dir(std::env::temp_dir()).unwrap().count(), 0);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn dry_run_prepares_nothing_before_any_lookup() {
+        let say = FakeSay::install();
+        let _dry_run = test_toolkit::EnvGuard::set_safe("PLAYA_DRY_RUN", "true");
+        let defaults = FakeSpeechDefaults::new(Some("Ava (Premium)"), Some(175));
+        let prepared = SayProvider::prepare_with("This is a test message.", &TtsConfig::new(), &defaults).await;
+        assert_eq!(prepared.unwrap(), None);
+        assert_eq!(defaults.lookups(), 0);
+        assert!(say.syntheses().is_empty());
+    }
+
+    // ========================================================================
     // Integration tests - macOS only
     // ========================================================================
 
@@ -894,7 +1269,9 @@ mod tests {
     #[tokio::test]
     async fn real_say_provider_speaks_muted() {
         let config = TtsConfig::default().with_volume(crate::types::VolumeLevel::Explicit(0.0));
-        let report = SayProvider::play_report("This is a test message.", &config).await.unwrap();
+        let resolution = SayProvider::resolve(&config, &OsSpeechDefaults).await;
+        let audio = SayProvider::synthesize("This is a test message.", &resolution).await.unwrap();
+        let report = SayProvider::play_report(audio.path(), &config).await.unwrap();
         #[cfg(feature = "playa")]
         {
             assert_eq!(report.route, crate::types::SpeakPlaybackRoute::Native);

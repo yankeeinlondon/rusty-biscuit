@@ -1,42 +1,9 @@
-#[cfg_attr(test, derive(PartialEq))]
-pub(crate) enum AudioPhase {
-    Speak(String),
-    Effect(String),
-}
-
-/// Compute the ordered audio phases for a notification.
+/// Whether `name` is an embedded Playa sound effect.
 ///
-/// When both speech and effect are present:
-/// - `say` + `effect` → effect first, then speech
-/// - `say_first` + `effect` → speech first, then effect
-///
-/// When only one audio output is present, it is the sole phase.
-pub(crate) fn audio_phases(n: &LifecycleNotification) -> Vec<AudioPhase> {
-    let speech_text = n
-        .say
-        .as_deref()
-        .or(n.say_first.as_deref())
-        .filter(|s| !s.is_empty());
-    let effect_name = n.effect.as_deref().filter(|s| !s.is_empty());
-    let speech_first = n.say_first.is_some();
-
-    match (speech_text, effect_name) {
-        (Some(text), Some(effect)) if speech_first => {
-            vec![
-                AudioPhase::Speak(text.to_string()),
-                AudioPhase::Effect(effect.to_string()),
-            ]
-        }
-        (Some(text), Some(effect)) => {
-            vec![
-                AudioPhase::Effect(effect.to_string()),
-                AudioPhase::Speak(text.to_string()),
-            ]
-        }
-        (Some(text), None) => vec![AudioPhase::Speak(text.to_string())],
-        (None, Some(effect)) => vec![AudioPhase::Effect(effect.to_string())],
-        (None, None) => vec![],
-    }
+/// The parser checks literal `effect` names through this predicate, which its
+/// caller supplies, so the lift-ready parser slice names no Playa type.
+pub(super) fn is_known_effect(name: &str) -> bool {
+    playa::SoundEffect::from_name(name).is_some()
 }
 
 impl LifecycleSignal {
@@ -113,27 +80,7 @@ impl LifecycleSignal {
     }
 }
 
-pub(super) fn normalize_empty_string(field: &mut Option<String>) {
-    if let Some(s) = field {
-        if s.trim().is_empty() {
-            *field = None;
-        }
-    }
-}
-
-/// Parse a `serde_json` "unknown field" error to extract the field name
-/// and the list of expected fields.
-///
-/// Serde's message format is:
-/// `unknown field `X`, expected one of `A`, `B`, `C``
-///
-/// Returns `(Some("X"), vec!["A", "B", "C"])` on match. For any serde error
-/// that is **not** an unknown-field error (e.g. `invalid type: map, expected
-/// a sequence` when `stack:` is authored as a map instead of a list) returns
-/// `(None, vec![])` — the caller renders the raw serde message rather than a
-/// fabricated "Unknown property" diagnostic, since the "expected" token in a
-/// type-mismatch message ("expected a sequence") is unrelated to the field
-/// catalog.
+/// Build the TTS configuration lifecycle speech uses from global settings.
 pub(crate) fn tts_config_from_settings(tts: Option<&TtsSettings>) -> TtsConfig {
     let mut config = TtsConfig::new();
     let Some(settings) = tts else {

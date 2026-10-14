@@ -22,11 +22,8 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             let file_link = render_file_link(source_file);
 
             // An unknown-field error carries a field catalog; render the
-            // "Unknown property / Expected one of" form. Any other serde
-            // error (e.g. `invalid type: map, expected a sequence` when
-            // `stack:` is a map instead of a list) renders its raw message
-            // verbatim — fabricating an "Unknown property" diagnostic with
-            // the comm-field list would be actively misleading.
+            // "Unknown property / Expected one of" form. Any other error
+            // renders its raw message verbatim.
             let is_unknown_field = unknown_field.is_some() || !expected_fields.is_empty();
 
             let (body, hint) = if is_unknown_field {
@@ -55,17 +52,8 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                      {file_link}\n\n{}",
                     escape_prose_path(message)
                 ))];
-                // The only sequence-typed field on a lifecycle event block
-                // is `stack`, so a "expected a sequence" mismatch almost
-                // always means `stack:` was authored as a map.
-                let hint = if message.contains("expected a sequence") {
-                    "The `stack:` property must be a YAML list of stack items \
-                     (each item begins with `-`)."
-                        .to_string()
-                } else {
-                    "Check the lifecycle frontmatter section in your prompt file."
-                        .to_string()
-                };
+                let hint =
+                    "Check the lifecycle frontmatter section in your prompt file.".to_string();
                 (body, hint)
             };
 
@@ -177,6 +165,27 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                      `blocked`, `failure`, `finalize`, and `loop` stacks.",
                 )
         }
+        CompositionError::RemovedGrammar {
+            source_path,
+            path,
+            removed,
+            replacement,
+        } => {
+            let file_link = render_file_link(source_path);
+            let body = format!(
+                "<cyan>`{path}`</cyan> in {file_link} uses the removed {} grammar.\n\n\
+                 <b>Replacement:</b> {}",
+                code_span(removed),
+                escape_prose_path(replacement)
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "removed grammar"))
+                .body(body)
+                .hint(
+                    "Lifecycle events are ordered action lists; see the lifecycle \
+                     documentation for the current grammar.",
+                )
+        }
         CompositionError::LifecycleStackInvalidShape {
             source_path,
             property,
@@ -190,18 +199,19 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
         } => {
             let file_link = render_file_link(source_path);
             let body = format!(
-                "Lifecycle stack item in <cyan>`{property}`</cyan> in {file_link} has an \
-                 invalid shape.\n\n{message}"
+                "Lifecycle item <cyan>`{property}`</cyan> in {file_link} has an invalid \
+                 shape.\n\n{message}"
             );
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "CompositionError",
-                    "invalid lifecycle stack item",
+                    "invalid lifecycle item",
                 ))
                 .body(body)
                 .hint(
-                    "A stack item is an object with an optional `when:` condition string \
-                     and an `action:` (scalar or array). Remove any extra keys.",
+                    "A lifecycle stack is a list of actions (`- verb: value`) or one \
+                     dictionary of verbs. A guarded item is `when:` plus `then:` (and \
+                     optionally `else:`), or `when:` plus sibling verbs.",
                 )
         }
         CompositionError::LifecycleActionInvalidShortForm {
@@ -265,29 +275,8 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 ))
                 .body(body)
                 .hint(
-                    "Lifecycle actions must use positional form (`verb: value`) or key/value \
-                     form (`{ action: verb, ... }`).",
-                )
-        }
-        CompositionError::LifecycleStackAmbiguous {
-            source_path,
-            property,
-            message,
-        } => {
-            let file_link = render_file_link(source_path);
-            let body = format!(
-                "Ambiguous lifecycle stack item in <cyan>`{property}`</cyan> in {file_link}.\
-                 \n\n{message}"
-            );
-            StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new(
-                    "CompositionError",
-                    "ambiguous lifecycle stack item",
-                ))
-                .body(body)
-                .hint(
-                    "Use positional form (`verb: value`) with exactly one key, or key/value \
-                     form (`{ action: verb, ... }`).",
+                    "Lifecycle actions use short form (`verb: value`) or long form \
+                     (`verb: { param: value }`).",
                 )
         }
         CompositionError::LifecycleObjectDataThroughInterpolationPositional {
@@ -308,7 +297,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 .body(body)
                 .hint(
                     "Pass object data through a whole-value `{{ ... }}` interpolation, or use \
-                     key/value form with a scalar parameter.",
+                     long form with a scalar parameter.",
                 )
         }
         CompositionError::LifecycleObjectDataThroughInterpolationParameter {
@@ -344,17 +333,6 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             "positional `set` form removed",
             "This action uses the removed `set: [key, value]` form.",
         ),
-        CompositionError::LifecycleSetLongFormRemoved {
-            source_path,
-            property,
-            path,
-        } => set_shape_block(
-            source_path,
-            property,
-            path,
-            "long-form `set` action removed",
-            "This action uses the removed `{ action: set, key: ..., value: ... }` form.",
-        ),
         CompositionError::LifecycleSetNotMapping {
             source_path,
             property,
@@ -380,7 +358,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             "invalid `set` destination",
             &format!("Destination key <cyan>{}</cyan> is invalid: {message}.", code_span(key)),
         ),
-        CompositionError::LifecycleProxyWithNotMapping {
+        CompositionError::LifecycleWithNotMapping {
             source_path,
             property,
             path,
@@ -388,7 +366,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
         } => {
             let file_link = render_file_link(source_path);
             let body = format!(
-                "Lifecycle action <cyan>`proxy`</cyan> field <cyan>`{property}.{path}`</cyan> in \
+                "Lifecycle overlay <cyan>`{property}.{path}`</cyan> in \
                  {file_link} is a {actual}; <cyan>`with`</cyan> must be a mapping of target \
                  frontmatter properties."
             );
@@ -400,7 +378,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                      equivalent to omitting it.",
                 )
         }
-        CompositionError::LifecycleProxyWithWholeMapping {
+        CompositionError::LifecycleWithWholeMapping {
             source_path,
             property,
             path,
@@ -408,7 +386,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
         } => {
             let file_link = render_file_link(source_path);
             let body = format!(
-                "Lifecycle action <cyan>`proxy`</cyan> field <cyan>`{property}.{path}`</cyan> in \
+                "Lifecycle overlay <cyan>`{property}.{path}`</cyan> in \
                  {file_link} was supplied as the whole-mapping interpolation <cyan>{}</cyan>.\
                  \n\nSupplying the entire mapping from one expression is not supported in this \
                  version and is a named follow-up. Author the keys explicitly; each value may \
@@ -425,7 +403,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                     "Write `with:` with explicit keys, e.g. `with: { spec: \"{{ spec }}\" }`.",
                 )
         }
-        CompositionError::LifecycleProxyWithDynamicKey {
+        CompositionError::LifecycleWithDynamicKey {
             source_path,
             property,
             path,
@@ -433,7 +411,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
         } => {
             let file_link = render_file_link(source_path);
             let body = format!(
-                "Lifecycle action <cyan>`proxy`</cyan> field <cyan>`{property}.{path}`</cyan> in \
+                "Lifecycle overlay <cyan>`{property}.{path}`</cyan> in \
                  {file_link} has the dynamic key <cyan>{}</cyan>.\n\n\
                  <cyan>`with`</cyan> keys name top-level frontmatter properties of the target \
                  and are never interpolated. Only values resolve.",
@@ -447,7 +425,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 .body(body)
                 .hint("Use a literal key and move the expression into its value.")
         }
-        CompositionError::LifecycleProxyWithEvaluationFailed {
+        CompositionError::LifecycleWithEvaluationFailed {
             source_path,
             property,
             path,
@@ -455,12 +433,13 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             message,
             ..
         } => {
+            let verb = overlay_directive(property);
             let file_link = render_file_link(source_path);
             let body = format!(
-                "Lifecycle action <cyan>`proxy`</cyan> to <cyan>{}</cyan> in {file_link} could \
+                "Lifecycle action <cyan>`{verb}`</cyan> to <cyan>{}</cyan> in {file_link} could \
                  not resolve <cyan>`{property}.{path}`</cyan>.\n\n{message}\n\n\
-                 The whole <cyan>`with`</cyan> mapping resolves at the source before the handoff, \
-                 so nothing was passed to the target and the source is still active.",
+                 The whole <cyan>`with`</cyan> mapping resolves at the source before the \
+                 transition, so nothing was passed on and the source is still active.",
                 code_span(target)
             );
             StatusBlock::new(StatusState::Error)
@@ -474,26 +453,27 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                      `ctx.*`/`env.*`, and the globals valid for this event.",
                 )
         }
-        CompositionError::LifecycleProxyOnlyParameter {
+        CompositionError::LifecycleWithUnsupported {
             source_path,
             property,
             verb,
-            param,
         } => {
             let file_link = render_file_link(source_path);
             let body = format!(
                 "Lifecycle action <cyan>`{verb}`</cyan> in <cyan>`{property}`</cyan> in \
-                 {file_link} received a <cyan>`{param}`</cyan> parameter, which only \
-                 <cyan>`proxy`</cyan> accepts."
+                 {file_link} received a <cyan>`with`</cyan> overlay, which only \
+                 <cyan>`proxy`</cyan> and <cyan>`retry`</cyan> accept."
             );
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "CompositionError",
-                    "parameter is proxy-only",
+                    "`with` is not accepted here",
                 ))
                 .body(body)
                 .hint(
-                    "Remove the parameter, or use `{ action: proxy, target: ..., with: { ... } }`.",
+                    "Remove `with`, or use `set` for invocation-local state. Only \
+                     `proxy: { target: ..., with: { ... } }` and \
+                     `retry: { with: { ... } }` take an overlay.",
                 )
         }
         CompositionError::LifecycleTransitionUnownedAtStage {
@@ -675,8 +655,8 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 ))
                 .body(body)
                 .hint(
-                    "Use positional form (`verb: value`) or key/value form \
-                     (`{ action: verb, ... }`). `verb(args)` is no longer accepted.",
+                    "Use short form (`verb: value`) or long form (`verb: { param: value }`). \
+                     `verb(args)` is no longer accepted.",
                 )
         }
         CompositionError::LifecycleActionPlacement {
@@ -709,8 +689,8 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
         } => {
             let file_link = render_file_link(source_path);
             let body = format!(
-                "Stack item in <cyan>`{property}`</cyan> in {file_link} contains more than \
-                 one lifecycle control action."
+                "Lifecycle dictionary <cyan>`{property}`</cyan> in {file_link} contains more \
+                 than one flow-control directive."
             );
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
@@ -719,9 +699,8 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 ))
                 .body(body)
                 .hint(
-                    "Split the actions across separate stack items, or remove the extra \
-                     lifecycle action. At most one lifecycle control action is allowed per \
-                     `when/action` block.",
+                    "Keep one flow-control directive per dictionary, or split the actions \
+                     into list items and guard each directive with its own `when`.",
                 )
         }
         CompositionError::LifecycleActionOrder {
@@ -729,8 +708,8 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
         } => {
             let file_link = render_file_link(source_path);
             let body = format!(
-                "Lifecycle action in <cyan>`{property}`</cyan> in {file_link} must be the \
-                 last action in its stack item."
+                "Flow-control directive <cyan>`{property}`</cyan> in {file_link} ends the \
+                 event, so it must be the last item in its list."
             );
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
@@ -739,8 +718,9 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 ))
                 .body(body)
                 .hint(
-                    "A lifecycle control action terminates stack processing, so any actions \
-                     after it would never run. Move it to the end of the `action:` array.",
+                    "A flow-control directive ends the whole event, so anything after it in \
+                     the same list would never run. Move it to the end of the list, or guard \
+                     it with `when`.",
                 )
         }
         CompositionError::LifecycleInvalidArgs {
@@ -782,7 +762,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 .hint(
                     "Use `err` only in `blocked`, `failure`, or `finalize` (where it is \
                      optional). To reference a frontmatter property named `err`, write \
-                     `doc.err` explicitly.",
+                     `fm.err` explicitly.",
                 )
         }
         CompositionError::InvalidFileReference { context, source } => {

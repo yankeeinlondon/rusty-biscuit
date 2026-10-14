@@ -47,7 +47,7 @@ use serde_json::{Map, Value};
 
 use super::super::error::CompositionError;
 use super::super::lifecycle::actions::{
-    LifecycleAction, LifecycleActionKind, LifecycleStackItem, is_known_side_effect,
+    LifecycleAction, LifecycleActionKind, LifecycleNode, for_each_action_mut, is_known_side_effect,
 };
 use super::super::lifecycle::context::{LifecycleCause, LifecycleErrorInfo};
 use super::super::lifecycle::executor::{LifecycleExprError, StackExecutionContext};
@@ -219,6 +219,10 @@ pub struct PromptTaskRequest {
     /// document open a run of its own. A handoff, retry, or resume inside the
     /// document is a new run regardless.
     pub run_evidence: Option<crate::invocation_context::RunEvidence>,
+    /// The invocation view of the document the task runs in: the step's, or
+    /// a group leg's own. The runner composes and launches the prompt
+    /// document under its environment. `None` leaves the choice to the runner.
+    pub document: Option<crate::invocation_context::InvocationContext>,
 }
 
 /// A composition run opened for a group member or a whole parallel group.
@@ -228,6 +232,10 @@ pub struct TaskRun {
     pub context: darkmatter::markdown::compose::ComposeContext,
     /// The run a member's prompt document joins.
     pub run: crate::invocation_context::RunEvidence,
+    /// The document a group leg entered, with the environment it captured.
+    /// `None` for a run that is not a document of its own (a parallel
+    /// group's shared run).
+    pub document: Option<crate::invocation_context::InvocationContext>,
 }
 
 /// What a `prompt:` task's runner reports back.
@@ -261,9 +269,20 @@ pub trait PromptTaskRunner: Sync {
     /// Open the composition run one serial group member executes as.
     ///
     /// A serial member is a run of its own, so it observes what the members
-    /// before it changed. `None` keeps the group's snapshot for the member's
-    /// fields, which is all a runner without launch evidence can offer.
+    /// before it changed, and a document of its own, which captures its own
+    /// environment. `None` keeps the group's snapshot for the member's fields,
+    /// which is all a runner without launch evidence can offer.
     fn open_member_run(&self, _task: &PreflightTask) -> Option<TaskRun> {
+        None
+    }
+
+    /// Open one parallel group leg: a document of its own, capturing its own
+    /// environment, inside the group's shared run (`group`) so siblings still
+    /// observe one view of the working tree.
+    ///
+    /// Called for every leg in declaration order before any leg starts.
+    /// `None` keeps the group's snapshot and document.
+    fn open_leg_run(&self, _task: &PreflightTask, _group: Option<&TaskRun>) -> Option<TaskRun> {
         None
     }
 
@@ -355,6 +374,17 @@ pub struct TaskExecution<'a> {
     /// document's first preparation. A serial group member replaces it with
     /// its own run; a parallel member with the group's.
     pub run_evidence: Option<&'a crate::invocation_context::RunEvidence>,
+    /// The document this task runs in, viewed under the environment it
+    /// captured: the step's, or a group leg's own.
+    ///
+    /// Before anything runs, every preflight-approved command is re-resolved
+    /// under this document's environment and refused when its text changed.
+    /// Its `shell:` commands and its stacks' `shell` actions start from this
+    /// document's child-process environment, through the runners'
+    /// `for_child_environment`. `None` runs the approved text unchecked, with
+    /// the runners as given, for callers whose tasks share the environment
+    /// preflight resolved under.
+    pub document: Option<&'a crate::invocation_context::InvocationContext>,
 }
 
 impl TaskExecution<'_> {
@@ -427,6 +457,9 @@ impl TaskExecution<'_> {
                 );
             }
         };
+        if let Some(refusal) = self.verify_preflight_approvals() {
+            return StageOutcome::terminal(TaskStatus::Failed, Some(refusal));
+        }
 
         if self.interrupted() {
             return StageOutcome::terminal(TaskStatus::Interrupted, None);
@@ -502,7 +535,7 @@ impl TaskExecution<'_> {
     fn run_stack(
         &self,
         stage: TaskStage,
-        items: &[LifecycleStackItem],
+        items: &[LifecycleNode],
         err: Option<&LifecycleErrorInfo>,
     ) -> Option<TaskDiagnostic> {
         // The stack reuses the step's context, so it names its own scope:
@@ -511,17 +544,32 @@ impl TaskExecution<'_> {
             TaskStage::Teardown => LifecycleScope::TaskTeardown,
             TaskStage::Setup | TaskStage::Primary => LifecycleScope::TaskSetup,
         };
-        let with_err;
-        let context = match err {
-            Some(info) => {
-                with_err = self.stack.with_error(info);
-                &with_err
+        // A stack's `shell` actions start from the document's environment.
+        let document_runner = self.document.and_then(|document| {
+            self.stack
+                .shell_runner
+                .for_child_environment(document.env_baseline())
+        });
+        let in_document;
+        let stack = match document_runner.as_deref() {
+            Some(shell_runner) => {
+                in_document = StackExecutionContext {
+                    shell_runner,
+                    ..self.stack.with_signal(self.stack.signal)
+                };
+                &in_document
             }
             None => self.stack,
         };
-        let outcome = context
-            .in_scope(scope)
-            .execute_action_stack(items, &self.stack_property(stage));
+        let with_err;
+        let context = match err {
+            Some(info) => {
+                with_err = stack.with_error(info);
+                &with_err
+            }
+            None => stack,
+        };
+        let outcome = context.in_scope(scope).execute_action_stack(items);
         outcome
             .evaluation_error
             .or(outcome.action_error)
@@ -613,6 +661,7 @@ impl TaskExecution<'_> {
             // wrapper already wrote it, so a second emission would double-print.
             frame_writer: self.live.map(|live| live.rendered_writer()),
             run_evidence: self.run_evidence.cloned(),
+            document: self.document.cloned(),
         };
 
         match self.prompt.run(&request) {
@@ -659,12 +708,17 @@ impl TaskExecution<'_> {
             }
         };
 
+        // A document's commands start from its own environment.
+        let document_shell = self
+            .document
+            .and_then(|document| self.shell.for_child_environment(document.env_baseline()));
+        let shell = document_shell.as_deref().unwrap_or(self.shell);
         let mut collected: Vec<String> = Vec::with_capacity(commands.len());
         for command in commands {
             if self.interrupted() {
                 return PrimaryOutcome::interrupted(collected.join("\n"));
             }
-            let output = match self.shell.run(command, timeout, self.interrupt, self.live) {
+            let output = match shell.run(command, timeout, self.interrupt, self.live) {
                 Ok(output) => output,
                 Err(TaskShellError::Isolation(source)) => {
                     return PrimaryOutcome::failed(TaskDiagnostic::from_composition(
@@ -862,6 +916,29 @@ impl TaskExecution<'_> {
         Ok(ParsedStacks { setup, teardown })
     }
 
+    /// Refuse the task, before any stage runs, when its document's captured
+    /// environment changes the text of a command sequence preflight approved.
+    ///
+    /// Interim contract until shell template approval lands: preflight
+    /// approves exact text resolved under the launch environment, and a task
+    /// captures its own environment later, so an approval can only vouch for
+    /// identical text. Prompt documents are not checked here; they approve
+    /// their own exact text when they compose.
+    fn verify_preflight_approvals(&self) -> Option<TaskDiagnostic> {
+        let document = self.document?;
+        let environment = document.document_environment();
+        // In the order the stages would run, so the refusal names the first
+        // command that would have run changed.
+        for stage in [TaskStage::Setup, TaskStage::Primary, TaskStage::Teardown] {
+            for approval in self.task.preflight_approvals.iter().filter(|a| a.stage() == stage) {
+                if let Err(error) = approval.verify(environment) {
+                    return Some(TaskDiagnostic::from_composition(stage, &error));
+                }
+            }
+        }
+        None
+    }
+
     /// Replace each `shell` command and `on_error` in a parsed stack with the
     /// bytes sequence approval fixed for that site, and mark the action
     /// resolved, so execution runs exactly the approved bytes and never
@@ -871,41 +948,54 @@ impl TaskExecution<'_> {
     fn apply_approved_commands(
         &self,
         stage: TaskStage,
-        items: &mut [LifecycleStackItem],
+        items: &mut [LifecycleNode],
     ) -> Result<(), CompositionError> {
-        for action in items.iter_mut().flat_map(|item| item.actions.iter_mut()) {
-            let LifecycleActionKind::Shell(shell) = &mut action.kind else {
-                continue;
-            };
-            for expr in std::iter::once(&mut shell.command).chain(shell.on_error.as_mut()) {
-                let literal = match expr {
-                    Expr::StringLiteral(text) => !text.contains("{{"),
-                    Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => true,
-                    _ => false,
-                };
-                if literal {
-                    continue;
-                }
-                let approved = self.task.approved_stack_commands.iter().find(|approved| {
-                    approved.site().stage() == stage
-                        && action_value_to_expr(&Value::String(approved.site().authored().to_string()))
-                            .is_ok_and(|authored| authored == *expr)
-                });
-                let Some(approved) = approved else {
-                    return Err(CompositionError::SequenceShellResolution {
-                        command: expr.to_string(),
-                        task: self.label(),
-                        message: format!(
-                            "this `{}` command was not approved at sequence preflight",
-                            stage.key()
-                        ),
-                        source: None,
-                    });
-                };
-                *expr = Expr::StringLiteral(approved.command().to_string());
+        let mut result = Ok(());
+        for_each_action_mut(items, &mut |action| {
+            if result.is_ok() {
+                result = self.apply_approved_command(stage, action);
             }
-            shell.pre_resolved = true;
+        });
+        result
+    }
+
+    /// [`Self::apply_approved_commands`] for one action.
+    fn apply_approved_command(
+        &self,
+        stage: TaskStage,
+        action: &mut LifecycleAction,
+    ) -> Result<(), CompositionError> {
+        let LifecycleActionKind::Shell(shell) = &mut action.kind else {
+            return Ok(());
+        };
+        for expr in std::iter::once(&mut shell.command).chain(shell.on_error.as_mut()) {
+            let literal = match expr {
+                Expr::StringLiteral(text) => !text.contains("{{"),
+                Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => true,
+                _ => false,
+            };
+            if literal {
+                continue;
+            }
+            let approved = self.task.approved_stack_commands.iter().find(|approved| {
+                approved.site().stage() == stage
+                    && action_value_to_expr(&Value::String(approved.site().authored().to_string()))
+                        .is_ok_and(|authored| authored == *expr)
+            });
+            let Some(approved) = approved else {
+                return Err(CompositionError::SequenceShellResolution {
+                    command: expr.to_string(),
+                    task: self.label(),
+                    message: format!(
+                        "this `{}` command was not approved at sequence preflight",
+                        stage.key()
+                    ),
+                    source: None,
+                });
+            };
+            *expr = Expr::StringLiteral(approved.command().to_string());
         }
+        shell.pre_resolved = true;
         Ok(())
     }
 
@@ -1052,8 +1142,8 @@ impl TaskExecution<'_> {
 
 /// Both parsed action stacks; `None` for an absent or empty one.
 struct ParsedStacks {
-    setup: Option<Vec<LifecycleStackItem>>,
-    teardown: Option<Vec<LifecycleStackItem>>,
+    setup: Option<Vec<LifecycleNode>>,
+    teardown: Option<Vec<LifecycleNode>>,
 }
 
 /// Everything the stage machine decided, before output commit and timing.

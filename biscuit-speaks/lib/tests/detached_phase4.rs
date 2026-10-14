@@ -129,7 +129,7 @@ async fn say_detached_job_preserves_lossless_arguments() {
 
     let temp = tempfile::tempdir().unwrap();
     let script = temp.path().join("say");
-    std::fs::write(&script, "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$SAY_TEST_ARGS\"\n/bin/cat > \"$SAY_TEST_TEXT\"\n").unwrap();
+    std::fs::write(&script, "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$SAY_TEST_ARGS\"\n/bin/cat > \"$SAY_TEST_TEXT\"\nprintf audio > \"$2\"\n").unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
     let _path = test_toolkit::EnvGuard::set_safe("PATH", temp.path());
     let args_file = temp.path().join("args");

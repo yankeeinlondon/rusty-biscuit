@@ -78,12 +78,13 @@ Invalid Transclusion Target(s)
 ```
 
 A **schema `file` value**, both in `md compose`'s error block and in
-`md schema validate`:
+`md schema validate`, here for a `docs/schema.md` whose fourth line is
+`target: ./nope.md`, so the location is the start of that value:
 
 ```text
 - ✗ the document docs/schema.md failed schema validation:
     - target no existing file matched reference `./nope.md` while resolving
-      from `/work/repo/docs` (at line 4 of frontmatter)
+      from `/work/repo/docs` (at line 4, column 9)
         a union type of: enum | string
         failure: no-match
 ```

@@ -13,6 +13,7 @@ fn requeue_prompt_state(source: &Path) -> HarnessPromptState {
         original_ref: source.display().to_string(),
         base_prompt: None,
         overlay: IndexMap::new(),
+        pending_retry_overlay: None,
         prompt_tail: Vec::new(),
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         suppress_output_commit: false,
@@ -46,6 +47,7 @@ fn requeue_materialized(prompt: &str) -> MaterializedHarnessPrompt {
         live_frontmatter,
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         lifecycle: None,
+        loop_values: None,
         mcp_body_tags: Vec::new(),
     }
 }

@@ -4,6 +4,7 @@
 
 use crate::detection::get_providers_for_strategy;
 use crate::errors::{AllProvidersFailed, TtsError};
+use crate::prepared::{ResolvedSynthesis, dry_run_enabled};
 use crate::providers::cloud::ElevenLabsProvider;
 #[cfg(target_os = "windows")]
 use crate::providers::host::SapiProvider;
@@ -12,7 +13,7 @@ use crate::providers::host::SayProvider;
 use crate::providers::host::{ESpeakProvider, EchogardenProvider, GttsProvider, KokoroTtsProvider};
 use crate::traits::TtsExecutor;
 use crate::types::{
-    AudioFormat, CloudTtsProvider, Gender, HostTtsProvider, Language, SpeakResult, TtsConfig,
+    CloudTtsProvider, Gender, HostTtsProvider, Language, SpeakResult, TtsConfig,
     TtsFailoverStrategy, TtsProvider, VolumeLevel,
 };
 
@@ -25,7 +26,7 @@ use crate::types::{
 /// - Gender and language preferences
 /// - Volume control
 /// - Provider failover strategies
-/// - Optional audio pre-generation via `prepare()`
+/// - Ahead-of-time synthesis into the shared audio cache via `prepare()`
 ///
 /// ## Examples
 ///
@@ -42,7 +43,7 @@ use crate::types::{
 ///     .play()
 ///     .await?;
 ///
-/// // Pre-generate audio for later playback
+/// // Synthesize ahead of time; a later call with the same settings reuses the file
 /// let prepared = Speak::new("Important message")
 ///     .prepare()
 ///     .await?;
@@ -53,13 +54,13 @@ use crate::types::{
 pub struct Speak {
     /// The text to be spoken.
     text: String,
-    /// Pre-generated audio data (if prepared).
-    audio: Option<Vec<u8>>,
-    /// Audio format of pre-generated audio.
-    #[cfg_attr(not(feature = "playa"), allow(dead_code))]
-    audio_format: AudioFormat,
     /// TTS configuration.
     config: TtsConfig,
+    /// The settings `prepare` resolved, which also name its provider.
+    ///
+    /// Kept apart from `config`: the settings belong to that provider alone,
+    /// and failover to another provider uses the caller's original config.
+    prepared: Option<ResolvedSynthesis>,
 }
 
 impl Speak {
@@ -75,9 +76,8 @@ impl Speak {
     pub fn new(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
-            audio: None,
-            audio_format: AudioFormat::default(),
             config: TtsConfig::default(),
+            prepared: None,
         }
     }
 
@@ -86,44 +86,54 @@ impl Speak {
     /// Voice names are provider-specific. For example:
     /// - macOS `say`: "Samantha", "Alex", "Daniel"
     /// - ElevenLabs: voice IDs like "21m00Tcm4TlvDq8ikWAM"
+    ///
+    /// Clears any preparation, as every builder input that can change the
+    /// synthesized audio does.
     #[must_use]
     pub fn with_voice(mut self, voice: impl Into<String>) -> Self {
         self.config.requested_voice = Some(voice.into());
+        self.prepared = None;
         self
     }
 
-    /// Set the gender preference for voice selection.
+    /// Set the gender preference for voice selection. Clears any preparation.
     #[must_use]
     pub fn with_gender(mut self, gender: Gender) -> Self {
         self.config.gender = gender;
+        self.prepared = None;
         self
     }
 
-    /// Set the language preference for voice selection.
+    /// Set the language preference for voice selection. Clears any preparation.
     #[must_use]
     pub fn with_language(mut self, language: Language) -> Self {
         self.config.language = language;
+        self.prepared = None;
         self
     }
 
     /// Set the volume level.
+    ///
+    /// Keeps any preparation: volume is applied at playback, never synthesized.
     #[must_use]
     pub fn with_volume(mut self, volume: VolumeLevel) -> Self {
         self.config.volume = volume;
         self
     }
 
-    /// Set the failover strategy.
+    /// Set the failover strategy. Clears any preparation.
     #[must_use]
     pub fn with_failover(mut self, strategy: TtsFailoverStrategy) -> Self {
         self.config.failover_strategy = strategy;
+        self.prepared = None;
         self
     }
 
-    /// Apply a complete TtsConfig.
+    /// Apply a complete TtsConfig. Clears any preparation.
     #[must_use]
     pub fn with_config(mut self, config: TtsConfig) -> Self {
         self.config = config;
+        self.prepared = None;
         self
     }
 
@@ -137,19 +147,31 @@ impl Speak {
         &self.config
     }
 
-    /// Check if audio has been pre-generated.
+    /// Whether `prepare` on this object published a cache file.
+    ///
+    /// Stays false after a dry run or a preparation that had nothing to do
+    /// (eSpeak, SAPI, or a default that could not be resolved). It records
+    /// completed work; it does not promise the temporary file still exists.
     pub fn is_prepared(&self) -> bool {
-        self.audio.is_some()
+        self.prepared.is_some()
     }
 
-    /// Pre-generate the audio for later playback.
+    /// Synthesize the phrase into the shared audio cache without playing it.
     ///
-    /// This is useful when you want to minimize latency at playback time.
-    /// The audio is generated and cached, then played when `play()` is called.
+    /// Only the first available provider for the failover strategy is
+    /// prepared; its error is returned rather than trying another provider.
+    /// The returned object retains the settings that provider resolved. A
+    /// fresh `Speak` that resolves the same provider and settings also reuses
+    /// the file, so the returned object may be discarded.
+    ///
+    /// Under `PLAYA_DRY_RUN` this returns `self` unchanged before looking at
+    /// any provider. Preparation can make a billed cloud request, never plays
+    /// audio, and never publishes a playback job.
     ///
     /// ## Errors
     ///
-    /// Returns `TtsError` if audio generation fails.
+    /// `NoProvidersAvailable` when the strategy selects no provider; otherwise
+    /// the selected provider's construction, resolution, or synthesis error.
     ///
     /// ## Examples
     ///
@@ -157,20 +179,68 @@ impl Speak {
     /// let prepared = Speak::new("Important announcement")
     ///     .prepare()
     ///     .await?;
-    ///
-    /// // Audio is now cached, play() will be faster
+    /// // False when there was nothing to prepare (eSpeak, an unresolved default).
+    /// let _published = prepared.is_prepared();
     /// prepared.play().await?;
     /// ```
-    pub async fn prepare(self) -> Result<Self, TtsError> {
-        // TODO: Implement audio generation for cloud providers
-        // For now, host providers don't support pre-generation
+    pub async fn prepare(mut self) -> Result<Self, TtsError> {
+        if dry_run_enabled() {
+            return Ok(self);
+        }
+        let providers = get_providers_for_strategy(&self.config.failover_strategy);
+        let Some(&provider) = providers.first() else {
+            return Err(TtsError::NoProvidersAvailable);
+        };
+        if let Some(settings) = Self::prepare_provider(provider, &self.text, &self.config).await? {
+            self.prepared = Some(settings);
+        }
         Ok(self)
+    }
+
+    /// Prepare one provider, returning the settings when it published a file.
+    async fn prepare_provider(
+        provider: TtsProvider,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<Option<ResolvedSynthesis>, TtsError> {
+        match provider {
+            TtsProvider::Host(HostTtsProvider::KokoroTts) => {
+                KokoroTtsProvider::new().prepare_resolved(text, config).await
+            }
+            TtsProvider::Host(HostTtsProvider::Gtts) => {
+                GttsProvider::new().prepare_resolved(text, config).await
+            }
+            TtsProvider::Host(HostTtsProvider::EchoGarden) => {
+                EchogardenProvider::new().prepare_resolved(text, config).await
+            }
+            TtsProvider::Host(HostTtsProvider::ESpeak) => {
+                ESpeakProvider::new().prepare(text, config).await.map(|()| None)
+            }
+            #[cfg(target_os = "macos")]
+            TtsProvider::Host(HostTtsProvider::Say) => {
+                SayProvider.prepare_resolved(text, config).await
+            }
+            #[cfg(target_os = "windows")]
+            TtsProvider::Host(HostTtsProvider::Sapi) => {
+                SapiProvider::new().prepare(text, config).await.map(|()| None)
+            }
+            TtsProvider::Cloud(CloudTtsProvider::ElevenLabs) => {
+                ElevenLabsProvider::new()?.prepare_resolved(text, config).await
+            }
+            TtsProvider::Host(host) => Err(TtsError::ProviderFailed {
+                provider: format!("{:?}", host),
+                message: "Provider not yet implemented".into(),
+            }),
+        }
     }
 
     /// Play the TTS audio.
     ///
-    /// If `prepare()` was called, plays the cached audio.
-    /// Otherwise, generates and plays the audio on-demand.
+    /// File-producing providers play their cached file when one exists for
+    /// the resolved settings, and synthesize it first otherwise. A prepared
+    /// object first plays through the provider and settings `prepare`
+    /// retained; if that fails, the remaining providers of the failover
+    /// strategy are tried with the original configuration.
     ///
     /// ## Errors
     ///
@@ -182,36 +252,40 @@ impl Speak {
     /// Speak::new("Hello!").play().await?;
     /// ```
     pub async fn play(self) -> Result<(), TtsError> {
-        // If audio was pre-generated, play it
-        if let Some(audio) = &self.audio {
-            #[cfg(feature = "playa")]
-            {
-                return crate::playback::play_audio_bytes(audio, self.audio_format, &self.config)
-                    .await;
-            }
-            #[cfg(not(feature = "playa"))]
-            {
-                // Playback requires the playa feature
-                let _ = audio;
-                return Err(TtsError::NoAudioPlayer);
+        let mut errors = Vec::new();
+        if let Some(settings) = &self.prepared {
+            tracing::debug!(provider = ?settings.provider(), "Trying prepared TTS provider");
+            match settings.speak(&self.text, &self.config).await {
+                Ok(()) => return Ok(()),
+                Err(error) => errors.push((settings.provider(), error)),
             }
         }
 
-        // Get available providers based on failover strategy
-        let providers = get_providers_for_strategy(&self.config.failover_strategy);
-
-        if providers.is_empty() {
+        let providers = self.fallback_providers();
+        if providers.is_empty() && errors.is_empty() {
             return Err(TtsError::NoProvidersAvailable);
         }
+        self.execute_with_failover(&providers, errors).await
+    }
 
-        // Try providers with failover
-        self.execute_with_failover(&providers).await
+    /// The failover strategy's providers, without the prepared provider a
+    /// retained-settings attempt has already tried.
+    fn fallback_providers(&self) -> Vec<TtsProvider> {
+        let mut providers = get_providers_for_strategy(&self.config.failover_strategy);
+        if let Some(settings) = &self.prepared {
+            let prepared = settings.provider();
+            providers.retain(|provider| *provider != prepared);
+        }
+        providers
     }
 
     /// Durably hand speech to the per-user Playa queue and return immediately.
     ///
     /// Cache misses reserve their sequence before synthesis so later sounds
-    /// cannot overtake the speech while a detached helper prepares it.
+    /// cannot overtake the speech while a detached helper prepares it. A
+    /// prepared object publishes its retained file when it is still cached;
+    /// otherwise the helper synthesizes it again with the retained settings,
+    /// falling back to the other providers with the original configuration.
     pub async fn play_detached(self) -> Result<crate::detached::DetachedJobId, TtsError> {
         #[cfg(not(feature = "playa"))]
         {
@@ -221,19 +295,17 @@ impl Speak {
 
         #[cfg(feature = "playa")]
         {
-            if matches!(
-                std::env::var("PLAYA_DRY_RUN").as_deref(),
-                Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes")
-            ) {
+            if crate::prepared::dry_run_enabled() {
                 return Ok(playa::detached::JobId::dry_run().into());
             }
-            if let Some(audio) = &self.audio {
-                return playa::detached::enqueue_bytes(
-                    audio,
-                    crate::playa_bridge::to_detached_playback(&self.config),
-                )
-                .map(Into::into)
-                .map_err(Into::into);
+
+            if let Some(settings) = &self.prepared {
+                if let Some(job) = settings.cached_job(&self.text, &self.config) {
+                    return playa::detached::enqueue(job)
+                        .map(Into::into)
+                        .map_err(Into::into);
+                }
+                return crate::detached::reserve_preparation(self.text, self.config, self.prepared);
             }
 
             let providers = get_providers_for_strategy(&self.config.failover_strategy);
@@ -257,7 +329,7 @@ impl Speak {
                 }
 
                 if crate::detached::requires_preparation(provider) {
-                    return crate::detached::reserve_preparation(self.text, self.config);
+                    return crate::detached::reserve_preparation(self.text, self.config, None);
                 }
 
                 match crate::detached::build_job(provider, &self.text, &self.config).await {
@@ -275,8 +347,9 @@ impl Speak {
 
     /// Play the TTS audio and return metadata about the voice used.
     ///
-    /// This is like `play()` but also returns a `SpeakResult` containing
-    /// information about the provider and voice that were actually used.
+    /// This is like `play()`, including a prepared object's retained
+    /// settings, but also returns a `SpeakResult` naming the provider and
+    /// voice that were actually used.
     ///
     /// ## Errors
     ///
@@ -289,29 +362,28 @@ impl Speak {
     /// println!("Used voice: {}", result.voice.name);
     /// ```
     pub async fn play_with_result(self) -> Result<SpeakResult, TtsError> {
-        // If audio was pre-generated, we can't return accurate metadata
-        // since we don't track which provider was used during prepare()
-        if self.audio.is_some() {
-            return Err(TtsError::ProviderFailed {
-                provider: "prepared".into(),
-                message: "play_with_result() not supported for prepared audio".into(),
-            });
+        let mut errors = Vec::new();
+        if let Some(settings) = &self.prepared {
+            tracing::debug!(provider = ?settings.provider(), "Trying prepared TTS provider");
+            match settings.speak_with_result(&self.text, &self.config).await {
+                Ok(result) => return Ok(result),
+                Err(error) => errors.push((settings.provider(), error)),
+            }
         }
 
-        // Get available providers based on failover strategy
-        let providers = get_providers_for_strategy(&self.config.failover_strategy);
-
-        if providers.is_empty() {
+        let providers = self.fallback_providers();
+        if providers.is_empty() && errors.is_empty() {
             return Err(TtsError::NoProvidersAvailable);
         }
-
-        // Try providers with failover
-        self.execute_with_failover_result(&providers).await
+        self.execute_with_failover_result(&providers, errors).await
     }
 
-    /// Execute TTS with failover, collecting all errors.
-    async fn execute_with_failover(&self, providers: &[TtsProvider]) -> Result<(), TtsError> {
-        let mut errors: Vec<(TtsProvider, TtsError)> = Vec::new();
+    /// Execute TTS with failover, collecting all errors after `errors`.
+    async fn execute_with_failover(
+        &self,
+        providers: &[TtsProvider],
+        mut errors: Vec<(TtsProvider, TtsError)>,
+    ) -> Result<(), TtsError> {
 
         for provider in providers {
             tracing::debug!(provider = ?provider, text_len = self.text.len(), "Trying TTS provider");
@@ -336,8 +408,8 @@ impl Speak {
     async fn execute_with_failover_result(
         &self,
         providers: &[TtsProvider],
+        mut errors: Vec<(TtsProvider, TtsError)>,
     ) -> Result<SpeakResult, TtsError> {
-        let mut errors: Vec<(TtsProvider, TtsError)> = Vec::new();
 
         for provider in providers {
             tracing::debug!(provider = ?provider, text_len = self.text.len(), "Trying TTS provider");
@@ -572,6 +644,47 @@ mod tests {
 
         assert_eq!(speak.config().requested_voice, Some("Alex".into()));
         assert_eq!(speak.config().gender, Gender::Male);
+    }
+
+    fn prepared() -> Speak {
+        let mut speak = Speak::new("Test");
+        speak.prepared = Some(ResolvedSynthesis::Kokoro {
+            voice: "af_heart".into(),
+        });
+        speak
+    }
+
+    #[test]
+    fn clone_and_volume_keep_preparation() {
+        assert!(prepared().is_prepared());
+        assert!(prepared().clone().is_prepared());
+        let louder = prepared().with_volume(VolumeLevel::Loud);
+        assert!(louder.is_prepared());
+        assert_eq!(louder.prepared, prepared().prepared);
+    }
+
+    #[test]
+    fn synthesis_inputs_clear_preparation() {
+        let cleared = [
+            prepared().with_voice("Samantha"),
+            prepared().with_gender(Gender::Male),
+            prepared().with_language(Language::Custom("fr".into())),
+            prepared().with_failover(TtsFailoverStrategy::PreferCloud),
+            prepared().with_config(TtsConfig::default()),
+        ];
+        for speak in cleared {
+            assert!(!speak.is_prepared(), "{speak:?}");
+        }
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn prepare_with_no_candidate_reports_no_providers() {
+        let _live = test_toolkit::EnvGuard::remove_safe("PLAYA_DRY_RUN");
+        let speak = Speak::new("Test").with_failover(TtsFailoverStrategy::SpecificProvider(
+            TtsProvider::Host(HostTtsProvider::Pico2Wave),
+        ));
+        assert!(matches!(speak.prepare().await, Err(TtsError::NoProvidersAvailable)));
     }
 
     #[tokio::test]

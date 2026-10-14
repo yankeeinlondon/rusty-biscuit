@@ -24,34 +24,31 @@ description: |-
         - pass in a `review` file reference to a review who's findings you have now implemented
         - the review will create a review _iteration_ with findings focused on what left to be done the original review finding and/or any additional new findings
 initialize:
-    stack:
-        - when: "spec && ( frontmatter(spec, 'reviewed') == true || frontmatter(spec, 'implemented') == true )"
-          action:
-              - proxy: "./_reviews/feature-review.md"
-        - when: "spec"
-          action:
-              - proxy: "./_reviews/review-spec-inline.md"
-        - when: "plan && file_exists(dirname(plan) + '/' + replace(basename(plan),'plan','spec'))"
-          action:
-              - proxy: "./_reviews/feature-review.md"
-        - when: "plan"
-          action:
-              - proxy: "./_reviews/review-implementation.md"
-        - when: "review"
-          action:
-              - proxy: "./_reviews/suggestion-review.md"
-        - action:
-              - warn: "using the parameters passed in, we found no match for a review type!"
-              - stop
+    - when: "spec && ( frontmatter(spec, 'reviewed') == true || frontmatter(spec, 'implemented') == true )"
+      then:
+          - proxy: "./_reviews/feature-review.md"
+    - when: "spec"
+      then:
+          - proxy: "./_reviews/review-spec-inline.md"
+    - when: "plan && file_exists(dirname(plan) + '/' + replace(basename(plan),'plan','spec'))"
+      then:
+          - proxy: "./_reviews/feature-review.md"
+    - when: "plan"
+      then:
+          - proxy: "./_reviews/review-implementation.md"
+    - when: "review"
+      then:
+          - proxy: "./_reviews/suggestion-review.md"
+    - warn: "using the parameters passed in, we found no match for a review type!"
+    - stop
 
 finalize:
-    stack:
-        - when: "spec && !file_exists(spec)"
-          action:
-            - warn: |-
-                    The `spec` path did not resolve to a file. Relative paths resolve from the directory you
-                    launched from, so double-check the path from there (shell completions can help). Also note
-                    that completed fixes/features are moved into a `_completed/` subdirectory.
+    - when: "spec && !file_exists(spec)"
+      then:
+        - warn: |-
+                The `spec` path did not resolve to a file. Relative paths resolve from the directory you
+                launched from, so double-check the path from there (shell completions can help). Also note
+                that completed fixes/features are moved into a `_completed/` subdirectory.
 ---
 
 You asked for a review but didn't pass in the right parameters to get proxied to

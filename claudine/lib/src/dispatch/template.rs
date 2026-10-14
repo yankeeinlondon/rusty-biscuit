@@ -498,7 +498,9 @@ fn render_expression(expression: &str, lookup: &EventMetaExpressionLookup<'_>) -
 /// Returns whether a dotted path is a recognized template variable handled
 /// by [`EventMetaExpressionLookup`].
 fn is_known_path(path: &str) -> bool {
-    if path.starts_with("env.")
+    if path == "hook"
+        || path.starts_with("hook.")
+        || path.starts_with("env.")
         || path.starts_with("extra.")
         || path.starts_with("tool_input.")
         || path.starts_with("tool_response.")

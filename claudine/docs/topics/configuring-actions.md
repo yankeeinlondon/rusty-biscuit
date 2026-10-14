@@ -35,6 +35,8 @@ Actions live inside event bindings under a provider's `events` map:
 
 When `matcher` is set, the binding only fires if the regex matches the relevant field. For example, `"matcher": "^Bash$"` restricts the binding to Bash tool invocations.
 
+A matcher can also be a Darkmatter condition over the same paths as [`when`](#available-paths), such as `"matcher": "hook.tool_name == 'Bash' && git.branch == 'main'"`. Claudine tries the string as a condition first; a bare word such as `Bash`, or a string that is not a valid condition, is compiled as a regex.
+
 ## Action Types
 
 Every action is a JSON object with a `"type"` discriminator. Claudine supports seven action types.
@@ -251,6 +253,7 @@ The following paths can be referenced in `when` expressions:
 
 | Path Prefix | Description |
 |-------------|-------------|
+| `hook` / `hook.*` | The whole normalized event payload / one field of it (see [The `hook` root](#the-hook-root)) |
 | `env.*` | Shell environment variables (e.g. `env.CI`) |
 | `extra.*` | Arbitrary extra data attached to the event |
 | `tool_input.*` | Nested fields from the tool input JSON |
@@ -284,6 +287,40 @@ Only call a policy engine when `ctx.today` is available:
 }
 ```
 
+### The `hook` root
+
+`hook` names the event payload explicitly. Bare `hook` is the whole normalized
+payload (its event fields, `extra`, and the `os`, `hardware`, `git`, and
+`project` groups), and `hook.<path>` is one field of it. The unprefixed paths
+above read the same fields, so `tool_name` and `hook.tool_name` agree.
+
+```json
+{ "type": "speak", "message": "{{ hook.tool_name }} finished", "when": "hook.tool_name == 'Bash'" }
+```
+
+- A missing `hook.<path>` is absent (`null`); it never falls back to an
+  unprefixed field or another root.
+- `hook` does not contain the environment: `hook.env.HOME` is absent. Read
+  environment variables through `env.*`.
+- `hook.extra.doc` reaches an `extra` field named `doc`.
+- `hook` exists only in hook actions. A hook expression has no frontmatter, so
+  Darkmatter's document root `fm` does not apply here.
+
+#### Migrating from the `doc` root
+
+The payload root was previously named `doc`. It was renamed with no alias, so
+`doc` gets no special treatment in a hook expression:
+
+| Written as | Before | Now |
+| --- | --- | --- |
+| `when: "doc.tool_name == 'Bash'"` | compares the tool name | `doc.tool_name` is absent, so the action never runs |
+| `{{ doc.tool_name }}` in a template | the tool name | left in the output as literal text |
+| `{{ hook.tool_name }}` | left as literal text | the tool name |
+| `{{ hook }}` | left as literal text | the whole payload as JSON |
+
+Replace `doc.` with `hook.` (or drop the prefix) in every `when`, `matcher`,
+and template string. Claudine does not rewrite configuration automatically.
+
 ## Template Variables
 
 All string fields in actions (`message`, `template`, `command`, `args`) support Handlebars-style interpolation.
@@ -302,6 +339,7 @@ All string fields in actions (`message`, `template`, `command`, `args`) support 
 | `{{prompt}}` | User prompt text | before_prompt |
 | `{{agent_type}}` | Agent/subagent type | subagent events |
 | `{{notification_type}}` | Notification type | notification |
+| `{{hook}}` / `{{hook.<path>}}` | The whole payload as JSON / one field of it (see [The `hook` root](#the-hook-root)) | all events |
 
 ### Context Variables (auto-detected at runtime)
 

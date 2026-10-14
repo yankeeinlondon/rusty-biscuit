@@ -121,10 +121,13 @@ const SUBTREE_COMPOSE_BASELINE: &[AllowedSite] = &[
                  before any event fires",
     },
     AllowedSite {
-        site: "sequence::preflight::resolve_shell_bytes",
+        site: "preflight::reapproval::compose_shell_text",
         calls: 1,
         reason: "Sequence Plus static shell-byte resolution — early-binding \
-                 only, with the resolved bytes stored for approval and execution",
+                 only, with the resolved bytes stored for approval and execution; \
+                 the same one function re-resolves an approved command under a \
+                 later task's environment to refuse changed text, so it is not a \
+                 second grammar",
     },
     AllowedSite {
         site: "sequence::task::resolve_value",

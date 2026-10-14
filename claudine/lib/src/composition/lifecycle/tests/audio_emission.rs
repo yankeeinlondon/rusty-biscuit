@@ -21,67 +21,9 @@ fn install_fixture_program(temp: &Path, name: &str) -> std::path::PathBuf {
     bin
 }
 
-#[test]
-fn audio_order_say_plus_effect() {
-    let n = LifecycleNotification {
-        say: Some("Hello".into()),
-        effect: Some("doorbell".into()),
-        ..Default::default()
-    };
-    let phases = audio_phases(&n);
-    assert_eq!(phases.len(), 2);
-    assert!(matches!(phases[0], AudioPhase::Effect(_)));
-    assert!(matches!(phases[1], AudioPhase::Speak(_)));
-}
-
-#[test]
-fn audio_order_say_first_plus_effect() {
-    let n = LifecycleNotification {
-        say_first: Some("Hello".into()),
-        effect: Some("doorbell".into()),
-        ..Default::default()
-    };
-    let phases = audio_phases(&n);
-    assert_eq!(phases.len(), 2);
-    assert!(matches!(phases[0], AudioPhase::Speak(_)));
-    assert!(matches!(phases[1], AudioPhase::Effect(_)));
-}
-
-#[test]
-fn audio_order_speech_only() {
-    let n = LifecycleNotification {
-        say: Some("Hello".into()),
-        ..Default::default()
-    };
-    let phases = audio_phases(&n);
-    assert_eq!(phases.len(), 1);
-    assert!(matches!(phases[0], AudioPhase::Speak(_)));
-}
-
-#[test]
-fn audio_order_effect_only() {
-    let n = LifecycleNotification {
-        effect: Some("doorbell".into()),
-        ..Default::default()
-    };
-    let phases = audio_phases(&n);
-    assert_eq!(phases.len(), 1);
-    assert!(matches!(phases[0], AudioPhase::Effect(_)));
-}
-
-#[test]
-fn audio_order_no_audio() {
-    let n = LifecycleNotification {
-        stderr: Some("Status only".into()),
-        ..Default::default()
-    };
-    let phases = audio_phases(&n);
-    assert!(phases.is_empty());
-}
-
 #[tokio::test]
 #[serial_test::serial]
-async fn default_emitter_publishes_audio_in_phase_order_without_waiting_for_playback() {
+async fn default_emitter_publishes_audio_in_stack_order_without_waiting_for_playback() {
     use std::time::{Duration, Instant};
 
     let temp = tempfile::tempdir().unwrap();
@@ -124,9 +66,10 @@ async fn default_emitter_publishes_audio_in_phase_order_without_waiting_for_play
     let emitter = DefaultLifecycleEmitter;
     let start = Instant::now();
 
+    // A dictionary plays its effect before speech; a list keeps its order.
     for frontmatter in [
         json!({"start": {"say": "This is a test message.", "effect": "doorbell-2"}}),
-        json!({"start": {"say_first": "This is a test message.", "effect": "doorbell-2"}}),
+        json!({"start": [{"say": "This is a test message."}, {"effect": "doorbell-2"}]}),
     ] {
         let config = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap();
         let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
@@ -224,8 +167,226 @@ async fn default_emitter_warns_once_when_speech_handoff_fails() {
     });
 }
 
+/// Run `signal`'s stack through the executor with a recording emitter.
+fn execute(
+    frontmatter: serde_json::Value,
+    signal: LifecycleSignal,
+) -> (Vec<EmittedAction>, executor::LifecycleEventOutcome) {
+    let emitter = RecordingEmitter::new();
+    let outcome = execute_with(frontmatter, signal, &emitter, &GlobalSettings::default());
+    (emitter.actions(), outcome)
+}
+
+/// Run `signal`'s stack through the executor with `emitter` and `settings`.
+fn execute_with(
+    frontmatter: serde_json::Value,
+    signal: LifecycleSignal,
+    emitter: &dyn LifecycleEmitter,
+    settings: &GlobalSettings,
+) -> executor::LifecycleEventOutcome {
+    let config = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap();
+    let (_, messaging, term) = test_ctx();
+    let engine_root = tempfile::tempdir().unwrap();
+    let engine = darkmatter::effects::EffectEngine::builder()
+        .mutation_root(engine_root.path())
+        .auto_rehash(false)
+        .build();
+    let fm = serde_json::Map::new();
+    let context = executor::StackExecutionContext {
+        signal,
+        scope: None,
+        frontmatter: &fm,
+        live_frontmatter: None,
+        runtime_state: None,
+        err: None,
+        timing: None,
+        current: None,
+        group: None,
+        loop_values: None,
+        base_dir: None,
+        ctx_base_dir: None,
+        prepared_context: None,
+        file_resolution_context: crate::test_support::process_context(),
+        effect_engine: &engine,
+        shell_runner: &executor::DisabledShellRunner,
+        emitter,
+        term: &term,
+        source_path: dummy_path(),
+        repo_root: None,
+        messaging: &messaging,
+        settings,
+    };
+    context.execute_event(&config)
+}
+
+/// A failure stack whose durable records spell its path: an effect, a guarded
+/// branch whose `else` (selected) speaks and whose `then` would play two
+/// effects, a trailing effect, then a `retry` transition.
+fn branching_audio_stack() -> serde_json::Value {
+    json!({ "failure": [
+        { "effect": "doorbell-2" },
+        {
+            "when": "false",
+            "then": [{ "effect": "confirmation" }, { "effect": "confirmation" }],
+            "else": [{ "say": "This is a test message." }],
+        },
+        { "effect": "confirmation" },
+        "retry",
+    ]})
+}
+
+/// Durable publication follows stack order across a guarded branch, only the
+/// selected branch publishes, and records published before a `retry`
+/// transition stay queued after it. The spool lock keeps playback from
+/// running, and the eSpeak stub is never executed.
+#[tokio::test]
+#[serial_test::serial]
+async fn executor_durably_queues_the_selected_branch_in_stack_order_across_a_transition() {
+    let temp = tempfile::tempdir().unwrap();
+    let spool = temp.path().join("spool");
+    let bin = install_fixture_program(temp.path(), "espeak");
+    let path = std::env::join_paths(
+        std::iter::once(bin).chain(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        )),
+    )
+    .unwrap();
+    let _path = test_toolkit::EnvGuard::set_safe("PATH", path);
+    let _spool = test_toolkit::EnvGuard::set_safe("PLAYA_SPOOL_DIR", &spool);
+    let _dry_run = test_toolkit::EnvGuard::remove_safe("PLAYA_DRY_RUN");
+    assert_eq!(biscuit_speaks::run_if_worker().await, None);
+    let _audio_spool = LockedAudioSpool::new(&spool);
+    let settings = GlobalSettings {
+        tts: Some(TtsSettings {
+            provider: Some("espeak".to_string()),
+            voice: None,
+            rate: None,
+        }),
+        ..GlobalSettings::default()
+    };
+
+    let outcome = execute_with(
+        branching_audio_stack(),
+        LifecycleSignal::Failure,
+        &DefaultLifecycleEmitter,
+        &settings,
+    );
+
+    assert!(
+        matches!(outcome.control, Some(executor::StackControl::Retry { .. })),
+        "{outcome:?}"
+    );
+    let pending = playa::detached::snapshot().unwrap().pending;
+    use playa::detached::JournalSourceKind::{Command, File};
+    assert_eq!(
+        pending.iter().map(|job| job.source_kind).collect::<Vec<_>>(),
+        vec![File, Command, File],
+        "effect, the selected `else` speech, effect: {pending:?}"
+    );
+    assert_eq!(
+        pending.iter().map(|job| job.sequence).collect::<Vec<_>>(),
+        vec![1, 2, 3]
+    );
+}
+
+/// Under `PLAYA_DRY_RUN` the same stack publishes nothing: no spool is
+/// created and no TTS preparation runs.
+#[tokio::test]
+#[serial_test::serial]
+async fn executor_publishes_no_audio_under_dry_run() {
+    let temp = tempfile::tempdir().unwrap();
+    let spool = temp.path().join("spool");
+    let _spool = test_toolkit::EnvGuard::set_safe("PLAYA_SPOOL_DIR", &spool);
+    let _dry_run = test_toolkit::EnvGuard::set_safe("PLAYA_DRY_RUN", "1");
+    assert_eq!(biscuit_speaks::run_if_worker().await, None);
+
+    let outcome = execute_with(
+        branching_audio_stack(),
+        LifecycleSignal::Failure,
+        &DefaultLifecycleEmitter,
+        &GlobalSettings::default(),
+    );
+
+    assert!(
+        matches!(outcome.control, Some(executor::StackControl::Retry { .. })),
+        "{outcome:?}"
+    );
+    assert!(!spool.exists(), "dry run must not create or fill the spool");
+}
+
+fn effect(name: &str) -> EmittedAction {
+    EmittedAction::Effect {
+        name: name.to_string(),
+    }
+}
+
+fn speech(text: &str) -> EmittedAction {
+    EmittedAction::Speech {
+        text: text.to_string(),
+    }
+}
+
 #[test]
-fn guard_non_audio_before_audio() {
+fn executor_publishes_an_effect_then_speech_in_stack_order() {
+    let (actions, outcome) = execute(
+        json!({ "success": [{ "effect": "confirmation" }, { "say": "done" }] }),
+        LifecycleSignal::Success,
+    );
+    assert_eq!(actions, [effect("confirmation"), speech("done")]);
+    assert_eq!(outcome, executor::LifecycleEventOutcome::default());
+}
+
+#[test]
+fn executor_publishes_speech_then_an_effect_in_stack_order() {
+    let (actions, outcome) = execute(
+        json!({ "success": [{ "say": "done" }, { "effect": "confirmation" }] }),
+        LifecycleSignal::Success,
+    );
+    assert_eq!(actions, [speech("done"), effect("confirmation")]);
+    assert_eq!(outcome, executor::LifecycleEventOutcome::default());
+}
+
+#[test]
+fn executor_interleaves_audio_with_other_actions_and_branches_in_order() {
+    let (actions, _) = execute(
+        json!({ "failure": [
+            { "say": "first" },
+            { "stderr": "between" },
+            { "when": "true", "then": [{ "effect": "crowd-applause" }, { "speak": "inside" }] },
+            { "effect": "confirmation" },
+        ]}),
+        LifecycleSignal::Failure,
+    );
+    assert_eq!(
+        actions,
+        [
+            speech("first"),
+            EmittedAction::Stderr {
+                signal: LifecycleSignal::Failure,
+                text: "between".to_string(),
+            },
+            effect("crowd-applause"),
+            speech("inside"),
+            effect("confirmation"),
+        ]
+    );
+}
+
+#[test]
+fn audio_before_a_directive_is_published_before_the_transition() {
+    let (actions, outcome) = execute(
+        json!({ "failure": [{ "say": "retrying" }, { "effect": "confirmation" }, "retry"] }),
+        LifecycleSignal::Failure,
+    );
+    assert_eq!(actions, [speech("retrying"), effect("confirmation")]);
+    assert!(
+        matches!(outcome.control, Some(executor::StackControl::Retry { .. })),
+        "{outcome:?}"
+    );
+}
+
+#[test]
+fn guard_emits_a_dictionary_in_canonical_order() {
     let config = parse_lifecycle_config(
         &json!({
             "start": {
@@ -256,24 +417,19 @@ fn guard_non_audio_before_audio() {
 
     let actions = emitter.actions();
     assert_eq!(actions.len(), 5);
-    // Non-audio first
+    // A dictionary expands in canonical order: communication lines, then
+    // the effect before speech.
     assert!(matches!(actions[0], EmittedAction::Stderr { .. }));
     assert!(matches!(actions[1], EmittedAction::Message { .. }));
     assert!(matches!(actions[2], EmittedAction::Notification { .. }));
-    // Audio: effect before say (default order)
     assert!(matches!(actions[3], EmittedAction::Effect { .. }));
     assert!(matches!(actions[4], EmittedAction::Speech { .. }));
 }
 
 #[test]
-fn guard_say_first_ordering() {
+fn guard_emits_a_list_in_authored_order() {
     let config = parse_lifecycle_config(
-        &json!({
-            "start": {
-                "say_first": "hello",
-                "effect": "confirmation",
-            }
-        }),
+        &json!({ "start": [{ "say": "hello" }, { "effect": "confirmation" }] }),
         dummy_path(),
     )
     .unwrap();
@@ -294,7 +450,6 @@ fn guard_say_first_ordering() {
 
     let actions = emitter.actions();
     assert_eq!(actions.len(), 2);
-    // say_first → speech before effect
     assert!(matches!(actions[0], EmittedAction::Speech { .. }));
     assert!(matches!(actions[1], EmittedAction::Effect { .. }));
 }
@@ -413,22 +568,32 @@ fn parses_notify_for_all_signals() {
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
 
-    assert_eq!(
-        config.start.as_ref().unwrap().notify.as_deref(),
-        Some("Starting")
-    );
-    assert_eq!(
-        config.success.as_ref().unwrap().notify.as_deref(),
-        Some("Done")
-    );
-    assert_eq!(
-        config.blocked.as_ref().unwrap().notify.as_deref(),
-        Some("Blocked")
-    );
-    assert_eq!(
-        config.failure.as_ref().unwrap().notify.as_deref(),
-        Some("Failed")
-    );
+    for (signal, title) in [
+        (LifecycleSignal::Start, "Starting"),
+        (LifecycleSignal::Success, "Done"),
+        (LifecycleSignal::Blocked, "Blocked"),
+        (LifecycleSignal::Failure, "Failed"),
+    ] {
+        assert_eq!(literal_communications(&config, signal), [("notify", title.to_string())]);
+    }
+}
+
+/// The `(verb, literal text)` of every root-level communication action.
+fn literal_communications(config: &LifecycleConfig, signal: LifecycleSignal) -> Vec<(&'static str, String)> {
+    config
+        .stack(signal)
+        .iter()
+        .filter_map(|node| match node {
+            actions::LifecycleNode::Action(LifecycleAction {
+                kind: LifecycleActionKind::Communication(comm),
+                ..
+            }) => match &comm.text {
+                Expr::StringLiteral(text) => Some((comm.channel.verb(), text.clone())),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
 }
 
 #[test]
@@ -440,20 +605,13 @@ fn parses_message_and_notify_independently() {
         }
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    let start = config.start.as_ref().unwrap();
-    assert_eq!(start.message.as_deref(), Some("Remote message"));
-    assert_eq!(start.notify.as_deref(), Some("Local notification"));
-}
-
-#[test]
-fn blank_notify_is_normalized_to_none() {
-    let fm = json!({
-        "start": { "notify": "   " },
-        "success": { "notify": "" }
-    });
-    let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
-    assert!(config.start.as_ref().unwrap().notify.is_none());
-    assert!(config.success.as_ref().unwrap().notify.is_none());
+    assert_eq!(
+        literal_communications(&config, LifecycleSignal::Start),
+        [
+            ("message", "Remote message".to_string()),
+            ("notify", "Local notification".to_string()),
+        ]
+    );
 }
 
 #[test]
@@ -491,7 +649,7 @@ fn notify_emits_without_active_route() {
 }
 
 #[test]
-fn notify_emits_before_audio_phases() {
+fn notify_emits_before_audio_in_a_dictionary() {
     let config = parse_lifecycle_config(
         &json!({
             "start": {

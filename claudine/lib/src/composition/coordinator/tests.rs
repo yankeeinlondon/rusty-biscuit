@@ -24,7 +24,10 @@ fn doc(name: &str) -> PathBuf {
 }
 
 fn provenance(source: &str, signal: LifecycleSignal, chain: Vec<PathBuf>) -> ProxyProvenance {
-    ProxyProvenance::new(doc(source), ActionLocation::new(signal, 0, 0), chain)
+    let path = crate::composition::LifecyclePath::root(signal.property_name())
+        .index(0)
+        .field("proxy");
+    ProxyProvenance::new(doc(source), ActionLocation::new(signal, path), chain)
 }
 
 fn overlay_of(pairs: &[(&str, serde_json::Value)]) -> IndexMap<String, serde_json::Value> {
@@ -87,9 +90,14 @@ mod handoff_state {
     }
 
     #[test]
-    fn action_location_renders_the_dotted_property_path() {
-        let location = ActionLocation::new(LifecycleSignal::Failure, 1, 2);
-        assert_eq!(location.to_string(), "failure.stack[1].action[2]");
+    fn action_location_renders_the_authored_path() {
+        let path = crate::composition::LifecyclePath::root("failure")
+            .index(1)
+            .field("else")
+            .index(2)
+            .field("proxy");
+        let location = ActionLocation::new(LifecycleSignal::Failure, path);
+        assert_eq!(location.to_string(), "failure[1].else[2].proxy");
     }
 
     #[test]
@@ -816,7 +824,10 @@ mod commit_records_only_handoffs {
                 IndexMap::new(),
                 ProxyProvenance::new(
                     self.path("source.md"),
-                    ActionLocation::new(LifecycleSignal::Success, 0, 0),
+                    ActionLocation::new(
+                        LifecycleSignal::Success,
+                        crate::composition::LifecyclePath::root("success").index(0).field("proxy"),
+                    ),
                     vec![self.path("source.md")],
                 ),
             )

@@ -101,7 +101,7 @@ const CONTRACT_DOC: &str = concat!(
     "\n",
     "U1: {{ supplied_later }}\n",
     "U2: {{ supplied_later || 'fallback' }} {{ is_null(supplied_later) }}\n",
-    "U3: {{ declared }} {{ title }} {{ repo }} {{ null }} {{ ctx.repo }} {{ doc.supplied_later }}\n",
+    "U3: {{ declared }} {{ title }} {{ repo }} {{ null }} {{ ctx.repo }} {{ fm.supplied_later }}\n",
     "F1: {{ no_such_fn(title) }}\n",
     "F2: {{ title ? upper(title) : missing_fn(title) }}\n",
 );
@@ -202,6 +202,123 @@ fn completion_and_hover_classify_bare_names_as_document_properties() {
     );
     assert!(!items.iter().any(|item| item["kind"] == json!(6)), "{items:#?}");
     fixture.shutdown();
+}
+
+/// `fm` is the catalog's frontmatter root; the released names `doc` and
+/// `hook` are ordinary properties, declared by a frontmatter value or by the
+/// document's own `$schema`.
+const FM_DOC: &str = concat!(
+    "---\n",
+    "$schema:\n",
+    "  hook: string -> A caller-supplied hook name\n",
+    "title: Review\n",
+    "doc:\n",
+    "  title: userland\n",
+    "---\n",
+    "\n",
+    "R1: {{ f }}\n",
+    "R2: {{ fm.ti }}\n",
+    "R3: {{ fm. }}\n",
+    "R4: {{ do }}\n",
+    "R5: {{ ho }}\n",
+    "H1: {{ fm }}\n",
+    "H2: {{ fm.title }}\n",
+    "H3: {{ doc.title }}\n",
+    "H4: {{ hook }}\n",
+);
+
+/// The `(label, kind)` of every completion offered at the end of `needle` on
+/// the line starting with `marker`.
+fn completions_at(fixture: &mut LspFixture<'_>, uri: &str, text: &str, marker: &str, needle: &str) -> Vec<Value> {
+    let (line, _, end) = span_on(text, marker, needle);
+    let result = fixture
+        .request(
+            "textDocument/completion",
+            json!({ "textDocument": { "uri": uri }, "position": { "line": line, "character": end } }),
+        )
+        .result
+        .expect("completions");
+    result.as_array().cloned().unwrap_or_default()
+}
+
+/// The hover Markdown with the cursor one character into `needle`.
+fn hover_at(fixture: &mut LspFixture<'_>, uri: &str, text: &str, marker: &str, needle: &str) -> String {
+    let (line, start, _) = span_on(text, marker, needle);
+    let result = fixture
+        .request(
+            "textDocument/hover",
+            json!({ "textDocument": { "uri": uri }, "position": { "line": line, "character": start + 1 } }),
+        )
+        .result
+        .expect("hover");
+    result["contents"]["value"].as_str().unwrap_or_default().to_string()
+}
+
+fn offers(items: &[Value], label: &str, kind: u64) -> bool {
+    items.iter().any(|item| item["label"] == json!(label) && item["kind"] == json!(kind))
+}
+
+/// Acceptance criterion 6: `fm` completes and hovers from Darkmatter's
+/// catalog, `doc` is no built-in, and declared `doc` and `hook` properties
+/// complete, hover, and stay silent like any other property.
+#[test]
+fn fm_completes_and_hovers_from_the_catalog_and_released_names_are_properties() {
+    const FIELD: u64 = 5;
+    const MODULE: u64 = 9;
+    let fm = reserved_root_descriptors().iter().find(|root| root.name == "fm").expect("fm is cataloged");
+    let workspace = LspWorkspace::new();
+    let (mut fixture, uri, diagnostics) = open_document(&workspace, "fm.md", FM_DOC);
+
+    let root = completions_at(&mut fixture, &uri, FM_DOC, "R1:", "f");
+    let offered = root.iter().find(|item| item["label"] == json!("fm")).unwrap_or_else(|| panic!("{root:#?}"));
+    assert_eq!(offered["kind"], json!(MODULE), "{offered}");
+    assert_eq!(offered["documentation"]["value"], json!(fm.description), "{offered}");
+
+    let members = completions_at(&mut fixture, &uri, FM_DOC, "R2:", "fm.ti");
+    assert!(offers(&members, "fm.title", FIELD), "{members:#?}");
+    let all_members = completions_at(&mut fixture, &uri, FM_DOC, "R3:", "fm.");
+    for label in ["fm.title", "fm.doc", "fm.hook"] {
+        assert!(offers(&all_members, label, FIELD), "{label}: {all_members:#?}");
+    }
+    // `$schema` is not reachable as a dotted path, so it is not offered.
+    assert!(!all_members.iter().any(|item| item["label"] == json!("fm.$schema")), "{all_members:#?}");
+
+    // The released names complete only as ordinary document properties.
+    let doc = completions_at(&mut fixture, &uri, FM_DOC, "R4:", "do");
+    assert!(offers(&doc, "doc", FIELD), "{doc:#?}");
+    assert!(!doc.iter().any(|item| item["label"] == json!("doc") && item["kind"] == json!(MODULE)), "{doc:#?}");
+    let hook = completions_at(&mut fixture, &uri, FM_DOC, "R5:", "ho");
+    assert!(offers(&hook, "hook", FIELD), "schema-declared and unset: {hook:#?}");
+
+    let hover_fm = hover_at(&mut fixture, &uri, FM_DOC, "H1:", "fm");
+    assert!(hover_fm.contains(&format!("**`fm`** — {}", fm.description)), "{hover_fm}");
+    let hover_member = hover_at(&mut fixture, &uri, FM_DOC, "H2:", "fm.title");
+    assert!(hover_member.contains("Static value: `Review` (from frontmatter `title`)"), "{hover_member}");
+    let hover_doc = hover_at(&mut fixture, &uri, FM_DOC, "H3:", "doc.title");
+    assert!(hover_doc.contains("Static value: `userland` (from frontmatter `doc.title`)"), "{hover_doc}");
+    assert!(!hover_doc.contains("**`fm`**"), "{hover_doc}");
+    let hover_hook = hover_at(&mut fixture, &uri, FM_DOC, "H4:", "hook");
+    assert!(hover_hook.contains("A caller-supplied hook name"), "{hover_hook}");
+    fixture.shutdown();
+
+    // Only the unfinished completion partials are undeclared.
+    let undeclared: Vec<String> = with_code(&diagnostics, UNDECLARED).into_iter().map(|(.., message)| message).collect();
+    assert_eq!(undeclared, [advisory("f"), advisory("do"), advisory("ho")], "{diagnostics:#?}");
+}
+
+/// With no `doc` property, `doc.title` is an undeclared document property:
+/// one advisory with the ordinary identity, never a reserved-root read.
+#[test]
+fn an_undeclared_doc_path_is_one_ordinary_advisory() {
+    let text = "---\ntitle: x\n---\n\nD1: {{ doc.title }} {{ fm.title }}\n";
+    let workspace = LspWorkspace::new();
+    let (fixture, _, diagnostics) = open_document(&workspace, "doc-path.md", text);
+    fixture.shutdown();
+    let undeclared = with_code(&diagnostics, UNDECLARED);
+    assert_eq!(undeclared.len(), 1, "{diagnostics:#?}");
+    let (span, source, severity, message) = &undeclared[0];
+    assert_eq!((span.0, span.1), (4, span_on(text, "D1:", "doc").1), "{diagnostics:#?}");
+    assert_eq!((source.as_str(), *severity, message.as_str()), ("darkmatter.compose", 2, advisory("doc").as_str()));
 }
 
 /// Every non-test `src/` line, as `(path relative to src, line number, text)`.

@@ -279,11 +279,9 @@ impl<'a> OrphanTeardownFixture<'a> {
 title: orphan teardown
 model: llamacpp/test-model
 failure:
-  stack:
-    - action: {append_line: ["events.log", "failure"]}
+  - {append_line: ["events.log", "failure"]}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Prompt body
 "#,
@@ -374,15 +372,12 @@ impl<'a> TerminalLifecycleFixture<'a> {
                 r#"---
 title: terminal grace
 failure:
-  stack:
-    - action:
-        - append_line: ["events.log", "failure-started"]
-        - shell: |
-            {}
-        - append_line: ["events.log", "failure-done"]
+  - append_line: ["events.log", "failure-started"]
+  - shell: |
+      {}
+  - append_line: ["events.log", "failure-done"]
 finalize:
-  stack:
-    - action: {{append_line: ["events.log", "finalize"]}}
+  - {{append_line: ["events.log", "finalize"]}}
 ---
 Prompt body
 "#,

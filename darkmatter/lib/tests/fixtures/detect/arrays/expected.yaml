@@ -1,4 +1,4 @@
 $schema:
   tags: string[]
-  mixed: any[]
+  mixed: unknown[]
   scores: number(integer)[]

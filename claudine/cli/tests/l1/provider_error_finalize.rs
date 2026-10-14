@@ -51,17 +51,13 @@ fn exhausted_resumes_fail_command_and_preserve_findings_report() {
             r#"---
 findings: {findings_yaml}
 success:
-  stack:
-    - when: "frontmatter(findings, 'status') == 'findings'"
-      action:
-        - action: resume
-          message: "Correct the remaining deterministic findings."
-          max_attempts: 2
+  - when: "frontmatter(findings, 'status') == 'findings'"
+    then:
+      - resume: {{ message: "Correct the remaining deterministic findings.", max_attempts: 2 }}
 finalize:
-  stack:
-    - when: "frontmatter(findings, 'status') != 'clean'"
-      action:
-        - error: "deterministic gate did not reach a clean outcome"
+  - when: "frontmatter(findings, 'status') != 'clean'"
+    then:
+      - error: "deterministic gate did not reach a clean outcome"
 ---
 Research remains invalid.
 "#,

@@ -213,4 +213,17 @@ mod tests {
         );
         assert_eq!(output, "claude ran Bash");
     }
+
+    #[test]
+    fn report_template_reads_hook_namespace() {
+        let output = format_report(
+            &ReportHandler {
+                format: ReportFormat::Text,
+                template: Some("{{ hook.provider }} ran {{ hook.tool_name }}; old {{ doc.tool_name }}".to_string()),
+                include_metadata: false,
+            },
+            &meta(),
+        );
+        assert_eq!(output, "claude ran Bash; old {{ doc.tool_name }}");
+    }
 }

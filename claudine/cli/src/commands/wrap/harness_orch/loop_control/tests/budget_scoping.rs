@@ -32,7 +32,7 @@ fn request_for(source: &Path, target: &Path, chain: Vec<PathBuf>) -> EvaluatedPr
         indexmap::IndexMap::new(),
         ProxyProvenance::new(
             source.to_path_buf(),
-            claudine::composition::ActionLocation::new(LifecycleSignal::Failure, 0, 0),
+            claudine::composition::ActionLocation::new(LifecycleSignal::Failure, claudine::composition::LifecyclePath::root("failure").index(0).field("proxy")),
             chain,
         ),
     )
@@ -43,6 +43,7 @@ fn retry(max_attempts: u32) -> LifecycleEventOutcome {
         max_attempts,
         backoff: RetryBackoff::Fixed,
         delay: "0s".to_string(),
+        overlay: indexmap::IndexMap::new(),
     })
 }
 

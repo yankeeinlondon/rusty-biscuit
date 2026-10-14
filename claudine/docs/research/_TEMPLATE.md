@@ -31,13 +31,11 @@ agent: opencode
 model: kimi-for-coding/k2p7
 update: "{{file_exists(file) && !markdown_body_empty(file)}}"
 initialize:
-    stack:
-        - when: "file_exists(file) && frontmatter(file, 'last_updated') == ctx.today"
-          action: [ stderr: "…already up to date — skipping.", skip ]
+    - when: "file_exists(file) && frontmatter(file, 'last_updated') == ctx.today"
+      then: [ stderr: "…already up to date — skipping.", skip ]
 success:
-    stack:
-        - when: "frontmatter(file, 'last_updated') != ctx.today"
-          action: [ stderr: "…not updated…", error: "research file was not updated" ]
+    - when: "frontmatter(file, 'last_updated') != ctx.today"
+      then: [ stderr: "…not updated…", error: "research file was not updated" ]
 ---
 
 ## Skills            — "Use the 'claudine' skill." (+ topic-relevant skills)

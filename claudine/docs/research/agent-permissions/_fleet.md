@@ -15,26 +15,24 @@ model: kimi-for-coding/k2p7
 update: "{{file_exists(file) && !markdown_body_empty(file)}}"
 # make interrupted fleet runs resumable: skip providers already researched today
 initialize:
-    stack:
-        - when: "!file_exists(file) || !frontmatter(file, 'last_updated') || date_delta(frontmatter(file, 'last_updated'), ctx.today, '14d')"
-          action:
-              - message: "The provider **{{state.name}}** needs to update its research on **Agent Permissions**"
-        - when: "file_exists(file) && frontmatter(file, 'last_updated') && !date_delta(frontmatter(file, 'last_updated'), ctx.today, '14d')"
-          action:
-              - stderr: "The provider **{{state.name}}** has research for **Agent Permissions** that is current; skipping updates"
-              - skip
+    - when: "!file_exists(file) || !frontmatter(file, 'last_updated') || date_delta(frontmatter(file, 'last_updated'), ctx.today, '14d')"
+      then:
+          - message: "The provider **{{state.name}}** needs to update its research on **Agent Permissions**"
+    - when: "file_exists(file) && frontmatter(file, 'last_updated') && !date_delta(frontmatter(file, 'last_updated'), ctx.today, '14d')"
+      then:
+          - stderr: "The provider **{{state.name}}** has research for **Agent Permissions** that is current; skipping updates"
+          - skip
 # a provider exiting 0 is not proof the research was written — verify the
 # agent actually stamped today's date before accepting success
 success:
-    stack:
-        - when: "frontmatter(file, 'last_updated') != ctx.today"
-          action:
-              - stderr: "The step reported success but <b>{{file}}</b> was not updated — <code>last_updated</code> is not {{ctx.today}}."
-              - error: "research file was not updated"
-        - when: "frontmatter(file, 'last_updated') == ctx.today"
-          action:
-              - info: "The **Agent Permissions** research on **{{state.name}}** completed successfully: {{ link(file) }}"
-              - message: "🎉  the **Agent Permissions** research on **{{state.name}}** completed successfully"
+    - when: "frontmatter(file, 'last_updated') != ctx.today"
+      then:
+          - stderr: "The step reported success but <b>{{file}}</b> was not updated — <code>last_updated</code> is not {{ctx.today}}."
+          - error: "research file was not updated"
+    - when: "frontmatter(file, 'last_updated') == ctx.today"
+      then:
+          - info: "The **Agent Permissions** research on **{{state.name}}** completed successfully: {{ link(file) }}"
+          - message: "🎉  the **Agent Permissions** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the Agent Permissions research on **{{state.name}}** failed to complete!"
     warn: "The Agent Permissions research on **{{state.name}}** failed to complete! (err: {{ err.msg }})"

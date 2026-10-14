@@ -40,7 +40,7 @@ in its body:
 ---
 title: Release notes
 ---
-# {{ upper(doc.title) }}
+# {{ upper(fm.title) }}
 ```
 
 The resulting heading is `# RELEASE NOTES`.
@@ -68,13 +68,20 @@ variables:
 
 | Form | Meaning |
 |---|---|
-| `doc.title` | The current document's `title` frontmatter property. |
+| `fm.title` | The current document's `title` frontmatter property. |
 | `draft` or `user.role` | A simple or nested value supplied to the expression. |
 | `ctx.today` | A runtime fact from the [context variables](context-variables.md). |
 | `env.HOME` | An environment variable, when available. |
 | `items[0]` | The first array element; indexes start at zero. |
 | `items[-1].name` | The `name` property of the last array element. |
-| `doc["release-name"]` | A property accessed by its quoted key. |
+| `fm["release-name"]` | A property accessed by its quoted key. |
+
+A bare name and its `fm.` form read the same frontmatter value (`title` and
+`fm.title`), except when the name is a reserved root. `{{ env }}` is always the
+environment, so a frontmatter key named `env` is read as `{{ fm.env }}`; the
+same applies to `ctx` and `current`, and in a lifecycle event to `err`,
+`timing`, and `group`. `doc` is not reserved: a frontmatter key named `doc` is
+read as `{{ doc }}`.
 
 Missing paths, properties accessed on `null`, and out-of-range array indexes
 resolve to `null`. This allows an expression to provide a fallback:

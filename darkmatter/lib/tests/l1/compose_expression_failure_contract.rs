@@ -476,7 +476,7 @@ fn subtree_compose_fails_on_real_expression_failures_only() {
 
     for (absent, expected) in [
         ("{{ missing }}", json!(null)),
-        ("{{ doc.missing }}", json!(null)),
+        ("{{ fm.missing }}", json!(null)),
         ("[{{ missing }}]", json!("[]")),
         ("{{ missing ? 'yes' : 'no' }}", json!("no")),
         ("{{ missing || 'fallback' }}", json!("fallback")),

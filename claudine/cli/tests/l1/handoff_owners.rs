@@ -80,22 +80,22 @@ fn events(fixture: &CliProcessFixture) -> Vec<String> {
         .collect()
 }
 
-/// One stack item appending `line` to the shared trail.
+/// A stack appending `line` to the shared trail.
 fn trail(event: &str, line: &str) -> String {
     format!(
-        "{event}:\n    stack:\n        - action:\n              - append_line: [\"events.log\", \"{line}\"]\n"
+        "{event}:\n    - append_line: [\"events.log\", \"{line}\"]\n"
     )
 }
 
-/// A stack item appending `line` and then proxying to `./target.md`.
+/// A stack appending `line` and then proxying to `./target.md`.
 fn trail_then_proxy(event: &str, line: &str) -> String {
     trail_then_proxy_to(event, line, "./target.md")
 }
 
-/// A stack item appending `line` and then proxying to `target`.
+/// A stack appending `line` and then proxying to `target`.
 fn trail_then_proxy_to(event: &str, line: &str, target: &str) -> String {
     format!(
-        "{event}:\n    stack:\n        - action:\n              - append_line: [\"events.log\", \"{line}\"]\n              - proxy: {target}\n"
+        "{event}:\n    - append_line: [\"events.log\", \"{line}\"]\n    - proxy: {target}\n"
     )
 }
 
@@ -132,7 +132,7 @@ fn assert_no_false_cycle(run: &Run) {
 /// iterations if nothing handed it off.
 fn looping_source(stacks: &str) -> String {
     format!(
-        "---\nn: 0\nloop:\n    while: \"n < 2\"\n    action: \"increment(n)\"\n{stacks}---\nloop body {{{{ _loop_count }}}}\n"
+        "---\nn: 0\nloop:\n    while: \"n < 2\"\n    action: \"increment(n)\"\n{stacks}---\nloop body {{{{ loop.count }}}}\n"
     )
 }
 
@@ -149,7 +149,7 @@ fn loop_success_proxy_hands_off_after_one_iteration() {
         "loop.md",
         &looping_source(&format!(
             "{}{}",
-            trail_then_proxy("success", "source success {{ _loop_count }}"),
+            trail_then_proxy("success", "source success {{ loop.count }}"),
             trail("finalize", "source finalize"),
         )),
     );
@@ -173,8 +173,8 @@ fn loop_failure_proxy_hands_off_after_one_iteration() {
         &fixture,
         "loop.md",
         &looping_source(&format!(
-            "success:\n    stack:\n        - action:\n              - error: \"not good enough\"\n{}{}",
-            trail_then_proxy("failure", "source failure {{ _loop_count }}"),
+            "success:\n    - error: \"not good enough\"\n{}{}",
+            trail_then_proxy("failure", "source failure {{ loop.count }}"),
             trail("finalize", "source finalize"),
         )),
     );
@@ -197,8 +197,8 @@ fn loop_finalize_proxy_hands_off_without_rerunning_finalize() {
         "loop.md",
         &looping_source(&format!(
             "{}{}",
-            trail("success", "source success {{ _loop_count }}"),
-            trail_then_proxy("finalize", "source finalize {{ _loop_count }}"),
+            trail("success", "source success {{ loop.count }}"),
+            trail_then_proxy("finalize", "source finalize {{ loop.count }}"),
         )),
     );
 
@@ -221,7 +221,7 @@ fn loop_terminal_proxy_does_not_fire_the_abandoned_iterations_gate() {
         &fixture,
         "loop.md",
         &format!(
-            "---\nn: 0\nloop:\n    while: \"n < 2\"\n    action: \"increment(n)\"\n    stack:\n        - action:\n              - append_line: [\"events.log\", \"gate\"]\n{}---\nloop body\n",
+            "---\nn: 0\nloop:\n    while: \"n < 2\"\n    action: \"increment(n)\"\n    gate:\n        - append_line: [\"events.log\", \"gate\"]\n{}---\nloop body\n",
             trail_then_proxy("success", "source success"),
         ),
     );
@@ -243,7 +243,7 @@ fn loop_start_proxy_hands_off_before_the_iteration_runs() {
         "loop.md",
         &looping_source(&format!(
             "{}{}{}",
-            trail_then_proxy("start", "source start {{ _loop_count }}"),
+            trail_then_proxy("start", "source start {{ loop.count }}"),
             trail("success", "source success"),
             trail("finalize", "source finalize"),
         )),
@@ -265,7 +265,7 @@ fn loop_proxy_after_a_retry_hands_off_after_one_iteration() {
     let source = write_doc(
         &fixture,
         "loop.md",
-        &looping_source(&retry_then_proxy("source success after retry {{ _loop_count }}")),
+        &looping_source(&retry_then_proxy("source success after retry {{ loop.count }}")),
     );
 
     let run = compose(&fixture, &source);
@@ -376,7 +376,7 @@ fn sequence_task_failure_proxy_runs_target_within_the_step() {
     task_stacks_row(
         "handoff-task-failure",
         &format!(
-            "success:\n    stack:\n        - action:\n              - error: \"not good enough\"\n{}",
+            "success:\n    - error: \"not good enough\"\n{}",
             trail_then_proxy("failure", "step failure")
         ),
         &["step failure"],
@@ -388,7 +388,7 @@ fn sequence_task_failure_proxy_runs_target_within_the_step() {
 /// attempt; the owner adopts it the same way.
 fn retry_then_proxy(line: &str) -> String {
     format!(
-        "success:\n    stack:\n        - when: \"!file_exists('retried.txt')\"\n          action:\n              - append_line: [\"retried.txt\", \"once\"]\n              - retry: 1\n        - action:\n              - append_line: [\"events.log\", \"{line}\"]\n              - proxy: ./target.md\n"
+        "success:\n    - when: \"!file_exists('retried.txt')\"\n      then:\n          - append_line: [\"retried.txt\", \"once\"]\n          - retry: 1\n    - append_line: [\"events.log\", \"{line}\"]\n    - proxy: ./target.md\n"
     )
 }
 
@@ -418,7 +418,7 @@ fn sequence_task_setup_teardown_and_output_run_once_across_a_handoff() {
         "sequence.md",
         &sequence_doc(
             true,
-            "      setup:\n          - action:\n                - append_line: [\"events.log\", \"setup\"]\n      teardown:\n          - action:\n                - append_line: [\"events.log\", \"teardown\"]\n",
+            "      setup:\n          - append_line: [\"events.log\", \"setup\"]\n      teardown:\n          - append_line: [\"events.log\", \"teardown\"]\n",
         ),
     );
 
@@ -440,7 +440,7 @@ fn failing_target_row(name: &str, fail_fast: bool) {
         &fixture,
         "target.md",
         &format!(
-            "---\n{}success:\n    stack:\n        - action:\n              - error: \"target rejected\"\n---\ntarget body\n",
+            "---\n{}success:\n    - error: \"target rejected\"\n---\ntarget body\n",
             trail("initialize", "target initialize"),
         ),
     );
@@ -454,7 +454,7 @@ fn failing_target_row(name: &str, fail_fast: bool) {
         "sequence.md",
         &sequence_doc(
             fail_fast,
-            "      teardown:\n          - action:\n                - append_line: [\"events.log\", \"teardown\"]\n",
+            "      teardown:\n          - append_line: [\"events.log\", \"teardown\"]\n",
         ),
     );
 
@@ -620,7 +620,7 @@ fn a_cycle_within_one_tasks_chain_is_refused() {
     write_doc(
         &fixture,
         "target.md",
-        "---\nstart:\n    stack:\n        - action:\n              - proxy: ./step.md\n---\ntarget body\n",
+        "---\nstart:\n    - proxy: ./step.md\n---\ntarget body\n",
     );
     write_doc(
         &fixture,
@@ -647,7 +647,7 @@ fn sequence_body_step_proxy_publishes_the_targets_output_once() {
         "sequence.md",
         &format!(
             "---\nsequence:\n    - name: first\n    - name: second\n      side_effect: {{ append_line: [\"events.log\", \"second step outputs={{{{ length(outputs) }}}}\"] }}\n{}---\nBody {{{{ state }}}}.\n",
-            "start:\n    stack:\n        - when: \"state.name == 'first'\"\n          action:\n              - append_line: [\"events.log\", \"body start\"]\n              - proxy: ./target.md\n",
+            "start:\n    - when: \"state.name == 'first'\"\n      then:\n          - append_line: [\"events.log\", \"body start\"]\n          - proxy: ./target.md\n",
         ),
     );
 
@@ -674,9 +674,9 @@ fn a_refused_request_leaves_no_entry_for_the_next_one_to_collide_with() {
         "loop.md",
         concat!(
             "---\nn: 0\nloop:\n    while: \"n < 3\"\n    action: \"increment(n)\"\n    fail_fast: false\n",
-            "success:\n    stack:\n",
-            "        - when: \"_loop_count == 1\"\n          action:\n              - append_line: [\"events.log\", \"refused request\"]\n              - proxy: ./loop.md\n",
-            "        - when: \"_loop_count == 2\"\n          action:\n              - append_line: [\"events.log\", \"legitimate request\"]\n              - proxy: ./target.md\n",
+            "success:\n",
+            "    - when: \"loop.count == 1\"\n      then:\n          - append_line: [\"events.log\", \"refused request\"]\n          - proxy: ./loop.md\n",
+            "    - when: \"loop.count == 2\"\n      then:\n          - append_line: [\"events.log\", \"legitimate request\"]\n          - proxy: ./target.md\n",
             "---\nloop body\n",
         ),
     );
@@ -711,9 +711,9 @@ fn refused_then_legitimate_row(name: &str, refused_action: &str, refusal: &str) 
         &format!(
             concat!(
                 "---\nn: 0\nloop:\n    while: \"n < 3\"\n    action: \"increment(n)\"\n    fail_fast: false\n",
-                "success:\n    stack:\n",
-                "        - when: \"_loop_count == 1\"\n          action:\n              - append_line: [\"events.log\", \"refused request\"]\n              - {}\n",
-                "        - when: \"_loop_count == 2\"\n          action:\n              - append_line: [\"events.log\", \"legitimate request\"]\n              - proxy: ./target.md\n",
+                "success:\n",
+                "    - when: \"loop.count == 1\"\n      then:\n          - append_line: [\"events.log\", \"refused request\"]\n          - {}\n",
+                "    - when: \"loop.count == 2\"\n      then:\n          - append_line: [\"events.log\", \"legitimate request\"]\n          - proxy: ./target.md\n",
                 "---\nloop body\n",
             ),
             refused_action
@@ -747,7 +747,7 @@ fn a_refused_resolution_leaves_no_entry_for_the_next_request() {
 fn a_refused_overlay_evaluation_leaves_no_entry_for_the_next_request() {
     refused_then_legitimate_row(
         "handoff-refused-overlay",
-        "{ action: proxy, target: ./target.md, with: { topic: \"{{ no_such_root() }}\" } }",
+        "proxy: { target: ./target.md, with: { topic: \"{{ no_such_root() }}\" } }",
         "no_such_root",
     );
 }
@@ -773,7 +773,7 @@ fn write_failing_target_that_is_proxied_back_to(fixture: &CliProcessFixture) {
         fixture,
         "target.md",
         &format!(
-            "---\n{}success:\n    stack:\n        - action:\n              - error: \"target rejected\"\n{}---\ntarget body\n",
+            "---\n{}success:\n    - error: \"target rejected\"\n{}---\ntarget body\n",
             trail("initialize", "target initialize"),
             trail_then_proxy_to("failure", "target failure", "./other.md"),
         ),
@@ -859,7 +859,7 @@ fn sequence_task_setup_teardown_and_output_run_once_across_a_terminal_handoff() 
         "sequence.md",
         &sequence_doc(
             true,
-            "      setup:\n          - action:\n                - append_line: [\"events.log\", \"setup\"]\n      teardown:\n          - action:\n                - append_line: [\"events.log\", \"teardown\"]\n",
+            "      setup:\n          - append_line: [\"events.log\", \"setup\"]\n      teardown:\n          - append_line: [\"events.log\", \"teardown\"]\n",
         ),
     );
 

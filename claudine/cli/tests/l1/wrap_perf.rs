@@ -186,7 +186,7 @@ fn composition_setup_and_provider_handoff_order_matches_phase_1_baseline() {
     let md_file = fixture.cwd().join("setup-order.md");
     fs::write(
         &md_file,
-        "---\nagent: goose\ninitialize:\n  stack:\n    - action: {stdout: \"phase:initialize\"}\n---\n# Setup ordering\n",
+        "---\nagent: goose\ninitialize:\n  - {stdout: \"phase:initialize\"}\n---\n# Setup ordering\n",
     )
     .unwrap();
     write_executable(

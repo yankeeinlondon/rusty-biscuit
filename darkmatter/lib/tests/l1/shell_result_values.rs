@@ -122,6 +122,22 @@ impl Repo {
         allow_timeout: bool,
         timeout: std::time::Duration,
     ) -> Result<Value, String> {
+        self.compose_configured(frontmatter, allow_timeout, timeout, false)
+    }
+
+    /// [`Self::compose`] for a caller that re-validates the post-shell
+    /// frontmatter itself.
+    fn compose_caller_owned(&self, frontmatter: &str) -> Result<Value, String> {
+        self.compose_configured(frontmatter, false, std::time::Duration::from_secs(60), true)
+    }
+
+    fn compose_configured(
+        &self,
+        frontmatter: &str,
+        allow_timeout: bool,
+        timeout: std::time::Duration,
+        caller_owned: bool,
+    ) -> Result<Value, String> {
         let path = self.path().join("doc.md");
         std::fs::write(&path, format!("---\n{frontmatter}\n---\nBody\n")).expect("write doc");
         let document = Markdown::try_from(path.as_path()).map_err(|error| error.to_string())?;
@@ -129,7 +145,8 @@ impl Repo {
             .with_source_file(&path)
             .with_shell_policy_root(self.path())
             .with_shell_timeout(timeout)
-            .with_allow_shell_timeout(allow_timeout);
+            .with_allow_shell_timeout(allow_timeout)
+            .with_caller_owned_post_shell_verdict(caller_owned);
         let approved = document
             .compose_preflight(&crate::request_support::request(options.clone()))
             .map_err(|error| error.to_string())?
@@ -438,6 +455,64 @@ fn schema_validates_the_expanded_value() {
             false,
         )
         .expect_err("a boolean is not a number");
+    assert!(error.contains("schema"), "{error}");
+}
+
+/// Compose judges unsuffixed stdout against the schema after expansion unless
+/// the caller owns that verdict; a value a result suffix typed is judged
+/// either way, since such a caller does not expect to coerce it.
+#[test]
+fn post_shell_verdict_follows_its_owner() {
+    let repo = Repo::new();
+    let stdout = format!("$schema:\n  v: number\nv: {}", yaml(&format!("$({SUCCEEDS})")));
+    let typed = format!("$schema:\n  v: number\nv: {}", yaml(&format!("$({SUCCEEDS})::ok")));
+
+    let error = repo.compose(&stdout, false).expect_err("`true` text is not a number");
+    assert!(error.contains("schema"), "{error}");
+    let owned = repo.compose_caller_owned(&stdout).expect("the caller judges stdout text");
+    assert_eq!(owned["v"], json!("true"));
+
+    for error in [repo.compose(&typed, false), repo.compose_caller_owned(&typed)] {
+        let error = error.expect_err("a boolean is not a number");
+        assert!(error.contains("schema"), "{error}");
+    }
+}
+
+/// Schema problems wait only for a value a later stage resolves, in both
+/// verdict modes: a command whose arguments pass 1 interpolated, and a
+/// template reading a command's output, are judged on what they resolve to;
+/// `$( … )` text that is never run is judged as written.
+#[test]
+fn schema_defers_exactly_what_a_later_stage_resolves() {
+    let repo = Repo::new();
+    let count = "$(git rev-list --count HEAD)";
+    let interpolated_command = format!(
+        "$schema:\n  v: number\nref: HEAD\nv: {}",
+        yaml("$(git rev-list --count {{ ref }})")
+    );
+    let template_over_output = format!("$schema:\n  v: number[]\nn: {}\nv: ['{{{{ n }}}}']", yaml(count));
+    let invalid_output = format!("$schema:\n  v: number[]\nn: {}\nv: ['{{{{ n }}}}']", yaml(&format!("$({SUCCEEDS})")));
+    let never_run = format!("$schema:\n  v: number[]\nv: [{}]", yaml(count));
+    let never_run_text = format!("$schema:\n  v: number\nv: {}", yaml(&format!("1 {count}")));
+
+    for caller_owned in [false, true] {
+        let compose = |frontmatter: &str| {
+            repo.compose_configured(frontmatter, false, std::time::Duration::from_secs(60), caller_owned)
+        };
+        let values = compose(&interpolated_command)
+            .unwrap_or_else(|error| panic!("caller_owned={caller_owned}: {error}"));
+        // A caller that owns the post-shell verdict also owns coercing stdout.
+        let one = if caller_owned { json!("1") } else { json!(1) };
+        assert_eq!(values["v"], one, "caller_owned={caller_owned}");
+        let values = compose(&template_over_output)
+            .unwrap_or_else(|error| panic!("caller_owned={caller_owned}: {error}"));
+        assert_eq!(values["v"], json!([one]), "caller_owned={caller_owned}");
+        for frontmatter in [&never_run, &never_run_text] {
+            let error = compose(frontmatter).expect_err(frontmatter);
+            assert!(error.contains("schema"), "caller_owned={caller_owned} {frontmatter}: {error}");
+        }
+    }
+    let error = repo.compose(&invalid_output, false).expect_err("`true` is not a number");
     assert!(error.contains("schema"), "{error}");
 }
 

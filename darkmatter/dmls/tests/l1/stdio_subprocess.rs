@@ -24,20 +24,20 @@ use biscuit_test_harness::bin_exe;
 use serde_json::{Value, json};
 use wait_timeout::ChildExt;
 
-struct ChildGuard {
+pub(crate) struct ChildGuard {
     child: Option<Child>,
 }
 
 impl ChildGuard {
-    fn new(child: Child) -> Self {
+    pub(crate) fn new(child: Child) -> Self {
         Self { child: Some(child) }
     }
 
-    fn child_mut(&mut self) -> &mut Child {
+    pub(crate) fn child_mut(&mut self) -> &mut Child {
         self.child.as_mut().expect("child already reaped")
     }
 
-    fn wait_timeout(&mut self, timeout: Duration) -> std::io::Result<Option<ExitStatus>> {
+    pub(crate) fn wait_timeout(&mut self, timeout: Duration) -> std::io::Result<Option<ExitStatus>> {
         let status = self.child_mut().wait_timeout(timeout)?;
         if status.is_some() {
             self.child.take();
@@ -45,7 +45,7 @@ impl ChildGuard {
         Ok(status)
     }
 
-    fn terminate(&mut self) {
+    pub(crate) fn terminate(&mut self) {
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
             let _ = child.wait();
@@ -110,7 +110,7 @@ fn child_guard_reaps_process_during_unwind() {
 }
 
 /// Frames a JSON-RPC message with the LSP `Content-Length` header.
-fn write_message(stdin: &mut impl Write, message: &Value) {
+pub(crate) fn write_message(stdin: &mut impl Write, message: &Value) {
     let body = serde_json::to_vec(message).expect("serialize message");
     write!(stdin, "Content-Length: {}\r\n\r\n", body.len()).expect("write header");
     stdin.write_all(&body).expect("write body");
@@ -118,7 +118,7 @@ fn write_message(stdin: &mut impl Write, message: &Value) {
 }
 
 /// Reads one framed LSP message, or `None` on EOF (the child closed stdout).
-fn read_message(reader: &mut impl BufRead) -> Option<Value> {
+pub(crate) fn read_message(reader: &mut impl BufRead) -> Option<Value> {
     let mut content_length: Option<usize> = None;
     loop {
         let mut line = String::new();

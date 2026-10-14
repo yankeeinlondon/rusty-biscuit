@@ -1327,9 +1327,11 @@ fn bootstrap_blocked(
 }
 
 /// A materialization with no document content, whose catch stacks resolve
-/// through `file_resolution_context`.
+/// through `file_resolution_context` and read `loop_values` as the `loop`
+/// global.
 fn empty_materialized_prompt(
     file_resolution_context: biscuit_file::FileResolutionContext,
+    loop_values: Option<claudine::composition::LoopAmbient>,
 ) -> MaterializedHarnessPrompt {
     MaterializedHarnessPrompt {
         frontmatter: serde_json::Value::Null,
@@ -1344,6 +1346,7 @@ fn empty_materialized_prompt(
         live_frontmatter: MaterializedHarnessPrompt::live_cell_from(&serde_json::Value::Null),
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         lifecycle: None,
+        loop_values,
         mcp_body_tags: Vec::new(),
     }
 }
@@ -1387,7 +1390,10 @@ fn preflight_fresh_document_phase(
     });
     if let Err(error) = result {
         let err_info = LifecycleErrorInfo::from_error_or_action("shell_approval", error.as_ref());
-        let empty = empty_materialized_prompt(prompt_state.file_resolution_context().clone());
+        let empty = empty_materialized_prompt(
+            prompt_state.file_resolution_context().clone(),
+            prompt_state.input_layers.loop_values.clone(),
+        );
         return Err(emit_blocked_finalize_with_err(
             lifecycle_guard,
             &empty,
@@ -1574,7 +1580,10 @@ fn materialize_attempt_prompt_phase(
             }
             Err(other) => other,
         };
-        let empty = empty_materialized_prompt(prompt_state.file_resolution_context().clone());
+        let empty = empty_materialized_prompt(
+            prompt_state.file_resolution_context().clone(),
+            prompt_state.input_layers.loop_values.clone(),
+        );
         match emit_blocked_finalize_with_err(
             lifecycle_guard,
             &empty,

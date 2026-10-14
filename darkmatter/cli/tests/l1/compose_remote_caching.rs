@@ -457,7 +457,7 @@ fn test_compose_unusable_cache_root_warns_and_still_composes() {
 /// R18 and AC36: `--cache-root` persists raw remote bodies only. A warm run
 /// still serves the remote body from the cache, but draws a new execution
 /// identity and recomposes the local `::file` child, the `::code` operation,
-/// and the `current_env` probe instead of replaying the cold run's output,
+/// and the `env` probe instead of replaying the cold run's output,
 /// and no composed, operation, or snapshot manifest is ever written.
 #[test]
 fn test_compose_cache_root_never_replays_composed_local_output() {
@@ -473,7 +473,7 @@ fn test_compose_cache_root_never_replays_composed_local_output() {
     let root = fixture.write_file(
         "cwd/root.md",
         &format!(
-            "# Root\n\nid=[{{{{ ctx.id }}}}] sid=[{{{{ ctx.sid }}}}] env=[{{{{ current_env.AC36_PROBE }}}}]\n\n\
+            "# Root\n\nid=[{{{{ ctx.id }}}}] sid=[{{{{ ctx.sid }}}}] env=[{{{{ env.AC36_PROBE }}}}]\n\n\
              ::file ./child.md\n\n::code ./main.rs\n\n::file {url}\n"
         ),
     );

@@ -80,6 +80,7 @@ pub(super) fn dry_run_sequence_target(
     cli_model: Option<&str>,
     catalog: &claudine::model_catalog::ModelCatalogService,
     mode: super::super::composition::ModelResolveMode,
+    environment: &claudine::invocation_context::DocumentEnvironment,
 ) -> Option<claudine::composition::ResolvedExecutionTarget> {
     use claudine::composition::{
         AgentResolutionState, ProviderResolutionReason, ResolvedExecutionTarget,
@@ -90,7 +91,7 @@ pub(super) fn dry_run_sequence_target(
 
     if let Some(provider) = explicit_provider {
         let (model, model_reason) =
-            resolve_document_model(catalog, provider, raw_hints, cli_model, mode);
+            resolve_document_model(catalog, provider, raw_hints, cli_model, mode, environment);
         return Some(ResolvedExecutionTarget {
             provider,
             provider_reason: ProviderResolutionReason::ExplicitFlag,
@@ -109,11 +110,60 @@ pub(super) fn dry_run_sequence_target(
         _ => return None,
     };
     let (model, model_reason) =
-        resolve_document_model(catalog, provider, raw_hints, cli_model, mode);
+        resolve_document_model(catalog, provider, raw_hints, cli_model, mode, environment);
     Some(ResolvedExecutionTarget {
         provider,
         provider_reason,
         model,
         model_reason,
     })
+}
+
+/// What a step's planned target is re-selected from when the document that
+/// runs it enters: the sequence's selection hints (with `--set` applied), its
+/// model catalog, and `--model`.
+#[derive(Clone, Copy)]
+pub(super) struct StepSelection<'a> {
+    pub(super) raw_hints: &'a claudine::composition::EffectiveSelectionHints,
+    pub(super) catalog: &'a claudine::model_catalog::ModelCatalogService,
+    pub(super) cli_model: Option<&'a str>,
+}
+
+impl StepSelection<'_> {
+    /// `planned` as the document captured under `environment` runs it.
+    ///
+    /// Preflight plans every step's target under the launch map, before any
+    /// later document has captured its own. The provider never depends on the
+    /// environment, so it stands; the model's environment steps (the
+    /// provider-specific variables, then `MODEL`) are re-read from the
+    /// document's map, and the re-selected model is the one that runs. A
+    /// model the user confirmed on the review screen, or passed as `--model`,
+    /// is a decision rather than a reading of the environment and stands too.
+    pub(super) fn for_document(
+        &self,
+        planned: claudine::composition::ResolvedExecutionTarget,
+        environment: &claudine::invocation_context::DocumentEnvironment,
+    ) -> claudine::composition::ResolvedExecutionTarget {
+        use claudine::composition::ModelResolutionReason;
+
+        if matches!(
+            planned.model_reason,
+            ModelResolutionReason::ExplicitCli | ModelResolutionReason::SequenceReview
+        ) {
+            return planned;
+        }
+        let (model, model_reason) = super::super::composition::resolve_document_model(
+            self.catalog,
+            planned.provider,
+            self.raw_hints,
+            self.cli_model,
+            super::super::composition::ModelResolveMode::REBUILD,
+            environment,
+        );
+        claudine::composition::ResolvedExecutionTarget {
+            model,
+            model_reason,
+            ..planned
+        }
+    }
 }

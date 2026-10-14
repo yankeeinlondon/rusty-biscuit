@@ -335,7 +335,7 @@ fn post_shell_validate(
                     property: name,
                     source: DroppedOptionalSource::Composed,
                     stage: DroppedOptionalStage::PostShellExpansion,
-                    reason: problem.message.clone(),
+                    reason: drop_reason(problem),
                 });
             }
         }
@@ -962,7 +962,7 @@ fn drop_invalid_optionals_with_origin(
                     continue;
                 }
                 if !to_drop.iter().any(|(n, _)| n == &name) {
-                    to_drop.push((name, problem.message.clone()));
+                    to_drop.push((name, drop_reason(problem)));
                 }
             }
             // Missing → required gap surfaced later. Invalid optional

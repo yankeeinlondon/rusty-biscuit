@@ -10,6 +10,7 @@ The main entry point for TTS operations.
 pub struct Speak {
     text: String,
     config: TtsConfig,
+    // private: the provider and settings `prepare` resolved, if any
 }
 
 impl Speak {
@@ -28,11 +29,11 @@ impl Speak {
     /// Set the volume level.
     pub fn with_volume(self, volume: VolumeLevel) -> Self;
 
-    /// Set the speech speed.
-    pub fn with_speed(self, speed: SpeedLevel) -> Self;
-
     /// Set the failover strategy.
     pub fn with_failover(self, strategy: TtsFailoverStrategy) -> Self;
+
+    /// Replace the whole configuration (the way to set speed).
+    pub fn with_config(self, config: TtsConfig) -> Self;
 
     /// Speak the text asynchronously.
     pub async fn play(self) -> Result<(), TtsError>;
@@ -40,10 +41,23 @@ impl Speak {
     /// Speak and return metadata about what was used.
     pub async fn play_with_result(self) -> Result<SpeakResult, TtsError>;
 
-    /// Pre-generate audio for later playback.
-    pub async fn prepare(self) -> Result<PreparedSpeech, TtsError>;
+    /// Synthesize into the shared audio cache with the first available
+    /// provider, without playing; a fresh `Speak` with the same settings
+    /// reuses the file. No-op under `PLAYA_DRY_RUN`, for eSpeak/SAPI, and
+    /// for an unresolvable default.
+    pub async fn prepare(self) -> Result<Self, TtsError>;
+
+    /// Whether `prepare` on this object published a cache file.
+    pub fn is_prepared(&self) -> bool;
 }
 ```
+
+**Preparation state**: `prepare` keeps the resolved provider and settings on
+the returned object. `play`, `play_with_result`, and `play_detached` try them
+first, then the strategy's *other* providers with the original config
+(`SpecificProvider` never switches). Clones keep the state; `with_volume`
+keeps it; `with_voice`, `with_gender`, `with_language`, `with_failover`, and
+`with_config` clear it. A dry-run `prepare` returns the builder unchanged.
 
 **Usage Examples**:
 
@@ -57,7 +71,6 @@ Speak::new("Hello!")
     .with_gender(Gender::Female)
     .with_language(Language::English)
     .with_volume(VolumeLevel::Soft)
-    .with_speed(SpeedLevel::Fast)
     .with_failover(TtsFailoverStrategy::PreferHost)
     .play()
     .await?;
@@ -293,6 +306,11 @@ pub trait TtsExecutor: Send + Sync {
 
     /// Return provider information string.
     fn info(&self) -> &str { "Unknown TTS Provider" }
+
+    /// Synthesize into the shared audio cache without playing. The default
+    /// does nothing (right for eSpeak/SAPI); file providers also return
+    /// without work under `PLAYA_DRY_RUN` or for an unresolved default.
+    async fn prepare(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> { Ok(()) }
 }
 ```
 

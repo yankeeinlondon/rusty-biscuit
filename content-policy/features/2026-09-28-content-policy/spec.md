@@ -41,8 +41,8 @@ references:
 related:
     - 2026-09-16-content-policy-no-cache
     - 2026-09-28-hash-writer-byte-fidelity
-    - 2026-09-28-recursive-schema-types
-    - 2026-10-04-content-policy-base-schema
+    - 2026-10-29-recursive-schema-types
+    - 2026-10-17-content-policy-base-schema
 human_review: false
 message_to_agent: |-
     Phase 5 (`FileChanged`) is done; `just test` (167) and `just lint` (incl. `deps-check`) pass in `content-policy/`, and `biscuit-file/` is green (895). Notes for Phase 6:

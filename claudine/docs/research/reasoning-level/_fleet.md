@@ -25,86 +25,77 @@ fail_fast: false
 # of writing one of the others.
 update: "{{ env.AGENT == agent && file_exists(file) && !markdown_body_empty(file) }}"
 initialize:
-    stack:
-        - when: "state.skip_research == true"
-          action:
-              - stderr: "**{{state.name}}** is marked `skip_research`; skipping {{topic}}"
-              - skip
-        - when: "only != 'all' && only != state.slug"
-          action:
-              - skip
-        - when: "env.AGENT != agent"
-          action:
-              - stderr: "**{{state.name}}** is assigned to {{agent}}, and this run launches {{env.AGENT}}; skipping"
-              - skip
-        - when: "agent == state.slug"
-          action:
-              - stderr: "**{{state.name}}** would be researched by its own agent; skipping"
-              - skip
-        - when: "env.MODEL != model"
-          action:
-              - warn: "**{{state.name}}** is assigned {{model}}, and this run launches {{env.MODEL}}"
-              - error: "this run launches a model outside the rotation"
-        # Current means the fleet confirmed the document against this revision
-        # of the contract within 14 days. The `success` event writes
-        # `contract_checked`; a document the fleet rejected never carries it.
-        - when: "file_exists(file) && frontmatter(file, 'schema_revision') == 2 && frontmatter(file, 'contract_checked') && !date_delta(frontmatter(file, 'contract_checked'), ctx.today, '14d')"
-          action:
-              - stderr: "**{{state.name}}** has {{topic}} research confirmed on {{ frontmatter(file, 'contract_checked') }}; skipping"
-              - skip
-        - action:
-              - info: "Researching **{{topic}}** for **{{state.name}}** with {{agent}} / {{model}} (effort: {{effort}}){{ agent != assigned ? ', covering for ' + assigned : '' }}"
+    - when: "state.skip_research == true"
+      then:
+          - stderr: "**{{state.name}}** is marked `skip_research`; skipping {{topic}}"
+          - skip
+    - when: "only != 'all' && only != state.slug"
+      then:
+          - skip
+    - when: "env.AGENT != agent"
+      then:
+          - stderr: "**{{state.name}}** is assigned to {{agent}}, and this run launches {{env.AGENT}}; skipping"
+          - skip
+    - when: "agent == state.slug"
+      then:
+          - stderr: "**{{state.name}}** would be researched by its own agent; skipping"
+          - skip
+    - when: "env.MODEL != model"
+      then:
+          - warn: "**{{state.name}}** is assigned {{model}}, and this run launches {{env.MODEL}}"
+          - error: "this run launches a model outside the rotation"
+    # Current means the fleet confirmed the document against this revision
+    # of the contract within 14 days. The `success` event writes
+    # `contract_checked`; a document the fleet rejected never carries it.
+    - when: "file_exists(file) && frontmatter(file, 'schema_revision') == 2 && frontmatter(file, 'contract_checked') && !date_delta(frontmatter(file, 'contract_checked'), ctx.today, '14d')"
+      then:
+          - stderr: "**{{state.name}}** has {{topic}} research confirmed on {{ frontmatter(file, 'contract_checked') }}; skipping"
+          - skip
+    - info: "Researching **{{topic}}** for **{{state.name}}** with {{agent}} / {{model}} (effort: {{effort}}){{ agent != assigned ? ', covering for ' + assigned : '' }}"
 start:
-    stack:
-        - when: "!has_binary(state.binary)"
-          action:
-              - warn: "**{{state.binary}}** is not installed on this host, so the research cannot inspect it locally"
+    - when: "!has_binary(state.binary)"
+      then:
+          - warn: "**{{state.binary}}** is not installed on this host, so the research cannot inspect it locally"
 success:
-    stack:
-        - when: "!file_exists(file) || frontmatter(file, 'last_updated') != ctx.today"
-          action:
-              - warn: "The agent finished, but {{ link(file) }} was not updated today"
-              - error: "the research document was not updated"
-        - when: "frontmatter(file, 'agent') != agent || frontmatter(file, 'model') != model"
-          action:
-              - warn: "{{ link(file) }} records a different agent or model than the one assigned ({{agent}} / {{model}})"
-              - error: "the research document records the wrong agent or model"
-        - action:
-              - set:
-                    contract: "$(md schema validate '{{file}}' --no-trigger-schemas --format json)::result"
-        - when: "!contract.ok"
-          action:
-              - warn: "{{topic}} research for **{{state.name}}** does not satisfy its contract"
-              - stderr: "{{{ contract.stdout }}}"
-              - error: "the research document does not satisfy its contract"
-        - action:
-              - set:
-                    relations: "$(python3 '{{ctx.repo_root}}/claudine/docs/research/reasoning-level/_relations.py' '{{file}}')::result"
-        - when: "!relations.ok"
-          action:
-              - warn: "{{topic}} research for **{{state.name}}** breaks a relation its contract requires"
-              - stderr: "{{{ relations.stdout }}}"
-              - error: "the research document breaks a relation its contract requires"
-        - action:
-              - set_frontmatter: ["{{file}}", "contract_checked", "{{ctx.today}}"]
-              - success: "{{topic}} research for **{{state.name}}** satisfies its contract: {{ link(file) }}"
-              - message: "✅ {{topic}} research for **{{state.name}}** completed and validated"
+    - when: "!file_exists(file) || frontmatter(file, 'last_updated') != ctx.today"
+      then:
+          - warn: "The agent finished, but {{ link(file) }} was not updated today"
+          - error: "the research document was not updated"
+    - when: "frontmatter(file, 'agent') != agent || frontmatter(file, 'model') != model"
+      then:
+          - warn: "{{ link(file) }} records a different agent or model than the one assigned ({{agent}} / {{model}})"
+          - error: "the research document records the wrong agent or model"
+    - set:
+          contract: "$(md schema validate '{{file}}' --no-trigger-schemas --format json)::result"
+    - when: "!contract.ok"
+      then:
+          - warn: "{{topic}} research for **{{state.name}}** does not satisfy its contract"
+          - stderr: "{{{ contract.stdout }}}"
+          - error: "the research document does not satisfy its contract"
+    - set:
+          relations: "$(python3 '{{ctx.repo_root}}/claudine/docs/research/reasoning-level/_relations.py' '{{file}}')::result"
+    - when: "!relations.ok"
+      then:
+          - warn: "{{topic}} research for **{{state.name}}** breaks a relation its contract requires"
+          - stderr: "{{{ relations.stdout }}}"
+          - error: "the research document breaks a relation its contract requires"
+    - set_frontmatter: ["{{file}}", "contract_checked", "{{ctx.today}}"]
+    - success: "{{topic}} research for **{{state.name}}** satisfies its contract: {{ link(file) }}"
+    - message: "✅ {{topic}} research for **{{state.name}}** completed and validated"
 failure:
-    stack:
-        - action:
-              - warn: "{{topic}} research for **{{state.name}}** failed: {{ err.msg }}"
-              - message: "💥 {{topic}} research for **{{state.name}}** failed: {{ err.msg }}"
+    - warn: "{{topic}} research for **{{state.name}}** failed: {{ err.msg }}"
+    - message: "💥 {{topic}} research for **{{state.name}}** failed: {{ err.msg }}"
 finalize:
-    stack:
-        # A usage limit is not cured by trying again. The provider stays
-        # unresearched until the limit resets.
-        - when: "err && err.category == 'cap'"
-          action:
-              - warn: "{{env.AGENT}} has reached a usage limit, so **{{state.name}}** was not researched"
-        # Anything else gets one more attempt. The retried run reads what the
-        # gates rejected, so the researcher sees what to correct.
-        - when: "err && err.category != 'cap'"
-          action: { retry: 1 }
+    # A usage limit is not cured by trying again. The provider stays
+    # unresearched until the limit resets.
+    - when: "err && err.category == 'cap'"
+      then:
+          - warn: "{{env.AGENT}} has reached a usage limit, so **{{state.name}}** was not researched"
+    # Anything else gets one more attempt. The retried run reads what the
+    # gates rejected, so the researcher sees what to correct.
+    - when: "err && err.category != 'cap'"
+      then:
+          - retry: 1
 ---
 # Reasoning Level Research on {{state.name}}
 

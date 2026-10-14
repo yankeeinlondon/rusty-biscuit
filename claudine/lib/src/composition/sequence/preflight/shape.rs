@@ -64,6 +64,10 @@ pub struct PreflightTask {
     /// The `setup:`/`teardown:` shell commands sequence approval fixed, which
     /// execution runs instead of re-evaluating the authored text.
     pub approved_stack_commands: Vec<ApprovedCommand>,
+    /// Every interpolating `shell:`, `setup:`, and `teardown:` command
+    /// sequence approval fixed, with what it was resolved from, so the task
+    /// can refuse one its own captured environment would change.
+    pub preflight_approvals: Vec<super::PreflightApproval>,
 }
 
 /// Where a `setup:`/`teardown:` shell command was authored: its stage and its
@@ -93,7 +97,9 @@ impl CommandSiteId {
 }
 
 /// A command whose exact bytes sequence approval fixed. Execution runs
-/// [`Self::command`]; the authored text is never evaluated again.
+/// [`Self::command`]; the authored text is never evaluated again to produce
+/// what runs. (A [`PreflightApproval`](super::PreflightApproval) re-resolves
+/// it only to refuse a task whose environment would change it.)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApprovedCommand {
     site: CommandSiteId,
@@ -185,9 +191,9 @@ pub enum GroupExecution {
 ///
 /// The stack is walked as raw JSON rather than through the lifecycle parser
 /// because preflight wants *potential* commands: an entry is collected whether
-/// or not its `when:` guard holds, and whether it is written positionally
-/// (`shell: "…"`) or in key/value form (`{action: shell, command: "…"}`), plus
-/// any `on_error:` companion.
+/// or not its `when:` guard holds — both `then` and `else` bodies are walked —
+/// and whether it is written in short form (`shell: "…"`) or long form
+/// (`shell: {command: "…", on_error: "…"}`).
 pub fn collect_stack_shell_commands(stack: &Value) -> Vec<String> {
     let mut commands = Vec::new();
     collect_from_value(stack, &mut commands);
@@ -207,22 +213,22 @@ fn collect_from_value(value: &Value, out: &mut Vec<String>) {
 }
 
 fn collect_from_object(map: &Map<String, Value>, out: &mut Vec<String>) {
-    // Positional form: `shell: "cmd"` or `shell: ["a", "b"]`.
-    if let Some(shell) = map.get("shell") {
-        push_strings(shell, out);
-    }
-    // Key/value form: `{action: shell, command: "cmd", on_error: "cmd"}`.
-    if map.get("action").and_then(Value::as_str) == Some("shell") {
-        if let Some(command) = map.get("command") {
-            push_strings(command, out);
+    match map.get("shell") {
+        // Long form: `shell: {command: "cmd", on_error: "cmd"}`.
+        Some(Value::Object(params)) => {
+            for key in ["command", "on_error"] {
+                if let Some(command) = params.get(key) {
+                    push_strings(command, out);
+                }
+            }
         }
-        if let Some(on_error) = map.get("on_error") {
-            push_strings(on_error, out);
-        }
+        // Short form: `shell: "cmd"` or `shell: ["a", "b"]`.
+        Some(shell) => push_strings(shell, out),
+        None => {}
     }
-    // Nested stacks: `action:` lists, `when:`-guarded entries, `on_error:` stacks.
+    // Nested bodies: `then:`/`else:` lists and dictionaries.
     for (key, value) in map {
-        if key == "shell" || key == "command" {
+        if key == "shell" {
             continue;
         }
         collect_from_value(value, out);

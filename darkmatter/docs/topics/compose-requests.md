@@ -159,15 +159,58 @@ Finding no repository is not an error: the request directory becomes the
 tree root. `resolution_failure()` uses the same classes as biscuit-file's
 `FileReferenceError::resolution_failure()`.
 
-## One environment per request
+<a id="one-environment-per-request"></a>
+
+## One environment per document
 
 `{{ env.NAME }}`, `ctx.agent`, `ctx.model`, and a `{{NAME}}/file.md` file
-reference all read the snapshot's environment. An expression and a file
-reference in one request therefore always agree, even if the process
-environment changes or differs.
+reference all read the snapshot's environment. A request composes one
+document, and every file that document transcludes shares the request, so an
+expression and a file reference anywhere in that document always agree, even
+if the process environment changes or differs. `md compose` is one document:
+it captures its process once, at its entry point.
+
+```text
+NOTES=/a md compose doc.md     {{ env.NOTES }} renders /a, ::file {{NOTES}}/x.md reads /a/x.md
+```
 
 A `ComposeContext` captured on its own (`ComposeContext::capture_for_document`
 and its siblings) reads no process environment either: its `env` starts empty,
 so `ctx.agent` is `"unknown"` until a request installs the snapshot's
-environment over it. Only `current_env.NAME` reads the live process
-environment, by design: it names the value at the moment it is referenced.
+environment over it. No expression reads the live process environment, so
+`env` does not change during a composition.
+
+A host that runs several documents in one process gives each document its own
+request, built from a snapshot captured when that document starts. A later
+document may therefore see a different environment from an earlier one, while
+each stays internally consistent. Claudine works this way: every sequence step,
+group leg, and `proxy` target is its own document with its own captured map
+(see Claudine's [composition](../../../claudine/docs/topics/composition.md)
+topic).
+
+### The environment shell children start from
+
+A `::shell` directive and a frontmatter `$( … )` command run as child
+processes. By default a child inherits the composing process's environment,
+which is right for `md compose`: it is one document in one process.
+
+A host that composes several documents in one process, each under its own
+environment (Claudine runs every sequence step and group leg as its own
+document), states the child environment on the request instead:
+
+```rust
+use darkmatter::markdown::compose::ComposeOptions;
+use darkmatter::markdown::compose::shell_expansion::ShellChildEnvironment;
+
+let options = ComposeOptions::new().with_shell_child_environment(ShellChildEnvironment::new([
+    ("PATH", "/usr/bin:/bin"),
+    ("DOC_MARK", "b"),
+]));
+```
+
+The supplied map replaces the inherited environment rather than adding to it.
+The executable is looked up on the supplied `PATH`, `PWD` is set to the
+directory the command runs in, and `NO_COLOR=1` is still added while ANSI
+stripping is on. Values are raw OS strings, so a value that is not valid UTF-8
+reaches the child unchanged. `::shell printenv DOC_MARK` above prints `b`
+whatever this process holds.

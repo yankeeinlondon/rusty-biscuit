@@ -95,6 +95,10 @@ pub struct ResolutionContext {
     /// The request's context. Every local reference derives from it, so no
     /// expression reads the process's directory, home, or environment.
     pub(crate) file_resolution_context: biscuit_file::FileResolutionContext,
+    /// The host globals of the composition this context belongs to, read by
+    /// the compose lookups (frontmatter seed state and the body's resolving
+    /// lookup) before the document. `None` declares nothing.
+    pub(crate) host_globals: Option<super::HostGlobals>,
     /// Projected property/array occurrences mapped back to their immutable caller records.
     pub(crate) caller_file_provenance: HashMap<String, CallerFileProvenance>,
     /// Caller record selected from the source expression for the active filesystem call.
@@ -129,6 +133,7 @@ impl ResolutionContext {
             alias_resolutions: Default::default(),
             current: Default::default(),
             file_resolution_context: context,
+            host_globals: None,
             caller_file_provenance: HashMap::new(),
             active_caller_file_provenance: None,
         }

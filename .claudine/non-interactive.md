@@ -9,19 +9,22 @@ You are running in a non-interactive session — the user cannot answer prompts 
   
 ### Credential and signing blockers (this is very likely why you're hanging)
 
-- Git commits with GPG/SSH signing enabled will block waiting for a passphrase
-  via `gpg-agent` / `ssh-agent` / `pinentry`. Before running `git commit` in a
-  non-interactive session, assume the passphrase is NOT cached unless an
-  included host-specific system prompt explicitly provides a non-interactive,
-  agent-backed signing procedure. If a commit appears to hang, abort the
-  command, report it, and do not retry.
-- Never run `gpg`, `ssh`, `ssh-add`, `sudo`, `op signin`, `aws sso login`,
-  `gh auth login`, `docker login`, `npm login`, or any credential helper that
-  may prompt — even if stdin is closed, many of these open `/dev/tty` directly.
-  An included host-specific system prompt may authorize exact non-interactive
-  `git commit` and signature-verification commands when the host agent handles
-  signing without a prompt; that exception does not authorize interactive key
-  management or credential setup.
+- Signed commits are expected to work in this session; a task that asks you to
+  commit means commit. `gpg-agent` normally holds the passphrase, and when it
+  does not, the passphrase dialog is a GUI pinentry that never reads this
+  session's stdin. Do not refuse to commit on the theory that signing might
+  prompt; attempt the commit and judge by the result.
+- To check before committing, `gpg-connect-agent 'keyinfo --list' /bye` is
+  read-only; a `1` in the seventh field of a key's row means its passphrase is
+  cached. A row without a `1` is not a reason to skip the commit.
+- If `git commit` fails or hangs on signing, abort it, report it, and do not
+  retry. Never bypass signing (`--no-gpg-sign`, `-c commit.gpgsign=false`).
+  `git verify-commit` and `git log --pretty=%G?` are read-only and always
+  allowed.
+- Never run `ssh-add`, `sudo`, `op signin`, `aws sso login`, `gh auth login`,
+  `docker login`, `npm login`, interactive `gpg` key management, or any
+  credential helper that may prompt — even if stdin is closed, many of these
+  open `/dev/tty` directly.
 - An included host-specific system prompt may authorize exact SSH aliases for
   unattended local build environments when every invocation uses
   `BatchMode=yes`. This does not authorize interactive SSH authentication or

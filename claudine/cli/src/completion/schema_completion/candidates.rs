@@ -24,11 +24,10 @@ use crate::completion::walker;
 ///
 /// - `enum` → enum members matching `value_partial` (prefix-insensitive when
 ///   `value_partial` is non-empty; all members for an empty partial).
-/// - `file` → files the property's `match(...)` globs admit, walked from the
-///   globs' roots in precedence order (see [`match_glob_files`]) and spelled
-///   as [`candidate_value`] spells them. A bare `file` with no `match`
-///   patterns falls back to the default Markdown glob under the launch
-///   directory.
+/// - `file` → files that satisfy every `match(...)` group of some
+///   alternative (see [`match_alternative_files`]), spelled as
+///   [`candidate_value`] spells them. A bare `file` with no `match` groups
+///   falls back to the default Markdown glob under the launch directory.
 ///
 /// Each candidate is rendered as the **full** `name='value'` token so the
 /// shell can replace the entire setter under the cursor (matches the
@@ -50,8 +49,8 @@ pub(crate) fn property_value(
         CompletionKind::Enum { members } => {
             enum_candidates(property, members, value_partial)
         }
-        CompletionKind::File { patterns } => {
-            file_candidates(property, patterns, value_partial, suggestion.is_array, ctx)
+        CompletionKind::File { alternatives } => {
+            file_candidates(property, alternatives, value_partial, suggestion.is_array, ctx)
         }
         // Hints don't produce concrete candidates — the caller falls back
         // to the existing `@`-gated path or shell-native completion.
@@ -90,7 +89,7 @@ fn enum_candidates(property: &str, members: &[String], value_partial: &str) -> V
 
 fn file_candidates(
     property: &str,
-    patterns: &[String],
+    alternatives: &[Vec<Vec<String>>],
     value_partial: &str,
     is_array: bool,
     ctx: &ScopeContext,
@@ -107,7 +106,7 @@ fn file_candidates(
     let mut out: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
 
-    if patterns.is_empty() {
+    if alternatives.is_empty() {
         // Bare `file` / `file[]` falls back to the default markdown glob.
         let candidates = default_glob::default_markdown_candidates_filtered(ctx, |path| {
             active.is_empty() || rel_or_name_matches(path, &base, &active)
@@ -133,13 +132,10 @@ fn file_candidates(
         return out;
     }
 
-    let Ok(globs) = MatchGlobs::new(patterns) else {
-        return Vec::new();
-    };
     let Ok(resolution) = scopes::file_resolution_context(ctx) else {
         return Vec::new();
     };
-    for path in match_glob_files(&globs, &resolution) {
+    for path in match_alternative_files(alternatives, &resolution) {
         let Some(value) = candidate_value(&path, &resolution) else {
             continue;
         };
@@ -166,50 +162,85 @@ fn file_candidates(
 
 /// Gather absolute file paths for a schema `file`/`file[]` property.
 ///
-/// - `patterns` empty → [`default_glob::default_markdown_candidates`], sorted
-///   (bare `file`/`file[]` fallback).
-/// - `patterns` non-empty → every file [`match_glob_files`] finds, in native
-///   order.
+/// - `alternatives` empty → [`default_glob::default_markdown_candidates`],
+///   sorted (bare `file`/`file[]` fallback).
+/// - otherwise → every file [`match_alternative_files`] finds.
 ///
 /// Used by the ENTER-path missing-property chooser. TAB completion uses
 /// [`file_candidates`] instead because it needs formatted setter tokens and
 /// array-continuation exclusion.
-pub(crate) fn file_candidate_paths(patterns: &[String], ctx: &ScopeContext) -> Vec<PathBuf> {
-    if patterns.is_empty() {
+pub(crate) fn file_candidate_paths(
+    alternatives: &[Vec<Vec<String>>],
+    ctx: &ScopeContext,
+) -> Vec<PathBuf> {
+    if alternatives.is_empty() {
         let mut paths = default_glob::default_markdown_candidates(ctx);
         paths.sort();
         return paths;
     }
-    let Ok(globs) = MatchGlobs::new(patterns) else {
-        return Vec::new();
-    };
     let Ok(resolution) = scopes::file_resolution_context(ctx) else {
         return Vec::new();
     };
-    match_glob_files(&globs, &resolution)
+    match_alternative_files(alternatives, &resolution)
 }
 
-/// Every file `globs` admit, for a suggestion list.
+/// Every file that satisfies every `match(...)` group of at least one of
+/// `alternatives` (an OR of AND-ed groups, as
+/// [`CompletionKind::File`] defines them).
 ///
-/// Walks each of the globs' roots in precedence order with the completion
+/// Each alternative is walked by [`match_glob_files`] in turn; the result is
+/// each walk's native order, alternatives in authored order, with a file a
+/// later alternative also admits kept at its first position (compared by
+/// canonical identity). An alternative whose groups no file satisfies, or
+/// that is not a valid glob list, contributes nothing.
+fn match_alternative_files(
+    alternatives: &[Vec<Vec<String>>],
+    resolution: &FileResolutionContext,
+) -> Vec<PathBuf> {
+    let mut seen: HashSet<PathIdentity> = HashSet::new();
+    let mut out: Vec<PathBuf> = Vec::new();
+    for groups in alternatives {
+        let Ok(groups) = MatchGroups::new(groups) else {
+            continue;
+        };
+        for path in match_glob_files(&groups, resolution) {
+            // Alternatives can reach one file through different roots, so
+            // spellings may differ.
+            let identity = canonicalize_simplified(&path)
+                .map_or_else(|_| PathIdentity::new(&path), |canonical| PathIdentity::new(&canonical));
+            if seen.insert(identity) {
+                out.push(path);
+            }
+        }
+    }
+    out
+}
+
+/// Every file all of `groups` admit, for a suggestion list.
+///
+/// Walks each of the first group's roots in precedence order (every admitted
+/// file lies under one; see [`PreparedFileMatch::roots`]) with the completion
 /// filters (hidden, gitignored, `_`-prefixed, [`walker::SKIP_DIRS`]), which
 /// shape suggestions only; validation still admits a filtered file a user
 /// types. Each file is examined once, in the first root's walk that reaches
-/// it, which is the most local root that contains it, and judged by
-/// [`biscuit_file::PreparedGlobReference::lists_file`] (nearest-root judgment), so a later
-/// root never re-offers a file an earlier root's pattern excluded. A file
+/// it, which is the most local root that contains it, and offered only when
+/// every group lists it (each group's nearest-root judgment), so a later
+/// root never re-offers a file an earlier root's pattern excluded; each group
+/// applies its own exclusions to its own positives. A file
 /// symlink whose target leaves the tree is omitted without a warning: a
 /// suggestion list is not a place for warnings.
 ///
-/// The walk skips a directory no pattern could list a file below
-/// ([`biscuit_file::PreparedGlobReference::may_list_below`]): a root such as the home
-/// folder can hold far more than `DOCS/*.md` ever reaches.
+/// The walk skips a directory below which some group could list no file: a
+/// root such as the home folder can hold far more than `DOCS/*.md` ever
+/// reaches.
 ///
 /// The result is in native order: root precedence, then fewest components
 /// below the root, then component-wise, as `GlobReference::list_files`
 /// orders its matches.
-fn match_glob_files(globs: &MatchGlobs, resolution: &FileResolutionContext) -> Vec<PathBuf> {
-    let Some(prepared) = globs.prepare(resolution) else {
+///
+/// [`PreparedFileMatch::roots`]: darkmatter::markdown::schemas::file_match::PreparedFileMatch::roots
+fn match_glob_files(groups: &MatchGroups, resolution: &FileResolutionContext) -> Vec<PathBuf> {
+    let Some(prepared) = groups.prepare(resolution) else {
         return Vec::new();
     };
     let prepared = Arc::new(prepared);
@@ -400,7 +431,11 @@ fn format_array_candidate(property: &str, prefix_segments: &[String], selected: 
     format!("{property}='{joined}'")
 }
 
-/// Compiled `file(match(...))` globs. Darkmatter owns the comparison so the
+/// Compiled `file(match(...))` groups. Darkmatter owns the comparison so the
 /// candidates offered here are exactly the files a root-union arm that
-/// contests the glob accepts.
+/// contests the groups accepts.
+use darkmatter::markdown::schemas::file_match::FileMatchGroups as MatchGroups;
+
+/// One compiled `match(...)` group, for tests that judge a single path.
+#[cfg(test)]
 pub(super) use darkmatter::markdown::schemas::file_match::FileMatchGlobs as MatchGlobs;

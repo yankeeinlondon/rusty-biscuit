@@ -17,6 +17,7 @@ use claudine::composition::{
     agent_state_breakdown, build_installed_snapshot, classify_agent_resolution,
     detect_installed_providers, invalid_agent_message, resolve_model_with_hints_from,
 };
+use claudine::invocation_context::DocumentEnvironment;
 use claudine::model_catalog::ModelCatalogService;
 use claudine::provider::Provider;
 use color_eyre::eyre::{Result, WrapErr, eyre};
@@ -74,6 +75,18 @@ pub(crate) fn composition_dispatch_context(
     context
 }
 
+/// The environment of the document a composition request launches: its
+/// prepared epoch's, else its invocation view's.
+pub(crate) fn request_environment(
+    request: &CompositionExecutionRequest,
+) -> DocumentEnvironment {
+    match (&request.prepared.document_epoch, &request.invocation_context) {
+        (Some(epoch), _) => epoch.environment().clone(),
+        (None, Some(invocation)) => invocation.document_environment().clone(),
+        (None, None) => DocumentEnvironment::default(),
+    }
+}
+
 /// Resolve the execution target for a composition request, reusing an
 /// upstream-resolved target when present and otherwise running the full
 /// provider/config/catalog discovery and TTY-gated picker.
@@ -111,6 +124,7 @@ pub(crate) fn resolve_execution_target(
     let favorite = selection_config.as_ref().and_then(|c| c.favorite);
 
     let mode = ModelResolveMode::live(request.silent);
+    let environment = request_environment(request);
     if let Some(provider) = request.explicit_provider {
         let (model, model_reason) = resolve_document_model(
             &catalog,
@@ -118,6 +132,7 @@ pub(crate) fn resolve_execution_target(
             &request.prepared.selection_hints,
             request.model.as_deref(),
             mode,
+            &environment,
         );
         return Ok(ResolvedExecutionTarget {
             provider,
@@ -141,6 +156,7 @@ pub(crate) fn resolve_execution_target(
             &request.prepared.selection_hints,
             request.model.as_deref(),
             mode,
+            &environment,
         );
         let provider_reason = match state {
             AgentResolutionState::Selected { .. } => {
@@ -171,6 +187,7 @@ pub(crate) fn resolve_execution_target(
             &request.prepared.selection_hints,
             request.model.as_deref(),
             mode,
+            &environment,
         );
         Ok(ResolvedExecutionTarget {
             provider,
@@ -224,6 +241,7 @@ pub(crate) fn eagerly_resolve_target(
     // is scoped to that provider only. Provider selection itself never
     // touches the catalog.
     let favorite = selection_config.and_then(|c| c.favorite);
+    let environment = ctx.invocation.document_environment();
     // Dry-run resolves against the same compiled baseline the live run uses
     // (so its `Model` row is the launch model) but never warms the listing.
     let mode = if dry_run {
@@ -234,7 +252,7 @@ pub(crate) fn eagerly_resolve_target(
 
     if let Some(provider) = explicit_provider {
         let (model, model_reason) =
-            resolve_document_model(&catalog, provider, hints, cli_model, mode);
+            resolve_document_model(&catalog, provider, hints, cli_model, mode, environment);
         return Ok(Some(ResolvedExecutionTarget {
             provider,
             provider_reason: claudine::composition::ProviderResolutionReason::ExplicitFlag,
@@ -260,7 +278,7 @@ pub(crate) fn eagerly_resolve_target(
             _ => return Ok(None),
         };
         let (model, model_reason) =
-            resolve_document_model(&catalog, provider, hints, cli_model, mode);
+            resolve_document_model(&catalog, provider, hints, cli_model, mode, environment);
         return Ok(Some(ResolvedExecutionTarget {
             provider,
             provider_reason,
@@ -278,6 +296,7 @@ pub(crate) fn eagerly_resolve_target(
         &catalog,
         source_path,
         mode,
+        environment,
     )
     .map(Some)
 }
@@ -299,6 +318,7 @@ fn resolve_live_target(
     catalog: &claudine::model_catalog::ModelCatalogService,
     source_path: &std::path::Path,
     mode: ModelResolveMode,
+    environment: &DocumentEnvironment,
 ) -> Result<ResolvedExecutionTarget> {
     resolve_live_target_with_tty(
         state,
@@ -310,6 +330,7 @@ fn resolve_live_target(
         source_path,
         std::io::stderr().is_terminal(),
         mode,
+        environment,
     )
 }
 
@@ -324,6 +345,7 @@ pub(crate) fn resolve_live_target_with_tty(
     source_path: &std::path::Path,
     is_tty: bool,
     mode: ModelResolveMode,
+    environment: &DocumentEnvironment,
 ) -> Result<ResolvedExecutionTarget> {
     use claudine::composition::ProviderResolutionReason;
 
@@ -335,7 +357,7 @@ pub(crate) fn resolve_live_target_with_tty(
 
     if let Ok(&provider) = selected_provider.as_ref() {
         let (model, model_reason) =
-            resolve_document_model(catalog, provider, hints, cli_model, mode);
+            resolve_document_model(catalog, provider, hints, cli_model, mode, environment);
         let provider_reason = match state {
             AgentResolutionState::Selected { .. } => ProviderResolutionReason::FrontmatterSingle,
             _ => ProviderResolutionReason::FrontmatterList,
@@ -351,7 +373,7 @@ pub(crate) fn resolve_live_target_with_tty(
     if is_tty {
         let provider = prompt_for_agent_state(&state, hints, snapshot, favorite, source_path)?;
         let (model, model_reason) =
-            resolve_document_model(catalog, provider, hints, cli_model, mode);
+            resolve_document_model(catalog, provider, hints, cli_model, mode, environment);
         Ok(ResolvedExecutionTarget {
             provider,
             provider_reason: ProviderResolutionReason::InteractivePicker,
@@ -547,40 +569,20 @@ pub(crate) fn resolve_document_model(
     hints: &EffectiveSelectionHints,
     cli_model: Option<&str>,
     mode: ModelResolveMode,
+    // The document's captured environment: model precedence steps 2 and 3
+    // (provider-specific variables, then `MODEL`) read it, never the process.
+    environment: &DocumentEnvironment,
 ) -> (Option<String>, ModelResolutionReason) {
-    resolve_document_model_from(
-        catalog,
-        provider,
-        hints,
-        cli_model,
-        mode,
-        claudine::composition::ambient_env_lookup,
-    )
-}
-
-/// [`resolve_document_model`] against a caller-supplied environment, for the
-/// rebuild path — whose callers include tests that cannot scrub the process
-/// environment they share with every other test in their binary.
-pub(crate) fn resolve_document_model_from<E>(
-    catalog: &ModelCatalogService,
-    provider: Provider,
-    hints: &EffectiveSelectionHints,
-    cli_model: Option<&str>,
-    mode: ModelResolveMode,
-    env_lookup: E,
-) -> (Option<String>, ModelResolutionReason)
-where
-    E: Fn(&str) -> Option<String>,
-{
+    let env_lookup = |var: &str| environment.lookup(var);
     if mode.refresh {
         // Probe without the catalog so the refresh gate can see whether a
         // CLI/env source already decided the model.
         let (_, probe_reason) =
-            resolve_model_with_hints_from(provider, hints, cli_model, None, &env_lookup);
+            resolve_model_with_hints_from(provider, hints, cli_model, None, env_lookup);
         refresh_for_model_validation(catalog, provider, hints, Some(&probe_reason));
     }
     let (model, reason) =
-        resolve_model_with_hints_from(provider, hints, cli_model, Some(catalog), &env_lookup);
+        resolve_model_with_hints_from(provider, hints, cli_model, Some(catalog), env_lookup);
     if mode.warn
         && let Some(notice) = model_catalog_notice(catalog, provider, model.as_deref(), &reason)
     {

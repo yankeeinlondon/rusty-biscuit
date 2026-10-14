@@ -3,12 +3,11 @@ operation: "merge-conflict"
 conflicts: {{ ctx.merge_conflicts }}
 interactive: true
 initialize:
-    stack:
-        - when: "!conflicts"
-          action:
-              - info: |-
-                  There are **no** merge conflicts in this branch! Exiting the "merge-conflict" prompt.
-              - skip
+    - when: "!conflicts"
+      then:
+          - info: |-
+              There are **no** merge conflicts in this branch! Exiting the "merge-conflict" prompt.
+          - skip
 start:
     info: starting the merge conflict analysis for the `{{ctx.branch}}` branch; there are **{{ length(conflicts) }}** conflicts to be addressed.
     message: starting the merge conflict analysis for the `{{ctx.branch}}` branch; there are **{{ length(conflicts) }}** conflicts to be addressed.

@@ -44,7 +44,7 @@ A task declares **exactly one** executable field:
 |---|---|
 | `prompt: <file-ref>` | The referenced Markdown document (inline-compose if *that* document is configured for it, otherwise a normal compose) |
 | `shell: <string \| string[]>` | One or more shell commands |
-| `side_effect: <action>` | One Darkmatter side effect, in the standard lifecycle action grammar |
+| `side_effect: <action>` | One Darkmatter side effect, written as a one-verb lifecycle dictionary in short or long form (`side_effect: { set_frontmatter: ["state.md", "status", "done"] }`) |
 | `group: <group-ref \| inline group>` | A [group](#groups) |
 | `task: <file-ref>` | An externalized `kind: task` file |
 
@@ -55,7 +55,7 @@ source document's Markdown body. A step **with** one runs that instead of the
 body. A source with no body — a `kind: sequence` YAML file invoked directly —
 simply requires every step to carry an executable.
 
-Optional task fields: `name`, `setup:` / `teardown:` (action stacks), `params:`
+Optional task fields: `name`, `setup:` / `teardown:` (lifecycle action lists), `params:`
 (user setters passed to a `prompt` document), `timeout:` (per shell command),
 `operation:`, `flow:`. A field that cannot affect the chosen executable — say
 `params:` on a `shell:` task — is a typed error, not a silent no-op.
@@ -191,7 +191,7 @@ The suffix parser respects quoted arguments, so a path containing a space or an
 |---|---|---|
 | `map(from, to)` | **Renames** `from` to `to` (the original key is removed) | an item lacks `from`, or is a scalar — the error names the item index |
 | `name(from)` | **Copies** `from` into `name` (the original is retained) | same as `map` |
-| `template(expr)` | Computes `name` per item with a Darkmatter expression; the item's top-level fields shadow globals, each replacing the same-named frontmatter key whole (an item `config: {a: 1}` over frontmatter `config: {b: 2}` makes `config.b`, `doc.config.b`, and `doc['config']['b']` all `null`) | the result is null or empty |
+| `template(expr)` | Computes `name` per item with a Darkmatter expression; the item's top-level fields shadow globals, each replacing the same-named frontmatter key whole (an item `config: {a: 1}` over frontmatter `config: {b: 2}` makes `config.b`, `fm.config.b`, and `fm['config']['b']` all `null`) | the result is null or empty |
 
 ```yaml
 sequence: things.yaml -> colors.data                          # names become "1", "2", "3"
@@ -302,21 +302,38 @@ Before anything runs, Claudine walks the **entire task graph**:
 - **Every shell command is approved byte-for-byte** — `shell:` tasks and
   `$( … )` expansions alike, across every step, group, and referenced document,
   *including branches that may never run*. Approved bytes are executed bytes.
+  Approval resolves each command under the launch environment.
 
   Resolution is **early-binding only**: `state`, `params`, template values,
-  `doc.*`, `ctx.*`, `env.*`. A shell string referencing `outputs`, a
+  `fm.*`, `ctx.*`, `env.*`. A shell string referencing `outputs`, a
   lifecycle global (`err`, `timing`, `group` — even for a group member's
   command, since no group is entered yet), or a runtime-mutated value is a
   typed preflight error — route that work through a `prompt` or `side_effect`
-  task instead. `doc.group` still reads the document. A task's `setup:` and
+  task instead. `fm.group` still reads the document. A task's `setup:` and
   `teardown:` commands run the bytes approved here, even if a `set` changed
   the value they were built from.
+
+  Each step and group leg later captures its own environment. Before any of
+  its stages runs, a task resolves its approved `shell:`, `setup:`, and
+  `teardown:` commands again under that environment. Identical text runs;
+  changed text is refused (`SequenceShellApprovalChanged`, naming the command
+  and the variables that changed), and nothing in the task runs. Approving
+  `deploy {{ env.TARGET }}` as `deploy staging` never authorizes
+  `deploy prod`. Approval of the command template, which would let changed
+  text run, is **planned**. See
+  [Composition — Approval under a later document's map](../composition.md#approval-under-a-later-documents-map).
 - **Git working state is observed once for the whole walk.** Static preflight
   is one discovery run: every referenced document (and every file it includes)
   that names a Git fact such as `ctx.staged_files` reads the same observation.
   Each step then observes Git state again when it runs, as its own composition
   run, so a step still sees what earlier steps changed.
 - **Provider and model resolve once**, producing a per-step target vector.
+  This plan reads the launch environment. When a step or group leg starts, it
+  captures its own environment, and the model is selected again from it: a
+  later step whose environment sets `MODEL=b` launches with `b`, even if the
+  launch environment named another model. The provider stands as planned,
+  because no environment variable selects it. A model given with `--model`, or
+  confirmed on the review screen, also stands.
 
 A preflight failure aborts the sequence regardless of `fail_fast`. Preparation
 never degrades to best-effort.
@@ -335,9 +352,12 @@ already composed for that task.
 ### Phase 2 — Just-in-time composition
 
 Each step composes **at its turn**, not up front. At every step boundary
-Claudine checks the interrupt flag, **re-reads the live source file from disk**,
-re-layers state, composes, validates, executes, appends the output, and folds in
-any mutations.
+Claudine checks the interrupt flag, **captures the step's environment**,
+**re-reads the live source file from disk**, re-layers state, composes,
+validates, executes, appends the output, and folds in any mutations. The step's
+composition, its task, its prompt document, its loop iterations, retries,
+handlers, and `finalize` all read that one environment; a group leg captures
+its own. See [Composition — One Environment per Document](../composition.md#one-environment-per-document).
 
 State layering, lowest precedence to highest:
 
@@ -406,7 +426,7 @@ stdout that task captured.
 ## Mutating state with `set`
 
 `set` is the state-mutation side effect. It works anywhere the lifecycle action
-grammar applies — lifecycle stacks, task `setup:`/`teardown:`, and
+grammar applies — lifecycle events, task `setup:`/`teardown:`, and
 `side_effect:` tasks:
 
 ```yaml
@@ -508,17 +528,20 @@ rather than left to implementation judgment.
 kind: task
 prompt: review.md
 setup:
-    - when: "file_exists(foo/bar/baz.md)"
-      action:
+    - when: "file_exists('foo/bar/baz.md')"
+      then:
           - message: "the file exists"
-    - action:
-          - set:
-                title: "About to do the thing"
+    - set:
+          title: "About to do the thing"
 teardown:
     - when: "ctx.dirty_files"
-      action:
-          - message: "I've made a mess of the place"
+      message: "I've made a mess of the place"
 ```
+
+`setup:` and `teardown:` take the same grammar as a lifecycle event: an ordered
+list of actions and `when`/`then`/`else` items, or a single dictionary of verbs
+run in canonical order (`teardown: { info: "review task done" }`). See
+[Lifecycle — Writing an Event](lifecycle.md#writing-an-event).
 
 - `setup` runs before the primary action. If it fails, the primary action is skipped.
 - `teardown` runs exactly once after setup has started — including after primary
@@ -533,7 +556,7 @@ An external `task:` reference is exclusive with the other executables and is an
 immutable expansion of the referenced file — v1 does not support patching or
 overriding fields at the referencing site.
 
-A task's `side_effect` action and its `setup`/`teardown` stacks mutate
+A task's `side_effect` action and its `setup`/`teardown` actions mutate
 relative to the document that authored the task — its own directory and
 repository — not the document a `prompt:` step composes and runs. An
 externalized `task:` (or `group:`) file that carries `set_frontmatter` or
@@ -600,7 +623,11 @@ group:
   typed **preflight** error. Racing write-backs are never legal.
 - **Process isolation** — each task runs as an independent child with
   spawn-level environment and working directory. Claudine never mutates process
-  environment or CWD on behalf of one task while siblings run.
+  environment or CWD on behalf of one task while siblings run. A leg's
+  `shell:` commands, its `setup:`/`teardown:` `shell` actions, and the
+  `::shell` and `$( … )` commands its documents run all start from the
+  environment that leg captured, so `echo $X` prints the value that
+  `{{ env.X }}` reads in the same leg.
 - **Timeouts and guards** apply to each task independently. Ctrl+C fans out to
   all running children; the group is marked interrupted and the sequence exits
   `130`.

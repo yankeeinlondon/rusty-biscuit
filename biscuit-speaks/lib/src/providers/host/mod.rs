@@ -15,3 +15,4 @@ pub use gtts::GttsProvider;
 pub use kokoro::KokoroTtsProvider;
 pub use sapi::SapiProvider;
 pub use say::SayProvider;
+pub(crate) use say::Resolution as SayResolution;

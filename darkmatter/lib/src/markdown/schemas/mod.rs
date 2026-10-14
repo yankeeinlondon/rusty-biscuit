@@ -72,6 +72,8 @@ pub mod roots;
 pub mod simplified;
 pub mod triggers;
 pub mod validate;
+mod positions;
+mod embedded;
 
 use std::{
     collections::{BTreeSet, HashSet},
@@ -85,7 +87,8 @@ use serde_json::Value;
 use crate::markdown::{Markdown, compose::ComposeSource};
 
 pub use about::{
-    CoercionRuleDescriptor, InlineObjectRuleDescriptor, MatchSafeConstraintDescriptor,
+    ALPHANUMERIC_OPTION_DESCRIPTORS, AlphanumericOptionDescriptor, alphanumeric_option_descriptors,
+    schema_type_descriptor, CoercionRuleDescriptor, InlineObjectRuleDescriptor, MatchSafeConstraintDescriptor,
     SchemaConstraintDescriptor, SchemaShapeDescriptor, SchemaTypeDescriptor,
     TriggerGrammarDescriptor, ValidationBehaviorDescriptor, coercion_rule_descriptors,
     inline_object_rule_descriptors, schema_constraint_descriptors, schema_shape_descriptors,
@@ -112,18 +115,21 @@ pub use phase::SchemaPhase;
 pub use reference::{SchemaReference, SchemaReferenceKind, classify_schema_reference};
 pub use rewrite::NormalizationOutcome;
 pub use simplified::{
-    Constraint, DRAFT_2020_12, DecodedScalar, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef,
+    AlphanumericOption, AlphanumericOptions, AsciiCharSet, Constraint, DRAFT_2020_12, DecodedScalar, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef,
     SchemaArm,
-    SchemaCursor, SchemaCursorRole, SchemaDeclaration, SchemaShape, SchemaSourceMap,
+    SchemaConstraintConflictKind, SchemaConstraintOrigin, SchemaCursor, SchemaCursorRole,
+    SchemaDeclaration, SchemaReferenceSite, SchemaShape, SchemaSourceId, SchemaSourceMap,
     SchemaSourcePath, SchemaSourcePathSegment,
-    SchemaSpanKind, SchemaValueEntry, SchemaValueKind, SchemaValueNode, SimplifiedSchema,
+    SchemaSpanKind, SchemaUnionRejection, SchemaValueEntry, SchemaValueKind, SchemaValueNode,
+    SimplifiedSchema,
     SimplifiedType, SourceAware, SuggestionItem,
     SuggestionLintProblem, SuggestionLintReason, SuggestionQuery, TypeExpr, decode_alias_definition,
-    decode_scalar, decode_partial_scalar_at, decode_scalar_at, decode_scalar_node, flow_collection_end, is_union_arm_path, lint_suggestions, mapping_separator,
+    decode_scalar, decode_partial_scalar_at, decode_scalar_at, decode_scalar_node, flow_collection_end, is_subtype, is_union_arm_path, lint_suggestions, mapping_separator,
     locate_schema_declaration_cursor, locate_schema_value, locate_type_definition_cursor,
     parse_property_definition,
     parse_property_definition_with_source, parse_schema_declaration,
     parse_schema_declaration_with_source, suggestions_for_def, suggestions_for_path,
+    Alternative, flattened_alternatives,
     StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_standalone_schema_document,
     parse_yaml_schema, to_json_schema,
 };
@@ -141,34 +147,44 @@ pub use triggers::{
 };
 pub use validate::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, PositionMap, ValidatorCache};
 
-static BASE_SCHEMA: std::sync::OnceLock<SimplifiedSchema> = std::sync::OnceLock::new();
-static BASE_JSON_SCHEMA: std::sync::OnceLock<Arc<Value>> = std::sync::OnceLock::new();
+/// The runtime baseline, prepared from the embedded table: its typed form with
+/// every import expanded, and that form lowered to JSON Schema.
+struct ShippedBaseline {
+    schema: SimplifiedSchema,
+    json_schema: Arc<Value>,
+}
 
-fn darkmatter_base_schema_ref() -> &'static SimplifiedSchema {
-    BASE_SCHEMA.get_or_init(|| {
-        let raw = include_str!("../../../../docs/schemas/darkmatter.yaml");
-        let frontmatter: serde_yaml_ng::Value =
-            serde_yaml_ng::from_str(raw).expect("baseline yaml must parse");
-        let schema_value = frontmatter
-            .get("$schema")
-            .expect("baseline file must have a `$schema` key");
-        parse_yaml_schema(schema_value).expect("baseline schema must parse")
+/// Prepared and lowered once per process, on first use.
+static BASELINE: std::sync::OnceLock<ShippedBaseline> = std::sync::OnceLock::new();
+
+fn shipped_baseline() -> &'static ShippedBaseline {
+    BASELINE.get_or_init(|| {
+        let resolved = resolve::prepare_embedded_schema(embedded::BASELINE_PATH, embedded::SHIPPED)
+            .unwrap_or_else(|error| panic!("the embedded baseline schema must prepare: {error}"));
+        ShippedBaseline {
+            schema: resolved
+                .simplified
+                .expect("an embedded schema is a SimplifiedSchema"),
+            json_schema: Arc::new(resolved.json_schema),
+        }
     })
 }
 
+fn darkmatter_base_schema_ref() -> &'static SimplifiedSchema {
+    &shipped_baseline().schema
+}
+
 fn darkmatter_base_json_schema_arc() -> &'static Arc<Value> {
-    BASE_JSON_SCHEMA.get_or_init(|| {
-        Arc::new(
-            to_json_schema(darkmatter_base_schema_ref()).expect("baseline schema must convert"),
-        )
-    })
+    &shipped_baseline().json_schema
 }
 
 /// Returns the Darkmatter baseline frontmatter schema as a [`SimplifiedSchema`].
 ///
-/// Loads the authored schema from `darkmatter/docs/schemas/darkmatter.yaml` via
-/// `include_str!` and parses it at first call. The result is cached so repeated
-/// calls are cheap.
+/// The baseline is authored at `darkmatter/docs/schemas/darkmatter.yaml` and
+/// compiled into the library. Its imports, such as `content_policy`'s
+/// Content Policy types, resolve against the other compiled-in schema
+/// documents, never the disk, so the result carries every referenced
+/// definition inline. It is prepared at first call and cached.
 ///
 /// ## Examples
 ///
@@ -180,8 +196,8 @@ fn darkmatter_base_json_schema_arc() -> &'static Arc<Value> {
 ///
 /// ## Panics
 ///
-/// Panics if the checked-in `darkmatter.yaml` cannot be parsed. This is a
-/// library bug or repository corruption, not an author error.
+/// Panics if the compiled-in baseline or a schema it imports cannot be
+/// prepared. This is a library bug, not an author error.
 pub fn darkmatter_base_schema() -> SimplifiedSchema {
     darkmatter_base_schema_ref().clone()
 }
@@ -189,10 +205,9 @@ pub fn darkmatter_base_schema() -> SimplifiedSchema {
 /// Returns the Darkmatter baseline frontmatter schema as a compiled Draft
 /// 2020-12 JSON Schema value.
 ///
-/// The result is derived from [`darkmatter_base_schema`] and cached so repeated
-/// calls do not re-pay the conversion cost. Each call returns an independent
-/// owned value; callers that only need to read the schema can use
-/// [`darkmatter_base_json_schema_ref`] instead.
+/// The result is [`darkmatter_base_schema`] lowered once and cached. Each
+/// call returns an independent owned value; callers that only need to read the
+/// schema can use [`darkmatter_base_json_schema_ref`] instead.
 ///
 /// ## Examples
 ///
@@ -205,8 +220,8 @@ pub fn darkmatter_base_schema() -> SimplifiedSchema {
 ///
 /// ## Panics
 ///
-/// Panics if the checked-in `darkmatter.yaml` cannot be converted to JSON
-/// Schema. This is a library bug or repository corruption, not an author error.
+/// Panics if the compiled-in baseline or a schema it imports cannot be
+/// prepared and lowered. This is a library bug, not an author error.
 pub fn darkmatter_base_json_schema() -> Value {
     darkmatter_base_json_schema_ref().clone()
 }
@@ -219,8 +234,8 @@ pub fn darkmatter_base_json_schema() -> Value {
 ///
 /// ## Panics
 ///
-/// Panics if the checked-in `darkmatter.yaml` cannot be converted to JSON
-/// Schema. This is a library bug or repository corruption, not an author error.
+/// Panics if the compiled-in baseline or a schema it imports cannot be
+/// prepared and lowered. This is a library bug, not an author error.
 pub fn darkmatter_base_json_schema_ref() -> &'static Value {
     darkmatter_base_json_schema_arc().as_ref()
 }
@@ -1054,8 +1069,9 @@ impl EffectiveSchema {
                     ),
                 }
             }
-            // Ordinary object schema. Narrow any discriminated property-level
-            // union to its selected arm; unrelated properties are untouched.
+            // Ordinary object schema. Narrow any discriminated union (property,
+            // item, or nested field) to its selected arm; other locations are
+            // untouched.
             None => {
                 let problems = validate::collect_problems_with_anchors(
                     &self.validator,
@@ -1063,7 +1079,7 @@ impl EffectiveSchema {
                     positions,
                     anchors,
                 );
-                validate::narrow_property_union_problems(
+                validate::narrow_discriminated_union_problems(
                     &self.json_schema,
                     instance,
                     positions,
@@ -1076,9 +1092,10 @@ impl EffectiveSchema {
         // #2). Whitespace-only descriptions (#8) and descriptions identical to
         // the rendered message (#9) are suppressed so the output stays additive.
         for problem in &mut problems {
-            problem.description = validate::resolve_problem_description(&self.json_schema, problem)
-                .filter(|desc| !desc.trim().is_empty())
-                .filter(|desc| *desc != problem.message);
+            problem.description =
+                validate::resolve_problem_description(&self.json_schema, problem, instance)
+                    .filter(|desc| !desc.trim().is_empty())
+                    .filter(|desc| *desc != problem.message);
         }
         ValidationReport {
             valid: problems.is_empty(),
@@ -1091,8 +1108,8 @@ impl EffectiveSchema {
     /// Validates like [`Self::validate_with_positions`], then applies the
     /// compose-parity deferral rules from `options` as data (R-5 Priority 3).
     ///
-    /// Top-level values still holding a `$(...)` shell expression or an
-    /// unresolved `{{ ... }}` template are collected into
+    /// Top-level values that are a whole-value `$(...)` shell expression or
+    /// still hold an unresolved `{{ ... }}` template are collected into
     /// [`ValidationReport::pending`]. With [`PendingPolicy::Defer`] (the
     /// default), problems attributable to a pending key are dropped from the
     /// report — mirroring compose, which lets a later shell-expansion pass
@@ -1465,7 +1482,7 @@ pub struct PendingValue {
 /// Why a [`PendingValue`] is deferred.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PendingValueReason {
-    /// The value holds a `$(...)` shell expression that has not run.
+    /// The value is a whole-value `$(...)` shell expression that has not run.
     ShellExpression,
     /// The value holds an unresolved `{{ ... }}` template.
     UnresolvedTemplate,
@@ -1593,10 +1610,12 @@ fn attributable_top_level_key(problem: &ValidationProblem) -> Option<String> {
     problem.instance_path.first().map(str::to_string)
 }
 
-/// Scans a frontmatter instance for top-level values that hold a deferred
-/// composition construct (`$(...)` shell expression or `{{ ... }}` template),
-/// mirroring compose's `value_pending_composition` — lexically only, never
-/// executing anything. `$schema` is skipped (a control key, not data).
+/// Scans a frontmatter instance for top-level values a later compose stage
+/// resolves — a whole-value `$(...)` shell expression or a `{{ ... }}`
+/// template anywhere in the value — mirroring compose's pre-shell deferral,
+/// lexically only, never executing anything. `$(...)` text elsewhere (inside
+/// a list, a mapping, or after other text) is never expanded, so it is not
+/// pending. `$schema` is skipped (a control key, not data).
 fn scan_pending_values(frontmatter: &Value) -> Vec<PendingValue> {
     let Value::Object(map) = frontmatter else {
         return Vec::new();
@@ -1620,11 +1639,16 @@ fn scan_pending_values(frontmatter: &Value) -> Vec<PendingValue> {
     out
 }
 
-/// Classifies a value's deferral reason. A `$(...)` shell expression takes
-/// precedence over a `{{ ... }}` template when both appear (the shell value is
-/// what a later pass resolves first), matching compose's ordering.
+/// Classifies a value's deferral reason. A whole-value `$(...)` shell
+/// expression takes precedence over a `{{ ... }}` template it contains (the
+/// shell value is what a later pass resolves first), matching compose's
+/// ordering.
 fn pending_reason(value: &Value) -> Option<PendingValueReason> {
-    if value_contains_marker(value, "$(") {
+    let shell_candidate = value.as_str().is_some_and(|text| {
+        crate::markdown::compose::value_origin::authored_shell_candidate(text)
+            && crate::markdown::literal_token::holds_pending_syntax(text)
+    });
+    if shell_candidate {
         Some(PendingValueReason::ShellExpression)
     } else if value_contains_marker(value, "{{") {
         Some(PendingValueReason::UnresolvedTemplate)
@@ -1733,24 +1757,37 @@ fn build_advisories(
     advisories.into_iter().collect()
 }
 
+/// The [`PositionMap`] for one validation source snapshot.
+///
+/// Positions come from the bytes the document was loaded from, so lines count
+/// the complete file, opening `---` included, and CRLF offsets stay exact.
+/// They name where a path was authored even after an assignment or coercion
+/// replaced its value. Without loaded text, the retained frontmatter YAML is
+/// used, offset by the opening delimiter line; a programmatically constructed
+/// document is located in its serialized view.
 pub(crate) fn positions_for(source: &Markdown) -> PositionMap {
-    // Prefer the original frontmatter text so reported line/column numbers
-    // match the source the user is editing. The raw text is the body
-    // between the leading `---` markers — its line 1 is the file's line 2
-    // (the opening `---` is line 1), so we offset the captured positions
-    // by `LEADING_DELIMITER_LINES`.
-    const LEADING_DELIMITER_LINES: u32 = 1;
-    if let Some(raw) = source.frontmatter().raw_source() {
-        let mut map = validate::build_position_map(raw);
-        for (_, (line, _)) in map.iter_mut() {
-            *line = line.saturating_add(LEADING_DELIMITER_LINES);
-        }
-        return map;
+    // The raw YAML's first line is the file's second: the opening `---` is
+    // line 1.
+    const RAW_SOURCE_BASE_LINE: u32 = 2;
+    let frontmatter = source.frontmatter();
+    // Loaded text is kept even when frontmatter parsing failed, so only a
+    // parsed frontmatter's own source may be projected.
+    if let Some(raw) = frontmatter.raw_source() {
+        let orders = frontmatter.mapping_orders();
+        let projected = match source.loaded_source() {
+            Some(loaded) => crate::markdown::extract_frontmatter_block(&loaded.text)
+                .ok()
+                .flatten()
+                .and_then(|block| {
+                    PositionMap::project(&loaded.text, block.yaml_span.clone(), 1, orders)
+                }),
+            None => PositionMap::project(raw, 0..raw.len(), RAW_SOURCE_BASE_LINE, orders),
+        };
+        return projected.unwrap_or_else(|| PositionMap::top_level(raw, RAW_SOURCE_BASE_LINE));
     }
 
-    // Fall back to re-serialising the parsed map. Used only for
-    // programmatically constructed `Markdown` documents that never went
-    // through the parser; line numbers refer to the canonicalised view.
+    // Programmatically constructed documents never went through the parser;
+    // line numbers refer to the canonicalised view.
     let map = source.frontmatter().as_map();
     if map.is_empty() {
         return PositionMap::new();
@@ -1764,7 +1801,13 @@ pub(crate) fn positions_for(source: &Markdown) -> PositionMap {
     }
     let yaml_value = serde_yaml_ng::Value::Mapping(yaml_map);
     match serde_yaml_ng::to_string(&yaml_value) {
-        Ok(rendered) => validate::build_position_map(&rendered),
+        Ok(rendered) => PositionMap::project(
+            &rendered,
+            0..rendered.len(),
+            1,
+            &crate::markdown::MappingOrders::collect(&yaml_value),
+        )
+        .unwrap_or_else(|| PositionMap::top_level(&rendered, 1)),
         Err(_) => PositionMap::new(),
     }
 }
@@ -2719,6 +2762,21 @@ mod claudine_compat_tests {
     }
 
     #[test]
+    fn validate_with_options_judges_shell_text_compose_never_expands() {
+        let effective = effective_number_field();
+        for value in [serde_json::json!(["$(echo 1)"]), serde_json::json!("1 $(echo 1)")] {
+            let instance = serde_json::json!({ "n": value });
+            let report = effective.validate_with_options(
+                &instance,
+                &PositionMap::new(),
+                &ValidationOptions::default(),
+            );
+            assert!(!report.valid, "{instance}: never-expanded shell text is judged");
+            assert!(report.pending.is_empty(), "{instance}: {:?}", report.pending);
+        }
+    }
+
+    #[test]
     fn validate_with_options_report_policy_keeps_pending_problem() {
         let effective = effective_number_field();
         let instance = serde_json::json!({ "n": "$(echo 1)" });
@@ -3413,6 +3471,64 @@ mod phase4_trigger_assembly {
             trigger_uri.is_some_and(|u| u.to_string_lossy().contains("claudine.trigger.yaml")),
             "trigger origin must point at the envelope file: {trigger_uri:?}"
         );
+    }
+
+    /// An authored `$schema` that redeclares a trigger property replaces it
+    /// whole and takes over its origin, so a host that keys a policy on the
+    /// winning declaration sees the document, not the trigger.
+    #[test]
+    fn authored_redeclaration_takes_over_a_trigger_property_origin() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        write(&root.join("schemas/claudine.trigger.yaml"), CLAUDINE_TRIGGER);
+        write(&root.join("schemas/claudine.yaml"), CLAUDINE_PAYLOAD);
+
+        let doc_path = root.join("doc.md");
+        write(
+            &doc_path,
+            "---\n$schema:\n  model: number\nprompt: hello\nmodel: 42\n---\nbody\n",
+        );
+        let api = DarkmatterSchemas::new(doc_context(root, &doc_path))
+            .with_trigger_discovery()
+            .unwrap();
+        let doc = md_from_file(&doc_path);
+
+        let effective = api.effective_for(&doc).unwrap().unwrap();
+        assert_eq!(
+            effective.origins.get("model").map(|o| o.kind),
+            Some(SchemaOriginKind::Document),
+        );
+        let report = api.validate(&doc).unwrap();
+        assert!(report.valid, "the authored number type wins: {:?}", report.problems);
+    }
+
+    /// A root-union authored `$schema` receives every matching trigger layer in
+    /// each arm, and the merged schema records no per-property origins, because
+    /// there are no top-level properties to attribute.
+    #[test]
+    fn root_union_document_schema_merges_trigger_per_arm_without_origins() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        write(&root.join("schemas/claudine.trigger.yaml"), CLAUDINE_TRIGGER);
+        write(&root.join("schemas/claudine.yaml"), "$schema:\n  model: string\n");
+        let union = "$schema:\n  - title: string(required)\n  - name: string(required)\n";
+
+        let doc_path = root.join("doc.md");
+        write(&doc_path, &format!("---\n{union}prompt: hello\ntitle: hi\nmodel: [1]\n---\nbody\n"));
+        let api = DarkmatterSchemas::new(doc_context(root, &doc_path))
+            .with_trigger_discovery()
+            .unwrap();
+        let doc = md_from_file(&doc_path);
+
+        let effective = api.effective_for(&doc).unwrap().unwrap();
+        assert!(effective.origins.is_empty(), "root union has no attributed properties");
+        assert!(effective.json_schema.get("anyOf").is_some(), "the root stays a union");
+        let report = api.validate(&doc).unwrap();
+        assert!(!report.valid, "the trigger's `model: string` applies in every arm");
+
+        write(&doc_path, &format!("---\n{union}prompt: hello\nname: n\nmodel: m\n---\nbody\n"));
+        let report = api.validate(&md_from_file(&doc_path)).unwrap();
+        assert!(report.valid, "a conforming value passes either arm: {:?}", report.problems);
     }
 
     // ── Complete dependency collection ──────────────────────────────────

@@ -407,7 +407,7 @@ fn assert_choose_many_markers(frame: &CapturedFrame, expected_checked: usize) {
 // ----------------------------------------------------------------------
 
 fn run_file_chooser_test<H: KeySender>(harness: &mut H) {
-    let ws = stage_workspace("cover: 'file(required)'", "cover: {{ doc.cover }}");
+    let ws = stage_workspace("cover: 'file(required)'", "cover: {{ fm.cover }}");
     let (chooser_frame, _) = drive_chooser(harness, &ws, &[]);
     assert_chooser_and_detail(&chooser_frame);
     assert_choose_one_markers(&chooser_frame);
@@ -431,7 +431,7 @@ fn run_file_chooser_test<H: KeySender>(harness: &mut H) {
 fn run_file_array_chooser_test<H: KeySender>(harness: &mut H) {
     let ws = stage_workspace(
         "attachments: 'file[](required)'",
-        "attachments: {{ doc.attachments }}",
+        "attachments: {{ fm.attachments }}",
     );
     let (chooser_frame, _) =
         drive_chooser(harness, &ws, &[Key::Space, Key::Down, Key::Down, Key::Space]);

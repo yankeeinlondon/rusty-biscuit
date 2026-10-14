@@ -394,6 +394,7 @@ pub(crate) fn execute_sequence(
             cli_model,
             &catalog,
             super::composition::ModelResolveMode::dry_run(silent),
+            prep_context.invocation.document_environment(),
         );
         (0..total_steps).map(|_| target.clone()).collect()
     } else {
@@ -494,6 +495,7 @@ pub(crate) fn execute_sequence(
                         refresh: first_for_provider,
                         warn: first_for_provider && !silent,
                     },
+                    prep_context.invocation.document_environment(),
                 )
             } else {
                 (
@@ -656,6 +658,11 @@ pub(crate) fn execute_sequence(
         plan: &plan,
         graph: &graph,
         resolved_targets: &resolved_targets,
+        selection: resolve::StepSelection {
+            raw_hints: &raw_hints,
+            catalog: &catalog,
+            cli_model,
+        },
         source,
         prep_context: &prep_context,
         shared,

@@ -713,12 +713,7 @@ impl Drop for CwdGuard {
 fn lifecycle_with_file_exists_shell()
 -> (crate::composition::lifecycle::LifecycleConfig, serde_json::Value) {
     let frontmatter = serde_json::json!({ "spec": "spec.md" });
-    let fm_with_event = serde_json::json!({
-        "spec": "spec.md",
-        "start": {
-            "stack": [{"action": {"shell": "echo {{ file_exists(spec) }}"}}]
-        }
-    });
+    let fm_with_event = serde_json::json!({ "spec": "spec.md", "start": [{ "shell": "echo {{ file_exists(spec) }}" }] });
     let config = crate::composition::lifecycle::parse_lifecycle_config(
         &fm_with_event,
         Path::new("<test>"),
@@ -731,10 +726,14 @@ fn lifecycle_with_file_exists_shell()
 fn resolved_start_shell_command(
     config: &crate::composition::lifecycle::LifecycleConfig,
 ) -> String {
-    let stack = config
-        .stack(LifecycleSignal::Start)
-        .expect("start stack present");
-    match &stack[0].actions[0].kind {
+    let mut first = None;
+    crate::composition::lifecycle::actions::for_each_action(
+        config.stack(LifecycleSignal::Start),
+        &mut |action| {
+            first.get_or_insert(action);
+        },
+    );
+    match &first.expect("start stack present").kind {
         LifecycleActionKind::Shell(shell) => match &shell.command {
             Expr::StringLiteral(s) => s.clone(),
             other => panic!("expected string-literal command, got: {other:?}"),
@@ -768,6 +767,7 @@ fn lifecycle_shell_read_side_resolves_against_document_dir() {
         &source_path,
         crate::test_support::process_context(),
         Some(launch_dir.path()),
+        crate::composition::lifecycle::bindings::EnclosingLoop::Outside,
     )
     .expect("resolution against the document dir must succeed");
 
@@ -800,6 +800,7 @@ fn lifecycle_shell_read_side_does_not_resolve_launch_only_file() {
         &source_path,
         crate::test_support::process_context(),
         None,
+        crate::composition::lifecycle::bindings::EnclosingLoop::Outside,
     )
     .expect("resolution still succeeds; file just resolves to absent");
 
@@ -842,14 +843,16 @@ fn lifecycle_shell_read_side_reuses_all_request_resolution_inputs() {
         "home_ref": "~/home.flag",
         "magic_ref": "@magic.flag",
         "package_ref": "^package.flag",
-        "start": {
-            "stack": [{"action": {"shell": concat!(
-                "echo {{ file_exists(env_ref) }} ",
-                "{{ file_exists(home_ref) }} ",
-                "{{ file_exists(magic_ref) }} ",
-                "{{ file_exists(package_ref) }}"
-            )}}]
-        }
+        "start": [
+            {
+                "shell": concat!(
+                    "echo {{ file_exists(env_ref) }} ",
+                    "{{ file_exists(home_ref) }} ",
+                    "{{ file_exists(magic_ref) }} ",
+                    "{{ file_exists(package_ref) }}"
+                ),
+            },
+        ],
     });
     let mut lifecycle = crate::composition::lifecycle::parse_lifecycle_config(
         &fm_with_event,
@@ -881,6 +884,7 @@ fn lifecycle_shell_read_side_reuses_all_request_resolution_inputs() {
         &source_dir.join("prompt.md"),
         &snapshot,
         None,
+        crate::composition::lifecycle::bindings::EnclosingLoop::Outside,
     )
     .unwrap();
 
@@ -901,9 +905,7 @@ fn lifecycle_with_shell_per_event(
     for event in events {
         frontmatter.insert(
             (*event).to_string(),
-            serde_json::json!({
-                "stack": [{"action": {"shell": format!("echo {event}")}}]
-            }),
+            serde_json::json!([{ "shell": format!("echo {event}") }]),
         );
     }
     crate::composition::lifecycle::parse_lifecycle_config(

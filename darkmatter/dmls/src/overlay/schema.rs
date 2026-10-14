@@ -844,7 +844,7 @@ fn def_at_path(root: &SchemaShape, path: &[&str]) -> Option<PropertyDef> {
 
 fn merged_inline_shape(definition: &PropertyDef) -> Option<SchemaShape> {
     let mut merged = None;
-    for atom in atoms(definition) {
+    for atom in alternatives(definition) {
         let TypeExpr::InlineObject(shape) = &atom.ty else {
             continue;
         };
@@ -869,7 +869,7 @@ fn merge_defs(existing: &PropertyDef, incoming: &PropertyDef) -> PropertyDef {
 
 fn meta_schema_kinds(definition: &PropertyDef) -> Vec<MetaSchemaKind> {
     let mut kinds = Vec::new();
-    for atom in atoms(definition) {
+    for atom in alternatives(definition) {
         let kind = match atom.ty {
             TypeExpr::Primitive(SimplifiedType::TypeDefinition) => MetaSchemaKind::TypeDefinition,
             TypeExpr::Primitive(SimplifiedType::Schema) => MetaSchemaKind::Schema,
@@ -887,6 +887,21 @@ fn atoms(definition: &PropertyDef) -> &[PropertyAtom] {
         PropertyDef::Single(atom) => std::slice::from_ref(atom),
         PropertyDef::Union(atoms) => atoms,
     }
+}
+
+/// The value alternatives of a definition: [`atoms`], with each resolved
+/// union-typed reference (`U[]`, `U(required)`) replaced by its arms,
+/// recursively, as the library's frontmatter shape reads them.
+fn alternatives(definition: &PropertyDef) -> Vec<&PropertyAtom> {
+    fn push<'a>(atom: &'a PropertyAtom, out: &mut Vec<&'a PropertyAtom>) {
+        match atom.union_arms() {
+            Some(arms) => arms.iter().for_each(|arm| push(arm, out)),
+            None => out.push(atom),
+        }
+    }
+    let mut out = Vec::new();
+    atoms(definition).iter().for_each(|atom| push(atom, &mut out));
+    out
 }
 
 /// The assembled schema for one document: the effective schema plus the

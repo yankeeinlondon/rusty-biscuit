@@ -195,18 +195,14 @@ fn characterize_initialize_proxy_resolution_failure() {
         r#"---
 title: characterize initialize proxy
 initialize:
-  stack:
-    - action: {append_line: ["events.log", "initialize"]}
-    - action: {proxy: "no/such/target.md"}
+  - {append_line: ["events.log", "initialize"]}
+  - {proxy: "no/such/target.md"}
 start:
-  stack:
-    - action: {append_line: ["events.log", "start"]}
+  - {append_line: ["events.log", "start"]}
 failure:
-  stack:
-    - action: {append_line: ["events.log", "failure"]}
+  - {append_line: ["events.log", "failure"]}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#,
@@ -263,15 +259,12 @@ fn characterize_terminal_proxy_resolution_failure() {
         r#"---
 title: characterize failure proxy
 start:
-  stack:
-    - action: {append_line: ["events.log", "start"]}
+  - {append_line: ["events.log", "start"]}
 failure:
-  stack:
-    - action: {append_line: ["events.log", "failure"]}
-    - action: {proxy: "no/such/target.md"}
+  - {append_line: ["events.log", "failure"]}
+  - {proxy: "no/such/target.md"}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#,
@@ -321,15 +314,12 @@ fn characterize_terminal_proxy_fails_at_resolution_with_invalid_file_reference()
         r#"---
 title: characterize terminal proxy typed surface
 start:
-  stack:
-    - action: {append_line: ["events.log", "start"]}
+  - {append_line: ["events.log", "start"]}
 failure:
-  stack:
-    - action: {append_line: ["events.log", "failure"]}
-    - action: {proxy: "no/such/target.md"}
+  - {append_line: ["events.log", "failure"]}
+  - {proxy: "no/such/target.md"}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#,
@@ -395,16 +385,13 @@ exit_expressions:
       - "["
     kind: regex
 start:
-  stack:
-    - action: {append_line: ["events.log", "start"]}
+  - {append_line: ["events.log", "start"]}
 failure:
-  stack:
-    - action: {append_line: ["events.log", "failure"]}
+  - {append_line: ["events.log", "failure"]}
 finalize:
-  stack:
-    - when: "err"
-      action: {append_line: ["events.log", "finalize-has-err"]}
-    - action: {append_line: ["events.log", "finalize"]}
+  - when: "err"
+    then: {append_line: ["events.log", "finalize-has-err"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#,
@@ -453,8 +440,7 @@ fn characterize_preflight_shell_denial() {
         r#"---
 title: characterize preflight shell denial
 start:
-  stack:
-    - action: {append_line: ["events.log", "start"]}
+  - {append_line: ["events.log", "start"]}
 ---
 
 ::shell rm -rf /
@@ -543,7 +529,7 @@ fn characterize_all_failure_routes_exit_one_and_emit_once() {
         (
             "initialize-proxy",
             run_route(
-                "---\ntitle: t\ninitialize:\n  stack:\n    - action: {proxy: \"no/such/target.md\"}\n---\nBody\n",
+                "---\ntitle: t\ninitialize:\n    - {proxy: \"no/such/target.md\"}\n---\nBody\n",
                 0,
                 &[],
             ),
@@ -551,7 +537,7 @@ fn characterize_all_failure_routes_exit_one_and_emit_once() {
         (
             "terminal-proxy",
             run_route(
-                "---\ntitle: t\nfailure:\n  stack:\n    - action: {proxy: \"no/such/target.md\"}\n---\nBody\n",
+                "---\ntitle: t\nfailure:\n    - {proxy: \"no/such/target.md\"}\n---\nBody\n",
                 3,
                 &[],
             ),
@@ -606,14 +592,11 @@ loop:
   action: "increment(phase)"
   max: 3
 start:
-  stack:
-    - action: {append_line: ["events.log", "start"]}
+  - {append_line: ["events.log", "start"]}
 failure:
-  stack:
-    - action: {append_line: ["events.log", "failure"]}
+  - {append_line: ["events.log", "failure"]}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#,

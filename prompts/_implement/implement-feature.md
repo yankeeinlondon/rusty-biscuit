@@ -54,16 +54,15 @@ phase: |-
     }}
 yolo: true
 initialize:
-    - stack:
-        - when: "!orchestration"
-          action:
-              - stderr: "looping phase-by-phase chosen over single agent orchestrating"
-              - message: "will implement `{{ parent_dir(spec) }}` using a phase-by-phase loop"
-              - proxy: "./implement-plan.md"
-        - when: "orchestration"
-          action:
-              - stderr: "implementing feature plan as an orchestrator"
-              - message: "will implement plan for `{{ parent_dir(spec) }}` as orchestrator"
+    - when: "!orchestration"
+      then:
+          - stderr: "looping phase-by-phase chosen over single agent orchestrating"
+          - message: "will implement `{{ parent_dir(spec) }}` using a phase-by-phase loop"
+          - proxy: "./implement-plan.md"
+    - when: "orchestration"
+      then:
+          - stderr: "implementing feature plan as an orchestrator"
+          - message: "will implement plan for `{{ parent_dir(spec) }}` as orchestrator"
 start:
     - message: "starting "
 ---

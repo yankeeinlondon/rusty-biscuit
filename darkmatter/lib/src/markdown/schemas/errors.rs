@@ -25,6 +25,11 @@ use std::{ops::Range, path::PathBuf};
 
 use thiserror::Error;
 
+use super::simplified::{
+    SchemaConstraintConflictKind, SchemaConstraintOrigin, SchemaReferenceSite, SchemaSourceId,
+    SchemaUnionRejection,
+};
+
 
 /// Errors produced by the schemas subsystem.
 #[derive(Debug, Error)]
@@ -149,6 +154,58 @@ pub enum SchemaError {
     /// import path.
     #[error("named-type import cycle detected: {chain}")]
     ImportCycle { chain: String },
+
+    /// A named-type reference (bare `Name` or explicit `Name@file`) names a
+    /// type its namespace does not define.
+    ///
+    /// `namespace` is the schema whose named types were searched: the
+    /// defining file for a reference written inside a named-type file, else
+    /// the inline `$schema`. `site` addresses the authored reference so an
+    /// editor can range the diagnostic on the name.
+    #[error("{}: unknown named type `{name}` in {namespace}", site.path)]
+    UnknownNamedType {
+        name: String,
+        namespace: SchemaSourceId,
+        site: SchemaReferenceSite,
+    },
+
+    /// Constraints merged onto one reused named type contradict each other.
+    ///
+    /// `site` is the consuming reference; `constraints` lists every authored
+    /// constraint taking part, in merge order (inherited first), each with
+    /// its own source and span so the conflict can point at all of them,
+    /// including declarations reached through multi-hop references.
+    #[error(
+        "{}: contradictory {kind} on named type `{name}`: {}",
+        site.path,
+        constraints
+            .iter()
+            .map(|origin| format!("`{}` in {}", origin.keyword, origin.source))
+            .collect::<Vec<_>>()
+            .join(" and ")
+    )]
+    ConstraintConflict {
+        name: String,
+        kind: SchemaConstraintConflictKind,
+        site: SchemaReferenceSite,
+        constraints: Vec<SchemaConstraintOrigin>,
+    },
+
+    /// A use-site postfix asks for an operation a union-typed named type
+    /// cannot take: a value constraint without `[]`, a constraint that is not
+    /// valid on an array, `[]` over an arm that is already an array, or `[]`
+    /// over an arm whose default is not an array.
+    ///
+    /// `site` is the consuming reference (its path names the property);
+    /// `definition` is the union's declaration in the namespace that defines
+    /// it. The two boxed fields keep [`SchemaError`] small.
+    #[error("{}: {rejection} (named type `{name}`)", site.path)]
+    UnionReference {
+        name: String,
+        rejection: Box<SchemaUnionRejection>,
+        site: SchemaReferenceSite,
+        definition: Box<SchemaReferenceSite>,
+    },
 
     /// A `$schema` file-reference chain revisits a file it is already
     /// resolving. A schema file whose whole payload is a reference
@@ -558,6 +615,69 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                      self-reference; recursive types are not supported in v1.",
                 ),
 
+            SchemaError::UnknownNamedType { name, namespace, site } => {
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("SchemaError", "unknown named type"))
+                    .body(Prose::new(format!(
+                        "<cyan>{}</cyan> references <cyan>{}</cyan>, which {} does not define.",
+                        Prose::escape_text(&site.path.to_string()),
+                        Prose::escape_text(name),
+                        Prose::escape_text_outside_code_spans(&namespace.to_string())
+                    )))
+                    .hint(
+                        "A bare name resolves only in the schema that writes it; use \
+                         <cyan>Name@./file.yaml</cyan> for a type from another file.",
+                    )
+            }
+
+            SchemaError::ConstraintConflict { name, kind, site, constraints } => {
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("SchemaError", "contradictory constraints"))
+                    .body(
+                        std::iter::once(Prose::new(format!(
+                            "<cyan>{}</cyan> reuses <cyan>{}</cyan> with contradictory {kind}:",
+                            Prose::escape_text(&site.path.to_string()),
+                            Prose::escape_text(name)
+                        )))
+                        .chain(constraints.iter().map(|origin| {
+                            Prose::new(format!(
+                                "<cyan>{}</cyan> at {} in {}",
+                                Prose::escape_text(&origin.keyword),
+                                Prose::escape_text(&origin.path.to_string()),
+                                Prose::escape_text_outside_code_spans(&origin.source.to_string())
+                            ))
+                        }))
+                        .collect::<Vec<_>>(),
+                    )
+                    .hint("Change the use-site constraint so it agrees with the named type.")
+            }
+
+            SchemaError::UnionReference { name, rejection, site, definition } => {
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "SchemaError",
+                        "unsupported operation on a union type",
+                    ))
+                    .body(vec![
+                        Prose::new(format!(
+                            "<cyan>{}</cyan> references the union <cyan>{}</cyan>: {}.",
+                            Prose::escape_text(&site.path.to_string()),
+                            Prose::escape_text(name),
+                            Prose::escape_text_outside_code_spans(&rejection.to_string())
+                        )),
+                        Prose::new(format!(
+                            "<dim>Defined at:</dim> {} in {}",
+                            Prose::escape_text(&definition.path.to_string()),
+                            Prose::escape_text_outside_code_spans(&definition.source.to_string())
+                        )),
+                    ])
+                    .hint(
+                        "A union reference accepts <cyan>required</cyan>, <cyan>generated</cyan>, \
+                         <cyan>eager</cyan>, a description, and <cyan>[]</cyan> with array \
+                         constraints. Put value constraints on the union's arms.",
+                    )
+            }
+
             SchemaError::ReferenceCycle { chain } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("SchemaError", "$schema reference cycle"))
                 .body(Prose::new(format!(
@@ -900,6 +1020,81 @@ mod tests {
         );
         assert!(out.contains("age"), "missing property: {out}");
         assert!(out.contains("min constraint"), "missing reason: {out}");
+    }
+
+    fn site(property: &str) -> SchemaReferenceSite {
+        SchemaReferenceSite {
+            source: SchemaSourceId::InlineDocument,
+            path: crate::markdown::schemas::SchemaSourcePath::root().property(property),
+        }
+    }
+
+    #[test]
+    fn unknown_named_type_names_the_type_the_reference_and_the_namespace() {
+        let err = SchemaError::UnknownNamedType {
+            name: "postcode".into(),
+            namespace: SchemaSourceId::File(PathBuf::from("contacts.yaml")),
+            site: site("address"),
+        };
+        assert_eq!(
+            err.to_string(),
+            "address: unknown named type `postcode` in `contacts.yaml`"
+        );
+        let out = render(&err);
+        assert!(out.contains("unknown named type"), "missing summary: {out}");
+        assert!(out.contains("postcode") && out.contains("contacts.yaml"), "{out}");
+    }
+
+    #[test]
+    fn constraint_conflict_lists_every_origin_in_merge_order() {
+        let origin = |source: SchemaSourceId, path: &str, keyword: &str| SchemaConstraintOrigin {
+            source,
+            path: crate::markdown::schemas::SchemaSourcePath::root().property(path),
+            keyword: keyword.into(),
+            occurrence: 0,
+            span: None,
+        };
+        let err = SchemaError::ConstraintConflict {
+            name: "title_base".into(),
+            kind: SchemaConstraintConflictKind::Bounds,
+            site: site("title"),
+            constraints: vec![
+                origin(SchemaSourceId::File(PathBuf::from("types.yaml")), "label", "min"),
+                origin(SchemaSourceId::InlineDocument, "title", "max"),
+            ],
+        };
+        assert_eq!(
+            err.to_string(),
+            "title: contradictory bounds on named type `title_base`: `min` in `types.yaml` and \
+             `max` in the inline `$schema`"
+        );
+        let out = render(&err);
+        assert!(out.contains("contradictory constraints"), "missing summary: {out}");
+        assert!(out.contains("label") && out.contains("types.yaml"), "{out}");
+    }
+
+    #[test]
+    fn union_reference_names_the_rejection_the_reference_and_the_definition() {
+        let err = SchemaError::UnionReference {
+            name: "policy".into(),
+            rejection: Box::new(SchemaUnionRejection::Constraint {
+                keyword: "max".into(),
+                array_level: false,
+            }),
+            site: site("content_policy"),
+            definition: Box::new(SchemaReferenceSite {
+                source: SchemaSourceId::File(PathBuf::from("policy.yaml")),
+                path: crate::markdown::schemas::SchemaSourcePath::root().property("policy"),
+            }),
+        };
+        assert_eq!(
+            err.to_string(),
+            "content_policy: constraint `max` cannot apply to a union-typed type (named type \
+             `policy`)"
+        );
+        let out = render(&err);
+        assert!(out.contains("unsupported operation on a union type"), "missing summary: {out}");
+        assert!(out.contains("content_policy") && out.contains("policy.yaml"), "{out}");
     }
 
     #[test]

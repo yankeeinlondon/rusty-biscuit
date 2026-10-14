@@ -324,6 +324,17 @@ pub(super) fn build_missing_properties_error(
     }
 }
 
+/// Why a property was dropped: the validator message, led by the problem's
+/// instance path when the problem lies inside the value
+/// (`/content_policy/1: …`), since the drop itself names only the property.
+pub(super) fn drop_reason(problem: &ValidationProblem) -> String {
+    if problem.instance_path.segments().len() > 1 {
+        format!("{}: {}", problem.path, problem.message)
+    } else {
+        problem.message.clone()
+    }
+}
+
 /// Build a clone of `source` with each invalid-optional key removed from
 /// the markdown's frontmatter. Returns the modified source plus a record
 /// of every property that was actually elided.
@@ -349,7 +360,7 @@ pub(super) fn source_with_dropped_optionals(
                 property: name,
                 source: DroppedOptionalSource::Frontmatter,
                 stage: DroppedOptionalStage::Composition,
-                reason: problem.message.clone(),
+                reason: drop_reason(problem),
             });
         }
     }
@@ -388,7 +399,7 @@ pub(super) fn options_with_dropped_optionals(
                 property: name,
                 source: DroppedOptionalSource::Override,
                 stage: DroppedOptionalStage::Composition,
-                reason: problem.message.clone(),
+                reason: drop_reason(problem),
             });
         }
     }

@@ -129,9 +129,9 @@ struct Row {
     executes: bool,
 }
 
-const ROUTER_OVERLAY: &str = "---\nstart:\n  stack:\n    - action: {action: proxy, target: './target.md', with: {base: overlay}}\n---\nrouter body\n";
+const ROUTER_OVERLAY: &str = "---\nstart:\n  - {proxy: {target: './target.md', with: {base: overlay}}}\n---\nrouter body\n";
 const ROUTER_PLAIN: &str =
-    "---\nstart:\n  stack:\n    - action: {action: proxy, target: './target.md'}\n---\nrouter body\n";
+    "---\nstart:\n  - {proxy: {target: './target.md'}}\n---\nrouter body\n";
 const TARGET_REQUIRED: &str = "---\nbase: string(required)\n---\n::file ./part.md\n";
 
 const ROWS: &[Row] = &[
@@ -325,7 +325,7 @@ fn an_untaken_branch_is_discovered_without_executing() {
 /// refused non-interactively when only the first iteration's bytes are
 /// approved — for a body command and for a lifecycle `shell` action alike.
 const LOOP_BODY: &str = "---\nn: 0\nloop:\n    while: \"n < 2\"\n    action: \"increment(n)\"\n---\n::file ./loop-part.md\n";
-const LOOP_LIFECYCLE: &str = "---\nn: 0\nloop:\n    while: \"n < 2\"\n    action: \"increment(n)\"\nsuccess:\n  stack:\n    - action: {action: shell, command: \"git check-ref-format --branch ran/{{ n }}\"}\n---\nbody\n";
+const LOOP_LIFECYCLE: &str = "---\nn: 0\nloop:\n    while: \"n < 2\"\n    action: \"increment(n)\"\nsuccess:\n  - {shell: {command: \"git check-ref-format --branch ran/{{ n }}\"}}\n---\nbody\n";
 
 fn loop_files(document: &'static str) -> [(&'static str, &'static str); 2] {
     [("loop.md", document), ("loop-part.md", "::shell git check-ref-format --branch ran/{{ n }}\n")]
@@ -374,7 +374,7 @@ fn an_unknowable_command_fails_preparation_despite_when_error_and_no_error() {
         &[
             (
                 "target.md",
-                "---\nflag: \"{{ has_alias('ll') }}\"\nfailure:\n  stack:\n    - action: {info: 'failure fired'}\n      no_error: true\nfinalize:\n  stack:\n    - action: {info: 'finalize fired'}\n      no_error: true\n---\n::file ./part.md\n",
+                "---\nflag: \"{{ has_alias('ll') }}\"\nfailure:\n  - {info: 'failure fired', no_error: true}\nfinalize:\n  - {info: 'finalize fired', no_error: true}\n---\n::file ./part.md\n",
             ),
             (
                 "part.md",
@@ -401,7 +401,7 @@ fn an_unknowable_command_fails_preparation_despite_when_error_and_no_error() {
 /// when it runs, which is how the row proves the refused bytes never launched.
 #[test]
 fn a_lifecycle_no_error_shell_does_not_absorb_an_unapproved_command() {
-    const LIFECYCLE: &str = "---\nn: 0\nloop:\n    while: \"n < 2\"\n    action: \"increment(n)\"\nsuccess:\n  stack:\n    - action: {action: shell, command: \"git init --quiet made-{{ n }}\", no_error: true}\n---\nbody\n";
+    const LIFECYCLE: &str = "---\nn: 0\nloop:\n    while: \"n < 2\"\n    action: \"increment(n)\"\nsuccess:\n  - {shell: {command: \"git init --quiet made-{{ n }}\", no_error: true}}\n---\nbody\n";
     let fixture = fixture("preflight-parity-no-error");
     let result = run(
         &fixture,

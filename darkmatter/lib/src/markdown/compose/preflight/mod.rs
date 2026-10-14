@@ -254,8 +254,8 @@ pub struct ComposePreflightReport {
     /// its `children` are the documents it directly transcludes, and so on.
     pub preflight_graph: PreflightGraphNode,
     /// The lazy context reads and expression functions the walked graph can
-    /// reach: `current.<key>` capabilities, `current_env.<KEY>` names, and
-    /// cataloged function calls, unioned across every document and every
+    /// reach: `current.<key>` capabilities and cataloged function calls,
+    /// unioned across every document and every
     /// statically known nested source.
     ///
     /// Metadata only (**R30**). Collecting it observes nothing — not a value, not

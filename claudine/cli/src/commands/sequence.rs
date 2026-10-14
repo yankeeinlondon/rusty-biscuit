@@ -62,10 +62,22 @@ pub fn run_sequence(
         Some(ledger) => {
             let shared = args.shared.clone();
             crate::budget::run_with_ledger(&ledger, &shared, || {
-                run_sequence_inner(args, verbose, startup_timings, crate::request::snapshot())
+                run_sequence_inner(
+                    args,
+                    verbose,
+                    startup_timings,
+                    crate::request::snapshot(),
+                    crate::request::document_environment_source(),
+                )
             })
         }
-        None => run_sequence_inner(args, verbose, startup_timings, crate::request::snapshot()),
+        None => run_sequence_inner(
+            args,
+            verbose,
+            startup_timings,
+            crate::request::snapshot(),
+            crate::request::document_environment_source(),
+        ),
     }
 }
 
@@ -228,12 +240,16 @@ fn expand_shell_source(
 // The shell-source runner returns `CompositionError` by value to satisfy the
 // library's runner signature; that enum is intentionally large and is boxed at
 // the reporting boundary, not here.
+//
+// `request` is the launch document's snapshot; `documents` is where each step,
+// group leg, and `proxy` target captures its own environment.
 #[allow(clippy::result_large_err)]
 fn run_sequence_inner(
     args: SequenceArgs,
     verbose: u8,
     startup_timings: Option<crate::perf::StartupTimings>,
     request: &darkmatter::markdown::compose::RequestSnapshot,
+    documents: claudine::invocation_context::EnvironmentSource,
 ) -> Result<i32> {
     let SequenceArgs {
         mut shared,
@@ -266,7 +282,8 @@ fn run_sequence_inner(
     let stderr_is_tty = std::io::stderr().is_terminal()
         || std::env::var_os("FORCE_COLOR").is_some();
 
-    let invocation = claudine::invocation_context::InvocationContext::capture(request)?;
+    let invocation = claudine::invocation_context::InvocationContext::capture(request)?
+        .with_environment_source(documents);
     let file_resolution_context = invocation.launch_file_resolution_context().clone();
     let source = match resolve_sequence_source(&file, &file_resolution_context) {
         Ok(source) => source,
@@ -553,7 +570,14 @@ mod tests {
         // Launched beside the document: the test process's directory is
         // inside this checkout, whose capture would walk the whole repository.
         let request = crate::request::snapshot().at_request_dir(dir.path());
-        let report = run_sequence_inner(args, 0, None, &request).unwrap_err();
+        let report = run_sequence_inner(
+            args,
+            0,
+            None,
+            &request,
+            crate::request::document_environment_source(),
+        )
+        .unwrap_err();
         let err = report
             .downcast::<CompositionError>()
             .expect("report should carry CompositionError");

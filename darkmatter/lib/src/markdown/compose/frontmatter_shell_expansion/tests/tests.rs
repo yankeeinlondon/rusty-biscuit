@@ -1001,12 +1001,12 @@ fn classify_bare_name_not_on_path_is_a_property_value() {
 }
 
 #[test]
-fn classify_doc_namespace_is_always_a_property_value() {
-    // `doc.*` resolves the frontmatter property even when a same-named
+fn classify_fm_namespace_is_always_a_property_value() {
+    // `fm.*` resolves the frontmatter property even when a same-named
     // executable exists on `PATH`.
-    assert_eq!(super::classify_executed_body("doc.echo"), BodyClass::Value);
-    assert_eq!(super::classify_executed_body("doc.build"), BodyClass::Value);
-    assert_eq!(super::classify_executed_body("doc"), BodyClass::Value);
+    assert_eq!(super::classify_executed_body("fm.echo"), BodyClass::Value);
+    assert_eq!(super::classify_executed_body("fm.build"), BodyClass::Value);
+    assert_eq!(super::classify_executed_body("fm"), BodyClass::Value);
 }
 
 #[test]

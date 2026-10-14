@@ -85,7 +85,14 @@ globals in an immutable `BindingView`, pair them with runtime entries through
 `EvaluationSession::associate` (rejects reserved names, omissions, and
 contradictions before any provider runs), check authored text passively with
 `prepare_value` + `validate_prepared` (every branch, no provider), and evaluate
-with `evaluate_prepared` or `SubtreeCompose::with_binding_view`. There is no
+with `evaluate_prepared` or `SubtreeCompose::with_binding_view`. A whole
+composition takes globals through `ComposeOptions::with_host_globals`
+(`HostGlobals::associate`): the frontmatter seed state and the body's
+`ResolvingLookup` consult them after the reserved roots, a transcluded child
+inherits them, a bare read of one is exempt from the deferred-key (DM1a) check,
+and an unavailable read is a fatal transclusion failure
+(`MarkdownError::unavailable_binding`). Claudine declares `loop` and the retired
+`_loop_*` names this way. There is no
 strict mode and no root-membership hook. See
 [Host Bindings](../../../darkmatter/docs/topics/darkmatter-expressions.md#host-bindings).
 

@@ -24,7 +24,7 @@ pub(crate) fn resolve_supplied_file_inputs(
         records,
         document_context,
         interactive,
-        |property, provided, patterns, origin| {
+        |property, provided, alternatives, origin| {
             let scope = ScopeContext {
                 cwd: origin.cwd().to_path_buf(),
                 home: origin.home_dir().map(std::path::Path::to_path_buf),
@@ -34,7 +34,7 @@ pub(crate) fn resolve_supplied_file_inputs(
             // A decline or cancellation is `Ok(None)` and is a normal outcome;
             // only a broken chooser is worth a diagnostic, since both reach the
             // caller as the same "no existing file matched" surface.
-            let path = match choose_provided_file_reference(property, provided, patterns, &scope) {
+            let path = match choose_provided_file_reference(property, provided, alternatives, &scope) {
                 Ok(selected) => selected?,
                 Err(err) => {
                     tracing::debug!(
@@ -73,7 +73,7 @@ fn resolve_supplied_file_inputs_with(
     records: &mut CallerInputRecords,
     document_context: &FileResolutionContext,
     interactive: InteractiveSchemaOptions,
-    mut select: impl FnMut(&str, &str, &[String], &FileResolutionContext) -> Option<serde_json::Value>,
+    mut select: impl FnMut(&str, &str, &[Vec<Vec<String>>], &FileResolutionContext) -> Option<serde_json::Value>,
 ) -> Result<(), CompositionError> {
     let pending = unresolved_supplied_files(source, records, document_context);
     if pending.is_empty() {
@@ -89,7 +89,7 @@ fn resolve_supplied_file_inputs_with(
         let CompositionError::UnresolvedFileReference {
             ref property,
             ref provided,
-            ref patterns,
+            ref alternatives,
             is_array,
             ..
         } = pending.error
@@ -102,7 +102,7 @@ fn resolve_supplied_file_inputs_with(
         let Some(record) = updated_records.get(property) else {
             return Err(downgrade_to_schema_validation(pending.error));
         };
-        let Some(selected) = select(property, provided, patterns, record.origin()) else {
+        let Some(selected) = select(property, provided, alternatives, record.origin()) else {
             return Err(downgrade_to_schema_validation(pending.error));
         };
         let value = if let Some(index) = pending.array_index {

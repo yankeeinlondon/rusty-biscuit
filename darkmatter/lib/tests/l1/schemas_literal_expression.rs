@@ -444,17 +444,16 @@ fn expression_with_required_constraint() {
 
 #[test]
 fn expression_parameterized_rejected_in_v1() {
-    // Bare `expression` must first be a known keyword (fails today), and the
-    // parameterized form must be rejected with a *specific* reserved-form
-    // message rather than the generic "unknown type" lexer error.
+    // Bare `expression` is a known keyword, and the parameterized form is
+    // rejected as an unknown constraint.
     assert!(
         atom("expression").is_ok(),
         "bare expression must be a known type"
     );
     let err = atom("expression(condition)").expect_err("expression(condition) reserved in v1");
     assert!(
-        !err.contains("unknown type"),
-        "parameterized expression must get a specific rejection, not the unknown-type error: {err}"
+        err.contains("unknown constraint"),
+        "parameterized expression must be rejected as an unknown constraint: {err}"
     );
 }
 

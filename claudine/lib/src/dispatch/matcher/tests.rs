@@ -307,3 +307,24 @@ fn compile_many_skips_empty_matchers_in_warning() {
         Ok(())
     });
 }
+
+#[test]
+fn hook_namespace_expression_matcher_matches_payload() {
+    let bash = tool_meta(AgenticEvent::BeforeTool, Some("Bash"));
+    let read = tool_meta(AgenticEvent::BeforeTool, Some("Read"));
+    let matcher = RuntimeMatcher::compile("hook.tool_name == 'Bash'");
+    assert!(matches!(matcher, Some(RuntimeMatcher::Expression { .. })));
+
+    assert!(matches(matcher.as_ref(), &bash));
+    assert!(!matches(matcher.as_ref(), &read));
+}
+
+#[test]
+fn old_doc_namespace_expression_matcher_does_not_match() {
+    let bash = tool_meta(AgenticEvent::BeforeTool, Some("Bash"));
+    let old = RuntimeMatcher::compile("doc.tool_name == 'Bash'");
+    let unprefixed = RuntimeMatcher::compile("tool_name == 'Bash'");
+
+    assert!(!matches(old.as_ref(), &bash));
+    assert!(matches(unprefixed.as_ref(), &bash));
+}
