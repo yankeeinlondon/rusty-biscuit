@@ -4,6 +4,17 @@ created: 2026-10-12
 phase: 1
 agent: claude/sonnet
 yolo: true
+source_files_during_phase_1:
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/mod.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/preparer.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/fakes.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/tests.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+    - claudine
 ---
 # Plan: TTS Pre-warm
 
@@ -49,51 +60,55 @@ The spec says "Open questions: None", but these are places where it is silent
 or two readings are possible. Each ruling below is the plan's default; the
 author may overturn one before Phase 2 starts.
 
-- [ ] **R1. Where `prewarm` lives at runtime.** `bridge_tts_settings` maps
+- [x] **R1. Where `prewarm` lives at runtime.** `bridge_tts_settings` maps
   `tts: false` to `GlobalSettings.tts = None`, so the enable bit cannot ride on
   `TtsSettings` (it does not exist for `false`/absent). *Ruling:* add a separate
   field (`GlobalSettings.tts_prewarm: bool`, default `true`) next to `tts`.
   `TtsSettings` and `tts_config_from_settings` are not changed, so playback
   config stays byte-identical. The pre-warm candidate config is built by calling
   the same `tts_config_from_settings` on the same bridged value.
-- [ ] **R2. Optional `provider` on `TtsConfigSettings`.** Make `provider:
+- [x] **R2. Optional `provider` on `TtsConfigSettings`.** Make `provider:
   Option<String>`; `bridge_tts_settings` maps `None` to `TtsSettings.provider =
   None` (same as `true`). Hook `speak` (`dispatch/runner/speak.rs`) must treat a
   provider-less object exactly as `true`. Serializing must omit `provider` when
   `None` (round-trip stays minimal). `prewarm` is `Option<bool>` in the
   struct so a TUI round-trip does not materialize a default into the user's file;
   the effective default is `true`.
-- [ ] **R3. Untagged enum error quality.** `TtsValue` is `#[serde(untagged)]`,
+- [x] **R3. Untagged enum error quality.** `TtsValue` is `#[serde(untagged)]`,
   so an object with an unknown key (`enabled`) produces serde's generic "did not
   match any variant" message. *Ruling:* keep the shape; acceptance only requires
   rejection. Improving the message is out of scope unless a one-line custom
   deserialize is cheaper than the test churn.
-- [ ] **R4. The `fm` snapshot for speculative resolution.** The spec says
+- [x] **R4. The `fm` snapshot for speculative resolution.** The spec says
   "owned snapshot of the effective document inputs." *Ruling:* the collector
   takes an explicit `PrewarmInputs { fm, ctx, env, sequence_injected_keys }`
   value built by the caller; it never reaches into live runtime state. `env` and
   `ctx` come from the document's captured binding (per `2026-10-18-fm-namespace`);
   if that capture is not yet available at a call site, that site is skipped (not
   approximated from the live process environment).
-- [ ] **R5. Function-call detection is syntactic.** Walk the parsed expression
+- [x] **R5. Function-call detection is syntactic.** Walk the parsed expression
   AST for any call node (including in untaken branches) and the raw authored
   string for `$(`/backtick shell expansion. *Ruling:* a phrase with either is
   ineligible; no catalog lookup of "pure" functions (spec: first implementation
   skips all calls).
-- [ ] **R6. De-duplication key.** (resolved text, playback `TtsConfig`).
+- [x] **R6. De-duplication key.** (resolved text, playback `TtsConfig`).
   `TtsConfig` may not implement `Hash`/`Eq`. *Ruling:* key on resolved text plus
   a canonical string of the config's provider/voice/speed fields, derived in one
   function next to the key type, covered by a test that changes each field.
-- [ ] **R7. Shutdown trigger.** "Invocation finishes or is interrupted" maps to
+  *Amended in Phase 1:* `biscuit_speaks::TtsConfig` derives `PartialEq` and
+  `Serialize` (not `Hash`/`Eq`), so the canonical string is the config's
+  serialized form, which covers every field (failover, gender, language,
+  volume, …), not only provider/voice/speed. The per-field test still applies.
+- [x] **R7. Shutdown trigger.** "Invocation finishes or is interrupted" maps to
   the existing top-level command scope and signal path
   (`docs/topics/signal-handling.md`). *Ruling:* the worker is owned by a guard
   that cancels on `Drop`, and the interrupt path already drops the command scope;
   no new signal handler.
-- [ ] **R8. Wider measurement (author decision, not scheduled).** The spec
+- [x] **R8. Wider measurement (author decision, not scheduled).** The spec
   rules out a performance spike. If the author wants a measured hit-rate or
   cold-start figure for Kokoro, that is a separate request; this plan does not
   include it.
-- [ ] **R9. Dependency state.** Phases 2+ assume `Speak::prepare` (already present
+- [x] **R9. Dependency state.** Phases 2+ assume `Speak::prepare` (already present
   in `biscuit-speaks/lib/src/speak.rs`), the grammar feature's parsed lifecycle
   action types, and the `fm` namespace capture have landed. If the grammar types
   are not yet on this branch, Phase 3 blocks; Phases 1-2 do not.
@@ -109,7 +124,7 @@ not a spike.
 
 **Wave 1.1 (parallel)**
 
-- [ ] **Map seams.**
+- [x] **Map seams.**
   - Read `lifecycle/audio.rs`, `executor.rs` (lines near the two
     `tts_config_from_settings` calls), `lifecycle/mod.rs`, `dispatch/loader.rs`
     `bridge_tts_settings`, `dispatch/runner/speak.rs`, and the call sites in
@@ -117,13 +132,13 @@ not a spike.
   - Record in `implementation-log.md` the concrete hook points for: bootstrap,
     stabilized reread, sequence preflight, proxy handoff, retry/resume, loop
     refresh. Confirm each has (or can get) a single "new snapshot" function.
-- [ ] **Recorder seam.**
+- [x] **Recorder seam.**
   - Define a crate-private `trait Preparer` (`async fn prepare(text, TtsConfig)
     -> Result<(), PrewarmError>`) with a production impl calling
     `Speak::new(text).with_config(cfg).prepare()` and discarding the builder.
   - Tests inject a recording / blocking / failing fake. Satisfies the "injected
     recorder" and "controllable fake futures" acceptance wording.
-- [ ] **Fixture check.** Confirm `CliProcessFixture` sets `PLAYA_DRY_RUN=1`,
+- [x] **Fixture check.** Confirm `CliProcessFixture` sets `PLAYA_DRY_RUN=1`,
   isolates `TMPDIR`/`TMP`/`TEMP` and `BISCUIT_SPEAKS_CACHE`, and exposes
   `audio_spool()`. List any gap as a task in Phase 6.
 
@@ -331,6 +346,11 @@ if the detached-playback boundary was touched (criterion 14).
   (`TtsValue`, `bridge_tts_settings`, `tts_config_from_settings`, the TUI tab)
   and fix any that drifted.
 - [ ] **Fixture gaps** noted in Task "Fixture check" (Phase 1), if any.
+  - `CliProcessFixture` does not isolate `TMPDIR`/`TMP`/`TEMP` (the audio
+    cache directory is `std::env::temp_dir()`) or `BISCUIT_SPEAKS_CACHE` (the
+    voice-capability cache file); the child inherits the host's values. Add
+    fixture-owned values for all four before the criterion-10 CLI test, or set
+    them on that test's builder.
 
 **Wave 6.2 (after 6.1)**
 
