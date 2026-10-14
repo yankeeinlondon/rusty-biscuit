@@ -28,19 +28,13 @@ clarified: false
 implemented: false
 human_review: false
 message_to_agent: |-
-  Phase 1 (preflight) is complete. The prerequisite gate passes and there is no blocker. Read "## Phase 1" in implementation-log.md before starting Phase 2, especially "Integration corrections" and "Inventory decisions". Facts that differ from this spec:
-  - There is no `validate_api`. Wire pagination validation into `validate_rust_client` in schematic/gen/src/validation.rs, emitting `ValidationDiagnostic` (format `severity= api= endpoint= feature= output=: msg`) with new `Feature` ids.
-  - `RestApi` has no `Default`. The two new fields touch the 18 production literals, 3 registry test literals, the importer builder (define/src/openapi/import/builder.rs:362), the emitter (gen/src/definition_gen.rs:141-159), and about 100 test literals.
-  - There is no public relative-URL resolver, and the envelope URL is redacted. The pager lives in the runtime crate and uses an in-crate seam for the unredacted final URL, `RequestMeta.page`, and a wrapper `EndpointSpec` to send absolute next links through the checked path.
-  - Pager entry points are runtime methods on `schematic_runtime::Call`, reached by thin generated forwards through `self.0`. Bump the ABI from 3 to 4 when generated pager impls land, and extend `PLANNED_CALL_METHODS` with every new knob name.
-  - trybuild and wiremock are already runtime dev-dependencies.
-  - Serde on the pagination model is a round-trip facility only: no definition reader exists, so the configuration-reader matrix does not apply. Phase 2.3 keeps strict round-trip and decode tests.
-  - Bitbucket has 8 wrapper lists, not 9: `GetSource` is a Binary non-list.
-  - ElevenLabs `ListVoices` stays unpaginated (`page_token` vs `next_page_token` is unresolved).
-  - GitLab `ListIssueParticipants` and Gitea `GetTagReference` need opt-out entries. The U-row wrapper collections get explicit unpaginated entries.
-  - The OpenAI API default page size carries no max.
-  - model-citizen does not depend on schematic-schema.
-  - Required-scope authorization is recorded as the author's phase-by-phase run instruction. Network verification and the EMQX ListAuthUsers fix are skipped (still pending).
+  Phase 3 is complete; read "## Phase 3" in implementation-log.md, especially section 3.1, before starting. What Phase 4 builds on:
+  - The runtime pager is `schematic_runtime::pager` (schematic/runtime/src/pager/). Pages are already real typed sends: each page goes out as the internal `PageRequest<R>` (request.rs) through `Client::send_located` (client.rs, crate-private), which returns the envelope plus the unredacted, pre-credential final URL used to resolve relative links. Credentials, origin policy, redirects, the deadline, and redaction therefore already apply; pre-send refusals (size bounds, start below the base, overflow, page_limit(0)) come back from `PageRequest::into_parts` as the runtime's own `InvalidArgument` TransportError with zero requests sent. Followed links are checked with `Client::check_link::<R>` first.
+  - Task 4.1's decode seam is exactly `request::PageDecoder` (parses the body to serde_json::Value) and `request::decode_items` (serde_json::from_value per item). The engine (engine.rs) reads records and continuations from the Value, so a from_slice candidate must still provide the record/continuation view.
+  - The deadline maps to `PagerError::DeadlineExceeded { completed_pages, error }` but has no acceptance tests yet. The same goes for the two-origin policy matrix, redirect/RedirectFailed mapping, Shopify `Only`, replacement requests, and the remaining IncompleteReason cases (DeadlineExceeded, TransportError, RedirectFailed): those are 4.3/4.4. Response hooks do not run on page bodies; decide this in 4.2 and log it.
+  - Continuation failures are deferred: a page that decodes is delivered and its missing/invalid/repeated continuation is returned by the next request without sending. A failed pager returns `PagerError::AlreadyFailed { first }`, not a clone. Histories are per direction and the opposite one is cleared when a page arrives (R14 re-traversal fix).
+  - The generator emits `impl Paginated` and markers and forwards `pager/page/offset/after/before/page_size/pages/fetch_page/collect_all` on call types (gen/src/codegen/pagination/mod.rs). `pager_view` is the single place adopted params leave the request. ABI is 4 on both sides, and schematic-schema was regenerated in Phase 3 (ABI and legacy-marker removal only).
+  - Runtime test fixtures live in schematic/runtime/tests/l1/pager_support.rs (the `endpoint!` macro plus a `Copy` builder `Def`); add Phase 4 tests beside pager_rules.rs/pager_surface.rs and declare new files in tests/l1/main.rs.
 parent: ../../reviews/2026-07-31-macro-review/spec.md
 depends_on:
     - 2026-10-12-schematic-runtime-envelope

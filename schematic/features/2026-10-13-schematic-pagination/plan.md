@@ -8,7 +8,152 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+    - schematic/define/src/lib.rs
+    - schematic/define/src/openapi/export/info.rs
+    - schematic/define/src/openapi/export/mod.rs
+    - schematic/define/src/openapi/import/builder.rs
+    - schematic/define/src/pagination.rs
+    - schematic/define/src/pagination/collection.rs
+    - schematic/define/src/pagination/resolve.rs
+    - schematic/define/src/pagination/selector.rs
+    - schematic/define/src/pagination/strategy.rs
+    - schematic/define/src/pagination/validate.rs
+    - schematic/define/src/params/mod.rs
+    - schematic/define/src/prelude.rs
+    - schematic/define/src/request.rs
+    - schematic/define/src/types.rs
+    - schematic/define/tests/endpoint_literal_surface.rs
+    - schematic/define/tests/pagination_inventory.rs
+    - schematic/define/tests/pagination_model.rs
+    - schematic/define/tests/pagination_serde.rs
+    - schematic/define/tests/pagination_support/mod.rs
+    - schematic/define/tests/pagination_tables.rs
+    - schematic/definitions/src/anthropic/mod.rs
+    - schematic/definitions/src/artificial_analysis/mod.rs
+    - schematic/definitions/src/bitbucket/mod.rs
+    - schematic/definitions/src/elevenlabs/mod.rs
+    - schematic/definitions/src/emqx/mod.rs
+    - schematic/definitions/src/eversolo/mod.rs
+    - schematic/definitions/src/gitea/mod.rs
+    - schematic/definitions/src/github/mod.rs
+    - schematic/definitions/src/gitlab/mod.rs
+    - schematic/definitions/src/huggingface/mod.rs
+    - schematic/definitions/src/lmstudio/mod.rs
+    - schematic/definitions/src/ollama/mod.rs
+    - schematic/definitions/src/openai/mod.rs
+    - schematic/definitions/src/registry/mod.rs
+    - schematic/definitions/src/samsung_smart_tv/mod.rs
+    - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+    - schematic/gen/src/codegen/api_struct/tests.rs
+    - schematic/gen/src/codegen/client/tests.rs
+    - schematic/gen/src/codegen/endpoint_methods/tests.rs
+    - schematic/gen/src/codegen/module_docs.rs
+    - schematic/gen/src/codegen/request_enum.rs
+    - schematic/gen/src/definition_gen.rs
+    - schematic/gen/src/diagnostics.rs
+    - schematic/gen/src/export/naming.rs
+    - schematic/gen/src/export/openapi.rs
+    - schematic/gen/src/export/postman/collection.rs
+    - schematic/gen/src/export/postman/mod.rs
+    - schematic/gen/src/export/postman/tests.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/test_utils.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/http_client.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/openapi_strict_completeness.rs
+    - schematic/gen/tests/l1/output_validation.rs
+    - schematic/gen/tests/l1/pagination_validation.rs
+    - schematic/gen/tests/l1/partial_generation.rs
+    - schematic/gen/tests/l1/postman_golden.rs
+docs_updated_during_phase_2:
+    - schematic/define/README.md
+    - schematic/docs/generation/validation.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_3:
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/src/call.rs
+    - schematic/runtime/src/client.rs
+    - schematic/runtime/src/meta.rs
+    - schematic/runtime/src/pager/mod.rs
+    - schematic/runtime/src/pager/spec.rs
+    - schematic/runtime/src/pager/engine.rs
+    - schematic/runtime/src/pager/json.rs
+    - schematic/runtime/src/pager/link.rs
+    - schematic/runtime/src/pager/progress.rs
+    - schematic/runtime/src/pager/request.rs
+    - schematic/runtime/src/pager/pages.rs
+    - schematic/runtime/src/pager/error.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/runtime/tests/l1/pager_support.rs
+    - schematic/runtime/tests/l1/pager_mechanisms.rs
+    - schematic/runtime/tests/l1/pager_outside.rs
+    - schematic/runtime/tests/l1/pager_rules.rs
+    - schematic/runtime/tests/l1/pager_surface.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_after_without_a_resumable_cursor.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_after_without_a_resumable_cursor.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_before_on_a_forward_only_cursor.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_before_on_a_forward_only_cursor.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_knob_after_pages.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_knob_after_pages.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_offset_on_a_page_number_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_offset_on_a_page_number_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_on_an_unpaginated_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_on_an_unpaginated_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_page_on_a_cursor_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_page_on_a_cursor_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_page_size_not_authored.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_page_size_not_authored.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_pages_on_a_session_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_pages_on_a_session_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_prev_without_a_backward_direction.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_prev_without_a_backward_direction.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_set_page_size_not_adjustable.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_set_page_size_not_adjustable.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_total_without_a_total.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_total_without_a_total.stderr
+    - schematic/gen/src/lib.rs
+    - schematic/gen/src/codegen/mod.rs
+    - schematic/gen/src/codegen/pagination/mod.rs
+    - schematic/gen/src/codegen/pagination/tests.rs
+    - schematic/gen/src/codegen/traits.rs
+    - schematic/gen/src/codegen/endpoint_methods/mod.rs
+    - schematic/gen/src/codegen/endpoint_methods/names.rs
+    - schematic/gen/src/codegen/endpoint_methods/docs.rs
+    - schematic/gen/src/codegen/request_structs/mod.rs
+    - schematic/gen/src/codegen/request_structs/endpoint_spec.rs
+    - schematic/gen/src/codegen/request_structs/tests.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/gen/src/output/assemble/shared.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/tests/common/fresh_output.rs
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/schema/src/lib.rs
+    - schematic/schema/src/shared.rs
+    - schematic/schema/src/bitbucket/requests.rs
+    - schematic/schema/src/gitea/requests.rs
+    - schematic/schema/src/github/requests.rs
+    - schematic/schema/src/gitlab/requests.rs
+docs_updated_during_phase_3:
+    - schematic/docs/generation/validation.md
+    - schematic/docs/generation/partial-generation.md
+    - schematic/gen/README.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/schematic-define/SKILL.md
+packages:
+    - schematic-define
+    - schematic-gen
+    - schematic-definitions
+    - schematic-runtime
+    - schematic-schema
 ---
 
 # Schematic pagination implementation plan
@@ -98,7 +243,7 @@ For applicable configuration readers, one test per format starts with a real-too
 
 ### Wave 3 — Sequential model integration
 
-- [ ] **2.1 Model contracts**
+- [x] **2.1 Model contracts**
   - Implement the four named strategy variants, builders, serde support, open-enum attributes, selectors/paths, input/value sources, bases, polarity/counts, size/more/cursor/boundary/link dimensions, constants, follow-up/carry, sessions, partitions, collections, and alternates in `schematic/define/src/pagination.rs` and focused submodules.
   - Provide no public Default that creates an empty usable-looking strategy. Preserve legacy symbols, update their docs to superseded, and export the new types through existing public/prelude surfaces.
   - Add the two RestApi fields and initialize every literal, importer constructor, fixture, and definition emitter to preserve compilation. Do not add fields to Endpoint/EndpointParams or rewrite definition endpoint literals.
@@ -106,12 +251,12 @@ For applicable configuration readers, one test per format starts with a real-too
 
 ### Wave 4 — Parallel model behavior and evidence
 
-- [ ] **2.2 Resolution validation**
+- [x] **2.2 Resolution validation**
   - Own production resolution/validation: pure exception/default/none precedence, explicit GET Vec recognition, caller knobs, item type/path checks where schema is known, and runtime fallback for opaque schemas.
   - Implement every R2 rule with the adoption exception, required-managed-default rule, destination conflicts across constants/session/continuation/size/partition, unknown/duplicate table ids and nearest-id diagnostics. Remove only strategy-local trust validation.
   - Wire the validator into `schematic/gen/src/validation.rs`; record kept/renamed/dropped design rules. Do not claim opaque collection structure was checked.
 
-- [ ] **2.3 Model evidence**
+- [x] **2.3 Model evidence**
   - Own separate test files: port applicable assertions from the 56-test prototype, including the 16 inventory tests' eventual real-definition contract, without importing obsolete endpoint fields or LinkTrust behavior.
   - Test each rejection with its valid sibling, resolution precedence, explicit non-GET lists, wrapper types, duplicate ids, required defaults, adoption with/without knobs, and near-miss locations. Freeze current Endpoint/EndpointParams literal compilation for R3.
   - Implement the applicable serde/configuration matrix from Phase 1, alongside round-trip tests. Assert public effects and preserve absent/null/empty distinctions from the declared format.
@@ -122,19 +267,19 @@ For applicable configuration readers, one test per format starts with a real-too
 
 ### Wave 5 — Parallel implementation on frozen contracts
 
-- [ ] **3.1 Pager mechanics**
+- [x] **3.1 Pager mechanics**
   - Own runtime pager production files: static projections, Pager/Pages, capability traits, Page/error shapes, four strategies, configuration versus iteration state, source-record counts, item streams, and readable page/item counters.
   - Implement explicit-signal precedence; missing/invalid continuation distinctions; null/empty/authored terminal values; nonterminal zero/false cursors; empty-page contradictions; missing/malformed totals; FullPage only with known effective size; checked arithmetic and both index bases.
   - Implement record-before-projection cursor extraction, nested array fan-outs in document order, no partial delivery from malformed pages, composite all-or-none cursors, inclusive identity filtering, exact loop histories, and terminal failed state. Keep decode access behind a stable internal seam for Phase 4's single measurement.
   - Implement optional/required size semantics, pre-send validation with request metadata, and authored adjustable size from the next request.
 
-- [ ] **3.2 Pager emission**
+- [x] **3.2 Pager emission**
   - Own generator codegen/assembly/request-struct files and the existing `codegen/endpoint_methods` emitter: replace the empty marker with static constants, item association, and only authored marker implementations. Extend existing local call types with thin inherent forwards for authored pager controls and entry points; update reserved-name collision handling for added methods. Emit no pagination surface for non-lists/unpaginated lists and no `using_*` methods; runtime logic stays hand-written.
   - Remove adopted inputs from request fields and constructors using the same resolution/adoption contract as validation; retain ordinary parameters in definitions and preserve required non-pager/typed-path Default rules.
   - Resolve wrapper item types through the existing Rust type resolver. Add deterministic snapshots, alternate/legacy-metadata independence tests, and isolated generated compile fixtures using the runtime contract.
   - Update dependency/manifest assembly so emitted clients import the actual runtime package. The generator task integrates its own exports/imports; runtime module registration belongs to 3.1.
 
-- [ ] **3.3 Core fixtures**
+- [x] **3.3 Core fixtures**
   - Own separate runtime test fixtures: port boundary/selector cases and prepare endpoint-shaped handwritten impls, local page servers, and positive/negative capability cases against the frozen contract.
   - Prepare the R30 mechanism matrix: GitHub page/Link, GitLab page/X-Next-Page and modeled keyset link, Gitea page/limit/total, Bitbucket next/previous/size, OpenAI S6/S7/S8 and item-id variants, Anthropic bidirectional ids, the three ElevenLabs strategies, nested EMQX metadata, and both Hugging Face strategies. Unverified provider fixtures exercise mechanisms without authoring those providers' real definitions.
   - Include AIP-158, Mastodon, SCIM, and Salesforce Bulk 2.0, plus `unverified_*` X API v2, WordPress, OData skiptoken, Cosmos DB, Salesforce REST query, and Reddit cases. Execute these fixtures through the integrated runtime in Phase 4, not only through extraction helpers.

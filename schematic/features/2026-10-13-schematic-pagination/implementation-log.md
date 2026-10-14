@@ -7,7 +7,152 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+    - schematic/define/src/lib.rs
+    - schematic/define/src/openapi/export/info.rs
+    - schematic/define/src/openapi/export/mod.rs
+    - schematic/define/src/openapi/import/builder.rs
+    - schematic/define/src/pagination.rs
+    - schematic/define/src/pagination/collection.rs
+    - schematic/define/src/pagination/resolve.rs
+    - schematic/define/src/pagination/selector.rs
+    - schematic/define/src/pagination/strategy.rs
+    - schematic/define/src/pagination/validate.rs
+    - schematic/define/src/params/mod.rs
+    - schematic/define/src/prelude.rs
+    - schematic/define/src/request.rs
+    - schematic/define/src/types.rs
+    - schematic/define/tests/endpoint_literal_surface.rs
+    - schematic/define/tests/pagination_inventory.rs
+    - schematic/define/tests/pagination_model.rs
+    - schematic/define/tests/pagination_serde.rs
+    - schematic/define/tests/pagination_support/mod.rs
+    - schematic/define/tests/pagination_tables.rs
+    - schematic/definitions/src/anthropic/mod.rs
+    - schematic/definitions/src/artificial_analysis/mod.rs
+    - schematic/definitions/src/bitbucket/mod.rs
+    - schematic/definitions/src/elevenlabs/mod.rs
+    - schematic/definitions/src/emqx/mod.rs
+    - schematic/definitions/src/eversolo/mod.rs
+    - schematic/definitions/src/gitea/mod.rs
+    - schematic/definitions/src/github/mod.rs
+    - schematic/definitions/src/gitlab/mod.rs
+    - schematic/definitions/src/huggingface/mod.rs
+    - schematic/definitions/src/lmstudio/mod.rs
+    - schematic/definitions/src/ollama/mod.rs
+    - schematic/definitions/src/openai/mod.rs
+    - schematic/definitions/src/registry/mod.rs
+    - schematic/definitions/src/samsung_smart_tv/mod.rs
+    - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+    - schematic/gen/src/codegen/api_struct/tests.rs
+    - schematic/gen/src/codegen/client/tests.rs
+    - schematic/gen/src/codegen/endpoint_methods/tests.rs
+    - schematic/gen/src/codegen/module_docs.rs
+    - schematic/gen/src/codegen/request_enum.rs
+    - schematic/gen/src/definition_gen.rs
+    - schematic/gen/src/diagnostics.rs
+    - schematic/gen/src/export/naming.rs
+    - schematic/gen/src/export/openapi.rs
+    - schematic/gen/src/export/postman/collection.rs
+    - schematic/gen/src/export/postman/mod.rs
+    - schematic/gen/src/export/postman/tests.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/test_utils.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/gen/tests/l1/http_client.rs
+    - schematic/gen/tests/l1/main.rs
+    - schematic/gen/tests/l1/openapi_strict_completeness.rs
+    - schematic/gen/tests/l1/output_validation.rs
+    - schematic/gen/tests/l1/pagination_validation.rs
+    - schematic/gen/tests/l1/partial_generation.rs
+    - schematic/gen/tests/l1/postman_golden.rs
+docs_updated_during_phase_2:
+    - schematic/define/README.md
+    - schematic/docs/generation/validation.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/schematic-define/SKILL.md
+source_files_during_phase_3:
+    - schematic/runtime/src/lib.rs
+    - schematic/runtime/src/call.rs
+    - schematic/runtime/src/client.rs
+    - schematic/runtime/src/meta.rs
+    - schematic/runtime/src/pager/mod.rs
+    - schematic/runtime/src/pager/spec.rs
+    - schematic/runtime/src/pager/engine.rs
+    - schematic/runtime/src/pager/json.rs
+    - schematic/runtime/src/pager/link.rs
+    - schematic/runtime/src/pager/progress.rs
+    - schematic/runtime/src/pager/request.rs
+    - schematic/runtime/src/pager/pages.rs
+    - schematic/runtime/src/pager/error.rs
+    - schematic/runtime/tests/l1/main.rs
+    - schematic/runtime/tests/l1/pager_support.rs
+    - schematic/runtime/tests/l1/pager_mechanisms.rs
+    - schematic/runtime/tests/l1/pager_outside.rs
+    - schematic/runtime/tests/l1/pager_rules.rs
+    - schematic/runtime/tests/l1/pager_surface.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_after_without_a_resumable_cursor.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_after_without_a_resumable_cursor.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_before_on_a_forward_only_cursor.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_before_on_a_forward_only_cursor.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_knob_after_pages.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_knob_after_pages.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_offset_on_a_page_number_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_offset_on_a_page_number_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_on_an_unpaginated_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_on_an_unpaginated_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_page_on_a_cursor_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_page_on_a_cursor_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_page_size_not_authored.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_page_size_not_authored.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_pages_on_a_session_endpoint.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_pages_on_a_session_endpoint.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_prev_without_a_backward_direction.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_prev_without_a_backward_direction.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_set_page_size_not_adjustable.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_set_page_size_not_adjustable.stderr
+    - schematic/runtime/tests/fixtures/compile_fail/pager_total_without_a_total.rs
+    - schematic/runtime/tests/fixtures/compile_fail/pager_total_without_a_total.stderr
+    - schematic/gen/src/lib.rs
+    - schematic/gen/src/codegen/mod.rs
+    - schematic/gen/src/codegen/pagination/mod.rs
+    - schematic/gen/src/codegen/pagination/tests.rs
+    - schematic/gen/src/codegen/traits.rs
+    - schematic/gen/src/codegen/endpoint_methods/mod.rs
+    - schematic/gen/src/codegen/endpoint_methods/names.rs
+    - schematic/gen/src/codegen/endpoint_methods/docs.rs
+    - schematic/gen/src/codegen/request_structs/mod.rs
+    - schematic/gen/src/codegen/request_structs/endpoint_spec.rs
+    - schematic/gen/src/codegen/request_structs/tests.rs
+    - schematic/gen/src/output/mod.rs
+    - schematic/gen/src/output/assemble/api.rs
+    - schematic/gen/src/output/assemble/shared.rs
+    - schematic/gen/src/validation.rs
+    - schematic/gen/tests/common/fresh_output.rs
+    - schematic/gen/tests/l1/e2e_generation.rs
+    - schematic/gen/tests/l1/fresh_output_compile.rs
+    - schematic/schema/src/lib.rs
+    - schematic/schema/src/shared.rs
+    - schematic/schema/src/bitbucket/requests.rs
+    - schematic/schema/src/gitea/requests.rs
+    - schematic/schema/src/github/requests.rs
+    - schematic/schema/src/gitlab/requests.rs
+docs_updated_during_phase_3:
+    - schematic/docs/generation/validation.md
+    - schematic/docs/generation/partial-generation.md
+    - schematic/gen/README.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/schematic-define/SKILL.md
+packages:
+    - schematic-define
+    - schematic-gen
+    - schematic-definitions
+    - schematic-runtime
+    - schematic-schema
 ---
 
 # Implementation Log for 2026-10-13-schematic-pagination (8 phases)
@@ -1103,3 +1248,310 @@ Cold build times for the generated crate, each on an empty target dir under `/tm
 ##### Pre-existing failures
 
 None.
+
+## Phase 2
+
+Phase 2 builds the define-side pagination model, its resolution and validation, the two `RestApi` fields, and the gen wiring. Started 2026-10-13 on `feat/modern-config`. Entries are appended as work lands.
+
+### 2.1 Model contracts (done)
+
+- **Layout.** `schematic/define/src/pagination.rs` keeps the legacy types in place and declares five submodules under `schematic/define/src/pagination/`: `selector` (`JsonPath`, `Step`, `ItemSelector`), `strategy` (inputs, value sources, the four kinds, shared dimensions, builders), `collection` (`Pagination`, `Alternate`, `Collection`, `PaginationException`), `resolve` (resolution, knobs, adoption), and `validate` (rules and diagnostics). Splitting the file into a directory module was avoided, so the legacy types show no move in the diff.
+- **Named strategy structs (S12, Proposed default adopted).** `PageStrategy` is `#[non_exhaustive]` with `PageNumber(PageNumberStrategy)`, `Offset(OffsetStrategy)`, `Cursor(CursorStrategy)`, and `NextLink(NextLinkStrategy)`. The structs have public fields and no `#[non_exhaustive]`; only open enums carry it (R1). Alternative: struct variants, as in the prototype. Reversal: a mechanical rewrite of the enum and its matches.
+- **Departures from the prototype**, all intentional:
+  - `Method` is replaced by the crate's `RestMethod`.
+  - `LinkTrust`, `NextLink.trust`, `NextLinkBuilder::trust`, `is_link_trusted` and `InvalidTrustedOrigin` are removed (default 16; link trust is the API's `CrossOrigin` policy).
+  - `PageSize` gains `sent_default: Option<u32>`, the authored value R2a requires for a provider-required size. `server_default` stays documentation only.
+  - `Collection` gains `item_type: Option<String>` (R26, default 22); `PaginationException { endpoint, collection }` is the table row (P8 item 3).
+  - `Partition::new(index, count).max(n)` and `SessionStep::constant(..)` builders were added.
+  - Runtime-side pieces stay out of define: `JsonPath::lookup`, `ItemSelector::{records, items, infer_root}`, `Strategy::is_terminal`, and `BoundaryTracker` need `serde_json::Value`, which define has only behind the `openapi` feature. They move to the runtime in Phase 3 (task 3.1), with the prototype's boundary and selector cases (task 3.3).
+  - `Knob::Close` and `Knob::Alternate` are dropped: there is no manual close (D27), and alternates add no caller surface (R6). `Knob::Session` (`with_session`) is added.
+- **Strict selector and path parsing.** `JsonPath::parse` and `ItemSelector::parse` keep empty segments instead of filtering them, so `""` and `"a..b"` are rejected by validation. A root array is spelled only `Collection::root()` (or `"[*]"`); `Collection::at("")` is invalid. This follows the plan's "root selector requires explicit root form".
+- **No empty usable-looking defaults.** No model type derives or implements `Default`, including `Collection`, `ItemSelector`, `JsonPath`, `Pagination`, and `Boundary` (all had `Default` in the prototype).
+- **Serde.** Every struct and struct-variant enum uses `#[serde(deny_unknown_fields)]`; no field has `#[serde(default)]`, so a missing list (`constants`, `terminal_values`, `alternates`, `parts`) or boolean (`adjustable`, `resumable`) is a decode error rather than an empty or false value. `Option` fields keep serde's meaning, absent = null = none; the model defines no difference between them (Phase 1 recorded that no configuration reader exists).
+- **Exports.** The new types are public under `schematic_define::pagination` and the authoring subset is in `schematic_define::prelude`. They are not re-exported at the crate root: `definitions/src/openai/mod.rs` glob-imports the crate root next to its own glob of OpenAI types, and root re-exports of names such as `Session` or `Collection` could make those names ambiguous there.
+- **Legacy (R8).** `PaginationStyle`, `PaginationResponse`, `with_pagination`, and the `pagination`/`response_pagination` fields are unchanged in code and documented as superseded. No `#[deprecated]`.
+- **`RestApi` fields (R3).** `default_pagination: Option<Strategy>` and `pagination_exceptions: Vec<PaginationException>`. 92 literals were updated by a script that inserts both fields, empty, after each `secret_names:` line: 18 production definitions (in 15 files), the importer builder, the definition emitter, and doc and test literals in define, gen, and definitions. No `Endpoint` or `EndpointParams` literal changed. The emitter always emits `default_pagination: None, pagination_exceptions: vec![]` with a comment saying why: an imported document yields no pagination, and the overlay (Phase 6) adds it.
+
+#### Contract frozen for Phase 3
+
+- `resolve(&RestApi, &Endpoint) -> Resolution` with `NotAList`, `Unpaginated { list, origin }`, `Paginated { list, strategy, alternates, origin }`. `ResolvedList { items: ItemSelector, item_type: Option<String> }`. `ResolutionOrigin::{Exception, ApiDefault, Unauthored}`: the spec's "None" is spelled `Unauthored` to avoid confusion with `Option::None`.
+- `caller_knobs(&Resolution) -> Vec<Knob>` / `strategy_knobs(&Strategy)`: the generator emits a knob forward and marker impl for exactly these. Order: start (`StartPage`/`StartOffset`/`ResumeCursor` forward then backward), `PageSize`, `AdjustPageSize`, `KeepAlive`, `Partitions`, `Next`, `Prev`, `Total`, `Renew`, `Session`.
+- `param_adoptions(&Endpoint, &Strategy) -> Vec<ParamAdoption>` and `adopted_params(..)` (the `Adopted` subset). The request-struct emitter in Phase 3.2 removes exactly `adopted_params`, so validation and emission share one decision.
+- `root_array_item_type(&ApiResponse)` names `T` for an explicit `Vec<T>`.
+- The `&'static` runtime projection mirrors these define types with slices instead of `Vec` and `&'static str` instead of `String`; Phase 3.1 owns it.
+
+### 2.2 Resolution validation (done)
+
+- **Define side.** `validate_pagination(&RestApi) -> Vec<PaginationDiagnostic>` and `validate_strategy(&Strategy)`. A diagnostic carries `endpoint: Option<String>` (none for the API default), `alternate: Option<String>`, and a `PaginationError`. Its `rule()` is a stable kebab-case id, its `group()` one of `Strategy`, `Exception`, `Parameter`, and it renders as `<rule>: <detail>`, adding `(alternate `label`)` when the error is in an alternate.
+- **Reporting the default once.** An API default's intrinsic errors are reported once with no endpoint. Each endpoint that inherits it is checked only for endpoint-dependent rules (paths, methods, carry names, declared parameters). The prototype re-reported the default's errors on every inheriting endpoint; with 38 OpenAI lists sharing one default that would flood the output.
+- **Gen wiring.** The plan's spelling is `validation.rs`, and Phase 1 found there is no `validate_api`. `check_pagination` runs at the end of `check_rust_api`, inside `validate_rust_client`, so it applies to the Rust client only; OpenAPI and Postman are unaffected. Three new `Feature` ids, `pagination-strategy`, `pagination-exception`, and `pagination-parameter`, group the rules. The rule id leads the message, which is how P8 item 3's `<api>.<endpoint_id>: <rule>: <detail>` fits the landed `ValidationDiagnostic` format. Alternative: one `Feature` per rule (about 35 variants). Reversal: map `PaginationError::rule()` to features one-to-one.
+- **Schema-aware checks (R5, R26).** Gen adds two rule ids of its own (all under `pagination-exception`):
+  - `invalid-item-type`: an authored item type that `syn` cannot parse.
+  - `unknown-item-type`: a single non-primitive identifier that is absent from the API's registry, where nested schemas count. `to_openapi_schemas()` flattens nested definitions; that matters because `WorkflowRun` exists only nested inside `WorkflowRunsResponse`.
+
+  `not-an-array-location` walks the selector's record steps through the response type's registered JSON schema, following `$ref`, single-member `allOf`, and nullable `anyOf`/`oneOf`. It reports only a demonstrable non-array. A missing property, an unresolved reference, an unregistered or qualified response type, or no registry at all is skipped, and nothing claims the location was checked; the runtime enforces it in Phase 4. The registry is built lazily and only for APIs that have pagination, so the shipped definitions pay nothing today.
+- **Define-side table rules** need no schema:
+  - an unknown row id, with the nearest id by edit distance when it is within max(2, len/3)
+  - a duplicate row id; the first row decides resolution
+  - an invalid selector syntax
+  - a wrapper key on an explicit `Vec<T>` response, or a row on a non-JSON response (`not-an-array-location`)
+  - a paginated list with no item type (`missing-item-type`)
+  - an empty item type
+
+  An unpaginated row needs no item type.
+- **Adoption and R2a.** `param_adoptions` classifies every declared parameter that a strategy input names; the outcomes are `Adopted`, `WithoutKnob`, `NotAdoptable`, and `NearMiss`. A near miss is the same name in another location (query, header, cookie, or path). Body inputs are not matched, because the body has no declared parameter list. Adoption requires the knob that replaces the field:
+  - page, offset, page size, and partition index/count always have one
+  - a cursor part has one only with `resumable`
+  - keep-alive has one only when `adjustable`
+  - constants and the session handle never do
+
+  A required adopted parameter needs a sent value. Page and offset send their base, keep-alive its default, and a size its `sent_default`. Cursor parts and partition inputs have none, so a required one is rejected.
+- **Alternates** are checked against every rule except the declared-parameter rules. An alternate is not generated, so it removes no field. This applies the Phase 1 decision for GitLab `ListGroupProjects`, where the keyset constants `order_by` and `sort` shadow declared parameters.
+- **Destination conflicts.** `DuplicateInput` compares query names exactly, header names without case, and body paths by prefix (`pit` against `pit.id`). It covers the page and offset inputs, cursor parts on both legs, size, constants, partition inputs, the session handle, and keep-alive on pages. Keep-alive on open is excluded, since it goes on a different request.
+
+#### Rules from design.md section 8: kept, renamed, dropped
+
+| Rule | Status |
+| --- | --- |
+| `CursorWithoutEndSignal`, `FullPageOnCursor`, `FullPageWithoutPageSize`, `PageCountOnNonPageNumber`, `EmptyCursorLeg`, `InclusiveBoundaryNeedsItemKey`, `AdjustablePageSizeOnPageNumber`, `AdjustableLinkSizeNotQuery`, `NextLinkWithFollowUpPath`, `NextLinkMethodUnspecified`, `UnknownCarryParam`, `UnknownPathParam`, `SessionHandleUnreachable`, `SessionHandleNotSent`, `SessionStepNeedsHandle`, `KeepAliveWithoutInput`, `InvalidPartitionMax`, `AlternatesWithoutPrimary`, `AlternatesOnUnpaginated`, `DuplicateLabel`, `InvalidLabel` | kept |
+| `InvalidPageSize` | kept; also checks `sent_default` is within bounds |
+| `DuplicateInput` | kept; widened to header case and body-path prefixes |
+| `BodyInputOnGet` | kept; HEAD is also body-less |
+| `CollidesWithEndpointParam` | kept, narrowed by adoption: near misses, constants, and session handles only |
+| `PagerManagedRequiredWithoutDefault` | added (R2a) |
+| `AdoptionWithoutKnob` | added (R7); the prototype reported these as collisions |
+| `EmptyValue`, `UnknownExceptionId`, `DuplicateExceptionId`, `InvalidItemSelector`, `NotAnArrayLocation`, `MissingItemType` | added (R5, R26, input robustness) |
+| `invalid-item-type`, `unknown-item-type` | added, gen only (R26) |
+| `InvalidTrustedOrigin` | dropped with `LinkTrust` (default 16) |
+
+### 2.3 Model evidence (done)
+
+New test files:
+- `define/tests/pagination_model.rs` (29 tests)
+- `define/tests/pagination_tables.rs` (20)
+- `define/tests/pagination_inventory.rs` (15)
+- `define/tests/pagination_serde.rs` (9)
+- `define/tests/endpoint_literal_surface.rs` (1)
+- `gen/tests/l1/pagination_validation.rs` (6), registered in `gen/tests/l1/main.rs`
+
+Shared fixture builders are in `define/tests/pagination_support/mod.rs`. Every test is L1 with an untiered name.
+
+- **Port of the 56 prototype tests.**
+  - The `patterns.rs` and `generalizations.rs` assertions about the model are in `pagination_model.rs`, each R2 rule next to its valid sibling.
+  - The 16 `inventory.rs` tests are in `pagination_inventory.rs` as fixture APIs written with a default and an exceptions table, and asserted through `resolve` and `caller_knobs`. Two prototype tests were merged into one (`unpaginated_endpoints_expose_no_knobs` and `every_paginated_endpoint_exposes_next`). `openai_plain_after_param_collides_with_strategy` was replaced by the adoption assertions, because R7 now adopts those parameters, plus `openai_cursor_without_resume_cannot_adopt_after`. Fixtures follow the Phase 1 inventory: Bitbucket has 8 lists, GitLab participants opt out, and ElevenLabs `ListVoices` is absent. The unverified Anthropic, EMQX, and Hugging Face strategies are labeled as mechanisms, not real definitions.
+  - Not ported here: `p18_*` link trust (removed). The runtime-only assertions are deferred to Phase 3 task 3.3, where they target the runtime projection: JSON lookups through `JsonPath::lookup` and `ItemSelector::items`, `BoundaryTracker`, and `is_terminal`.
+- **Serde (strict round trip; no configuration reader, per Phase 1).** The tests cover:
+  - a repeated write/read/write round trip that is byte-identical, with equal knobs and validation
+  - an unedited control
+  - unknown fields at every level
+  - an absent list or flag as an error, with `[]` accepted and distinct
+  - an absent `Option` equal to `null`, an equality the model defines
+  - wrong types: whole field, one element, every element, and composite elements
+  - an unknown kind, location, or method
+  - duplicate keys, top-level and nested inside the internally tagged kind
+  - trailing content
+- **R3.** `endpoint_literal_surface.rs` builds `Endpoint` and `EndpointParams` literals exactly as they are spelled today. The diff check: `git diff -U0 -- schematic/definitions/src` has 42 insertions and no deletions. They are 18 production literals and 3 registry-test literals, each gaining `default_pagination: None,` and `pagination_exceptions: vec![],`. No endpoint-literal line changed.
+
+#### Requirement-to-test mapping (Phase 2 scope)
+
+| Requirement | Tests |
+| --- | --- |
+| R1 model, builders, serde, no empty default | `pagination_model::builders_produce_named_kind_structs_with_documented_defaults`, `shared_dimension_setters_finish_the_builder`, `selector_*`, `empty_selector_is_not_a_root_array`, `json_path_*`; `pagination_serde::*`; the new doc examples (doctests) |
+| R2 every rule plus its valid sibling | `pagination_model::{cursor_read_only_from_items_needs_an_end_signal, short_page_signal_rules, page_totals_end_only_page_numbers, page_size_bounds_must_be_consistent, one_destination_may_be_written_once, empty_names_and_locations_are_rejected, body_inputs_need_a_request_with_a_body, next_link_on_a_non_get_endpoint_states_its_follow_up_method, next_link_follows_the_link_so_it_has_no_follow_up_path, carried_names_and_step_paths_must_belong_to_the_endpoint, composite_and_inclusive_cursor_rules, adjustable_page_size_rules, partition_maximum_is_positive, session_handle_rules, session_steps_use_endpoint_path_params_and_bodies_only_where_allowed}`; `pagination_tables::{alternates_are_validated_and_resolved_but_add_no_knobs, a_near_miss_and_an_unadoptable_input_collide, a_declared_parameter_without_its_knob_is_refused_and_kept}` |
+| R2a (define part) | `pagination_tables::a_required_managed_parameter_needs_a_value_to_send` (required size without/with `sent_default`, required page, required cursor) |
+| R3 | `endpoint_literal_surface::endpoint_and_params_literals_compile_unchanged_and_behave_the_same`; the definitions diff above |
+| R4 | `pagination_tables::{get_vec_is_a_list_that_inherits_the_default_or_is_unpaginated_without_one, only_get_with_an_explicit_vec_is_recognized, a_row_decides_before_inference, a_wrapper_row_without_a_default_is_an_unpaginated_list, root_array_item_type_reads_only_an_explicit_vec}` |
+| R5 | `pagination_tables::{unknown_row_id_is_rejected_with_the_nearest_endpoint, duplicate_row_id_is_rejected_and_the_first_row_decides, row_list_shape_rules, an_unpaginated_row_needs_no_item_type}`; `pagination_validation::item_location_is_checked_against_the_registered_response_schema` |
+| R6 (model part) | `pagination_tables::{alternates_are_validated_and_resolved_but_add_no_knobs, an_alternate_constant_may_shadow_a_declared_parameter}`; `pagination_inventory::gitlab_page_number_default_with_keyset_alternate_modeled_only` |
+| R7 (model part) | `pagination_tables::{a_declared_parameter_with_its_knob_is_adopted, a_declared_parameter_without_its_knob_is_refused_and_kept, a_near_miss_and_an_unadoptable_input_collide, partition_inputs_are_adopted_with_their_knob}`; `pagination_inventory::{bitbucket_follows_body_next_and_hides_no_page_number, openai_cursor_without_resume_cannot_adopt_after}` |
+| R8 (model part) | `pagination_tables::legacy_pagination_metadata_does_not_change_resolution` (resolution, knobs, validation, and adoption identical with and without legacy metadata; legacy alone makes no list) |
+| R26 (define and gen part) | `pagination_tables::row_list_shape_rules` (missing item type, inferred `T`); `pagination_validation::{item_type_must_be_rust_type_syntax, item_types_resolve_through_the_registry_including_nested_schemas}` (registered nested, qualified, primitive accepted; unknown rejected) |
+| Gen wiring | `pagination_validation::{each_rule_group_renders_as_its_feature_on_the_rust_client_only, a_pagination_error_blocks_only_the_rust_client, live_definitions_report_no_pagination_diagnostics}` |
+
+Deferred by the plan: the generator half of R2a, R6, R7, and R8 (struct fields, `new()`, byte-identical constants) is Phase 3.2; the runtime half of R2a is Phase 4.
+
+#### Input robustness
+
+Phase 1 recorded that the configuration-reader matrix does not apply. The strict serde tests above stand in its place. Grep for load-bearing smells in `define/src/pagination/`: no `#[serde(default)]`. The two `unwrap_or_default()` calls are not parse fallbacks. One reads an endpoint with no declared parameters as having no query parameters, which is that type's meaning. The other is `caller_knobs` of a non-paginated resolution, which is empty by contract.
+
+### Validation run in this phase (macOS, rustc 1.98.1)
+
+| Check | Result |
+| --- | --- |
+| `just test` (schematic area) | pass: L1 2017/2017 (12 skipped), fresh-output 6/6, compile-fail 1/1 |
+| `just lint` (schematic area) | pass, after two fixes: `#[allow(clippy::large_enum_variant)]` with a reason on `Pagination` and `Resolution` (precedent in `gen/src/model_gen.rs` and the OpenAI types), and a type alias in a test |
+| `just _doctest schematic-define --all-features` / `schematic-gen` | pass: 174 / 18 |
+| Fresh generation (`cargo run -p schematic-gen -- generate --api all ...` into `/tmp/pagination-phase2.*`) | `schematic/schema` and its `Cargo.toml`, OpenAPI, and Postman are all byte-identical to the committed output; the 27 expected `query-in-path` warnings are unchanged |
+| `just test-schema` / `just lint-schema` | not re-run: the generated crate is byte-identical and its dependencies are unchanged (Phase 1 baseline pass reused) |
+| Other OSes | not run. This phase adds pure data-model and string logic, with no paths, processes, timing, or terminal use. CI's pull-request Linux and macOS cells cover it. |
+
+No pre-existing failures were found.
+
+### Deviations in this phase
+
+- `ResolutionOrigin::Unauthored` is the spec's "None" (R4); it was renamed to avoid `Option::None`.
+- `AdoptionWithoutKnob` is a separate rule; the spec folds it into `CollidesWithEndpointParam`.
+- Pagination diagnostics use three `Feature` ids, with the rule id in the message, rather than one feature per rule.
+- R5 "Remove only strategy-local trust validation" is done. `InvalidTrustedOrigin` is the only rule dropped.
+- Runtime-only model helpers (JSON lookup, boundary tracker, terminal check) were not added to define; they go to the runtime in Phase 3.
+- R1 "every authoring example in design.md sections 5 and 9 compiles against the real API" is met through the ported fixtures. The design examples use the prototype's endpoint-level `.collection(..)`; they are rewritten as exceptions rows, and the prototype names `Method`, `NextLink { trust }`, and struct-variant kinds became `RestMethod`, no trust, and named structs.
+- The `docs/` tree and README were touched now, ahead of Phase 8. `schematic/docs/generation/validation.md` gained the three features and a "Pagination rules" section, because the docs tree is the current record of validation. `schematic/define/README.md` replaced its legacy pagination how-to, which presented the superseded types as the way to paginate, with the model, and its 4 `RestApi` examples gained the two fields. Phase 8.1 still owns the full docs pass.
+
+### Human review agenda (Phase 2 updates)
+
+1. **Defaults.**
+   - P8 item 3: a list of rows; reject duplicates and unknown ids with a nearest-id hint, in the landed diagnostic format.
+   - P8 item 5 (S12): named structs.
+   - P8 item 7: alternates are modeled and validated, and add no knobs.
+   - Default 12: adopt-and-hide only with the knob.
+   - Defaults 13 and 22: `item_type: Option<String>`, inferred only from an explicit `Vec<T>`.
+   - Default 14: GET `Vec<T>` opt-outs use `Collection::root().unpaginated()` rows.
+   - Default 15: legacy kept, documented as superseded.
+   - Default 16: trust removed.
+3. **Design choices.** See 2.1 and 2.2: type names, `Unauthored`, `sent_default`, three features, the default reported once, and the knob order.
+11. **Open questions (new).**
+    - Should an alternate's declared-parameter collisions be validated once alternates are generated? Recommended: yes, at that time.
+    - Should a required partition input get an authored default? Recommended: no until a real API needs one.
+    - The nearest-id threshold is max(2, len/3). Recommended: keep.
+12. **Drift.** The `define/README.md` pagination section and table, and the `EndpointParams` field and `with_pagination` docs, presented the legacy types as live. They were corrected to say "superseded" (code assumed correct). The `Paginated` marker doc in gen is still Phase 3's.
+14. **Unratified.** S12 named structs were adopted. The others are not applied yet.
+15. **Adoption rule.** It is implemented and tested in the model. The real adoptions are listed in Phase 6 and 7.
+17. **Wrapper item type default.** Implemented as authored `item_type`, checked by `syn` and the registry, with nested schemas counted.
+
+## Phase 3
+
+Phase 3 builds the runtime pager (task 3.1), its generator emission (3.2), and the core runtime fixtures (3.3). Started 2026-10-13 on `feat/modern-config`. Entries are appended as work lands. Task 3.1 was written first so its contract could be frozen; 3.2 and 3.3 then ran concurrently in two delegated workers with disjoint file ownership (`schematic/gen/**` versus `schematic/runtime/tests/**`, with runtime bug fixes reported back).
+
+### 3.1 Pager mechanics (runtime)
+
+New module `schematic_runtime::pager` (`schematic/runtime/src/pager/`):
+
+| File | Holds |
+| --- | --- |
+| `mod.rs` | `Paginated`, the kind and session marker types, the capability traits, `CursorValue` |
+| `spec.rs` | the `&'static` projection of the define model (`Strategy`, `Kind`, `Input`, `Source`, `MoreSignal`, `CursorLeg`, `LinkSource`, `Carry`, `FollowUp`, `Session`, `Partition`, `ItemSelector`, ...) |
+| `engine.rs` | the sans-I/O traversal state machine: request planning, end detection, continuation extraction, loop history |
+| `json.rs` | path lookup, record fan-out, continuation/flag/total interpretation |
+| `link.rs` | the RFC 8288 `Link` parser (quoted parameters, multiple fields, multiple relation tokens) |
+| `progress.rs` | `History` (exact keys) and `BoundaryTracker` (ported from the prototype) |
+| `request.rs` | `PageRequest<R>`, the internal endpoint a page is sent as; `PageDecoder` (the decode seam); follow-up building |
+| `pages.rs` | `Pager`, `Pages`, `Items`, `Call::pager`, `fetch_page`, `collect_all` |
+| `error.rs` | `Page<T>`, `PagerError`, `PagerErrorKind`, `ContinuationProblem`, `Incomplete`, `IncompleteReason` |
+
+Design choices (agenda items 3 and 14), each with its alternative and reversal:
+
+- **One generic pager (R9, Proposed; adopted).** `Pager<'a, A, R>` configures and `Pages<'a, A, R>` iterates for every kind; the engine is not generic over the endpoint. Alternative: per-endpoint pager types. Reversal: wrap the engine in generated types.
+- **Capability encoding (R10, Proposed; adopted with one change).** Each control is a method with its own `where R: <Capability>` bound and `#[diagnostic::on_unimplemented]`. Kind- and session-derived capabilities (`StartPage`, `StartOffset`, `Sessionless`, `Sessioned`) are blanket impls over the associated types `Paginated::Kind` and `Paginated::Session`, with `#[diagnostic::do_not_recommend]`. The other capabilities (`PageSizeKnob`, `ResumeAfter`, `ResumeBefore`, `HasPrev`, `HasTotal`, `AdjustablePageSize`, `KeepAliveKnob`, `Partitioned`, `Renewable`) are generator-emitted empty marker impls, one per knob in `caller_knobs`. `ResumeAfter`/`ResumeBefore` carry `type Cursor` (`String`, or a tuple of up to four `String`s for a composite cursor, R15). Reversal: blanket more of them from constants once Rust can bound on const values.
+- **`.pages()` is absent on a session endpoint** through the `Sessionless` bound, so R22's "no `pages()` outside the scope" is a compile error now; `with_session` arrives in Phase 5.
+- **Entry points (default 10).** `Call::pager()` is the runtime entry; generated call types forward `pager`, each authored knob, `pages`, `fetch_page`, and `collect_all` to it. Knobs return the `Pager`, so a knob ends the endpoint's own setter chain: endpoint setters come first, as they already do before `.full()`. `fetch_page` and `collect_all` return the runtime's boxed `CallFuture`, so a generated `#[inline]` forward compiles no per-endpoint state machine (the same reasoning as the generated `IntoFuture`). `Pager` also forwards `anonymous`, `credential`, and `deadline`, so a per-call setting survives into the pager in either order (the sniff ledger entry needs `.anonymous()`).
+- **Pages are ordinary typed sends.** A page is sent as `PageRequest<R>`, a runtime-internal `EndpointSpec` that keeps `R`'s API, endpoint id, method, failure type, and declared error statuses. Credentials, origin policy, redirects, the deadline, hooks-free decoding, and redaction are therefore the client's own, and an origin refusal or invalid argument reports the listing endpoint. Pre-send refusals (size bounds, start below the base, overflow, a zero page limit) are returned by `PageRequest::into_parts`, so they surface as the runtime's own `TransportError` of kind `InvalidArgument` with request metadata and zero requests sent (D24, default 9). A followed link is checked with `Client::check_link::<R>` and then sent through the checked absolute-URL path (`RequestParts.path` holding the URL), per the runtime-envelope ruling.
+- **Final-URL seam (Phase 1 correction 3).** `Client::send_located` (crate-private) returns the envelope plus the unredacted, pre-credential URL of the hop that received the final reply; `send_unboxed` now delegates to it. Relative links resolve against that URL with `Url::join` (RFC 3986), so `?page=2` and `../next` keep the endpoint path.
+- **`RequestMeta.page`** is the page's 1-based position in its traversal, set on the envelope of every page send and on a page's transport error; ordinary sends leave it `None`. Alternative: the provider's page number, which cursor and link strategies do not have.
+- **Deferred continuation failures.** A page that decodes but whose continuation is missing, unusable, or repeated is delivered; the failure is stored as that direction's next position and returned by the next request, before anything is sent. This is how R21's "items from a successfully decoded page are retained even when its continuation is invalid" holds for both `next()` and `collect_all`. A malformed collection or item decode failure is the envelope's `MalformedSuccess` with the raw body and no items (R17).
+- **Failed stays failed.** `PagerError` holds non-`Clone` evidence (`ApiError<E>`), so a later call returns `PagerError::AlreadyFailed { first: PagerErrorKind }` without a request rather than a clone of the first error. Deviation from R14's "returns the same failure"; the kind is the same and no request is sent.
+- **`PagerError` shape.** `Transport`, `Api { error, meta }`, `MissingContinuation`, `InvalidContinuation { problem }`, `RepeatedContinuation`, `BoundaryNoProgress`, `EmptyPageClaimsMore`, `DeadlineExceeded { completed_pages, error }`, `AlreadyFailed`. `EmptyPageClaimsMore` is the R12 "no-progress" contradiction of an empty page-number or offset page whose signal says more; `ContinuationProblem::{Cursor, Link, AmbiguousLink, MoreSignal, Total}` distinguishes unusable values. Page size bounds are not a pager variant: they are the runtime's `InvalidArgument` kind (Phase 1 correction 11).
+- **`IncompleteReason` mapping (P8 item 1, R21).** The spec's five plus `InvalidContinuation`, `InvalidArgument`, `TransportError`. Missing or invalid continuation and a malformed end signal or total map to `InvalidContinuation`; repeated continuation, boundary no-progress, and an empty page claiming more map to `RepeatedContinuation`; a `RedirectFailed` envelope maps to `TransportError`; other envelope failures to `HttpError`; outer transport kinds to `CrossOriginRejected`, `InvalidArgument`, `DeadlineExceeded`, or `TransportError`.
+- **Page limit (P8 item 2).** `DEFAULT_PAGE_LIMIT = 100`; `Pager::page_limit(n)` sets it and `configured_page_limit()` reads it. It counts page requests including failed ones. After the last permitted page, a proven end returns `Ok`; a deferred continuation failure is reported as that failure (no request is needed to know it); otherwise `PageLimitReached`.
+- **End detection (R12).** An explicit signal decides when it is present: `Flag`, `Present`, `LinkRel`, and `Total`; a flag that is absent counts as no signal (cursor falls back to continuation presence, page number and offset to a non-empty page), and a flag of the wrong type is `InvalidContinuation { MoreSignal }`. `Total` decides only when the covered amount is known (page number needs an effective size for an item total); otherwise it falls back like a missing total. `FullPage` uses the effective size (caller's, else `sent_default`) and otherwise falls back to a non-empty page, so `server_default` alone never establishes it. A cursor value that is a number or boolean is a value; arrays and objects are values only for a JSON body destination (`search_after`).
+- **Stall rule (R14, P8 item 6; Proposed, adopted).** Every continuation sent forward is kept exactly, per direction, including the caller's starting cursor; any repeat is `RepeatedContinuation`. Links are keyed by their resolved URL. An inclusive forward boundary uses `BoundaryTracker` instead of the history.
+- **Size semantics (R13, R2a).** An unset optional size is omitted; `sent_default` is sent when the caller sets none; `server_default` is never sent. A followed link carries the provider's size unless the caller adjusted it during the traversal (R16 "a provider-issued size is not changed implicitly").
+- **Follow-up shape (R16).** Non-link follow-ups keep the method and path unless `FollowUp` names them; a follow-up path template is filled from the endpoint's own path values by matching `Paginated::PATH` segment by segment. The carry rule filters query pairs and top-level JSON body fields; managed inputs are written last and replace any value. A followed link is sent verbatim with GET unless carry names values, which are set on its query replacing existing ones. Every `RequestBody` variant owns its bytes, so no body is non-replayable today. Phase 4.2 owns the acceptance tests of these rules.
+- **Decode seam (R24, P8 item 4).** Provisional: the page body parses to `serde_json::Value` (`PageDecoder`) and items decode through `serde_json::from_value` (`request::decode_items`). Phase 4.1 compares this with a shared `from_slice` path; the seam is these two functions. Response hooks do not run on page bodies (the envelope's `Json` hooks are typed by the endpoint's success type, not a page); recorded for Phase 4.
+- **ABI 3 → 4** (Phase 1 correction 9): `schematic_runtime::ABI` and the generator's `RUNTIME_ABI` change together.
+- **Not built in this phase, by the plan:** session scope (`with_session`, keep-alive, renew, close), partitions (Phase 5); the shared deadline acceptance, origin-policy matrix, and decode measurement (Phase 4). The projection already carries sessions and partitions, so generated constants need no change later.
+
+### 3.2 Pager emission (generator)
+
+- **Emitter.** `schematic/gen/src/codegen/pagination/mod.rs` replaces `codegen/traits.rs` (deleted). For each endpoint that resolves `Paginated`, it emits `impl schematic_runtime::pager::Paginated` with `type Item` (the resolved item type through the response-type tokenizer), `type Kind`, `type Session`, the `&'static` `STRATEGY` and `ITEMS` constants, and `PATH`. It also emits one marker impl per knob in `caller_knobs`: `ResumeAfter`/`ResumeBefore` with `type Cursor` sized to the leg's parts, `PageSizeKnob`, `AdjustablePageSize`, `KeepAliveKnob`, `Partitioned`, `HasPrev`, `HasTotal`, and `Renewable`. Nothing is emitted for unpaginated lists, non-lists, or alternates. Paths are fully qualified, so the generated modules gain no `use`. A define variant the projection does not know (the enums are `#[non_exhaustive]`) emits `compile_error!`, following the existing `method_tokens` precedent. So does a paginated list without an item type, which validation already rejects.
+- **Example (exact snapshot test `page_number_strategy_emits_its_projection_markers_and_forwards`):** a GitHub-like `ListReleases` emits `type Kind = PageNumberKind`, `Kind::PageNumber { page: Input::Query("page"), base: OneBased, more: MoreSignal::LinkRel { rel: "next" } }`, `size: Some(PageSize { param: Input::Query("per_page"), server_default: Some(30), sent_default: None, min: 1, max: Some(100), adjustable: false })`, `ITEMS = { record: &[Step::Each], projection: &[] }`, and `impl PageSizeKnob`. Its call type gains `pager`, `page`, `page_size`, `pages`, `fetch_page`, and `collect_all`, all `#[inline]`. The request struct has no `page`/`per_page` field, `with_*` method, or setter.
+- **One adoption decision (R7, R2a).** `pager_view(api, endpoint)` removes exactly `adopted_params(endpoint, strategy)` (query and header) from the endpoint as the Rust client sees it. Request-struct emission, call-type setters and docs, and `resolve_names` read it. Name validation calls `resolve_names`, so validation and emission share it. The OpenAPI and Postman exporters do not use it, so plain parameters stay in the exports.
+- **Forwards (default 10).** Paginated call types forward `pager()` and each authored setter-like knob. Without a session they also forward `pages()`, `fetch_page()`, and `collect_all()`. There are no `keep_alive`, `partitioned`, `with_session`, or `renew` forwards yet (Phase 5). Paginated call types get one extra doc paragraph; unpaginated output is unchanged.
+- **Names.** `PLANNED_CALL_METHODS` now reserves `pager` beside `pages`, `fetch_page`, and `collect_all` on every call type; no shipped definition has a `pager` setter. The knob forwards (`page`, `offset`, `after`, `before`, `page_size`) are reserved per endpoint, only where that endpoint forwards them. A remaining setter of that name gains `_param` under the new `RenameReason::PagerMethod` and is reported as the existing rename warning, so an unpaginated endpoint's setters never change.
+- **Legacy (R8, R25).** The `Paginated` marker trait in the generated `shared.rs`, its 35 impls, the `use crate::shared::Paginated` imports, `has_paginated`, and `"Paginated"` in `IMPORTED_TYPE_NAMES` are removed. `EndpointParams.pagination` no longer reaches the generator.
+- **ABI.** `RUNTIME_ABI` is 4, matching the runtime (checked by `the_generator_emits_the_abi_of_the_workspace_runtime`).
+- **Fresh-output fixture.** `fresh_output_compile.rs` gains a `FixturePages` API with page-number, cursor, and next-link endpoints; the cursor and next-link ones are wrapper lists. A `PAGER_CONTROL` program calls `.state(..).page_size(10).pages()`, `.after("x").fetch_page()`, `.collect_all()`, and `.page(2).page_limit(3).collect_all()` on the generated crate. Two compile-time misuses are asserted with their diagnostics: `.pager()` on an unpaginated endpoint and `.page_size` on the next-link endpoint. Both reuse the existing fixture crate builds. `tests/common/fresh_output.rs::doctored_runtime` now copies directories recursively, because the runtime gained `src/pager/`.
+- **Regeneration (pre-authorized; agenda 13).** `just generate` was run in this phase, not Phase 7, because the ABI bump would otherwise leave the committed `schematic-schema` failing its compile-time ABI assertion between phases. `git diff --stat -- schematic/schema schematic/openapi schematic/postman`: 6 files, +2/−60. That is `lib.rs` (ABI 3 → 4), `shared.rs` (the marker trait), and `bitbucket`/`gitea`/`github`/`gitlab` `requests.rs` (35 `impl Paginated` lines and 4 imports). OpenAPI and Postman are byte-identical. No definition authors pagination yet, so no request field was removed. The 27 `query-in-path` warnings are unchanged.
+
+### 3.3 Core fixtures (runtime tests)
+
+New files under `schematic/runtime/tests/l1/`, all declared in `main.rs`; every test is L1 and untiered:
+
+- `pager_support.rs`: 37 endpoint fixtures built like generator output by an `endpoint!` macro. Each has `&'static` constants and only its authored markers. A `Copy` builder `Def` assembles the strategy constants, because struct-update syntax cannot be used on `Strategy` in a constant: `follow_up` and `session` are not `Copy`.
+- `pager_mechanisms.rs` (17), `pager_outside.rs` (10), `pager_rules.rs` (32), `pager_surface.rs` (11).
+- `#[cfg(test)]` units in `src/pager/json.rs` (7), `progress.rs` (5), `link.rs` (3), and `request.rs` (3). They port prototype cases g2 (boundary tracker), g4 (selector fan-out, including two-level `responses[*].hits.hits[*]._source` in document order), p01/p05 (lookups), and g6 (terminal values).
+- 11 compile-fail fixtures `tests/fixtures/compile_fail/pager_*.rs` with `.stderr`. The snapshots hold only crate-relative paths; the harness clears `RUSTC_WRAPPER`.
+
+Every mechanism runs through the real runtime against a local wiremock server, not only through extraction helpers. The slowest pager test takes 27 ms.
+
+**Bug found and fixed:** stepping `next, next, prev, next` on a bidirectional next-link pager returned `RepeatedContinuation`, because the forward history still held the page-2 link. R14 says a deliberate backward step is not a forward cycle. A page accepted in one direction now clears the other direction's history (`engine.rs`, `History::clear`). Regression test: `pager_rules::stepping_back_then_forward_again_is_not_a_repeated_continuation`. It fails without the fix (checked by reverting the two lines) and passes with it. The same test proves that a cycle inside one forward run after turning around is still caught.
+
+#### Requirement-to-test mapping (Phase 3 scope)
+
+| Requirement | Tests (boundary, fidelity) |
+| --- | --- |
+| R9 one generic pager; thin forwards | runtime fixtures shaped like generated impls (all `pager_*` tests); gen `page_number_strategy_emits_its_projection_markers_and_forwards`; fresh-output `slow_fixture_apis_compile_and_send_offline` (crate boundary, F3: generated crate compiled against the workspace runtime) |
+| R10 unauthored knobs do not compile | 11 `pager_*` compile-fail cases (page_size, page, offset, after, before, prev, total, set_page_size, `.pager()` on unpaginated, knob after `.pages()`, `pages`/`fetch_page`/`collect_all` on a session endpoint); positive: `pager_surface::{every_control_is_available_on_a_fully_authored_endpoint, page_number_and_offset_endpoints_take_their_start_and_size_controls}`; generated surface: `slow_generated_types_reject_misuse_at_compile_time`. The real generated endpoint set runs in Phase 7 (R31). |
+| R11 iteration surface | `pager_surface::{each_page_carries_its_number_in_the_page_and_the_request_metadata, items_flattens_every_page_in_order}`; `total`, `is_finished`, `pages_fetched`, `items_delivered` asserted in the mechanism tests |
+| R11a `fetch_page` | `pager_surface::{fetch_page_sends_one_request_with_the_cursor_and_size_and_returns_that_page, an_ordinary_send_of_a_paginated_request_returns_the_wrapper_without_a_page_number}`; fresh-output `PAGER_CONTROL` program |
+| R12 end detection | `pager_rules::{an_explicit_false_ends_despite_a_stale_cursor, an_explicit_true_without_a_cursor_is_a_missing_continuation_after_the_page, without_a_signal_a_missing_null_or_empty_cursor_ends, zero_and_false_cursors_are_values_not_ends, a_flag_of_the_wrong_type_is_an_invalid_more_signal_never_completion, a_true_means_last_flag_ends_when_true, an_empty_page_number_page_that_claims_more_is_an_error, an_empty_cursor_page_with_a_continuation_continues, a_missing_total_falls_back_to_a_non_empty_page_for_offsets, a_malformed_or_negative_total_is_an_invalid_total, a_server_default_is_never_sent_and_does_not_establish_a_full_page, page_number_arithmetic_is_checked_before_the_next_send, a_start_page_below_the_base_is_refused_without_a_request, an_offset_advances_by_source_records_from_its_zero_base}`; SCIM 1-based and both 0-based mechanism tests; `json` unit tests for terminal values |
+| R13 / R2a (runtime half) size rules | `pager_rules::{a_size_outside_the_declared_bounds_is_refused_naming_the_bound_with_zero_requests, an_adjusted_size_applies_from_the_next_request_and_is_validated, an_optional_size_is_omitted_when_unset, a_full_page_rule_uses_the_sent_default_size_on_every_request_unless_overridden}`; generator half: `pagination::tests::{adopted_parameters_leave_the_request_and_the_call_type, only_adopted_required_parameters_keep_default}` |
+| R14 stall and loop | `pager_rules::{a_cursor_cycle_is_a_repeated_continuation, a_return_to_the_starting_cursor_is_a_repeated_continuation, a_repeated_link_is_a_repeated_continuation, a_failed_pager_stays_failed_without_another_request, stepping_back_then_forward_again_is_not_a_repeated_continuation}`; `progress::tests::the_history_keeps_every_key_it_saw` |
+| R15 composite and inclusive | `pager_rules::{a_composite_cursor_sends_every_part_and_ends_when_all_are_absent, a_composite_cursor_with_only_some_parts_is_a_missing_continuation, an_inclusive_boundary_drops_redelivered_ties_and_fails_on_a_page_of_only_ties}`; 4 tracker units |
+| R16 (partial; Phase 4 owns acceptance) | AIP-158 `AllExcept(["skip"])`; verbatim link following in the keyset, OData, and Salesforce REST tests; constants on every non-link request; `request::tests::{follow_up_path_takes_the_endpoint_path_values, link_query_values_are_replaced_and_others_kept_in_order, body_inputs_create_nested_objects}` |
+| R17 item location | `pager_rules::{a_malformed_collection_is_a_malformed_success_with_its_body_and_no_items, a_record_without_its_projection_is_malformed, a_malformed_second_page_contributes_no_items_to_collect_all}`; `json` selector units |
+| R18 (Phase 3 part) | `pager_surface::{relative_links_resolve_against_the_response_url, distinct_next_links_are_ambiguous_and_identical_ones_are_followed, a_cross_origin_next_link_is_refused_before_any_request_reaches_it}`; `link::tests` (quoted commas, multiple relation tokens, malformed fields). The two-origin policy matrix is Phase 4.4. |
+| R21 (partial) | `pager_rules::{the_default_page_limit_is_one_hundred_and_zero_is_refused_without_a_request, completion_exactly_at_the_page_limit_is_complete, reaching_the_page_limit_first_is_incomplete_with_the_items_so_far}`; reasons `InvalidContinuation`, `InvalidArgument`, `HttpError`, `RepeatedContinuation`, and `CrossOriginRejected` asserted in the rule and surface tests, including the items of a valid page kept when its continuation is invalid. `DeadlineExceeded`, `TransportError`, and `RedirectFailed` are Phase 4.3. |
+| R25 generated surface | gen `pagination::tests::{unpaginated_lists_and_non_lists_emit_nothing_pagination_related, repeated_generation_is_identical, session_strategy_has_markers_but_no_outside_scope_iteration, composite_inclusive_cursor_with_backward_leg_and_total, next_link_with_body_prev_on_a_wrapper_list, one_based_offset_strategy}`; `e2e_generation::shared_module_defines_no_pagination_trait`; the regeneration diff |
+| R26 (gen part) | `pagination::tests::wrapper_item_types_are_emitted_as_authored` (`serde_json::Value`, a qualified path, `Vec<String>`) |
+| R6 / R8 independence | `pagination::tests::{alternates_do_not_change_the_output, legacy_pagination_metadata_does_not_change_the_output}`; `e2e_generation::legacy_pagination_metadata_emits_no_pager` |
+| Names | `pagination::tests::{a_setter_named_like_a_pager_control_is_renamed, an_unpaginated_endpoint_reserves_only_the_pager_entry_points}` |
+| R30 mechanism matrix | `pager_mechanisms.rs`: GitHub page + Link, GitLab `X-Next-Page` + `X-Total` and keyset Link, Gitea page/limit + `X-Total-Count`, Bitbucket body next + previous + size, OpenAI S6 / item-id / S7 / S8, Anthropic bidirectional with `.before`, ElevenLabs history / voices token / shared voices 0-based, EMQX nested `meta.hasnext` + `meta.count`, Hugging Face Link cursor and 0-based `p`. `pager_outside.rs`: AIP-158, Mastodon, SCIM, Salesforce Bulk 2.0, and `unverified_{x_api_v2, wordpress, odata_skiptoken, cosmos_db, salesforce_rest_query, reddit}` |
+| R36 privacy | `pager_surface::{a_repeated_secret_cursor_is_not_in_the_error_text, an_invalid_secret_continuation_is_not_in_the_error_text}` (cursor, link, ambiguous links, `Incomplete` text) |
+
+Input robustness: this phase adds no configuration reader. The pager reads provider response bodies, which the spec and Phase 1 record as outside the matrix. Their shapes are covered by the R12 and R17 response-shape tests above: absent, null, wrong type, empty, and malformed values each have a defined outcome. Smells grepped in `runtime/src/pager/`: no `#[serde(default)]`. `unwrap_or_default` and `filter_map(..as_str())` are not used on load-bearing reads. The `.ok()` in `decode_items` makes the whole page malformed when any item fails, so it never filters out an element.
+
+### Validation run in this phase (macOS, rustc 1.98.1)
+
+| Check | Result |
+| --- | --- |
+| `just test` (schematic area) | pass: L1 2113/2113 (12 skipped), fresh-output 6/6, compile-fail 1/1 (now 21 cases) |
+| `just lint` (schematic area) | pass |
+| `just _doctest schematic-runtime` / `schematic-gen` | pass: 1 / 18 |
+| `RUSTDOCFLAGS='-D warnings' cargo doc -p schematic-runtime --no-deps` | clean |
+| `just generate`, then `git diff --stat` of schema/openapi/postman | 6 schema files, +2/−60; OpenAPI and Postman unchanged |
+| `just test-schema` / `just lint-schema` | pass: 40/40 / clean |
+| `cargo check --all-targets` of the seven `schematic-schema` dependents (sniff, biscuit-speaks, homelab, eversolo-integration, arcam-amp-integration, sony-receiver-integration, unfolded-integration-helper) | pass. Their test suites were not run: the regeneration removed only an unused trait and changed the ABI value, and Phase 7.3 runs them after the real field removals. |
+| `just cross-check schematic-runtime --os linux` | pass: 288 run, 1 skipped (the trybuild test, which runs through its own recipe) |
+| Windows, WSL2 | not run here; Phase 8.2 owns platform evidence. Risk is low: the pager touches no paths, processes, or timers, and the compile-fail snapshots use crate-relative paths like the existing ones that already run on Windows. |
+
+No pre-existing failures.
+
+### Deviations in this phase
+
+- **`AlreadyFailed` instead of the same error** (R14): explained under 3.1.
+- **Explicit marker impls for most capabilities.** Only the kind- and session-derived ones are blanket impls. The spike blanket-implemented only kind-derived ones too, so this matches it; listed because R10 names the encoding as Proposed.
+- **Early regeneration** of `schematic-schema` (ABI and legacy marker only), forced by the ABI bump; Phase 7 still owns the regeneration with authored pagination.
+- **Salesforce REST `done` flag cannot be authored.** The define model's `NextLinkStrategy` has no "more" signal, so `done` (true means last) cannot end a next-link traversal. The `unverified_salesforce_rest_query` test proves only the relative `nextRecordsUrl` mechanism; `TrueMeansLast` is tested on an offset fixture. Recorded as an open question (agenda 11).
+- **Response hooks do not run on page bodies.** The client's `pre_response_json` hook is not applied to a page document. Recorded for Phase 4's transport work.
+- **Follow-up path filling** was implemented here (a small segment match against `Paginated::PATH`) rather than in Phase 4.2, because the constant had to exist for generated code either way.
+
+### Human review agenda (Phase 3 updates)
+
+1. **Defaults.** P8 item 1: eight reasons with the mapping under 3.1. P8 item 2: a page limit of 100, `page_limit`/`configured_page_limit`, which counts attempts. P8 item 6: widened stall rule, histories per direction and reset on a direction change. Default 9: knobs are infallible and bounds are checked before the send, as `InvalidArgument`. Default 10: thin forwards on call types. Default 19 is not exercised yet (Phase 4).
+3. **Design choices.** See 3.1 and 3.2: runtime names (`Pager`, `Pages`, `Items`, `Page`, `PagerError`, `PagerErrorKind`, `ContinuationProblem`, `Incomplete`, `IncompleteReason`, `DEFAULT_PAGE_LIMIT`, `PageResult`, `CollectResult`); the `Paginated` associated types and constants; the generated constant layout (snapshot above); entry names `pager`, `pages`, `fetch_page`, `collect_all`, `page_limit`.
+4. **Removed request fields.** None yet: no definition authors a strategy. The mechanism is tested.
+8. **Compile-time observations.** `just lint-schema` finished in 7.0 s warm after regeneration. The schema output is unchanged apart from 62 lines, so a cold before/after comparison is left to Phase 7 with authored pagination. The `on_unimplemented` messages show in the compile-fail snapshots (for example "`PlainList` is not paginated", "has no authored page size").
+9. **OS.** macOS full; Linux runtime cross-check; Windows and WSL2 are Phase 8.2. The trybuild snapshots hold crate-relative paths only.
+10. **Deviations.** See above.
+11. **Open questions (new).**
+    - Should `NextLinkStrategy` gain an optional "more" signal (Salesforce REST `done`)? Recommended: yes, in the definition-vocabulary work, once a verified provider needs it.
+    - Should re-traversal after `prev()` be allowed (implemented), or should a pager be one-directional per run? Recommended: allowed, as implemented.
+12. **Drift.** Resolved by assuming the code is right:
+    - The `Paginated` marker's doc described a nonexistent `fetch_all_pages`; the marker and its doc were deleted.
+    - `RequestMeta.page`'s doc said the field was reserved for planned pagers; it now describes the page position.
+    - The gen README's and `docs/generation/partial-generation.md`'s descriptions of the marker were replaced.
+    - `docs/generation/validation.md`'s reserved-name table gained `pager` and the per-endpoint pager controls.
+13. **Pre-authorized actions.** Regenerated `schematic-schema` (+2/−60, listed above), ahead of Phase 7.
+14. **Unratified.** R9/R10 adopted as described. R14 widened, plus a reset of the opposite history on a direction change. S11 is provisionally `from_value` behind `request::{PageDecoder, decode_items}`.
+17. **`InvalidContinuation` and the added reasons.** Implemented as listed in 3.1; the Phase 3 tests above cover five of the eight reasons.
+18. **Stall-rule widening.** No test depended on consecutive-only detection. Walking back and forth through a bidirectional list repeats a continuation across directions; that is not treated as a loop.
