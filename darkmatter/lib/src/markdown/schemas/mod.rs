@@ -3473,6 +3473,64 @@ mod phase4_trigger_assembly {
         );
     }
 
+    /// An authored `$schema` that redeclares a trigger property replaces it
+    /// whole and takes over its origin, so a host that keys a policy on the
+    /// winning declaration sees the document, not the trigger.
+    #[test]
+    fn authored_redeclaration_takes_over_a_trigger_property_origin() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        write(&root.join("schemas/claudine.trigger.yaml"), CLAUDINE_TRIGGER);
+        write(&root.join("schemas/claudine.yaml"), CLAUDINE_PAYLOAD);
+
+        let doc_path = root.join("doc.md");
+        write(
+            &doc_path,
+            "---\n$schema:\n  model: number\nprompt: hello\nmodel: 42\n---\nbody\n",
+        );
+        let api = DarkmatterSchemas::new(doc_context(root, &doc_path))
+            .with_trigger_discovery()
+            .unwrap();
+        let doc = md_from_file(&doc_path);
+
+        let effective = api.effective_for(&doc).unwrap().unwrap();
+        assert_eq!(
+            effective.origins.get("model").map(|o| o.kind),
+            Some(SchemaOriginKind::Document),
+        );
+        let report = api.validate(&doc).unwrap();
+        assert!(report.valid, "the authored number type wins: {:?}", report.problems);
+    }
+
+    /// A root-union authored `$schema` receives every matching trigger layer in
+    /// each arm, and the merged schema records no per-property origins, because
+    /// there are no top-level properties to attribute.
+    #[test]
+    fn root_union_document_schema_merges_trigger_per_arm_without_origins() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        write(&root.join("schemas/claudine.trigger.yaml"), CLAUDINE_TRIGGER);
+        write(&root.join("schemas/claudine.yaml"), "$schema:\n  model: string\n");
+        let union = "$schema:\n  - title: string(required)\n  - name: string(required)\n";
+
+        let doc_path = root.join("doc.md");
+        write(&doc_path, &format!("---\n{union}prompt: hello\ntitle: hi\nmodel: [1]\n---\nbody\n"));
+        let api = DarkmatterSchemas::new(doc_context(root, &doc_path))
+            .with_trigger_discovery()
+            .unwrap();
+        let doc = md_from_file(&doc_path);
+
+        let effective = api.effective_for(&doc).unwrap().unwrap();
+        assert!(effective.origins.is_empty(), "root union has no attributed properties");
+        assert!(effective.json_schema.get("anyOf").is_some(), "the root stays a union");
+        let report = api.validate(&doc).unwrap();
+        assert!(!report.valid, "the trigger's `model: string` applies in every arm");
+
+        write(&doc_path, &format!("---\n{union}prompt: hello\nname: n\nmodel: m\n---\nbody\n"));
+        let report = api.validate(&md_from_file(&doc_path)).unwrap();
+        assert!(report.valid, "a conforming value passes either arm: {:?}", report.problems);
+    }
+
     // ── Complete dependency collection ──────────────────────────────────
 
     #[test]
