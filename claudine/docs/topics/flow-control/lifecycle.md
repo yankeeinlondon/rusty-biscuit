@@ -449,6 +449,184 @@ Audio already published keeps playing across a flow-control transition: when
 `retry`, `resume`, or `proxy` fires, the queued audio plays out and the next
 attempt's audio queues behind it. There is no way to cancel it.
 
+### Speech is prepared ahead of time (pre-warm)
+
+Synthesizing a phrase takes time: roughly 0.2–0.8 s for macOS `say`, 0.5–3 s
+for Kokoro on a CPU, and 1–3 s for gTTS, Echogarden, and cloud providers. A
+`say` in `success` that fires at the end of a twenty-minute run does not need
+to wait for that, because its text was usually known before the agent started.
+So Claudine **pre-warms** it: while it prepares the document, it hands every
+phrase it can already resolve to a background worker that synthesizes it into
+the TTS audio cache. When the event fires, `say` resolves the same text with
+the same voice settings, finds the cached audio, and publishes it at once.
+
+```yaml
+success:
+  - effect: "chime"
+  - say: "{{ fm.title }} is done"      # known now: pre-warmed
+failure:
+  - say: "failed: {{ err.msg }}"       # needs err: synthesized when failure fires
+```
+
+Pre-warm is an optimization only. It never changes what is spoken, the order
+audio plays in, the run's outcome, or its exit code, and an event never waits
+for it. If the event fires before its phrase is ready, `say` takes its ordinary
+uncached path, exactly as it would without pre-warm.
+
+#### Which phrases are pre-warmed
+
+Pre-warm walks the parsed lifecycle actions, never arbitrary frontmatter. It
+collects every `say`/`speak` in `start`, `blocked`, `success`, `failure`,
+`finalize`, the `loop:` block (loose verbs or `gate:`), and a sequence task's
+`setup:`/`teardown:`. It looks inside dictionary bundles, named arguments
+(`say: { text: … }`), and both the `then` and `else` bodies of every `when`,
+at any depth. It does not evaluate a `when` guard: the guard decides whether a
+phrase plays, not what it says. Phrases in `initialize` are skipped, since
+`initialize` fires moments after preparation and a warm cache gains nothing
+there.
+
+A collected phrase is pre-warmed only when it is **ready early**, which is
+stricter than the general [early-binding](#binding-time-early-vs-late) rule:
+
+| The phrase | Pre-warmed? | Example |
+| --- | --- | --- |
+| literal text | yes | `say: "all done"` |
+| reads only frontmatter (`fm.x`, `fm['x']`, or a bare document property) | yes | `say: "{{ title }} is done"` |
+| reads `ctx` or `env` | yes, from the values the document captured | `say: "done on {{ ctx.branch }}"` |
+| combines those with operators, indexing, `\|\|` fallbacks, or `? :` | yes | `say: "{{ fm.name \|\| 'the job' }} finished"` |
+| reads `err`, `timing`, `current`, `loop`, or `group` (or any global added later) | no | `say: "took {{ timing.total_ms }} ms"` |
+| contains **any** function call, even in a branch that would not run | no | `say: "done at {{ date() }}"` |
+| contains a shell expansion (`$( … )` or a backtick) | no | ``say: "on $(hostname)"`` |
+| resolves to empty or whitespace-only text | no | `say: "{{ fm.missing }}"` |
+
+`fm.err` reads a document property, so it can be pre-warmed even though `err`
+cannot. Function calls are excluded wholesale because some read-only functions
+probe a shell, the filesystem, or the network, and pre-warm never runs
+anything on speculation. A phrase that is skipped still plays normally: it is
+synthesized when its event fires. A phrase whose speculative resolution fails
+is skipped silently and reports nothing; the event resolves it again and
+reports its own errors as usual.
+
+The resolved text is produced by the same interpolation `say` uses at event
+time. Text an expression returns is data: braces or `$( … )` inside a
+frontmatter value are spoken as written, never evaluated a second time.
+
+#### When it runs
+
+One worker belongs to the whole command: a `compose`, `inline-compose`,
+`sequence`, or provider-wrapper invocation. It starts on the first phrase
+submitted, works through phrases one at a time, and is cancelled when the
+command finishes or is interrupted. Cancellation does not wait for unfinished
+synthesis; anything already cached stays cached for the next run.
+
+```mermaid
+flowchart LR
+    B["bootstrap read<br/>(before initialize)"] --> S[submit early phrases]
+    R["stabilized reread<br/>(after initialize)"] --> S
+    P["sequence preflight<br/>(before step one)"] --> S
+    E["retry, resume, loop iteration,<br/>proxy target"] --> S
+    T["sequence task context<br/>(before its setup)"] --> S
+    S --> Q{already queued?}
+    Q -- yes --> X[skip]
+    Q -- no --> W[background worker]
+    W --> C[(TTS audio cache)]
+    C -. cache hit .-> V["say fires at its event"]
+```
+
+Phrases are submitted at each point where Claudine reads a document:
+
+- the **bootstrap** read, before `initialize` fires;
+- the **stabilized reread** after initialization, and every later read that
+  produces a new document state: each loop iteration, a `retry` or `resume`,
+  and a `proxy` target (after its `with:` overlay is applied, so the target's
+  phrases use the overlaid values; the caller never collects them);
+- in a sequence, **preflight**, which submits the early phrases of every
+  prompt document the sequence reaches and every task's `setup:`/`teardown:`
+  before step one launches, without composing a body, resolving a new
+  reference, fetching remote content, or running setup. Each step is
+  submitted again when it is actually prepared;
+- in a sequence, each **task's context**: when a step's task, a serial group
+  member, or a parallel group member captures its own `ctx`/`env`, before
+  its `setup:` runs, its `setup:`/`teardown:` phrases are submitted again
+  against that capture and the step's composed frontmatter.
+
+Submission never waits for synthesis, so none of these delays `initialize`,
+preflight, or the provider launch.
+
+Each distinct pair of resolved text and voice configuration is prepared at
+most once per command, across every task, iteration, retry, and handoff. A
+phrase whose text changes (for example because `initialize` rewrote the
+document with `set_frontmatter`) is a new pair and is prepared again; an
+unchanged phrase is not. A failed preparation is not retried by pre-warm; the
+event still synthesizes the phrase normally. Failures never print anything:
+the first one in a command is logged as a single tracing warning that omits
+the phrase text.
+
+#### Sequence values are left for their step
+
+Inside a sequence, values that a step receives from the sequence are treated as
+late even though they are read through `fm`: the per-step overlay keys
+(`state`, `previous`, `next`, `outputs`, `sequence_id`), keys set by the
+caller with `--set`, and a prompt task's `params`. A phrase reading one of them,
+by a bare name, `fm.key`, or `fm['key']`, is not pre-warmed; nor is a phrase
+whose computed index (`fm[name]`) or whole-`fm` read could reach one. During
+preflight, Claudine also leaves late any frontmatter value that still holds
+`{{`, `$(`, or a backtick (resolving it would mean evaluating it) and any read
+of `ctx` or `env`, because the step has not captured its own yet. Those
+phrases are reconsidered when their document is prepared, and a task's
+`setup:`/`teardown:` phrases when the task captures its context. For example,
+with `project: Widget` and `derived: "{{ project }} ready"` in the sequence
+document, a task teardown's `say: "{{ derived }}"` and
+`say: "{{ env.NAME }}"` are skipped by preflight and prepared as
+`Widget ready` and the task's captured `NAME` once the task starts. The
+per-step overlay keys, `--set` keys, and runtime writes stay late there too.
+
+#### Configuration and when it is off
+
+Each phrase is prepared with the voice configuration of the speech that will
+play it:
+
+| Where the phrase is | Voice configuration |
+| --- | --- |
+| A document's lifecycle (compose, inline-compose, a provider wrapper, a sequence's prompt documents) | the `tts` setting in `~/.claudine/config.json` |
+| A sequence task's `setup:`/`teardown:`, including group members | automatic provider, no requested voice (task stacks do not read `tts`) |
+
+So under `{ "tts": { "provider": "kokoro", "voice": "af_heart" } }`, a
+document's `say: done` is prepared with Kokoro and `af_heart`, and a task's
+`say: done` is prepared separately with the automatic provider, because that is
+how each is played.
+
+The on/off switch always comes from the user's `tts` setting, whichever phrase
+is submitted first. Pre-warm is on unless that setting is an object with
+`"prewarm": false`; see
+[Configuring Actions → Text-to-speech settings](../configuring-actions.md#text-to-speech-settings-tts).
+The switch is decided once per command, when the first phrase is submitted.
+
+Pre-warm also does nothing under `--dry-run` or when `PLAYA_DRY_RUN` is `1`,
+`true`, `TRUE`, or `yes`. These checks come before any phrase is resolved.
+
+#### Limits
+
+- A phrase that reads a late root (`err`, `timing`, `current`, `loop`,
+  `group`) is never pre-warmed.
+- A lifecycle `set` (in `initialize` or any later event) changes the run's
+  state, not the document Claudine re-reads. A phrase that reads a key `set`
+  writes is pre-warmed with the text it had before the `set`, and at event time
+  it misses the cache and synthesizes the correct text. You hear the right
+  words, a little later. A document rewritten with `set_frontmatter` is re-read
+  and warmed with its new text.
+- Phrases for events that never fire are synthesized anyway. With a cloud
+  provider that can mean a billed request for each unfired phrase, and any
+  provider spends CPU or network time on them.
+- An event that fires while its phrase is still being prepared does not wait
+  for or cancel the preparation, so the phrase may be synthesized twice.
+- `proxy … with:` cannot switch the TTS provider or voice; neither is
+  frontmatter.
+- Providers that write no audio file (eSpeak, SAPI), or whose default voice
+  cannot be resolved safely ahead of time, gain nothing; preparing for them
+  succeeds without doing any work.
+- The audio cache has no eviction or expiry.
+
 ### Messages and notifications are delivered before exit
 
 A `message` or `notify` returns at once and delivers in the background, but it
