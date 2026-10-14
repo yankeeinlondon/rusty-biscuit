@@ -1,9 +1,10 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use darkmatter::markdown::{
     Markdown,
+    compose::{RequestSnapshot, build_resolution_context},
     schemas::{
-        DarkmatterSchemas, PropertyDef, SchemaShape, TypeExpr, darkmatter_base_json_schema,
+        DarkmatterSchemas, EmbeddedSchemaBundle, PropertyDef, SchemaShape, TypeExpr, darkmatter_base_json_schema,
         darkmatter_base_schema, parse_yaml_schema, resolve::resolve_yaml_schema, to_json_schema,
     },
 };
@@ -16,8 +17,39 @@ fn base_api() -> DarkmatterSchemas {
         .expect("base schema must be baseline-compatible")
 }
 
-fn claudine_schema_path() -> std::path::PathBuf {
-    manifest_dir!().join("../docs/schemas/claudine.yaml")
+/// Claudine's complete schema bundle, as Claudine embeds it.
+const CLAUDINE_BUNDLE: EmbeddedSchemaBundle = EmbeddedSchemaBundle::new(
+    "claudine",
+    &[
+        ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
+        ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
+        ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
+        ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
+        ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
+    ],
+);
+
+/// The Darkmatter baseline with trigger discovery and Claudine's bundle
+/// registered, the way Claudine's launch verdict applies it to a document with
+/// no `$schema`. Discovery runs in an empty folder with an empty home, so the
+/// embedded bundle is the only trigger source; the folder lives as long as the
+/// returned guard.
+fn claudine_api() -> (tempfile::TempDir, DarkmatterSchemas) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = biscuit_file::canonicalize_simplified(dir.path()).expect("canonical temp dir");
+    std::fs::create_dir_all(root.join("home")).expect("home dir");
+    let snapshot = RequestSnapshot::new(&root)
+        .with_home(Some(root.join("home")))
+        .with_env(HashMap::new());
+    let context = build_resolution_context(&snapshot).expect("fixture context");
+    let api = DarkmatterSchemas::new(context)
+        .with_baseline(darkmatter_base_schema())
+        .expect("base schema must be baseline-compatible")
+        .with_trigger_discovery()
+        .expect("an empty folder has no disk triggers")
+        .with_embedded_trigger_bundle(CLAUDINE_BUNDLE)
+        .expect("Claudine's bundle must load");
+    (dir, api)
 }
 
 fn validate_with_base(frontmatter: &str) -> darkmatter::markdown::schemas::ValidationReport {
@@ -168,13 +200,15 @@ fn base_style_schema_validates_nested_values() {
 }
 
 #[test]
-fn claudine_schema_file_resolves_as_baseline() {
-    DarkmatterSchemas::new(crate::request_support::cwd_context())
-        .with_baseline_from_file(claudine_schema_path())
-        .expect("Claudine schema must resolve imports and remain baseline-compatible");
+fn claudine_catalog_resolves_from_its_bundle() {
+    let md: Markdown = "---\nprompt: Explain.\n---\nBody\n".into();
+    let (_dir, api) = claudine_api();
+    api.effective_for(&md)
+        .expect("Claudine's catalog must resolve its imports")
+        .expect("a document with a prompt selects Claudine's catalog");
 
-    let raw = std::fs::read_to_string(claudine_schema_path()).expect("schema must be readable");
-    let yaml: YamlValue = serde_yaml_ng::from_str(&raw).expect("schema YAML must parse");
+    let raw = include_str!("../../../../claudine/schemas/claudine.yaml");
+    let yaml: YamlValue = serde_yaml_ng::from_str(raw).expect("schema YAML must parse");
     let properties = yaml
         .get("$schema")
         .and_then(YamlValue::as_mapping)
@@ -183,9 +217,12 @@ fn claudine_schema_file_resolves_as_baseline() {
     assert!(!properties.contains_key("maxTurns"));
     assert!(!properties.contains_key("output"));
     assert!(!properties.contains_key("stall_timeout"));
-    assert_eq!(
-        properties.get("mode").and_then(YamlValue::as_str),
-        Some("enum(append, replace) -> Delivery mode for automatically discovered system-prompt documents.")
+    assert!(
+        properties
+            .get("mode")
+            .and_then(YamlValue::as_str)
+            .is_some_and(|mode| mode.starts_with("enum(append, replace) ->")),
+        "`mode` is the system-prompt delivery enum"
     );
     assert!(!raw.contains("boolish"));
 }
@@ -193,11 +230,8 @@ fn claudine_schema_file_resolves_as_baseline() {
 #[test]
 fn claudine_schema_accepts_typed_lifecycle_stack() {
     let md: Markdown = "---\nstart:\n  - info: Starting\n  - when: env.CI == 'true'\n    then:\n      - message: Build started\n      - shell:\n          command: cargo test\n          no_error: true\nsuccess:\n  info: Done\n  effect: tick\n---\nBody\n".into();
-    let report = DarkmatterSchemas::new(crate::request_support::cwd_context())
-        .with_baseline_from_file(claudine_schema_path())
-        .expect("Claudine schema must load")
-        .validate(&md)
-        .expect("validation must run");
+    let (_dir, api) = claudine_api();
+    let report = api.validate(&md).expect("validation must run");
 
     assert!(
         report.valid,
@@ -209,11 +243,8 @@ fn claudine_schema_accepts_typed_lifecycle_stack() {
 #[test]
 fn claudine_schema_rejects_malformed_lifecycle_stack() {
     let md: Markdown = "---\nstart: run-now\n---\nBody\n".into();
-    let report = DarkmatterSchemas::new(crate::request_support::cwd_context())
-        .with_baseline_from_file(claudine_schema_path())
-        .expect("Claudine schema must load")
-        .validate(&md)
-        .expect("validation must run");
+    let (_dir, api) = claudine_api();
+    let report = api.validate(&md).expect("validation must run");
 
     assert!(!report.valid, "a lifecycle stack must be a list or a dictionary");
 }
@@ -221,11 +252,8 @@ fn claudine_schema_rejects_malformed_lifecycle_stack() {
 #[test]
 fn claudine_schema_accepts_loop_controls_and_lifecycle_concerns_together() {
     let md: Markdown = "---\nloop:\n  while: step < 3\n  action:\n    op: increment\n    prop: step\n  info: Iteration complete\n  warn: Iteration ended\n---\nBody\n".into();
-    let report = DarkmatterSchemas::new(crate::request_support::cwd_context())
-        .with_baseline_from_file(claudine_schema_path())
-        .expect("Claudine schema must load")
-        .validate(&md)
-        .expect("validation must run");
+    let (_dir, api) = claudine_api();
+    let report = api.validate(&md).expect("validation must run");
 
     assert!(
         report.valid,

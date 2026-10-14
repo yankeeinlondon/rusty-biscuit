@@ -270,9 +270,6 @@ const CORE_TYPE_USERS: &[(&str, &[&str])] = &[
         "claudine/docs/schemas/partials/side-effect.yaml",
         &["null", "unknown"],
     ),
-    ("darkmatter/docs/schemas/claudine-types.yaml", &["unknown"]),
-    // `any` for provider-specific shapes and the optional sequence states.
-    ("darkmatter/docs/schemas/claudine.yaml", &["unknown"]),
     ("darkmatter/docs/schemas/darkmatter.yaml", &["unknown"]),
     ("darkmatter/schemas/partials/fm.yaml", &["unknown"]),
 ];
@@ -1101,17 +1098,17 @@ fn inline_shape<'a>(definition: &'a PropertyDef, label: &str) -> &'a SchemaShape
     }
 }
 
-/// The migrated side-effect partial and the shipped Claudine baseline carry the
-/// presence the migration decided, read through the passive parser:
+/// The migrated side-effect partial and Claudine's frontmatter catalog carry
+/// the presence the migration decided, read through the passive parser:
 /// `set_frontmatter.value` admits null and is therefore optional,
 /// `merge_frontmatter` takes exactly `file` and a required `obj`, and the
-/// injected `state` stays required (an object, never null) while the optional
-/// sequence states admit null.
+/// sequence values Claudine injects are null-admitting `unknown`s, never
+/// required.
 #[test]
 fn migrated_shipped_definitions_declare_their_presence() {
     let root = repo_root();
     let side_effect_path = root.join("claudine/docs/schemas/partials/side-effect.yaml");
-    let claudine_path = root.join("darkmatter/docs/schemas/claudine.yaml");
+    let claudine_path = root.join("claudine/schemas/claudine.yaml");
     let before = fingerprint([side_effect_path.as_path(), claudine_path.as_path()]);
     let counters = effect_counters();
 
@@ -1154,16 +1151,13 @@ fn migrated_shipped_definitions_declare_their_presence() {
 
     let claudine: YamlValue =
         serde_yaml_ng::from_str(&fs::read_to_string(&claudine_path).expect("readable"))
-            .expect("Claudine baseline is YAML");
-    let schema = yaml_key(&claudine, "$schema").expect("the baseline has `$schema`");
+            .expect("Claudine's catalog is YAML");
+    let schema = yaml_key(&claudine, "$schema").expect("the trigger has a `$schema` payload");
     let property = |key: &str| {
         parse_property_definition(key, yaml_key(schema, key).unwrap_or_else(|| panic!("no `{key}`")))
             .unwrap_or_else(|error| panic!("`{key}`: {error}"))
     };
-    let state = property("state");
-    assert!(state.is_required(), "`state` must stay required: {state:?}");
-    assert!(!state.admits_null(), "`state` is an object, never null");
-    for key in ["previous_state", "next_state", "tools", "skills", "compatibility"] {
+    for key in ["state", "previous", "next", "outputs", "sequence_id"] {
         let definition = property(key);
         assert!(
             definition.admits_null() && !definition.is_required(),

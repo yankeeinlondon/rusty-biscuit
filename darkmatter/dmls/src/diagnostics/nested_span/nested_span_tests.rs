@@ -1,6 +1,6 @@
 //! `dm.expression.nested_span_in_literal` end to end through the frontmatter
-//! producer and the `Rewrite with + concatenation` quick fix, with the shipped
-//! Claudine extension active.
+//! producer and the `Rewrite with + concatenation` quick fix, with Claudine's
+//! catalog (from `claudine/schemas/`) active as a schema extension.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -24,19 +24,25 @@ const INCIDENT: &str = include_str!(
     "../../../../../claudine/cli/tests/fixtures/nested_span_regression/review-spec-inline.md"
 );
 
-fn schemas_dir() -> PathBuf {
-    biscuit_test_harness::manifest_dir!().join("../docs/schemas")
-}
 
 /// Runs `f` with a context for `text` at client document `version`.
 fn with_ctx<R>(text: &str, version: i32, f: impl FnOnce(&DocumentContext) -> R) -> R {
     let path = Path::new("/w/prompts/doc.md");
     let uri: Uri = "file:///w/prompts/doc.md".parse().unwrap();
+    let schemas = tempfile::tempdir().expect("temp dir");
     let mut config = DmlsConfig::default();
     config.schema.extensions.insert(
         "claudine".to_string(),
         SchemaExtensionConfig {
-            path: schemas_dir().join("claudine.yaml"),
+            path: crate::context::test_support::claudine_payload_extension(
+                schemas.path(),
+                &[
+                    ("claudine.yaml", CLAUDINE_TRIGGER),
+                    ("lifecycle.yaml", CLAUDINE_LIFECYCLE),
+                    ("action.yaml", CLAUDINE_ACTION),
+                    ("linking.yaml", CLAUDINE_LINKING),
+                ],
+            ),
             globs: vec!["**/*.md".to_string()],
         },
     );
@@ -150,22 +156,34 @@ fn the_same_defect_in_a_body_produces_no_diagnostic() {
 
 #[test]
 fn diagnostics_use_decoded_escape_parity_for_literal_openers() {
-    for (authored_backslashes, expected_diagnostics) in
-        [(1, 0), (2, 0), (3, 1), (4, 1), (5, 0), (6, 0)]
-    {
+    // One document, one stack item per case: item `k`'s expression is on
+    // line `3 + 2k`.
+    let cases = [(1, 0), (2, 0), (3, 1), (4, 1), (5, 0), (6, 0)];
+    let mut text = String::from("---\nsuccess:\n");
+    let mut expressions = Vec::new();
+    for (authored_backslashes, _) in cases {
         let expression = format!(
             "{{{{ '{}{{{{ name }}}}' }}}}",
             "\\".repeat(authored_backslashes)
         );
-        let text = format!("---\nsuccess:\n    say: |-\n        {expression}\n---\n\nbody\n");
-        with_ctx(&text, 1, |ctx| {
-            let found = nested(ctx);
-            assert_eq!(found.len(), expected_diagnostics, "{expression}: {found:#?}");
-            for diagnostic in found {
-                assert_eq!(ranged(ctx, &diagnostic), "{{ name }}", "{expression}");
-            }
-        });
+        text.push_str(&format!("    - say: |-\n        {expression}\n"));
+        expressions.push(expression);
     }
+    text.push_str("---\n\nbody\n");
+    with_ctx(&text, 1, |ctx| {
+        let found = nested(ctx);
+        for (k, ((_, expected_diagnostics), expression)) in cases.iter().zip(&expressions).enumerate() {
+            let line = 3 + 2 * k as u32;
+            let on_line: Vec<&Diagnostic> =
+                found.iter().filter(|diagnostic| diagnostic.range.start.line == line).collect();
+            assert_eq!(on_line.len(), *expected_diagnostics, "{expression}: {found:#?}");
+            for diagnostic in on_line {
+                assert_eq!(ranged(ctx, diagnostic), "{{ name }}", "{expression}");
+            }
+        }
+        let expected_total: usize = cases.iter().map(|(_, expected)| expected).sum();
+        assert_eq!(found.len(), expected_total, "{found:#?}");
+    });
 }
 
 #[test]
@@ -318,6 +336,7 @@ fn ranges_are_inner_for_exact_styles_and_whole_for_folded_and_tagged() {
 const CLAUDINE_TRIGGER: &str = include_str!("../../../../../claudine/schemas/claudine.yaml");
 const CLAUDINE_LIFECYCLE: &str = include_str!("../../../../../claudine/schemas/lifecycle.yaml");
 const CLAUDINE_ACTION: &str = include_str!("../../../../../claudine/schemas/action.yaml");
+const CLAUDINE_LINKING: &str = include_str!("../../../../../claudine/schemas/linking.yaml");
 
 /// The mapping under `section` (`$schema` of a trigger, `types` of a library).
 fn schema_section(text: &str, section: &str) -> serde_yaml_ng::Mapping {

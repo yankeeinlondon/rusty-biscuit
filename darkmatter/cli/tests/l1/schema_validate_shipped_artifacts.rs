@@ -1,6 +1,7 @@
 //! `md schema validate` end to end against the real shipped artifacts migrated
-//! by `2026-10-16-core-schema-types`: the Claudine side-effect partial, the
-//! three dialect trigger fixtures, and the Claudine baseline's `state`.
+//! by `2026-10-16-core-schema-types`: the Claudine side-effect partial and the
+//! three dialect trigger fixtures, plus a test-owned schema for the presence of
+//! a `generated; required` object.
 //!
 //! Each test copies the artifacts into an isolated fixture directory, validates
 //! every document in one `md` run, and matches the NDJSON records back to their
@@ -181,17 +182,18 @@ fn each_migrated_trigger_selects_and_validates_its_target() {
     assert_cases(&process, &["--no-trigger-schemas"], &untriggered, &documents);
 }
 
-/// The shipped Claudine baseline's `state` is `object(generated; required)`:
-/// authored documents may omit it, but a present value must be an object and
-/// never null, while the optional `previous_state`/`next_state` (`any`) admit
-/// null.
+/// A `state: object(generated; required)` property: authored documents may
+/// omit it, but a present value must be an object and never null, while the
+/// optional `previous_state`/`next_state` (`any`) admit null.
 #[test]
-fn shipped_claudine_baseline_keeps_state_an_object() {
+fn generated_required_object_state_stays_an_object() {
     let process = CliProcessFixture::new();
     let dir = process.cwd();
-    write(&dir.join("claudine.yaml"), include_str!("../../../docs/schemas/claudine.yaml"));
-    write(&dir.join("claudine-types.yaml"), include_str!("../../../docs/schemas/claudine-types.yaml"));
-    let schema = |values: &str| format!("$schema: ./claudine.yaml\n{values}");
+    write(
+        &dir.join("sequence-state.yaml"),
+        "$schema:\n  state: object(generated; required)\n  previous_state: any\n  next_state: any\n",
+    );
+    let schema = |values: &str| format!("$schema: ./sequence-state.yaml\n{values}");
 
     let cases: Vec<Case> = vec![
         ("state_omitted.md", schema(""), true, None),

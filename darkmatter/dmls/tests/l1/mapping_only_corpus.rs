@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use darkmatter::markdown::compose::RequestSnapshot;
 use dmls::capabilities::ClientProfile;
-use dmls::config::{DmlsConfig, SchemaExtensionConfig};
+use dmls::config::DmlsConfig;
 use dmls::context::RepositoryContexts;
 use dmls::graph::{NoContexts, WorkspaceGraph};
 use dmls::overlay::OverlayState;
@@ -52,20 +52,6 @@ fn corpus() -> Vec<(String, PathBuf)> {
     }
     documents.sort();
     documents
-}
-
-/// The configuration the repository's editors use for these documents: the
-/// shipped Claudine extension activated for every Markdown file.
-fn config() -> DmlsConfig {
-    let mut config = DmlsConfig::default();
-    config.schema.extensions.insert(
-        "claudine".to_string(),
-        SchemaExtensionConfig {
-            path: manifest_dir().join("../docs/schemas/claudine.yaml"),
-            globs: vec!["**/*.md".to_string()],
-        },
-    );
-    config
 }
 
 /// All provider diagnostics for one document, as normalized JSON.
@@ -117,7 +103,7 @@ fn normalize_paths(value: &mut Value, manifest: &Path) {
 
 #[test]
 fn mapping_only_corpus_diagnostics_match_pre_descent_baseline() {
-    let config = config();
+    let config = DmlsConfig::default();
     // One cache for the whole corpus: the repository context is built once per
     // repository rather than once per document (each build walks this monorepo).
     let contexts = RepositoryContexts::new(RequestSnapshot::new(manifest_dir()));

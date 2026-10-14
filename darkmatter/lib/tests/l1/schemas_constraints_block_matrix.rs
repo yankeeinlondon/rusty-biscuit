@@ -1,11 +1,9 @@
 //! The input robustness matrix for block `$constraints` on reused and inline
 //! objects (`2026-10-13-named-type-presence-and-local-names`, Phase 5).
 //!
-//! The fixture is the shipped `lifecycle-branch-bundle` named type from
-//! `darkmatter/docs/schemas/claudine-types.yaml`, which declares
-//! `$constraints: { min-keys: 1 }`; the matrix names its copy
-//! `lifecycle-action`. Every cell makes one edit to that block,
-//! then judges it at two sites:
+//! The fixture is [`FIXTURE`]'s `lifecycle-action`: an open dictionary of
+//! verbs that declares `$constraints: { min-keys: 1 }`. Every cell makes one
+//! edit to that block, then judges it at two sites:
 //!
 //! - **reused**: the type lives in a standalone schema file and a document
 //!   reuses it as `lifecycle-action(…)@./types-N.yaml`, so the block merges
@@ -118,20 +116,30 @@ fn render_document_mapping(format: Format, entries: &[(String, Node)]) -> String
     out
 }
 
-// ── the shipped fixture ───────────────────────────────────────────────────
+// ── the fixture ───────────────────────────────────────────────────────────
 
-/// The shipped `lifecycle-branch-bundle` members other than `$constraints`, each
-/// as JSON text, after checking the shipped block is still `{ min-keys: 1 }`.
-fn shipped_lifecycle_action(shipped: &str) -> Vec<(String, Node)> {
-    let value: YamlValue = serde_yaml_ng::from_str(shipped).expect("shipped claudine-types.yaml parses");
-    let definition = value["$schema"]["lifecycle-branch-bundle"]
+/// The test-owned named type every cell edits. Its pattern dictionary admits
+/// any key, so the probes' key counts are the only thing a bound judges.
+const FIXTURE: &str = "$schema:
+  lifecycle-action:
+    \"<string>\": \"any -> A lifecycle verb and its short-form value.\"
+    $constraints:
+      min-keys: 1
+";
+
+/// The fixture's `lifecycle-action` members other than `$constraints`, each
+/// as JSON text, after checking its block is the `{ min-keys: 1 }` the
+/// columns' base blocks start from.
+fn fixture_lifecycle_action(fixture: &str) -> Vec<(String, Node)> {
+    let value: YamlValue = serde_yaml_ng::from_str(fixture).expect("fixture parses");
+    let definition = value["$schema"]["lifecycle-action"]
         .as_mapping()
-        .expect("claudine-types.yaml defines `lifecycle-branch-bundle` as an object");
+        .expect("the fixture defines `lifecycle-action` as an object");
     let block: YamlValue = serde_yaml_ng::from_str("min-keys: 1").unwrap();
     assert_eq!(
         definition.get("$constraints"),
         Some(&block),
-        "the shipped fixture's block changed; re-derive this matrix's base columns"
+        "the fixture's block changed; re-derive this matrix's base columns"
     );
     definition
         .iter()
@@ -271,7 +279,7 @@ fn container_rows() -> Vec<(&'static str, Edit, Expect)> {
 }
 
 fn columns() -> Vec<Column> {
-    // The shipped lower bound, reused under a use-site upper bound that a
+    // The fixture's lower bound, reused under a use-site upper bound that a
     // four-key object violates whatever the block says.
     let lower_bound_reuse: &[(&str, &str)] = &[("action", "lifecycle-action(max-keys(3))@./TYPES")];
     let lower_bound_reuse_probes = || {
@@ -301,7 +309,7 @@ fn columns() -> Vec<Column> {
             inline_probes: lower_bound_inline_probes(),
             rows: numeric_rows(),
         },
-        // The shipped block with its one member swapped for an upper bound,
+        // The fixture's block with its one member swapped for an upper bound,
         // so `max-keys: 0` is not also a contradiction with `min-keys: 1`.
         Column {
             name: "max-keys",
@@ -493,14 +501,14 @@ impl Matrix {
     }
 }
 
-fn walk_matrix(format: Format, shipped: &str) {
+fn walk_matrix(format: Format) {
     let dir = tempfile::tempdir().expect("temp dir");
     let root = biscuit_file::canonicalize_simplified(dir.path()).expect("canonical temp dir");
     let mut matrix = Matrix {
         format,
         context: context_at(&root),
         root,
-        action: shipped_lifecycle_action(shipped),
+        action: fixture_lifecycle_action(FIXTURE),
         files: 0,
     };
     let mut failures = Vec::new();
@@ -550,10 +558,10 @@ fn walk_matrix(format: Format, shipped: &str) {
 
 #[test]
 fn constraints_block_matrix_yaml() {
-    walk_matrix(Format::Yaml, include_str!("../../../docs/schemas/claudine-types.yaml"));
+    walk_matrix(Format::Yaml);
 }
 
 #[test]
 fn constraints_block_matrix_json_form() {
-    walk_matrix(Format::Json, include_str!("../../../docs/schemas/claudine-types.yaml"));
+    walk_matrix(Format::Json);
 }
