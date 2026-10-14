@@ -106,7 +106,8 @@ fn compose_spelling(reference: &str, strategy: &PortabilityPreference) -> String
 /// to the composed document wherever the link was authored.
 ///
 /// Each absolute destination goes through `PortablePath` with the default
-/// strategy: a nearby relative link, then the repository root (`&`), a
+/// strategy: a verified bare tree-root path, a nearby relative link, then the
+/// repository root (`&`), a
 /// portable environment variable, the home directory (`~`), and the absolute
 /// path last. Portable variables are those the request environment's
 /// `PORTABLE_ENV_VARIABLES` declares plus
@@ -391,13 +392,13 @@ mod tests {
     }
 
     #[test]
-    fn a_peer_directory_target_becomes_a_relative_link() {
+    fn a_peer_directory_target_prefers_the_bare_root_spelling() {
         let fixture = RepoFixture::new(&["image.png"]);
         let content = format!("![img]({})\n", fixture.absolute("assets/image.png"));
 
         let (output, report) = normalize(&content, &options_with_repo(&fixture.source));
 
-        assert_eq!(output, "![img](../assets/image.png)\n");
+        assert_eq!(output, "![img](assets/image.png)\n");
         assert_eq!(report.link_normalizations_applied, 1);
         assert!(link_warnings(&report).is_empty(), "{:?}", report.warnings);
     }
@@ -410,7 +411,7 @@ mod tests {
 
         let (output, report) = normalize(&content, &options_with_repo(&fixture.source));
 
-        assert_eq!(output, "[image](<../assets/image name.png#details>)\n[web](https://example.com/image.png)\n");
+        assert_eq!(output, "[image](<assets/image name.png#details>)\n[web](https://example.com/image.png)\n");
         assert_eq!(
             extract_markdown_links(&output, &crate::markdown::compose::ComposeSource::Unknown).len(),
             2
@@ -435,8 +436,7 @@ mod tests {
     /// The document's own directory is the route's origin, whatever the
     /// document's name looks like: an extensionless source (`docs/README`)
     /// is not a directory, and a dotted directory name (`v1.2`) is not a file.
-    /// Two levels up is not a default relative shape, so the repository root
-    /// anchors it.
+    /// The bare repository-root spelling is independent of source depth.
     #[test]
     fn a_distant_target_in_the_repository_is_repository_rooted() {
         let fixture = RepoFixture::new(&["image.png"]);
@@ -450,7 +450,7 @@ mod tests {
 
             let (output, report) = normalize(&content, &options_with_repo(&source_file));
 
-            assert_eq!(output, "![img](&assets/image.png)\n", "source {source_name}");
+            assert_eq!(output, "![img](assets/image.png)\n", "source {source_name}");
             assert_eq!(report.link_normalizations_applied, 1, "source {source_name}");
         }
     }
@@ -474,7 +474,7 @@ mod tests {
 
         let (output, report) = normalize(&content, &options_with_repo(&source_file));
 
-        assert_eq!(output, "[img](&assets/images/image.png)\n[sibling](./sibling.md)");
+        assert_eq!(output, "[img](assets/images/image.png)\n[sibling](docs/deep/nested/dir/sibling.md)");
         assert_eq!(report.link_normalizations_applied, 2);
     }
 
@@ -613,7 +613,7 @@ mod tests {
 
         assert_eq!(
             output,
-            "<link rel=\"stylesheet\" href=\"../assets/styles.css\">\n<link rel=\"preload\" as=\"font\" href=\"../assets/font.woff2\">\n<script src=\"../assets/app.js\"></script>"
+            "<link rel=\"stylesheet\" href=\"assets/styles.css\">\n<link rel=\"preload\" as=\"font\" href=\"assets/font.woff2\">\n<script src=\"assets/app.js\"></script>"
         );
         assert_eq!(report.link_normalizations_applied, 3);
     }
@@ -642,7 +642,7 @@ mod tests {
         assert_eq!(
             output,
             format!(
-                "[link](<./with (parens).md>)\n<img src='./single_quotes.md'>\n<a href=\"./single_quotes.md\" data-alt='{}'>link</a>",
+                "[link](<with (parens).md>)\n<img src='single_quotes.md'>\n<a href=\"single_quotes.md\" data-alt='{}'>link</a>",
                 biscuit_file::to_portable_string(&abs_quotes)
             ),
             "only destinations change; a data attribute is not a link"
@@ -665,7 +665,7 @@ mod tests {
 
         assert_eq!(
             output,
-            "<a href = \"../assets/image.png\">link</a>\n<img src = \"../assets/image.png\">\n<video src = \"../assets/movie.mp4\"></video>\n<link href = \"../assets/styles.css\">"
+            "<a href = \"assets/image.png\">link</a>\n<img src = \"assets/image.png\">\n<video src = \"assets/movie.mp4\"></video>\n<link href = \"assets/styles.css\">"
         );
         assert_eq!(report.link_normalizations_applied, 4);
     }
@@ -685,7 +685,7 @@ mod tests {
 
         assert_eq!(
             output,
-            "[a](../assets/x.md#install)\n[b](../assets/x.md?plain=1)\n[c](../assets/x.rs:42)\n[d](../assets/x.rs:3-7)\n[e](../assets/x.md?q=1#frag)\n"
+            "[a](assets/x.md#install)\n[b](assets/x.md?plain=1)\n[c](assets/x.rs:42)\n[d](assets/x.rs:3-7)\n[e](assets/x.md?q=1#frag)\n"
         );
         assert_eq!(report.link_normalizations_applied, 5);
     }
@@ -723,7 +723,7 @@ mod tests {
         let (once, _) = normalize(&content, &options);
         let (twice, report) = normalize(&once, &options);
 
-        assert_eq!(once, "![img](../assets/image.png)\n[x](../assets/x.md#h)\n");
+        assert_eq!(once, "![img](assets/image.png)\n[x](assets/x.md#h)\n");
         assert_eq!(twice, once);
         assert_eq!(report.link_normalizations_applied, 0);
     }
@@ -838,7 +838,7 @@ mod tests {
 
         for destination in [canonical, biscuit_file::to_portable_string(&lexical)] {
             let (output, _) = normalize(&format!("![i]({destination})"), &options);
-            assert_eq!(output, "![i](../assets/image.png)", "{destination}");
+            assert_eq!(output, "![i](assets/image.png)", "{destination}");
         }
     }
 

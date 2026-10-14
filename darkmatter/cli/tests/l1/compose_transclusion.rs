@@ -205,8 +205,8 @@ fn test_compose_link_relative_same_repo() {
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     assert!(
-        stdout.contains("../assets/logo.png"),
-        "stdout should contain relative path, got:\n{stdout}"
+        stdout.contains("![img](assets/logo.png)"),
+        "stdout should contain the bare repository-root path, got:\n{stdout}"
     );
     // Should not contain absolute path
     assert!(
@@ -259,8 +259,8 @@ fn test_compose_link_transcluded_child() {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(
-        stdout.contains("../components/sibling.md"),
-        "stdout should contain normalized sibling path relative to parent, got:\n{stdout}"
+        stdout.contains("[link](components/sibling.md)"),
+        "stdout should contain the bare repository-root sibling path, got:\n{stdout}"
     );
     // Should not contain absolute path
     let abs_sibling = biscuit_file::canonicalize_simplified(&sibling_file).unwrap();
@@ -372,14 +372,12 @@ fn test_compose_html_spaced_attributes() {
     assert!(output.status.success(), "command should succeed");
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // Resolved to absolute and normalized back: a same-directory target is
-    // `./name`, so the authored destinations come back unchanged.
     assert!(
-        stdout.contains("<a href = \"./other.md\">"),
+        stdout.contains("<a href = \"other.md\">"),
         "stdout should contain the normalized spaced href, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("<img src = \"./img.png\">"),
+        stdout.contains("<img src = \"img.png\">"),
         "stdout should contain the normalized spaced src, got:\n{stdout}"
     );
     let abs_repo = std::fs::canonicalize(&repo).unwrap();

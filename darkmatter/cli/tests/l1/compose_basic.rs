@@ -24,8 +24,10 @@ fn compose_file_links_exports_portable_markdown_without_render_metadata() {
         let output = String::from_utf8_lossy(&result.get_output().stdout);
         assert!(!output.contains("bt:render-tree"), "{output}");
         assert!(!output.contains("file://"), "{output}");
-        assert!(output.contains("[mode-1004.md](&standards/modes/mode-1004.md)"), "{output}");
-        assert!(output.contains("[osc 8.md](<&standards/osc/osc 8.md>)"), "{output}");
+        assert!(output.lines().any(|line| line == "📂 standards/modes/"), "{output}");
+        assert!(output.lines().any(|line| line == "📂 standards/osc/"), "{output}");
+        assert!(output.contains("[mode-1004.md](standards/modes/mode-1004.md)"), "{output}");
+        assert!(output.contains("[osc 8.md](<standards/osc/osc 8.md>)"), "{output}");
         assert!(output.contains("title: Fleet") == frontmatter, "{output}");
     }
 }

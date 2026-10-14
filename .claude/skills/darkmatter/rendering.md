@@ -26,6 +26,10 @@ with `render_tree::embedded::without_embedded_metadata`, retaining the fallback
 and surrounding source formatting. Keep the markers in the in-memory composed
 document for terminal/browser folds. Link normalization includes local `file:`
 URLs in the fallback; the encoded subtree retains absolute hyperlink targets.
+`::file-links` root headers are unlinked context labels without a leading slash,
+ending in `/`. Only the actual repository root gets the repository icon. Keep
+the filesystem's automatic Nerd Font icon payloads through composition so
+terminal glyph selection happens at render time; fallback Markdown stays Unicode.
 
 `DarkmatterPage` is a viewport assembler. It owns page width, margin, padding,
 background, max-width centering, browser wrapper metadata, and stylesheet

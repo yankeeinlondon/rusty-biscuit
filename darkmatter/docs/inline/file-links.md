@@ -132,12 +132,25 @@ The rendered tree uses the common ancestor of all matched files as its root.
 The root line shows:
 
 - A dimmed prefix with the path from the tree root to the target directory
-  (e.g. `/docs/`)
-- A highlighted target directory name (e.g. `topics`)
+  (e.g. `docs/`, without a leading slash)
+- A highlighted target directory name (e.g. `topics/`, including a trailing slash)
 - A repository icon when the root is the repository root, or a folder icon
   otherwise
 
 Every file in the tree is wrapped in an OSC8 hyperlink when rendered to a TTY.
+
+The root directory is an unlinked context label. In Markdown, for example:
+
+```md
+📂 biscuit-terminal/docs/research/terminal-standards/osc/
+
+- 📄 [osc-0-1-2.md](biscuit-terminal/docs/research/terminal-standards/osc/osc-0-1-2.md)
+```
+
+Terminal and browser rendering keep the prefix dimmed and the target directory
+highlighted. Terminal rendering selects Nerd Font folder and extension-specific
+file icons when Nerd Font support is detected, including the Markdown file
+icon. Markdown and browser fallbacks use portable Unicode icons.
 
 ### Lossless Rendering Through Compose
 
@@ -156,11 +169,11 @@ embedding markers.
 
 `md compose` exports just the readable fallback in Markdown output, omitting
 the internal marker comments. Both glob and directory listings use the normal
-link normalization rules: nearby paths are relative to the source document,
-and more distant targets in the same repository use `&` references, for example:
+link normalization rules: verified bare tree-root paths precede nearby relative
+paths and `&` references, for example:
 
 ```md
-- 📄 [mode-1004.md](&biscuit-terminal/docs/research/terminal-standards/modes/mode-1004.md)
+- 📄 [mode-1004.md](biscuit-terminal/docs/research/terminal-standards/modes/mode-1004.md)
 ```
 
 The in-memory composed document retains the styled subtree for terminal,

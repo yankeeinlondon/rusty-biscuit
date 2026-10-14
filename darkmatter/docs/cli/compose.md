@@ -14,8 +14,8 @@ Unlike `read`, `compose` focuses on transformed content, not display rendering d
 
 Markdown output exports `::file-links` as readable linked lists without internal
 render-tree metadata comments. Local `file:` URLs use the same portable-link
-normalization as absolute paths: nearby relative links first, then repository
-references such as `&docs/standards/mode-1004.md`. Terminal, HTML, and JSON
+normalization as absolute paths: verified bare tree-root links first, then nearby
+relative links and repository references such as `&docs/standards/mode-1004.md`. Terminal, HTML, and JSON
 output retain the component's styling and absolute hyperlink targets.
 
 ## Reporting

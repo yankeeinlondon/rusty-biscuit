@@ -316,16 +316,16 @@ fn compute_render(
             .and_then(|n| n.to_str())
             .unwrap_or(".")
             .to_string();
-        (String::new(), name)
+        (String::new(), format!("{name}/"))
     } else {
         let target = components.last().cloned().unwrap_or_default();
         let parents = &components[..components.len() - 1];
         let prefix = if parents.is_empty() {
-            "/".to_string()
+            String::new()
         } else {
-            format!("/{}/", parents.join("/"))
+            format!("{}/", parents.join("/"))
         };
-        (prefix, target)
+        (prefix, format!("{target}/"))
     };
 
     Ok(FileLinksRender {
@@ -333,7 +333,8 @@ fn compute_render(
         included_paths,
         dimmed_prefix,
         target_name,
-        uses_repo_icon: is_repo,
+        uses_repo_icon: is_repo
+            && biscuit_file::PathIdentity::new(component_root) == biscuit_file::PathIdentity::new(boundary),
     })
 }
 
@@ -680,7 +681,7 @@ mod tests {
         let result = discover_content("::file-links docs/*.md\n", &source).unwrap();
         let render = result.render.expect("expected matches");
         assert_eq!(render.included_paths.len(), 1);
-        assert!(render.uses_repo_icon);
+        assert!(!render.uses_repo_icon);
     }
 
     #[test]
@@ -739,7 +740,7 @@ mod tests {
 
         let result = discover_content("::file-links docs/*.pdf\n", &source).unwrap();
         let render = result.render.expect("expected the in-bound symlink to match");
-        assert_eq!(render.target_name, "docs");
+        assert_eq!(render.target_name, "docs/");
         assert_eq!(render.included_paths, vec![PathBuf::from("alias.pdf")]);
     }
 
@@ -787,9 +788,9 @@ mod tests {
         let result =
             discover_content("::file-links --dir docs/topics\n", &source).unwrap();
         let render = result.render.expect("expected matches");
-        assert_eq!(render.target_name, "topics");
-        assert_eq!(render.dimmed_prefix, "/docs/");
-        assert!(render.uses_repo_icon);
+        assert_eq!(render.target_name, "topics/");
+        assert_eq!(render.dimmed_prefix, "docs/");
+        assert!(!render.uses_repo_icon);
         assert_eq!(render.included_paths, vec![PathBuf::from("a.md")]);
     }
 
@@ -804,7 +805,8 @@ mod tests {
         let render = result.render.expect("expected matches");
         // The target IS the repo root: no dimmed prefix, target is the dir name.
         assert_eq!(render.dimmed_prefix, "");
-        assert!(!render.target_name.is_empty());
+        assert!(render.target_name.ends_with('/'));
+        assert!(render.uses_repo_icon);
     }
 
     #[test]
@@ -819,7 +821,7 @@ mod tests {
         let result = discover_content("::file-links docs/**/*.md\n", &source).unwrap();
         let render = result.render.expect("expected matches");
         // Common ancestor of docs/a.md and docs/sub/b.md is docs.
-        assert_eq!(render.target_name, "docs");
+        assert_eq!(render.target_name, "docs/");
     }
 
     // ── Deduplication ────────────────────────────────────────────────────────

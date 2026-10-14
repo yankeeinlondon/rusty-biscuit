@@ -89,7 +89,7 @@ the compose pipeline.
 
 - **Link Normalization** - Converts absolute link destinations back into portable
   references through `biscuit_file::PortablePath` (default strategy, root document's
-  context): nearby relative (`./x`, `../peer/x`), `&repo/path`, a declared `{{VAR}}`
+  context): verified bare tree-root (`docs/x`), nearby relative (`./x`, `../peer/x`), `&repo/path`, a declared `{{VAR}}`
   (written as the literal `{{{VAR}}}` so recompose is stable), `~/`, else the absolute
   path is kept with a `link_normalization` warning (the document still holds a
   host-tied link); `ComposeOptions::with_absolute_fallback_warning(false)`
