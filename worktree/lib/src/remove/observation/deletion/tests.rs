@@ -237,9 +237,13 @@ fn a_file_changed_without_any_event_is_kept_and_stops_deletion() {
         ),
         (
             "replaced by a new file",
+            // Written beside the original and renamed over it: deleting first
+            // lets Linux hand the freed inode straight to the new file, which
+            // is then the same `(device, inode)` with other content, so it
+            // reads as `Modified` (kept either way).
             Box::new(|f: &Fixture| {
-                fs::remove_file(f.q("README.md")).unwrap();
-                fs::write(f.q("README.md"), b"readme\n").unwrap();
+                fs::write(f.q("README.md.new"), b"readme\n").unwrap();
+                fs::rename(f.q("README.md.new"), f.q("README.md")).unwrap();
             }),
             ActivityKind::Replaced,
         ),
