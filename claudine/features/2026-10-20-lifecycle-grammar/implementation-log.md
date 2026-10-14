@@ -9,44 +9,280 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
 packages:
+    - darkmatter-cli
     - claudine-cli
+    - claudine
+    - claudine-gen
+    - darkmatter
+    - dmls
 human_review: false
 message_to_agent: |-
-  Phase 1 froze the contracts you must build against. Read the
-  implementation log's "Frozen contracts" and "Chosen diagnostic names"
-  sections before editing; they are binding unless you record a departure.
+    Phase 3 finished Waves 4 and 5. Read the log's "## Phase 3" section;
+    its departures are binding.
 
-  Key points for Phase 2 (Wave 2, shared action model):
-  - Node model: `LifecycleNode { Action, Conditional }`, with
-    `LifecycleConditional { when, then, otherwise, path }` and a
-    `path: LifecyclePath` on every `LifecycleAction`. `LifecycleStackItem`
-    and `LifecycleNotification` are deleted; stacks are `Vec<LifecycleNode>`
-    (empty means absent).
-  - `LifecyclePath` is the promoted `source_map.rs::LifecycleSurfacePath`
-    (Field / MapKey / Index segments), rendered like
-    `failure[0].else[1].shell.command`. It fills the existing `property`
-    field of errors; delete the post-hoc "{event}.stack[i]" annotator in
-    parse.rs.
-  - Effect check: parse.rs gets `LifecycleParseOptions { is_known_effect,
-    authored }`; the public `parse_lifecycle_config(fm, path)` moves to
-    lifecycle/mod.rs and supplies a playa-backed predicate from audio.rs.
-    Today `parse.rs:297` is the only AC9 violation (plus the doc comment at
-    `parse.rs:68`).
-  - Errors: add `RemovedGrammar { source_path, path, removed, replacement }`;
-    rename `LifecycleProxyWith*` to `LifecycleWith*` (EvaluationFailed gains
-    `verb`), and `LifecycleProxyOnlyParameter` to `LifecycleWithUnsupported`
-    (`param` dropped; it was always `with`). Rename `ProxyWith` ->
-    `WithOverlay`, `ProxyWithValue` -> `WithValue`, `ProxyWithError` ->
-    `WithOverlayError`.
-  - The old `{action: verb, ...}` discriminator long form is still live in
-    parse.rs (`parse_long_form_action_object`) and must become a
-    `RemovedGrammar` error; the regex inventory does not find it.
-  - `_loop_*` seeding lives in `looping/types.rs::insert_ambient_overrides`,
-    not in `reserved.rs` (which only lists the names).
-
-  Phase 1 also fixed one pre-existing L1 failure (a trailing-space match in
-  `compose_schema_cli.rs`); `just test` and `just lint` in claudine/ were
-  green at the end of Phase 1 (8740 passed, 9 skipped).
+    - Retry overlays are live. Departure from contract 8: the overlay is
+      consumed by `materialize_harness_prompt`, not by
+      `load_overlaid_source`, because a retried attempt reads its document
+      twice (shell preflight, then materialization) and both must see it.
+    - Docs Phase 4 must update are listed under "Docs Phase 4 must update"
+      in the log (flow-control-reference `with:` section with renamed error
+      names and `retry.with`, flow-control retry parameters, composition.md
+      overlay note, lifecycle.md ~line 863, pre-flight-checks.md
+      `RemovedGrammar` on discovery).
+    - `just test-l2` still fails until `cli/tests/level2/**` is migrated
+      (Wave 6); it was not run in Phase 3.
+    - The Darkmatter schema extension (`claudine-types.yaml`) now accepts
+      the new grammar loosely below two conditional levels; DMLS checks a
+      nested `{{ }}` in `when` only in the first two levels. Docs may say
+      so; the parser remains authoritative.
+    - The opt-in `shipped_prompt_route_drift` comparisons still disagree
+      until `prompts/_implement/implement-plan.md` is migrated and hashes
+      refreshed (Wave 6, AC11).
+    - New L1 files `compose_removed_grammar.rs` and
+      `compose_retry_overlay.rs` are `cfg(unix)` (sh stubs).
+    - `claudine/docs/providers/dispatch-inventory.json` was regenerated
+      (two new test-fixture `direct-ref` sites); regenerate again if
+      Phase 4 edits `cli/src` tests that name providers.
+source_files_during_phase_2:
+    - claudine/cli/src/commands/compose/loop_run.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/preflight.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/composition/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/active_state_wiring.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/budget_scoping.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/lifecycle_ordering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/proxy.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/recovery_identity.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_evaluation.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_routing.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/unowned_handoff.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/commands/wrap/overlay.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/tests/common/incomplete_subagents.rs
+    - claudine/cli/tests/common/terminal_interrupt.rs
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/clarify.md
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/format.md
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/implement.md
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/plan.md
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/review.md
+    - claudine/cli/tests/fixtures/frozen_prompts/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/nested_span_regression/commit.md
+    - claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/characterization_error_routes.rs
+    - claudine/cli/tests/l1/compose_caller_file_provenance.rs
+    - claudine/cli/tests/l1/compose_initialize_acceptance.rs
+    - claudine/cli/tests/l1/compose_initialize_staged_boot.rs
+    - claudine/cli/tests/l1/compose_presence_parity.rs
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+    - claudine/cli/tests/l1/composition_outputs.rs
+    - claudine/cli/tests/l1/ctx_launch_anchor.rs
+    - claudine/cli/tests/l1/ctx_per_run.rs
+    - claudine/cli/tests/l1/document_environment_routes.rs
+    - claudine/cli/tests/l1/effective_diagnostic_render.rs
+    - claudine/cli/tests/l1/handoff_owners.rs
+    - claudine/cli/tests/l1/inline_completion_lifecycle.rs
+    - claudine/cli/tests/l1/level1_provided_partial_file_pty.rs
+    - claudine/cli/tests/l1/level1_provider_overlay_home.rs
+    - claudine/cli/tests/l1/level1_review_router_partial_pty.rs
+    - claudine/cli/tests/l1/level1_structured_error_message.rs
+    - claudine/cli/tests/l1/lifecycle_downgrade_outcome.rs
+    - claudine/cli/tests/l1/lifecycle_literal_escapes.rs
+    - claudine/cli/tests/l1/lifecycle_set_shell_values.rs
+    - claudine/cli/tests/l1/loop_gate_ambient.rs
+    - claudine/cli/tests/l1/loop_initialize_state.rs
+    - claudine/cli/tests/l1/preflight_execution_parity.rs
+    - claudine/cli/tests/l1/provider_error_finalize.rs
+    - claudine/cli/tests/l1/provider_tail_launch.rs
+    - claudine/cli/tests/l1/provider_tail_ownership.rs
+    - claudine/cli/tests/l1/sequence_budget.rs
+    - claudine/cli/tests/l1/sequence_groups.rs
+    - claudine/cli/tests/l1/sequence_initialize_include_preflight.rs
+    - claudine/cli/tests/l1/sequence_jit.rs
+    - claudine/cli/tests/l1/sequence_schema.rs
+    - claudine/cli/tests/l1/setter_after_switch.rs
+    - claudine/cli/tests/l1/wrap_compose_preflight.rs
+    - claudine/cli/tests/l1/wrap_compose_validation.rs
+    - claudine/cli/tests/l1/wrap_opencode.rs
+    - claudine/cli/tests/l1/wrap_perf.rs
+    - claudine/cli/tests/l1/wrap_sequence_composition.rs
+    - claudine/cli/tests/l1/wrap_sigint.rs
+    - claudine/gen/tests/l1/agent_errors_check.rs
+    - claudine/lib/src/composition/coordinator/commit.rs
+    - claudine/lib/src/composition/coordinator/handoff.rs
+    - claudine/lib/src/composition/coordinator/tests.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/frontmatter_excerpt.rs
+    - claudine/lib/src/composition/frontmatter_excerpt/tests.rs
+    - claudine/lib/src/composition/lifecycle/action_shape.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/actions/tests.rs
+    - claudine/lib/src/composition/lifecycle/audio.rs
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/bindings/tests.rs
+    - claudine/lib/src/composition/lifecycle/control/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/action_dispatch.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/binding_contract.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mutation_visibility.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/proxy_with_evaluation.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/set_shell_values.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/parse.rs
+    - claudine/lib/src/composition/lifecycle/runtime/tests.rs
+    - claudine/lib/src/composition/lifecycle/source_map.rs
+    - claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
+    - claudine/lib/src/composition/lifecycle/tests/audio_emission.rs
+    - claudine/lib/src/composition/lifecycle/tests/diagnostics.rs
+    - claudine/lib/src/composition/lifecycle/tests/grammar.rs
+    - claudine/lib/src/composition/lifecycle/tests/guard_runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/tests/nested_span.rs
+    - claudine/lib/src/composition/lifecycle/tests/parse_config.rs
+    - claudine/lib/src/composition/lifecycle/tests/validation.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+    - claudine/lib/src/composition/looping/actions.rs
+    - claudine/lib/src/composition/looping/config.rs
+    - claudine/lib/src/composition/looping/config/tests.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/gate_ambient.rs
+    - claudine/lib/src/composition/looping/engine/tests/iteration_actions.rs
+    - claudine/lib/src/composition/looping/engine/tests/iteration_bindings.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/looping/engine/tests/mod.rs
+    - claudine/lib/src/composition/looping/engine/tests/post_checked_timing.rs
+    - claudine/lib/src/composition/looping/engine/tests/removed_loop_reads.rs
+    - claudine/lib/src/composition/looping/engine/tests/seed_state.rs
+    - claudine/lib/src/composition/looping/expression.rs
+    - claudine/lib/src/composition/looping/expression/tests.rs
+    - claudine/lib/src/composition/looping/types.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/preflight/tests.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/bootstrap/tests.rs
+    - claudine/lib/src/composition/prepare/tests.rs
+    - claudine/lib/src/composition/reserved.rs
+    - claudine/lib/src/composition/schema/supplied/tests.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/tests/fixtures/frozen_prompts/prompts/_reviews/cross-platform.md
+    - claudine/lib/tests/fixtures/frozen_prompts/prompts/clarify.md
+    - claudine/lib/tests/fixtures/frozen_prompts/prompts/review.md
+    - claudine/lib/tests/l1/agent_errors_fleet.rs
+    - claudine/lib/tests/l1/lifecycle_lift_ready_guard.rs
+    - claudine/lib/tests/l1/main.rs
+    - darkmatter/dmls/src/overlay/expressions/frontmatter_inventory_tests.rs
+    - darkmatter/dmls/tests/fixtures/sequence_descent/implement-plan.md
+    - darkmatter/lib/src/markdown/compose/context/effective_state.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/expression/binding.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/parser.rs
+    - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/tests/l1/dasherized_identifier_compose.rs
+    - darkmatter/lib/tests/l1/host_globals_compose.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/prompts/dasherized_identifier_corpus.rs
+docs_updated_during_phase_2:
+    - claudine/docs/research/agent-errors/_fleet.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/darkmatter/expressions.md
+source_files_during_phase_3:
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/control.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/lifecycle/control/tests.rs
+    - claudine/lib/src/composition/lifecycle/runtime/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/retry_with_evaluation.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/action_dispatch.rs
+    - claudine/lib/src/composition/lifecycle/tests/audio_emission.rs
+    - claudine/lib/src/composition/lifecycle/tests/guard_runtime.rs
+    - claudine/lib/tests/l1/lifecycle_control_flow_spike.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/active_state_wiring.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/budget_scoping.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/tests/l1/compose_removed_grammar.rs
+    - claudine/cli/tests/l1/compose_retry_overlay.rs
+    - claudine/cli/tests/l1/main.rs
+    - darkmatter/docs/schemas/claudine.yaml
+    - darkmatter/docs/schemas/claudine-types.yaml
+    - darkmatter/dmls/src/diagnostics/nested_span.rs
+    - darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+    - darkmatter/dmls/src/overlay/frontmatter.rs
+    - darkmatter/dmls/src/overlay/expressions/frontmatter_inventory_tests.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/tests/l1/no_side_effects.rs
+    - darkmatter/lib/src/markdown/compose/context/capture/groups.rs
+    - darkmatter/lib/src/markdown/frontmatter.rs
+    - darkmatter/lib/src/markdown/mapping_orders.rs
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/schemas_constraints_block_matrix.rs
+    - darkmatter/lib/tests/prompts/dasherized_identifier_corpus.rs
+    - darkmatter/lib/tests/fixtures/frozen_prompts/prompts/_reviews/feature-review.md
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/l1/compose_dasherized_identifiers.rs
+    - darkmatter/cli/tests/fixtures/frozen_prompts/prompts/plan.md
+docs_updated_during_phase_3:
+    - claudine/docs/providers/dispatch-inventory.json
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/inline/interpolation.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/claudine/SKILL.md
 ---
 # Implementation Log for 2026-10-20-lifecycle-grammar (5 phases)
 
@@ -344,3 +580,558 @@ the departure here.
 
 Prerequisite available; inventory, ownership, diagnostic names, and contracts
 recorded above; no design ruling blocks Wave 2.
+
+## Phase 2
+
+Phase 2 is Wave 2 (shared action model) and Wave 3 (parser rewrite and loop
+bindings).
+
+### Wave 2 — shared model (done by the integration owner)
+
+- **Node model** as frozen: `LifecycleNode { Action, Conditional }`,
+  `LifecycleConditional { when, then, otherwise, path }`, and
+  `LifecycleAction { kind, no_error, path }` (`lifecycle/actions.rs`).
+  `LifecycleStackItem` and `LifecycleNotification` are deleted. Stacks are
+  `Vec<LifecycleNode>`; `LifecycleConfig` keeps only `stacks`, and
+  `stack(signal)` returns a slice (empty means absent).
+  `for_each_action`/`for_each_action_mut` give the structural walk (both
+  branches, guards not evaluated) used by preflight stamping, the
+  `initialize` shell refusal, task approved-command stamping, and shell
+  collection.
+- **`LifecyclePath`** is the promoted `source_map.rs::LifecycleSurfacePath`,
+  now `pub` and re-exported from `actions` and `composition`. It gained
+  `parent()` and `root_name()`.
+- **`CommunicationAction`** is `{ channel, text }`; `route` and the
+  `message`/`sound` payload aliases are gone from the model.
+- **`LifecycleControlAction::Retry`** gained `with: WithOverlay`.
+  *Departure from contract 8:* the field is `WithOverlay` (empty when omitted),
+  not `Option<WithOverlay>`, matching `Proxy.with`, because an omitted and an
+  empty overlay already mean the same thing for `proxy`. The executor does not
+  yet evaluate or transport it (`StackControl::Retry` is unchanged); that is
+  Wave 5.
+- **`ActionLocation`** (`coordinator/handoff.rs`) is now
+  `{ signal, path: LifecyclePath }`, no longer `Copy`, and renders the
+  authored path (`failure[0].else[1].proxy`) instead of
+  `failure.stack[0].action[1]`. `stack_index()`/`action_index()` are gone.
+  The proxy commit-time file-reference error now names `{event}[*].proxy`.
+- **Errors** (`composition/error/**`): added `RemovedGrammar`; replaced
+  `LifecycleProxyOnlyParameter` with `LifecycleWithUnsupported { source_path,
+  property, verb }`; renamed the `LifecycleProxyWith*` family to
+  `LifecycleWith*`. *Departure from "Chosen diagnostic names":*
+  `LifecycleWithEvaluationFailed` does **not** store a `verb` field. Adding a
+  sixth `String` pushed `CompositionError` past the workspace
+  `large-error-threshold` (136 bytes; clippy `result_large_err` fired at 226
+  sites). The verb is the last segment of the variant's `property` (the
+  action path, e.g. `failure[0].proxy`), so `error::overlay_directive(property)`
+  derives it for `Display`, the status block, and the detail `message`.
+  `LifecycleSayConflict` now means `say` + `speak` in one dictionary. Removed
+  `LifecycleStackAmbiguous` and `LifecycleSetLongFormRemoved`: no grammar can
+  produce them now (a multi-key dictionary is a legal bundle, and
+  `{action: set, …}` is `RemovedGrammar`). Renderer text that described
+  `stack:`/`action:` grammar was rewritten. `RemovedGrammar` uses the shared
+  `composition.lifecycle_invalid` code with `property`/`message` detail.
+- **Effect catalog injection** (contract 4): `parse.rs` takes
+  `LifecycleParseOptions { is_known_effect, authored }`; the public
+  `parse_lifecycle_config`, `parse_task_action_stack`, and
+  `parse_single_action` now live in `lifecycle/mod.rs` and supply
+  `audio.rs::is_known_effect` (Playa). `audio_phases`/`AudioPhase` and
+  `normalize_empty_string` are deleted.
+- **AC9 guard:** `lib/tests/l1/lifecycle_lift_ready_guard.rs` (one test per
+  slice file via `include_str!`, plus a self-test of the scan). The six files
+  name no forbidden type.
+
+### Executor work pulled forward from Wave 4 (departure)
+
+Deleting `LifecycleNotification` (frozen contract 1) removes the
+notification-field execution path, so part of Wave 4 had to land here for
+the crates to compile:
+
+- `StackExecutionContext::execute_event` now runs only the stack; the
+  recursive `execute_nodes` walks nodes serially, evaluates each reached guard
+  once, runs only the selected body, and returns a directive or failure
+  through every enclosing list. Diagnostics use each action's authored path;
+  `StackRoot` is gone. `execute_action_stack(nodes)` lost its `property`
+  argument (paths are rooted by the parser).
+- `emit_top_level`, `resolve_emit`, and `emit_top_level_for_signal` are
+  deleted; the CLI's success/blocked path
+  (`loop_control/lifecycle_events.rs`) now runs only the stack.
+- The guard's own `emit_signal` (drop safety net and `emit_*_once` helpers,
+  which have no execution context) now emits the stack's root-level,
+  unguarded, literal `stderr`/`message`/`notify`/`say`/`speak`/`effect`
+  actions in authored order. Phase 3 should decide whether that safety net
+  stays.
+
+Audio is therefore already published in stack order; the Wave 4 owner still
+owns the ordered-publication tests (AC8) and the durable-queue coverage.
+
+### Wave 3 — parser (done by the integration owner)
+
+`parse.rs` was rewritten around a `StackParser` (list → item → bundle):
+
+- Stacks accept omitted/`null`/`[]`/`{}` (empty), a list, or a root
+  dictionary (no `when`, `then`, or `else`). Task `setup:`/`teardown:` accept
+  the same, rooted at the task property.
+- Bundles expand in canonical order (`set`; `stdout`, `stderr`, `info`,
+  `warn`, `success`, `message`, `notify`, `effect`, `say`/`speak`; `shell`;
+  other verbs by ASCII name; the directive). Lifecycle parsing no longer reads
+  authored mapping order except for a `set:` mapping's keys.
+- `when` items: `then` (+ optional `else`) or sibling verbs; depth limit five
+  (`LifecycleStackInvalidShape` at the sixth `…when`); list-local
+  `LifecycleActionOrder` reported at the unconditional directive's path.
+- `no_error`: long-form parameter or bundle sibling; YAML boolean only;
+  rejected beside `then`/`else`, beside a lone `set`, and when both homes are
+  set; never applied to `set`.
+- Removed grammar (`stack`, `action`, `say_first` keys; communication
+  `message`/`sound`/`route` long-form parameters) raises `RemovedGrammar` with
+  the authored path and a replacement hint, checked before any other shape
+  error. At the `loop:` root, `action`/`actions` stay iteration controls.
+- `with` is accepted on `proxy` and `retry`; elsewhere
+  `LifecycleWithUnsupported`. `resume.message` stays valid.
+- `loop:` concerns: loose verbs (a root bundle) or `gate:` (a stack), never
+  both; `when` at the loop root is rejected. `looping/config.rs` now accepts
+  every lifecycle-concern key (any verb, `gate`, `no_error`, and `when`/
+  `stack`/`say_first` so the lifecycle parser reports them typed) and shares
+  `LOOP_ITERATION_KEYS` with the lifecycle parser.
+- `source_map.rs` walks the new grammar; `validate.rs` has the one recursive
+  `walk_stack` (contract 6) used by nested-span, `err`-availability, and
+  shell-collection checks. Shell collection walks both branches, with paths
+  like `failure[0].else[1].shell.command`.
+- `sequence/preflight/shape.rs` (raw shell collection) — see the test log
+  below for its long-form fix.
+
+Parser evidence: `lifecycle/tests/grammar.rs` (56 tests: AC1–AC4, AC17, the
+parse side of AC5 and AC6). First run: 52/56; the failures were one wrong
+expected path in the test and a real bug — the removed-key check rejected the
+loop-root iteration `action:`. Fixed; 56/56 and 7/7 guard tests pass.
+
+Drift fixed in touched code: the long-form `defer` missing-delay message said
+"`requeue`"; it now says "`defer`" (the separate
+`LifecycleDeferNotImplemented` wording stays with the Phase 4 docs sweep).
+`audio.rs` carried a doc comment describing a deleted serde helper on
+`tts_config_from_settings`; it now describes the function.
+
+Also in the parser pass: `sequence/preflight/shape.rs::collect_stack_shell_commands`
+(the raw-JSON collector sequence preflight uses for task `setup:`/`teardown:`)
+now reads the long form `shell: {command, on_error}`; it previously only
+recognized the removed `{action: shell, command: …}` map, so a long-form task
+shell would have escaped sequence approval. A bad-path bug in the executor was
+found by the migrated tests: a `set` action's diagnostics read
+`start[0].set.set.out` (the executor appended `.set` to a path that already
+ended in `set`); fixed in `executor.rs`.
+
+### Wave 3 — loop bindings (contract 7)
+
+Two workers. The first landed the binding declaration, condition lookups,
+seeding removal, and the pre-launch `RemovedGrammar` scan; the second wired
+the iteration's values into every surface. Design as built:
+
+- `lifecycle/bindings.rs` declares `loop` like `group`, with
+  `OUTSIDE_LOOP = "claudine.outside-loop"` and a three-state
+  `EnclosingLoop { Iteration(&LoopAmbient), Pending, Outside }`. `Pending` is a
+  loop document prepared before its first iteration (seed, bootstrap read,
+  launch audit): `loop` is execution-dependent and reads `null`, as the
+  `_loop_*` names did before the loop seeded them.
+- `StackExecutionContext.loop_values: Option<&LoopAmbient>` feeds
+  `runtime_bindings_in_loop`; the loop gate passes the just-finished
+  iteration; CLI iteration events read it from a new
+  `MaterializedHarnessPrompt` field. `PrepareOptions` and
+  `CallerInputLayers` carry `loop_values`, so an iteration's re-preparations
+  (stabilized reread, retry, resume) keep it; a proxy target clears it.
+- `looping/expression.rs` resolves `loop`, `loop.<m>`, and `loop['<m>']` in
+  `while`/`until` with no frontmatter fallback. `insert_ambient_overrides`,
+  `AMBIENT_VARIABLE_NAMES`, and `AmbientVariable::NAMES` are deleted
+  (`reserved.rs` keeps `LOOP_ROOT` and `RETIRED_LOOP_NAMES`).
+- **Darkmatter main compose gained host-declared globals** (not anticipated by
+  the plan: Phase 1 found the binding machinery, but only subtree compose used
+  it). `HostGlobals::associate(view, entries)` (shared registration checks with
+  `EvaluationSession::associate`) and `ComposeOptions::with_host_globals`. The
+  globals travel on `ResolutionContext` like the `current` authority; both the
+  frontmatter and body lookups read them; root classification is reserved root
+  → declared global → document property, so bare `loop`/`loop.x`/`loop['x']`
+  read the global and `fm.loop` reads the configuration; a declared global is
+  exempt from the deferred-key check (an explicit `fm.loop` read is not);
+  transcluded documents inherit the globals; the globals join the options
+  fingerprint only when present, so with none supplied Darkmatter is
+  byte-identical (whole suite green). Plain `md compose` supplies none.
+- Retired names: `RemovedGrammar` before launch from parsed expressions only
+  (variable roots, `fm._loop_x`, `fm['_loop_x']`) in lifecycle surfaces
+  (`validate.rs::find_removed_loop_read` on `walk_stack`), `while`/`until`,
+  loop actions, other frontmatter strings, and body spans outside code blocks
+  (`path: body:<line>`). The five names are also declared **unavailable host
+  globals** (reason `claudine.removed-loop-name`), so a read introduced only by
+  a later render (a transclusion) is mapped to `RemovedGrammar` with
+  `path: "render"`. Literal text, Markdown, code fences, and `_loop_notes`
+  stay data.
+- Darkmatter's dasherized-identifier sample `_loop_count` became `_iter_count`.
+
+Departures and known gaps (recorded, not hidden):
+
+- Passive lifecycle validation treats `loop` as execution-dependent, so a
+  non-loop document reading `loop` in an event is rejected when the event
+  fires (typed `claudine.outside-loop`), not before launch.
+- Sequence shell approval treats `loop` as unavailable (sequence approval
+  fixes every command before any step runs); lifecycle shell approval treats
+  it as lexical.
+- A proxy target reached from a loop iteration does not receive `loop`
+  (before, it inherited `_loop_*` through the override layer). It is not an
+  iteration.
+- Later-render detection does not catch an explicit `fm._loop_*` inside a
+  transcluded document, does not reach the context-free branch-discovery pass
+  of frontmatter `$( … )` ternaries, and reports `path: "render"` with the
+  root document rather than the transcluded file and line.
+
+### Test migration (Phase 4 work pulled forward)
+
+`just test` must be green at the end of every phase, and the parser now
+rejects the old grammar, so every default-tier test and fixture that authored
+it had to migrate in this phase (planned for Wave 6). Four workers migrated
+them with disjoint ownership:
+
+- **Lib unit and L1 tests:** all lifecycle, executor, coordinator, error,
+  prepare, preflight, schema, and sequence tests; lib frozen prompts
+  (`_reviews/cross-platform`, `clarify`, `review`); and the live fleet
+  `claudine/docs/research/agent-errors/_fleet.md` (read by
+  `lib/tests/l1/agent_errors_fleet.rs`; same guards, order, and parameters).
+  `claudine/gen/tests/l1/agent_errors_check.rs` reads the same fleet and was
+  adjusted (`success` is now the list). Tests whose only subject was removed
+  behavior were deleted and are covered by `grammar.rs` or rewritten
+  equivalents: `audio_order_*` (5), `blank_notify_is_normalized_to_none`,
+  `trims_empty_strings_to_none`, `parse_serde_unknown_field_*`,
+  `stack_as_map_reports_sequence_mismatch_not_unknown_property`,
+  `rejects_ambiguous_multi_key_action_object`,
+  `positional_proxy_plus_sibling_with_stays_ambiguous`,
+  `rejects_unknown_stack_item_key`, `rejects_with_on_every_other_action`,
+  `emit_top_level_for_signal_fires_comm_without_running_stack`.
+  `audio_emission.rs` now proves stack-order publication through the executor
+  in both directions, interleaved with branches, before a `retry`, and on the
+  durable spool.
+- **CLI unit tests** (`cli/src/**`): about 55 JSON fixtures; three
+  "top-level before stack" tests renamed to authored-order tests.
+- **CLI L1 + fixtures:** every `cli/tests/l1` file with old grammar,
+  `cli/tests/common/{incomplete_subagents,terminal_interrupt}.rs`, the CLI
+  frozen prompts (`_implement/implement-plan`, `clarify`, `format`,
+  `implement`, `plan`, `review`, `frozen_prompts/shipped_implement_route`),
+  and `nested_span_regression/commit.md`.
+  `compose_initialize_acceptance::an_initialize_stop_ends_the_stack_…` had an
+  action after `stop` (now an order error); the stop moved into a `then` body
+  so the item after it still proves it never runs.
+- **Read by default L1 and therefore migrated now:**
+  `cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md`
+  (the hash-pinned route fixture; `shipped_prompts.rs` parses it) and
+  `darkmatter/dmls/tests/fixtures/sequence_descent/implement-plan.md` (same
+  corpus); the DMLS inventory assertion that named
+  `initialize.stack[0].action[0].message` now names
+  `initialize[0].then[0].message`. The route fixture's pinned hashes cover the
+  shipped prompts, not the fixture, and the shipped prompts are unchanged, so
+  the opt-in `shipped_prompt_route_drift` fixture-vs-prompt comparisons will
+  disagree until Phase 4 migrates `prompts/_implement/implement-plan.md` and
+  re-derives the fixture (AC11).
+- **Docs:** only the loop example in
+  `claudine/docs/topics/flow-control/lifecycle.md` ("Loop lifecycle concerns")
+  and its following sentence, because
+  `loop_gate_ambient::lifecycle_reference_loop_example_runs_as_written`
+  executes it. The rest of the page is Phase 4.
+- **Not migrated (Phase 4):** `cli/tests/level2/**` (compile verified with all
+  features; YAML still old — `level2_lifecycle_control.rs` alone has ~426
+  hits), `cli/tests/prompts/**`, root `prompts/`, research templates and other
+  fleets, and docs/skill pages other than the above.
+
+### Requirement-to-test map (Phase 2 scope)
+
+| Requirement | Tests |
+| --- | --- |
+| AC1 lists/root dictionaries in every stack home | `lifecycle/tests/grammar.rs`: `every_event_accepts_a_flat_action_list`, `every_event_accepts_a_root_dictionary_in_canonical_order`, `a_bundle_expands_set_communication_shell_effects_then_the_directive`, `a_root_dictionary_never_carries_when`, `the_loop_gate_is_a_stack`, `loose_loop_verbs_are_a_root_dictionary_beside_iteration_controls`, `loose_loop_verbs_cannot_mix_with_gate`, `when_at_the_loop_root_is_rejected`, `task_stacks_accept_a_list_or_a_dictionary_rooted_at_the_task_property` |
+| AC2 depth five / six | `conditionals_nest_five_levels_deep`, `a_sixth_level_is_a_typed_error_naming_its_path`, `an_else_if_chain_counts_each_nested_when_and_siblings_do_not` |
+| AC3 list-local placement | `an_action_after_an_unconditional_directive_is_rejected_in_every_list`, `a_when_item_never_counts_as_unconditional`, `the_same_directive_in_sibling_branches_is_legal`, `two_directives_in_one_dictionary_are_rejected`, `skip_stays_initialize_only_inside_branches` |
+| AC4 `no_error` homes | `no_error_is_accepted_as_a_long_form_parameter`, `no_error_is_accepted_beside_the_verbs_of_a_bundle_but_never_reaches_set`, `a_body_may_be_a_dictionary_with_its_own_no_error`, `then_cannot_sit_beside_sibling_verbs_or_no_error`, `no_error_beside_a_lone_set_is_rejected`, `set_has_no_long_form_no_error`, `inner_and_sibling_no_error_are_ambiguous_even_when_they_agree`, `no_error_must_be_a_yaml_boolean_in_both_homes`, `no_error_defaults_to_false`; executor side in `executor/tests/{set_shell_values,runtime_set}.rs` |
+| AC5 (parse side) `with` placement | `with_is_accepted_on_retry_and_proxy`, `with_is_rejected_on_every_other_verb_resume_included`, `a_retry_overlay_has_the_proxy_shape_rules`, `resume_message_stays_a_valid_parameter` |
+| AC6 removed grammar (parse) | `the_stack_key_is_removed_grammar_in_every_stack`, `the_action_aggregator_and_discriminator_are_removed_grammar`, `say_first_is_removed_grammar`, `communication_message_sound_and_route_parameters_are_removed_grammar`, `removed_keys_win_over_every_other_shape_error` |
+| AC6 retired `_loop_*` reads | `looping/engine/tests/removed_loop_reads.rs`, `bindings/tests.rs::a_retired_loop_read_is_found_only_in_parsed_reads`, `looping/expression/tests.rs::a_condition_reading_a_retired_loop_name_is_removed_grammar`, `iteration_bindings::a_retired_read_a_transcluded_document_introduces_is_removed_grammar`, CLI `loop_gate_ambient::{a_retired_loop_read_stops_compose_before_launch, naming_a_retired_loop_spelling_in_text_is_data}` |
+| AC7 `loop.*` | `bindings/tests.rs` (matrix, `the_loop_global_carries_one_iteration_and_never_falls_back_to_the_document`, `the_loop_global_outside_a_loop_is_the_typed_scope_diagnostic`), `looping/expression/tests.rs` (bare/dotted/bracket, no fallback, `fm.loop`), `looping/engine/tests/gate_ambient.rs` (migrated, coverage kept), `looping/engine/tests/iteration_bindings.rs` (body + compose-time frontmatter, pending, outside, lifecycle shell bytes), `seed_state.rs`, CLI `loop_gate_ambient.rs` (gate on every pass, iteration events, body/frontmatter/gate); Darkmatter `tests/l1/host_globals_compose.rs` (7, including "undeclared `loop` stays a document property") |
+| AC9 lift-ready slice | `lib/tests/l1/lifecycle_lift_ready_guard.rs` (6 files + scan self-test) |
+| AC17 parser coverage | `grammar.rs`: `explicitly_empty_branches_are_rejected`, `orphan_branches_guard_only_and_flag_only_items_are_rejected`, `several_sibling_verbs_use_short_form_only`, `say_and_speak_cannot_share_a_dictionary`, `speak_keeps_its_authored_key_in_the_path`, `unknown_item_keys_are_unknown_verbs_not_discarded`, `unknown_long_form_parameters_are_rejected`, `communication_long_form_takes_text`, `short_form_arity_is_checked_with_the_authored_path`, `object_arguments_still_pass_through_whole_value_interpolation`, `an_unknown_literal_effect_is_rejected_in_any_branch_and_a_template_is_deferred`, `initialize_refuses_shells_in_either_branch`, `initialize_refuses_a_shell_valued_set_in_a_dead_branch`, `both_branches_contribute_shells_to_approval`, `absent_null_and_empty_stacks_are_all_empty`, `a_stack_of_the_wrong_type_is_rejected_not_read_as_empty` |
+| Executor recursion (pulled forward; AC8/AC17 executor side owned by Phase 3) | migrated `executor/tests/conditions_control.rs`, `lifecycle/tests/audio_emission.rs` (stack-order publication both directions) |
+
+The configuration Input Robustness Matrix is omitted per the plan (text
+grammar); its shape cells that do apply are covered above: absent/null/empty
+stacks (empty), wrong-type stack (rejected), explicit empty branches
+(rejected), non-boolean `no_error` (rejected), unknown keys (rejected).
+
+### Gates (macOS, this host)
+
+- `just test` in `claudine/`: **8810 run, 8810 passed, 9 skipped** (the
+  recipe's standing skips; Phase 1 baseline 8740).
+- `just lint` in `claudine/` (incl. `lint-lifecycle-doc-facets`): passed. The
+  linker's `__eh_frame section too large` warning is environmental.
+- `just test` in `darkmatter/`: **9947 run, 9947 passed, 10 skipped**;
+  `just lint` in `darkmatter/` passed (incl. the `zed-dmls` wasm32 build).
+- No other OS was exercised. The changes are platform-neutral Rust (parsing,
+  path rendering, binding plumbing) with no `cfg`, filesystem-path, or process
+  behavior; CI's Linux/macOS cells and the nightly Windows/WSL2 cells cover
+  them.
+
+### Observed, not in scope
+
+A CLI L1 worker reported: in a `fail_fast: false` loop, a crashed lifecycle
+expression in `success` (e.g. `append_line: ["events.log", "{{ no_such_root() }}"]`)
+keeps the loop from advancing (the `increment` action never runs), so the
+provider relaunches up to the iteration cap (100 launches, exit 1, ~20 s),
+while the diagnostic says "the run halts". Not verified against `main`;
+likely pre-existing and unrelated to the grammar. Recorded for a fix
+specification rather than changed here.
+
+### Checkpoint
+
+Shared node, path, binding, and overlay interfaces are stable; the parser,
+walker, source map, and binding paths agree; AC9 passes. Wave 3 is complete
+for parser grammar and loop bindings. Remaining for Phase 3: AC8
+durable-queue/fake-publisher coverage beyond the migrated tests, the guard's
+drop safety-net decision, `retry.with` evaluation and transport (Wave 5),
+the CLI-boundary removed-grammar tests (`compose`, `inline-compose`,
+`sequence`), and the DMLS `nested_span.rs`/`overlay/frontmatter.rs`/schema
+extension work (Wave 4).
+
+## Phase 3
+
+Phase 3 is Wave 4 (executor/audio proof and editor integration, run in
+parallel by two owners with disjoint files) and Wave 5 (retry overlay
+evaluation, transport, and consumption, plus the CLI-boundary
+removed-grammar tests). The Wave 5 owner ran concurrently with the Wave 4
+test owner because the Wave 4 executor code had already landed in Phase 2
+(see "Executor work pulled forward"); the Wave 4 owner was restricted to test
+files and `executor.rs` belonged to Wave 5.
+
+### Wave 4 — executor and audio proof
+
+The executor recursion landed in Phase 2; this owner audited it against the
+Wave 4 contracts and added tests where coverage was missing. No defect was
+found in `executor.rs`. `cargo nextest run -p claudine --lib -E 'test(/lifecycle::/)'`:
+529/529.
+
+| Contract | Existing evidence | Added in Phase 3 |
+| --- | --- | --- |
+| AC8 fake publisher, both orders | `audio_emission.rs::executor_publishes_{an_effect_then_speech,speech_then_an_effect}_in_stack_order`, `executor_interleaves_audio_with_other_actions_and_branches_in_order` | — |
+| AC8 audio survives a transition | `audio_before_a_directive_is_published_before_the_transition` | `executor_durably_queues_the_selected_branch_in_stack_order_across_a_transition` (LockedAudioSpool + eSpeak stub, dry run removed only in the fixture; queue `[File, Command, File]`, sequences 1–3, outcome `Retry`, the unselected branch queued nothing) |
+| AC8 dry run publishes nothing | — | `executor_publishes_no_audio_under_dry_run` (no spool directory created) |
+| Selected branch only (effects and operands) | `conditions_control::when_false_skips_item_when_true_runs` | `only_the_selected_branch_evaluates_its_operands_and_runs_effects`, `an_unselected_raising_operand_is_never_evaluated` (both directions) |
+| Guard evaluated once; `set` visibility | `mutation_visibility::stack_action_sees_prior_set_frontmatter`, `runtime_set::consecutive_set_actions_observe_each_others_updates` | `a_guard_is_evaluated_once_and_set_is_visible_to_later_actions_and_guards` |
+| Guard failure follows failure routing, never selects `else` | `when_unknown_function_fails_closed` | `a_raising_nested_guard_fails_the_event_without_selecting_else` (`start[0].then[1].when`) |
+| Nested directive ends the event | `control_action_terminates_remaining_items` (depth 1) | `a_depth_two_directive_terminates_every_enclosing_list` (`then` and `else`) |
+| `no_error`: dispatch vs expression | `action_dispatch::{no_error_suppresses_propagation_and_continues, no_error_does_not_suppress_evaluation_raise}` | `nested_dispatch_failure_obeys_no_error_and_otherwise_stops_the_event`, `nested_no_error_does_not_suppress_an_evaluation_error`, `runtime_set::bundle_no_error_cannot_suppress_its_set_failure` (AC4) |
+
+**Drop safety net: kept.** `LifecycleRunGuard::emit_signal` is reached in
+production only from the guard's `Drop` (a run that started but never emitted a
+terminal event). It is the last-resort terminal notice, as the old
+notification-field drop path was. Its doc comment now says "stack order (a root
+dictionary's canonical order)" and lists what it skips.
+
+**Bug fixed (`lifecycle/mod.rs::emit_signal`).** Text with an embedded
+template (`message: "done: {{ fm.title }}"`) parses as a `StringLiteral`, so
+the safety net sent the raw `{{ fm.title }}`. It now skips any text in which
+`ExpressionFinder::find_all_plain` finds a span, because it has no context to
+evaluate one. Before the fix, the new
+`guard_runtime.rs::guard_drop_emits_only_root_literal_communication` test
+failed with `Message { text: "done: {{ fm.title }}" }`. The test asserts that
+only root literal communication is emitted; guarded items, whole-value
+templates, embedded templates, and `shell` are skipped.
+
+### Wave 4 — editor integration (AC12)
+
+Darkmatter-only owner. `just test` in `darkmatter/`: **9950 run, 9950
+passed, 10 skipped**; `just lint` in `darkmatter/` passed (including the
+`zed-dmls` wasm32 build). `mapping_only_corpus` passed against its existing
+baseline: **no re-bless**.
+
+- **Schemas, edited in place** (same paths, imports, and extension loading):
+  - `claudine-types.yaml`: `lifecycle-event` is a list of entries or a root
+    dictionary. An entry is a bare verb string or a `lifecycle-stack-item` with
+    `when` (expression), `then`, `else`, `no_error`, and any verb key; it is
+    never empty. A `then`/`else` body is a non-empty list or a non-empty
+    dictionary. `lifecycle-branch-item` types `when` one level down; deeper
+    bodies are loose, and the parser owns the depth limit. `loop-event` gained
+    `gate:` and loose verb keys. `lifecycle-action`, `stack`/`action`,
+    `say_first`, and the fixed communication-field list are removed.
+  - `claudine.yaml`: the five generated `_loop_*` properties are removed and
+    the `loop` description is updated.
+  - Checked with `md schema validate`: every new-grammar shape (including five
+    levels) passes; `then: []`/`{}`, `start: run-now`, `- 5`, `- {}`, and
+    `gate: hi` are rejected.
+- **DMLS mirror** (`dmls/src/diagnostics/nested_span.rs`): one classifier
+  that follows Claudine's path spelling: an event or `loop.gate` is a list or
+  a dictionary; in an item, `when` is a condition, `then`/`else` are bodies,
+  and any other key is a verb; everything under a verb is checked (operands,
+  long-form parameters, `set`/`with` data) except a long-form `no_error`;
+  loose `loop:` keys are verbs, and iteration controls and `gate` itself are
+  not. New constants `STRUCTURAL_ITEM_KEYS` and `LOOP_ITERATION_KEYS`;
+  `COMMUNICATION_FIELDS` and the `stack`/`action`/`say_first` special cases are
+  gone. **Intentional behavior change:** a whole-value `{{ }}` in a dictionary
+  `effect` is now checked, matching Claudine's own validation (it used to be
+  skipped).
+- **Tests mapped to AC12:**
+  - Extension loads at its documented paths and accepts the new grammar:
+    `cli/tests/l1/schema_validate.rs` (`…_accepts_reused_lifecycle_and_loop_types`
+    with `gate`, `…_rejects_an_empty_lifecycle_item` at `/initialize/0`),
+    `lib/tests/l1/base_schema_end_to_end.rs` (`claudine_schema_accepts_typed_lifecycle_stack`,
+    `…_rejects_malformed_lifecycle_stack`,
+    `…_accepts_loop_controls_and_lifecycle_concerns_together`),
+    `lib/tests/l1/schemas_constraints_block_matrix.rs` (now reads
+    `lifecycle-branch-bundle`).
+  - Inventory guard still active:
+    `nested_span_tests::lifecycle_inventory_matches_the_authored_claudine_schema`
+    (rewritten: union arms, structural keys plus any verb, loop keys equal
+    `LOOP_ITERATION_KEYS` + `gate`, `when`/`while`/`until` expressions); the
+    opt-in `dasherized_identifier_corpus::condition_keys_match_the_shipped_claudine_schema`
+    (run, passing). Claudine's
+    `single_pass_inventory_matches_the_authored_claudine_schema` still passes.
+  - Classification of list item, `then`/`else` body, root dictionary, and
+    `gate`: `nested_span_tests::{path_matcher_classifies_representative_lifecycle_paths,
+    item_operands_proxy_with_values_and_predicates_are_diagnosed,
+    root_dictionaries_branch_bodies_and_the_loop_gate_are_diagnosed,
+    loose_loop_verbs_are_diagnosed_and_iteration_controls_are_not}`; the nine
+    lifecycle tests in `providers/frontmatter/sequence_tests.rs`, including
+    `failure[0].else[1].when` and `loop.gate[3].when`.
+  - Pointer tests (`overlay/frontmatter.rs`): `test_mapping_items_descend_to_their_keys`
+    (`initialize[0].when`, `initialize[1].then[0]`) and the new
+    `test_lifecycle_pointers_mirror_the_claudine_authored_path`
+    (`start.say`, `failure[0].else[1].shell.command`, `loop.gate[0].then[0].warn`).
+  - Also migrated: `dmls/tests/l1/no_side_effects.rs` (hover lines moved by
+    one), `lib/src/markdown/{mapping_orders,frontmatter}.rs` tests,
+    `capture/groups.rs`, the frozen `darkmatter/cli/.../prompts/plan.md` and
+    `darkmatter/lib/.../prompts/_reviews/feature-review.md`, and
+    `_loop_count` → `_iter_count` in `cli/tests/l1/compose_dasherized_identifiers.rs`.
+- **Docs:** `dmls/docs/diagnostics.md` (now says how deep `when` is checked),
+  `docs/lsp/features.md`, `docs/inline/interpolation.md`.
+- **Remaining `darkmatter/` AC16 hits, all intentional:** `features/_completed/**`
+  and `fixes/_completed/**` (snapshots);
+  `lib/tests/fixtures/clean/prompts-commit-464e2d90e.md` (must stay
+  byte-identical to a pinned git blob); `dmls/docs/diagnostics.md:200`
+  `- action: archive` (a content-policy example, not lifecycle grammar);
+  `stack` struct fields in `render_tree/fold.rs`, `schemas/resolve.rs`, and
+  `transclusion/types.rs` (unrelated Rust).
+- **Known limitation:** DMLS checks a nested `{{ }}` inside a `when` only where
+  the schema types `when` as an expression (the first two conditional levels).
+  A deeper `when` is accepted by the editor and caught by Claudine's parser
+  before launch.
+
+### Wave 5 — retry overlays (AC5) and CLI removed grammar (AC6)
+
+**Design as built**
+
+- `StackControl::Retry` gained `overlay: IndexMap<String, Value>` (empty
+  when `with` is omitted). `resolve_proxy_with`/`walk_proxy_with` became
+  `resolve_with_overlay`/`walk_with_overlay`, and `retry` uses the same path as
+  `proxy`: native values, literal data, nested diagnostic paths, and the
+  lifecycle-key template rejection are unchanged for proxy. For a retry, the
+  error's `property` is the retry's authored path (`failure[0].then[0].retry`),
+  so `overlay_directive` reads "retry", and `target` is the current document.
+  The overlay resolves inside `resolve_control`, so a failure leaves
+  `control: None` plus an `evaluation_error`: nothing is dispatched, no budget
+  is spent, and `no_error` cannot hide it.
+- `control.rs::decide_control` ignores the overlay; `ControlDispatch::Retry`
+  is unchanged (contract 8).
+- CLI: `HarnessPromptState.pending_retry_overlay: Option<IndexMap<…>>`.
+  `control_dispatch.rs` sets it on retry (`None` for an empty overlay, so a
+  later retry without `with` clears it) and clears it on resume;
+  `coordinator.rs` clears it on proxy adoption. `prompt.rs::active_overlay(state)`
+  merges `state.overlay` (retained proxy overlay) and then the retry overlay
+  key-wise on top; both `load_overlaid_source` and `harness_prepare_options`
+  (the existing `proxy_overlay` field, which is how pre-launch re-entry gets
+  it) use it. Nothing is written to disk; values pass through the proxy data
+  layer and are never evaluated as templates. `compose/prep.rs` needed no
+  change.
+
+**Departure from contract 8 (consumption point).** A retried attempt reads its
+document twice: the shell preflight (`preflight_harness_document`), then
+`materialize_harness_prompt`. A `take()` inside `load_overlaid_source` would
+hide the overlay from the second read, which is the one the provider runs
+against. The preflight read therefore only looks at the overlay, and
+`materialize_harness_prompt` consumes it, even when that read fails. A failed
+preflight also clears it. The overlay still applies to exactly one transition
+(test `the_retried_attempts_preflight_and_materialization_both_see_the_retry_overlay`).
+
+**Bug fixed outside the planned files (`lib/src/composition/preflight.rs`).**
+In plain `compose`, a `_loop_count` read introduced only by a transcluded
+document surfaced as a generic `MarkdownError: interpolation failed`. The
+shell-discovery walk wrapped it as `PreFlightDiscoveryFailed` before
+composition could map it to `RemovedGrammar`. A `discovery_failed()` helper now
+runs `removed_loop_read_in_composition` first at both walk sites. This closes
+part of the Phase 2 gap "later-render detection does not reach the
+context-free branch-discovery pass"; the error still reports `path: "render"`.
+
+**Requirement → test**
+
+| Requirement | Test |
+| --- | --- |
+| AC5 evaluation: native values, static keys, literal data | `executor/tests/retry_with_evaluation.rs::a_retry_overlay_keeps_native_values_static_keys_and_literal_data` |
+| AC5 omitted/empty overlay; other parameters unchanged | `…::an_omitted_or_empty_retry_overlay_is_empty_and_the_other_parameters_are_unchanged` |
+| AC5 `err` feeds the overlay | `…::the_err_global_feeds_a_failure_retry_overlay` |
+| AC5 failure diagnostic (verb, document, nested path) | `…::a_retry_overlay_failure_names_retry_the_current_document_and_the_nested_path` |
+| AC5 atomic failure; `no_error` cannot hide it | `…::a_failing_retry_overlay_is_atomic`, `…::no_error_does_not_suppress_a_retry_overlay_failure` |
+| AC5 lifecycle-key templates rejected | `…::run_time_template_text_cannot_become_lifecycle_configuration_through_a_retry` |
+| AC5 repeated retry | `loop_control/tests/overlay_layering.rs::{a_retry_overlay_applies_to_its_own_fresh_read_only, a_later_retry_replaces_an_unconsumed_retry_overlay}` |
+| AC5 retry then resume | `…::a_resume_never_sees_a_retry_overlay` |
+| AC5 proxy-owned document | `…::{a_retry_overlay_layers_over_the_retained_proxy_overlay, proxy_adoption_drops_an_unconsumed_retry_overlay}` |
+| AC5 no disk persistence / no template re-evaluation | `…::{a_retry_overlay_never_writes_to_disk, a_retry_overlay_value_is_never_evaluated_as_a_template}` |
+| AC5 refresh validation failure | `…::a_retry_overlay_the_schema_rejects_fails_the_refresh` |
+| AC5 evaluation failure spends no attempt | `retry_resume.rs::a_failed_retry_overlay_spends_no_attempt_and_stages_nothing` |
+| AC5 end to end (binary) | `cli/tests/l1/compose_retry_overlay.rs::a_retry_overlay_reaches_the_second_attempts_prompt` (prompts are exactly `["reason=first try", "reason=first try, then retried"]`; file bytes unchanged) |
+| AC6 CLI boundary | `cli/tests/l1/compose_removed_grammar.rs`: `macro_rules!` rows `stack_key`, `action_aggregator`, `action_beside_when`, `say_first`, `communication_{message,sound,route}`, `loop_read_in_{frontmatter,body}` × `compose`/`inline-compose`/`sequence` (27 tests; exit 1, "removed grammar", authored path, removed spelling, replacement, launch marker absent); guard `every_table_row_generates_its_tests`; late render `a_retired_read_introduced_by_a_transclusion_is_rejected_at_render` |
+
+Both new L1 modules are `#[cfg(unix)]` in `cli/tests/l1/main.rs` because
+their provider stubs are `/bin/sh` scripts, following the existing stub L1
+pattern. Windows coverage of the same contracts comes from the in-process
+`overlay_layering.rs`/`retry_with_evaluation.rs` tests, which are not gated.
+
+### Integration gates (macOS, this host)
+
+- First `just test` in `claudine/`: one failure,
+  `dispatch_inventory::dispatch_inventory_matches_committed_file` (1849 → 1851
+  sites). The two new sites are `direct-ref` references, test fixtures naming
+  a provider, not conditional dispatch. Regenerated
+  `claudine/docs/providers/dispatch-inventory.json` with
+  `CLAUDINE_UPDATE_INVENTORY=1 just test-cli dispatch_inventory::`.
+- `just test` in `claudine/`: **8868 run, 8868 passed, 9 skipped** (the
+  recipe's standing skips; Phase 2 ended at 8810).
+- `just lint` in `claudine/` (incl. `lint-lifecycle-doc-facets`): passed.
+- `just test` / `just lint` in `darkmatter/`: passed (see Wave 4 above).
+- No other OS exercised. The changes are platform-neutral Rust (overlay
+  merging, schema YAML, a DMLS path classifier); the two new `cfg(unix)` L1
+  files follow the existing stub pattern. CI's Linux/macOS cells and the
+  nightly Windows/WSL2 cells cover the rest.
+- Not run: `just test-l2` (still fails until Phase 4 migrates
+  `cli/tests/level2/**`, as recorded in Phase 2).
+
+### Docs Phase 4 must update (found here, not edited)
+
+The flow-control pages still describe the Phase 2–removed names, so they are
+left for the planned Phase 4 rewrite rather than patched piecemeal:
+
+- `flow-control-reference.md` "Passing values with `with:`" (~line 82–185): add
+  `retry.with` (one transition's fresh re-read, layered on top of a retained
+  proxy overlay so retry wins a shared key; a later retry without `with`, a
+  resume, or a proxy adoption never sees it; an evaluation failure takes no
+  transition and spends no budget; the diagnostic reads "`retry` to `<current
+  document>`"). Rename `LifecycleProxyWith*` → `LifecycleWith*`, replace
+  `LifecycleProxyOnlyParameter` with `LifecycleWithUnsupported`, and drop the
+  `LifecycleStackAmbiguous` row. Say that `resume` takes no `with`.
+- `flow-control.md`: add `with` to the `retry` parameters.
+- `composition.md` (~line 1428, "keep the document's overlay"): a retry adds a
+  one-read retry overlay.
+- `lifecycle.md` (~line 863): include `retry … with` beside `proxy … with`.
+- `pre-flight-checks.md`: a retired `_loop_*` read met during discovery now
+  reports `RemovedGrammar` (`path: render`), not `PreFlightDiscoveryFailed`.
+
+### Requirement-to-test summary (Phase 3)
+
+AC4 (executor side), AC8, and AC17 (executor side): Wave 4 executor table.
+AC5: Wave 5 table. AC6 (CLI boundary): `compose_removed_grammar.rs`. AC12:
+Wave 4 editor section. No configuration Input Robustness Matrix applies
+(text grammar; see Phase 1). No pre-existing failures remain; nothing was
+skipped beyond the recipes' standing skips.
+
+### Checkpoint
+
+Selected-branch execution and ordered audio tests pass; the editor extension
+loads and accepts the new grammar; parser and editor paths agree. The AC5
+transition and AC6 CLI tests pass; no retry overlay survives past its
+transition. Runtime, parser, and editor changes compile and test together.

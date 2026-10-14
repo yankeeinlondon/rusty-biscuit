@@ -10,7 +10,252 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
 packages:
+    - darkmatter-cli
     - claudine-cli
+    - claudine
+    - claudine-gen
+    - darkmatter
+    - dmls
+source_files_during_phase_2:
+    - claudine/cli/src/commands/compose/loop_run.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/preflight.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/composition/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/active_state_wiring.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/budget_scoping.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/lifecycle_ordering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/proxy.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/recovery_identity.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_evaluation.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_routing.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/unowned_handoff.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/commands/wrap/overlay.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/tests/common/incomplete_subagents.rs
+    - claudine/cli/tests/common/terminal_interrupt.rs
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/clarify.md
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/format.md
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/implement.md
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/plan.md
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/review.md
+    - claudine/cli/tests/fixtures/frozen_prompts/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/nested_span_regression/commit.md
+    - claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/characterization_error_routes.rs
+    - claudine/cli/tests/l1/compose_caller_file_provenance.rs
+    - claudine/cli/tests/l1/compose_initialize_acceptance.rs
+    - claudine/cli/tests/l1/compose_initialize_staged_boot.rs
+    - claudine/cli/tests/l1/compose_presence_parity.rs
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+    - claudine/cli/tests/l1/composition_outputs.rs
+    - claudine/cli/tests/l1/ctx_launch_anchor.rs
+    - claudine/cli/tests/l1/ctx_per_run.rs
+    - claudine/cli/tests/l1/document_environment_routes.rs
+    - claudine/cli/tests/l1/effective_diagnostic_render.rs
+    - claudine/cli/tests/l1/handoff_owners.rs
+    - claudine/cli/tests/l1/inline_completion_lifecycle.rs
+    - claudine/cli/tests/l1/level1_provided_partial_file_pty.rs
+    - claudine/cli/tests/l1/level1_provider_overlay_home.rs
+    - claudine/cli/tests/l1/level1_review_router_partial_pty.rs
+    - claudine/cli/tests/l1/level1_structured_error_message.rs
+    - claudine/cli/tests/l1/lifecycle_downgrade_outcome.rs
+    - claudine/cli/tests/l1/lifecycle_literal_escapes.rs
+    - claudine/cli/tests/l1/lifecycle_set_shell_values.rs
+    - claudine/cli/tests/l1/loop_gate_ambient.rs
+    - claudine/cli/tests/l1/loop_initialize_state.rs
+    - claudine/cli/tests/l1/preflight_execution_parity.rs
+    - claudine/cli/tests/l1/provider_error_finalize.rs
+    - claudine/cli/tests/l1/provider_tail_launch.rs
+    - claudine/cli/tests/l1/provider_tail_ownership.rs
+    - claudine/cli/tests/l1/sequence_budget.rs
+    - claudine/cli/tests/l1/sequence_groups.rs
+    - claudine/cli/tests/l1/sequence_initialize_include_preflight.rs
+    - claudine/cli/tests/l1/sequence_jit.rs
+    - claudine/cli/tests/l1/sequence_schema.rs
+    - claudine/cli/tests/l1/setter_after_switch.rs
+    - claudine/cli/tests/l1/wrap_compose_preflight.rs
+    - claudine/cli/tests/l1/wrap_compose_validation.rs
+    - claudine/cli/tests/l1/wrap_opencode.rs
+    - claudine/cli/tests/l1/wrap_perf.rs
+    - claudine/cli/tests/l1/wrap_sequence_composition.rs
+    - claudine/cli/tests/l1/wrap_sigint.rs
+    - claudine/gen/tests/l1/agent_errors_check.rs
+    - claudine/lib/src/composition/coordinator/commit.rs
+    - claudine/lib/src/composition/coordinator/handoff.rs
+    - claudine/lib/src/composition/coordinator/tests.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/frontmatter_excerpt.rs
+    - claudine/lib/src/composition/frontmatter_excerpt/tests.rs
+    - claudine/lib/src/composition/lifecycle/action_shape.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/actions/tests.rs
+    - claudine/lib/src/composition/lifecycle/audio.rs
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/bindings/tests.rs
+    - claudine/lib/src/composition/lifecycle/control/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/action_dispatch.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/binding_contract.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mutation_visibility.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/proxy_with_evaluation.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/set_shell_values.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/parse.rs
+    - claudine/lib/src/composition/lifecycle/runtime/tests.rs
+    - claudine/lib/src/composition/lifecycle/source_map.rs
+    - claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
+    - claudine/lib/src/composition/lifecycle/tests/audio_emission.rs
+    - claudine/lib/src/composition/lifecycle/tests/diagnostics.rs
+    - claudine/lib/src/composition/lifecycle/tests/grammar.rs
+    - claudine/lib/src/composition/lifecycle/tests/guard_runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/tests/nested_span.rs
+    - claudine/lib/src/composition/lifecycle/tests/parse_config.rs
+    - claudine/lib/src/composition/lifecycle/tests/validation.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+    - claudine/lib/src/composition/looping/actions.rs
+    - claudine/lib/src/composition/looping/config.rs
+    - claudine/lib/src/composition/looping/config/tests.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/gate_ambient.rs
+    - claudine/lib/src/composition/looping/engine/tests/iteration_actions.rs
+    - claudine/lib/src/composition/looping/engine/tests/iteration_bindings.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/looping/engine/tests/mod.rs
+    - claudine/lib/src/composition/looping/engine/tests/post_checked_timing.rs
+    - claudine/lib/src/composition/looping/engine/tests/removed_loop_reads.rs
+    - claudine/lib/src/composition/looping/engine/tests/seed_state.rs
+    - claudine/lib/src/composition/looping/expression.rs
+    - claudine/lib/src/composition/looping/expression/tests.rs
+    - claudine/lib/src/composition/looping/types.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/preflight/tests.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/bootstrap/tests.rs
+    - claudine/lib/src/composition/prepare/tests.rs
+    - claudine/lib/src/composition/reserved.rs
+    - claudine/lib/src/composition/schema/supplied/tests.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/tests/fixtures/frozen_prompts/prompts/_reviews/cross-platform.md
+    - claudine/lib/tests/fixtures/frozen_prompts/prompts/clarify.md
+    - claudine/lib/tests/fixtures/frozen_prompts/prompts/review.md
+    - claudine/lib/tests/l1/agent_errors_fleet.rs
+    - claudine/lib/tests/l1/lifecycle_lift_ready_guard.rs
+    - claudine/lib/tests/l1/main.rs
+    - darkmatter/dmls/src/overlay/expressions/frontmatter_inventory_tests.rs
+    - darkmatter/dmls/tests/fixtures/sequence_descent/implement-plan.md
+    - darkmatter/lib/src/markdown/compose/context/effective_state.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/expression/binding.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/parser.rs
+    - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/tests/l1/dasherized_identifier_compose.rs
+    - darkmatter/lib/tests/l1/host_globals_compose.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/prompts/dasherized_identifier_corpus.rs
+docs_updated_during_phase_2:
+    - claudine/docs/research/agent-errors/_fleet.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/darkmatter/expressions.md
+source_files_during_phase_3:
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/control.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/lifecycle/control/tests.rs
+    - claudine/lib/src/composition/lifecycle/runtime/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/retry_with_evaluation.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/action_dispatch.rs
+    - claudine/lib/src/composition/lifecycle/tests/audio_emission.rs
+    - claudine/lib/src/composition/lifecycle/tests/guard_runtime.rs
+    - claudine/lib/tests/l1/lifecycle_control_flow_spike.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/active_state_wiring.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/budget_scoping.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/tests/l1/compose_removed_grammar.rs
+    - claudine/cli/tests/l1/compose_retry_overlay.rs
+    - claudine/cli/tests/l1/main.rs
+    - darkmatter/docs/schemas/claudine.yaml
+    - darkmatter/docs/schemas/claudine-types.yaml
+    - darkmatter/dmls/src/diagnostics/nested_span.rs
+    - darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+    - darkmatter/dmls/src/overlay/frontmatter.rs
+    - darkmatter/dmls/src/overlay/expressions/frontmatter_inventory_tests.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/tests/l1/no_side_effects.rs
+    - darkmatter/lib/src/markdown/compose/context/capture/groups.rs
+    - darkmatter/lib/src/markdown/frontmatter.rs
+    - darkmatter/lib/src/markdown/mapping_orders.rs
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/schemas_constraints_block_matrix.rs
+    - darkmatter/lib/tests/prompts/dasherized_identifier_corpus.rs
+    - darkmatter/lib/tests/fixtures/frozen_prompts/prompts/_reviews/feature-review.md
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/l1/compose_dasherized_identifiers.rs
+    - darkmatter/cli/tests/fixtures/frozen_prompts/prompts/plan.md
+docs_updated_during_phase_3:
+    - claudine/docs/providers/dispatch-inventory.json
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/inline/interpolation.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/claudine/SKILL.md
 ---
 # Lifecycle Grammar Implementation Plan
 
@@ -55,7 +300,7 @@ Wave numbers are unique across the plan. A wave is a dependency step; tasks mark
 
 ### Wave 2 — Shared action model
 
-- [ ] **Define recursive model**
+- [x] **Define recursive model**
   - Update `claudine/lib/src/composition/lifecycle/{actions.rs,action_shape.rs,signatures.rs,mod.rs}` to represent ordered leaf actions and conditional nodes with ordered branch bodies. Compact dictionaries expand into that model during parsing.
   - Add typed retry `with` data using the existing proxy-overlay value contract; remove communication payload aliases and unused `route` model fields. Preserve action signatures, literal/native-value rules, positional arity, defaults, `skip` placement, and planned directive behavior.
   - Introduce the agreed removed-grammar and shared-overlay diagnostics in composition errors/rendering; establish authored paths usable by parser, walker, executor, and editor tests. Update affected comments and compile-time consumers sufficiently to make the next wave reviewable.
@@ -65,7 +310,7 @@ Wave numbers are unique across the plan. A wave is a dependency step; tasks mark
 
 ### Wave 3 — Parser and loop bindings (parallel)
 
-- [ ] **Implement stack grammar** — **parallel**, lifecycle parser/source-map/validator owner
+- [x] **Implement stack grammar** — **parallel**, lifecycle parser/source-map/validator owner
   - Rewrite `parse.rs` for flat lists and root dictionaries across all six events and task `setup`/`teardown`. Parse recursive branches with root guards at depth one, siblings at the same depth, and a path-bearing error at depth six.
   - Expand dictionaries as `set`, ordered communication (`stdout`, `stderr`, `info`, `warn`, `success`, `message`, `notify`, `effect`, `say`), `shell`, ASCII-sorted canonical side-effect/expression names, then one control directive. Reject `say`/`speak` collisions, root `when`, multiple directives, and multi-verb long forms.
   - Enforce list-local control-last placement; a guarded item never counts as unconditional. Enforce both `no_error` homes, YAML boolean typing, inner/sibling conflict rejection, prohibition beside `then`/`else`, and exclusion from standalone or bundled `set` failures.
@@ -73,7 +318,7 @@ Wave numbers are unique across the plan. A wave is a dependency step; tasks mark
   - Parse loop loose verbs or `gate` through the same grammar; reject mixing them and root `when`. Check removed keys before extracting lifecycle concerns; iteration `action`/`actions` remain controls. Keep gate execution on every condition check, including the exit pass.
   - Extend the shared expression walker and `source_map.rs` through both branches, bundles, mutations, and `retry.with`. Both branches undergo binding, expression-syntax, nested-span, and shell-approval validation; nested `initialize` shells and shell-valued `set` fail even in dead branches.
   - Add focused tests for AC1–AC6 and AC17, with authored paths such as `failure[0].else[1].shell.command`; exercise every stack home, not only document events.
-- [ ] **Introduce loop bindings** — **parallel**, binding/loop/expression owner
+- [x] **Introduce loop bindings** — **parallel**, binding/loop/expression owner
   - Update lifecycle binding views, runtime context plumbing, `looping/expression.rs`, `looping/engine.rs`, `reserved.rs`, reporting queries, and `cli/src/commands/compose/loop_run.rs` to supply the five unchanged values through captured host bindings under `loop`.
   - Cover bare/dotted/static-bracket access; `fm.loop` remains configuration. Missing ambient members cannot fall back to frontmatter, and declared `loop` outside a loop produces the typed scope diagnostic. Plain Darkmatter composition gains no ambient loop global.
   - Remove `_loop_*` seeding and detect expression reads of the five exact retired names via shared parsing/validation, including explicit `fm` forms and static brackets. Check discoverable frontmatter/body reads before launch and late-introduced expressions when prepared for rendering.
@@ -86,13 +331,13 @@ Wave numbers are unique across the plan. A wave is a dependency step; tasks mark
 
 ### Wave 4 — Runtime and editor behavior (parallel)
 
-- [ ] **Execute ordered nodes** — **parallel**, lifecycle executor/audio owner
+- [x] **Execute ordered nodes** — **parallel**, lifecycle executor/audio owner
   - Adapt `executor.rs`, runtime context, and audio helpers to dispatch the shared ordered nodes serially. Evaluate each reached guard exactly once against live state using existing truthiness; only the selected body evaluates operands. Guard failure follows existing failure routing and cannot select `else`.
   - Preserve `set` snapshot/commit semantics and visibility to following actions. Return a nested control result through every enclosing list immediately; retain existing catch-event routing and exactly-once `finalize` behavior.
   - Remove the notification-field execution path, `say_first`, and `audio_phases`. Publish each audio action at its position; preserve Playa queue durability, tracked message registration, and ordinary CLI shutdown draining.
   - Prove ordered publication in both directions with a fake publisher, continued durability after transitions, selected-branch effects only, nested event termination, mutation visibility, and dispatch-versus-expression failure behavior under `no_error` (AC4, AC8, AC17).
   - For durable queue coverage, use `LockedAudioSpool` and stub TTS preparation; disable dry run only inside that isolated fixture while preventing playback. Separately assert dry-run prompt executions publish no audio.
-- [ ] **Preserve editor integration** — **parallel**, Darkmatter schema/DMLS owner
+- [x] **Preserve editor integration** — **parallel**, Darkmatter schema/DMLS owner
   - Update `darkmatter/docs/schemas/claudine.yaml` and `claudine-types.yaml` in place for new-grammar examples and recursive bodies. Keep existing paths, imports, extension loading, and `lifecycle_inventory_matches_the_authored_claudine_schema` active.
   - Permit legal deep bodies loosely where existing schema types cannot express them; parser enforcement owns depth five and list ordering. Do not introduce full action typing or new authoritative schema files.
   - Update `darkmatter/dmls/src/diagnostics/nested_span.rs`, its tests, and `overlay/frontmatter.rs` pointers for list items, branch bodies, root dictionaries, and `gate`; remove old structural fields.
@@ -102,7 +347,7 @@ Wave numbers are unique across the plan. A wave is a dependency step; tasks mark
 
 ### Wave 5 — Retry overlay integration
 
-- [ ] **Consume retry overlays**
+- [x] **Consume retry overlays**
   - Generalize the existing source-side proxy overlay evaluation for `retry.with` without changing proxy behavior. Preserve native values, static keys, literal target data, captured context, and exact nested diagnostic paths; reject whole-map interpolation and executable spans in lifecycle-key values.
   - Carry resolved overlays through `StackControl`, `control.rs` dispatch, runtime decisions, wrapper `loop_control/control_dispatch.rs`, active-state refresh, and compose preparation. Apply before the fresh read's schema validation/composition and consume only the transition's retry overlay.
   - Prove evaluation failure installs no overlay and spends no retry transition; `no_error` cannot hide it. Preserve additional-attempt budgets, delay/backoff, pre/post-launch re-entry, initialize-once behavior, and resume session compatibility checks.
