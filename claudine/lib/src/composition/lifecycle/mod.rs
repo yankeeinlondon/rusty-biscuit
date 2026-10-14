@@ -331,7 +331,7 @@ pub struct LifecycleRuntimeState {
 // Emitter trait + default implementation
 // ---------------------------------------------------------------------------
 
-/// Trait for emitting lifecycle notification side effects.
+/// Trait for emitting lifecycle communication side effects.
 ///
 /// Injectable to allow test doubles that capture emissions without hitting
 /// real stderr, messaging, TTS, or sound playback. The text channels keep the
@@ -629,12 +629,12 @@ impl<'a> LifecycleRunGuard<'a> {
     /// can still fire.
     ///
     /// A `success`/`blocked` stack that ends in an explicit `error(...)` action
-    /// downgrades the run to `failure`. The success/blocked top-level
-    /// communication has **already** fired (top-level fires before the stack, per
-    /// the spec) and that emission must remain — so the terminal slot was already
-    /// taken by `Success`/`Blocked`. This overwrites only [`Self::terminal_signal`]
-    /// to `Failure` while keeping [`Self::terminal_emitted`] true, letting the
-    /// caller run the `failure` event's top-level + stack directly (without
+    /// downgrades the run to `failure`. The actions before the directive in the
+    /// success/blocked stack have **already** run and their emissions must
+    /// remain — so the terminal slot was already taken by `Success`/`Blocked`.
+    /// This overwrites only [`Self::terminal_signal`] to `Failure` while keeping
+    /// [`Self::terminal_emitted`] true, letting the caller run the `failure`
+    /// event's stack directly (without
     /// [`Self::record_event_emission`], which would refuse the taken slot) and
     /// keeping [`Self::emit_finalize_once`] enabled.
     ///
@@ -928,10 +928,10 @@ impl Drop for LifecycleRunGuard<'_> {
     }
 }
 
-/// Runtime context required for emitting lifecycle notifications.
+/// Runtime context required for emitting lifecycle communication.
 ///
 /// Holds references to settings, messaging configuration, terminal, and paths
-/// needed to resolve and emit lifecycle notifications.
+/// needed to resolve and emit lifecycle communication actions.
 #[derive(Debug)]
 pub struct LifecycleRuntimeContext<'a> {
     /// Global settings (includes TTS configuration).

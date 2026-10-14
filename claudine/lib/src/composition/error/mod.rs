@@ -600,7 +600,7 @@ pub enum CompositionError {
         line: usize,
     },
 
-    /// A lifecycle notification property failed to deserialize.
+    /// A lifecycle frontmatter property has an invalid value.
     #[error("invalid lifecycle property `{property}`: {message}")]
     LifecycleInvalid {
         /// The frontmatter property that failed to parse (e.g. `"success"`).
@@ -611,7 +611,7 @@ pub enum CompositionError {
         source_file: PathBuf,
         /// The unknown field name extracted from the serde error (e.g. `"speak"`).
         unknown_field: Option<String>,
-        /// The list of valid field names for the lifecycle notification.
+        /// The valid field names, when the error is an unknown field.
         expected_fields: Vec<String>,
     },
 
@@ -1037,12 +1037,12 @@ pub enum CompositionError {
 
     /// The short-form lifecycle action grammar `verb(args)` has been removed.
     ///
-    /// Authors must use positional (`verb: value`) or key/value
-    /// (`{ action: verb, ... }`) form. The `rewrite` field carries the
-    /// positional equivalent for the did-you-mean message.
+    /// Authors must use short form (`verb: value`) or long form
+    /// (`verb: { param: value }`). The `rewrite` field carries the short-form
+    /// equivalent for the did-you-mean message.
     #[error(
         "short-form lifecycle action `{raw}` in `{property}` has been removed ({source_path}).\n\n\
-         Use the positional or key/value form instead: {rewrite}",
+         Use the short form (`verb: value`) or the long form instead: {rewrite}",
         source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleShortFormRemoved {
@@ -1056,14 +1056,14 @@ pub enum CompositionError {
         rewrite: String,
     },
 
-    /// A variadic expression-function action was authored in key/value form.
+    /// A variadic expression-function action was authored in long form.
     ///
     /// Variadic functions (`and`, `or`) accept a variable number of positional
     /// arguments and have no deterministic named-parameter mapping, so they
-    /// reject the `{ action: verb, ... }` shape. Authors must use the positional
-    /// array form (`and: [a, b, c]`).
+    /// reject the `verb: { param: value }` shape. Authors must use the
+    /// positional array form (`and: [a, b, c]`).
     #[error(
-        "lifecycle expression function `{verb}` in `{property}` does not support key/value form; \
+        "lifecycle expression function `{verb}` in `{property}` does not support long form; \
          use the positional array form (`{verb}: [...]`) ({source_path})",
         source_path = biscuit_file::to_portable_string(source_path)
     )]
@@ -1253,7 +1253,7 @@ pub enum CompositionError {
 
     /// A flow-control action is valid in the event (placement is universal),
     /// but its runtime effect — run-loop re-entry (`retry`), hand-off
-    /// (`proxy`), or the deferred-queue (`requeue`) — is not wired for events
+    /// (`proxy`), or deferred re-execution (`defer`) — is not wired for events
     /// outside the provider run loop: `initialize`, a compose pre-flight
     /// `blocked`, and the `loop` gate. The control is surfaced as a clear error
     /// rather than a silent no-op. (`resume` reports `ResumeWithoutSession`
@@ -1290,10 +1290,14 @@ pub enum CompositionError {
         source_path: PathBuf,
     },
 
-    /// A lifecycle stack requested `requeue(...)`, but the runtime could not
-    /// record the prompt in the deferred-execution queue.
+    /// A lifecycle stack requested `defer`, but the runtime could not record
+    /// the prompt in the deferred-execution queue.
+    ///
+    /// **Planned:** nothing raises this yet; `defer` reports
+    /// [`Self::LifecycleDeferNotImplemented`] until the rendezvous scheduler
+    /// can receive prompts.
     #[error(
-        "lifecycle `requeue` (delay `{delay}`{reason}) could not enqueue the \
+        "lifecycle `defer` (delay `{delay}`{reason}) could not enqueue the \
          prompt via rendezvous: {message} ({source_path})",
         reason = match reason {
             Some(r) => format!(", reason `{r}`"),
@@ -1302,7 +1306,7 @@ pub enum CompositionError {
         source_path = biscuit_file::to_portable_string(source_path)
     )]
     LifecycleRequeueEnqueueFailed {
-        /// The prompt file whose stack requested requeue.
+        /// The prompt file whose stack requested `defer`.
         source_path: PathBuf,
         /// The requested delay duration string.
         delay: String,

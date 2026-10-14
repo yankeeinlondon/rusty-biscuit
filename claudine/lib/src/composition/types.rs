@@ -688,7 +688,7 @@ pub struct PreparedComposition {
     /// re-resolves the declaration, so a run cannot weaken its own contract by
     /// editing `$schema` mid-run.
     pub launch_schema: Option<LaunchSchema>,
-    /// Parsed lifecycle notification config from effective frontmatter.
+    /// Parsed lifecycle stacks from effective frontmatter.
     pub lifecycle: LifecycleConfig,
     /// Darkmatter composition performance report, when enabled.
     pub compose_perf: Option<ComposePerfReport>,

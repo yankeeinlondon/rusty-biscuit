@@ -297,7 +297,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 .body(body)
                 .hint(
                     "Pass object data through a whole-value `{{ ... }}` interpolation, or use \
-                     key/value form with a scalar parameter.",
+                     long form with a scalar parameter.",
                 )
         }
         CompositionError::LifecycleObjectDataThroughInterpolationParameter {
