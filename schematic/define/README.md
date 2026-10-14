@@ -68,8 +68,8 @@ The definition process is intentionally **data-driven**: you describe *what* the
 | `ParamDef` | Single parameter definition |
 | `QueryParamType` | Parameter value type |
 | `ParamStyle` | Parameter serialization style |
-| `PaginationStyle` | Common pagination request patterns |
-| `PaginationResponse` | How APIs signal pagination state in responses |
+| `PaginationStyle` | Superseded: materializes `page`/`per_page`-style query parameters; drives no pager |
+| `PaginationResponse` | Superseded: read by nothing |
 
 ### WebSocket API Types
 
@@ -525,6 +525,8 @@ let api = RestApi {
     cross_origin: CrossOrigin::same_origin(),
     request_id_header: Some("x-request-id".to_string()),
     secret_names: vec![],
+    default_pagination: None,
+    pagination_exceptions: vec![],
 };
 ```
 
@@ -782,6 +784,8 @@ let api = RestApi {
     cross_origin: CrossOrigin::default(),
     request_id_header: None,
     secret_names: vec![],
+    default_pagination: None,
+    pagination_exceptions: vec![],
 };
 ```
 
@@ -868,6 +872,8 @@ let api = RestApi {
     cross_origin: CrossOrigin::default(),
     request_id_header: None,
     secret_names: vec![],
+    default_pagination: None,
+    pagination_exceptions: vec![],
 };
 ```
 
@@ -959,6 +965,8 @@ let api = RestApi {
     cross_origin: CrossOrigin::default(),
     request_id_header: None,
     secret_names: vec![],
+    default_pagination: None,
+    pagination_exceptions: vec![],
 };
 ```
 
@@ -983,49 +991,45 @@ let params = EndpointParams::default()
     .with_query_param("limit", QueryParamType::Integer, false, Some("Max results"));
 ```
 
-### Endpoint with Pagination
-
-```rust
-use schematic_define::{
-    Endpoint, RestMethod, ApiResponse, ApiRequest,
-    params::{EndpointParams, PaginationStyle, PaginationResponse}
-};
-
-Endpoint {
-    id: "ListUsers".to_string(),
-    method: RestMethod::Get,
-    path: "/users".to_string(),
-    description: "List all users with pagination".to_string(),
-    request: None,
-    response: ApiResponse::json_vec_type("User"),
-    headers: vec![],
-    params: Some(EndpointParams::default()
-        .with_pagination(PaginationStyle::github())
-        .with_response_pagination(PaginationResponse::LinkHeader)),
-    oauth_scopes: None,
-}
-```
-
 ### Pagination
 
-`PaginationStyle` provides standardized pagination patterns:
+Pagination is authored once per API, not on endpoints. `RestApi` has a
+default strategy for its lists and one table of exception rows keyed by
+endpoint id; the types live in `schematic_define::pagination`:
 
 ```rust
-use schematic_define::params::{EndpointParams, PaginationStyle, PaginationResponse};
+use schematic_define::pagination::{
+    Collection, MoreSignal, PageSize, PaginationException, Strategy, ValueSource,
+};
 
-// GitHub-style pagination (page + per_page)
-let params = EndpointParams::default()
-    .with_pagination(PaginationStyle::github())
-    .with_response_pagination(PaginationResponse::LinkHeader);
+let default = Strategy::page_number("page", MoreSignal::link_rel("next"))
+    .page_size(PageSize::new("per_page").server_default(30).max(100))
+    .build();
 
-// Cursor-based pagination
-let params = EndpointParams::default()
-    .with_pagination(PaginationStyle::cursor("after", Some("limit"), 20));
-
-// Offset/limit pagination
-let params = EndpointParams::default()
-    .with_pagination(PaginationStyle::offset_limit("offset", "limit", 20, 100));
+// A GET endpoint whose response is `Vec<T>` inherits `default`. Wrapper
+// lists, opt-outs, overrides, and non-GET lists need a row.
+let exceptions = vec![
+    PaginationException::new(
+        "ListWorkflowRuns",
+        Collection::at("workflow_runs")
+            .item_type("WorkflowRun")
+            .paginate(default.clone().total(ValueSource::body("total_count"))),
+    ),
+    PaginationException::new("GetTagReference", Collection::root().unpaginated()),
+];
+// RestApi { default_pagination: Some(default), pagination_exceptions: exceptions, .. }
 ```
+
+A strategy input with the same name and location as a declared parameter
+adopts it (the request struct drops the field) only when the strategy
+authors the knob that replaces it. The rules are checked by
+`pagination::validate_pagination`, which `schematic-gen` runs; see
+[generation validation](../docs/generation/validation.md#pagination-rules).
+
+`PaginationStyle`, `PaginationResponse`, and `EndpointParams::with_pagination`
+are superseded. They remain only because existing definitions still use
+`with_pagination` to add ordinary query parameters; nothing generates a pager
+from them.
 
 ### QueryParamType Variants
 

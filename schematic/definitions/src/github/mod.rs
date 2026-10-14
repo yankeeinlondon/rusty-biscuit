@@ -516,6 +516,8 @@ pub fn define_github_api() -> RestApi {
         // GitHub sends its request id in `X-GitHub-Request-Id`.
         request_id_header: Some("x-github-request-id".to_string()),
         secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     }
 }
 

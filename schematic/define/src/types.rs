@@ -12,6 +12,7 @@ use strum::{Display, EnumIter, EnumString};
 use crate::auth::{AuthPolicy, AuthStrategy, EnvAuthStrategy};
 use crate::cross_origin::CrossOrigin;
 use crate::headers::{EnvList, EnvMapping};
+use crate::pagination::{PaginationException, Strategy};
 use crate::params::EndpointParams;
 use crate::request::ApiRequest;
 use crate::response::ApiResponse;
@@ -116,6 +117,8 @@ pub enum RestMethod {
 ///     cross_origin: CrossOrigin::default(),
 ///     request_id_header: None,
 ///     secret_names: vec![],
+///     default_pagination: None,
+///     pagination_exceptions: vec![],
 /// };
 ///
 /// assert_eq!(api.name, "SimpleApi");
@@ -219,6 +222,8 @@ pub struct RestApi {
     ///     cross_origin: CrossOrigin::default(),
     ///     request_id_header: None,
     ///     secret_names: vec![],
+    ///     default_pagination: None,
+    ///     pagination_exceptions: vec![],
     /// };
     /// ```
     pub env_mapping: Option<EnvMapping>,
@@ -232,6 +237,15 @@ pub struct RestApi {
     /// (matched exactly) whose values are never stored in metadata or shown,
     /// beyond the built-in names and the API's authentication names.
     pub secret_names: Vec<String>,
+    /// Strategy inherited by every list endpoint without an exception row.
+    ///
+    /// `None` leaves lists unpaginated. A GET endpoint whose response is an
+    /// explicit `Vec<T>` is a list automatically; any other list needs a row in
+    /// [`Self::pagination_exceptions`]. See [`crate::pagination::resolve`].
+    pub default_pagination: Option<Strategy>,
+    /// List shapes keyed by endpoint id: wrapper lists, opt-outs, overrides,
+    /// and non-GET lists. Each id names an endpoint of this API at most once.
+    pub pagination_exceptions: Vec<PaginationException>,
 }
 
 impl RestApi {
@@ -275,6 +289,8 @@ impl RestApi {
     ///     cross_origin: CrossOrigin::default(),
     ///     request_id_header: None,
     ///     secret_names: vec![],
+    ///     default_pagination: None,
+    ///     pagination_exceptions: vec![],
     /// };
     ///
     /// let mapping = api.default_env_mapping();
@@ -304,6 +320,8 @@ impl RestApi {
     ///     cross_origin: CrossOrigin::default(),
     ///     request_id_header: None,
     ///     secret_names: vec![],
+    ///     default_pagination: None,
+    ///     pagination_exceptions: vec![],
     /// };
     ///
     /// let mapping = api.default_env_mapping();
@@ -582,6 +600,8 @@ mod tests {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
 
         let mapping = api.default_env_mapping();
@@ -612,6 +632,8 @@ mod tests {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
 
         let mapping = api.default_env_mapping();
@@ -645,6 +667,8 @@ mod tests {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
 
         let mapping = api.default_env_mapping();
@@ -676,6 +700,8 @@ mod tests {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
 
         let mapping = api.default_env_mapping();
@@ -705,6 +731,8 @@ mod tests {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
 
         let mapping = api.default_env_mapping();
@@ -750,6 +778,8 @@ mod tests {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
 
         let mapping = api.default_env_mapping();
@@ -788,6 +818,8 @@ mod tests {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
 
         let mapping1 = api.default_env_mapping();

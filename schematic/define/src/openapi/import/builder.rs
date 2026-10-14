@@ -377,6 +377,8 @@ impl OpenApiImport {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         })
     }
 

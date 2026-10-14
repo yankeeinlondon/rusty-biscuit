@@ -178,6 +178,8 @@ mod tests {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         }
     }
 
@@ -223,6 +225,8 @@ mod tests {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         }
     }
 
@@ -363,6 +367,8 @@ mod tests {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
         let registry = TestRegistry::new();
         let options = ExportOptions::new();
@@ -408,6 +414,8 @@ mod tests {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
         let registry = TestRegistry::new();
         let options = ExportOptions::new();
@@ -453,6 +461,8 @@ mod tests {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
         let registry = TestRegistry::new().with_schema("Model");
         let options = ExportOptions::new();
@@ -510,6 +520,8 @@ mod tests {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
         let registry = TestRegistry::new()
             .with_schema("RequestBody")

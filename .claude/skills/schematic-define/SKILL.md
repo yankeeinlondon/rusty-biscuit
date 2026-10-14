@@ -127,6 +127,38 @@ no per-endpoint override):
 `definitions/tests/api_policy.rs` pins all three for every shipped API; a new
 definition must add its row there.
 
+### 7) Pagination Is Authored Per API, Not Per Endpoint
+
+Every `RestApi` literal also sets `default_pagination: Option<Strategy>` and
+`pagination_exceptions: Vec<PaginationException>` (empty: `None`, `vec![]`).
+`Endpoint` and `EndpointParams` gained no field. Types live in
+`schematic_define::pagination` (and the prelude), not the crate root.
+
+- `pagination::resolve(api, endpoint)`: a row for the endpoint id decides;
+  else a **GET** whose response is literally `Vec<T>` is a list inheriting the
+  default; else not a list. Wrappers, opt-outs, overrides, and non-GET lists
+  all need a row: `PaginationException::new("Id", Collection::at("data").item_type("Item"))`.
+  A root array is `Collection::root()`; `at("")` is invalid.
+- `caller_knobs` is exactly what the generated call exposes; alternates
+  (`or_paginate`) are modeled and validated but add no knob.
+- `param_adoptions`/`adopted_params`: a strategy input with the same location
+  and name as a declared param adopts it (removed from the request struct)
+  only when the strategy authors the matching knob (a cursor part needs
+  `.resumable()`); otherwise `adoption-without-knob`. A required adopted size
+  needs `PageSize::sent_default(n)`; `server_default` is documentation only.
+- `validate_pagination` feeds `schematic-gen`'s `validate_rust_client` as the
+  `pagination-strategy` / `pagination-exception` / `pagination-parameter`
+  features; rules are listed in `schematic/docs/generation/validation.md`.
+- `PaginationStyle`, `PaginationResponse`, and `with_pagination` are
+  superseded and inert: only the query params they materialize matter.
+- A paginated endpoint generates `impl schematic_runtime::pager::Paginated`
+  (`&'static` strategy constants) plus one capability marker per knob, and
+  its call type forwards `pager()`, each authored knob (`page`, `offset`,
+  `after`, `before`, `page_size`), and `pages()` / `fetch_page()` /
+  `collect_all()`. Knobs return the runtime `Pager`, so endpoint setters come
+  first. A remaining setter named like a forwarded knob becomes `<name>_param`.
+  Traversal logic lives only in `schematic-runtime`'s `pager` module.
+
 ## Generated-Client Contracts To Keep In Sync
 
 When updating docs or examples that touch generated clients:

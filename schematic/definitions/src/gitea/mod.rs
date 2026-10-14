@@ -449,6 +449,8 @@ pub fn define_gitea_api() -> RestApi {
         cross_origin: CrossOrigin::same_origin(),
         request_id_header: None,
         secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     }
 }
 
