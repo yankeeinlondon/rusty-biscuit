@@ -139,11 +139,12 @@ pub use roots::{
     InvalidSchemasDir, SCHEMAS_DIR_VARIABLE, SchemaRoot, SchemaRootKind, SchemaRootState,
     SchemaRoots, SearchedRoot,
 };
+pub use embedded::EmbeddedSchemaBundle;
 pub use triggers::{
     LoadedTrigger, MatchArms, MatchExpr, PathGlobs, PathSubject, ShadowedFile, TriggerEnvelope,
-    TriggerArmTrace, TriggerEvaluation, TriggerRegistry, TriggerTrace, TriggerTraceEntry,
-    evaluate_registry, matched_triggers, parse_trigger_envelope, parse_trigger_envelope_from_str,
-    trace_registry, scan,
+    TriggerArmTrace, TriggerEvaluation, TriggerRegistry, TriggerSource, TriggerTrace,
+    TriggerTraceEntry, evaluate_registry, matched_triggers, parse_trigger_envelope,
+    parse_trigger_envelope_from_str, trace_registry, scan, scan_with_embedded,
 };
 pub use validate::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, PositionMap, ValidatorCache};
 
@@ -259,6 +260,8 @@ pub struct DarkmatterSchemas {
     baseline: Option<BaselineSchema>,
     cache: ValidatorCache,
     triggers: Option<triggers::TriggerRegistry>,
+    /// Bundles [`Self::with_trigger_discovery`] appends after the roots.
+    embedded_bundles: Vec<EmbeddedSchemaBundle>,
     file_resolution_context: biscuit_file::FileResolutionContext,
 }
 
@@ -287,10 +290,12 @@ struct BaselineSchema {
 /// A resolved trigger payload layer, ready to merge into the effective schema.
 #[derive(Clone)]
 struct TriggerLayer {
-    /// The trigger envelope file path (for origin attribution + dependency).
-    source: PathBuf,
-    /// The resolved payload JSON Schema (guaranteed simple-object).
-    json_schema: Value,
+    /// The trigger envelope (for origin attribution; a file is also a
+    /// dependency).
+    source: triggers::TriggerSource,
+    /// The resolved payload JSON Schema (guaranteed simple-object), shared
+    /// with the registry that resolved it.
+    json_schema: Arc<Value>,
     /// Payload dependency edges (referenced files + imports + examples).
     dependencies: Vec<PathBuf>,
     advisories: Vec<SchemaAdvisory>,
@@ -304,6 +309,7 @@ impl DarkmatterSchemas {
             baseline: None,
             cache: SHARED_VALIDATOR_CACHE.clone(),
             triggers: None,
+            embedded_bundles: Vec::new(),
             file_resolution_context: context,
         }
     }
@@ -458,8 +464,37 @@ impl DarkmatterSchemas {
     /// searched root claims the `kind: trigger-schema` envelope but is
     /// malformed (bad envelope, bad match grammar, vacuous arm).
     pub fn with_trigger_discovery(self) -> Result<Self, SchemaError> {
-        let registry = triggers::scan(&self.file_resolution_context)?;
+        let registry =
+            triggers::scan_with_embedded(&self.file_resolution_context, &self.embedded_bundles)?;
         Ok(self.with_trigger_registry(registry))
+    }
+
+    /// Registers a host's embedded trigger bundle as a last-resort trigger
+    /// location after the five schema roots.
+    ///
+    /// A bundle trigger applies only when no schema root holds a file of the
+    /// same name; its `$schema` and imports resolve inside the bundle. When a
+    /// registry is already installed (by [`Self::with_trigger_discovery`] or
+    /// [`Self::with_trigger_registry`]) the bundle is appended to it now;
+    /// either way a later [`Self::with_trigger_discovery`] appends it after
+    /// its scan. [`Self::with_trigger_registry`] installs its registry as
+    /// given, without registered bundles.
+    ///
+    /// ## Errors
+    ///
+    /// [`SchemaError::EmbeddedBundle`] or [`SchemaError::EmbeddedTriggerLoad`]
+    /// (see [`triggers::TriggerRegistry::append_embedded_bundle`]); the
+    /// instance is consumed.
+    pub fn with_embedded_trigger_bundle(
+        mut self,
+        bundle: EmbeddedSchemaBundle,
+    ) -> Result<Self, SchemaError> {
+        bundle.check()?;
+        if let Some(registry) = self.triggers.as_mut() {
+            registry.append_embedded_bundle(bundle)?;
+        }
+        self.embedded_bundles.push(bundle);
+        Ok(self)
     }
 
     /// Attaches a prebuilt trigger registry (e.g. one cached per boundary by
@@ -486,9 +521,9 @@ impl DarkmatterSchemas {
     ///
     /// 1. The caller-configured baseline (if any).
     /// 2. Matching trigger-schema payloads — first schema root first,
-    ///    filename-lexicographic within a root (the registry's built-in order).
-    ///    Shadowing is applied before matching (a shadowed file is never in the
-    ///    registry).
+    ///    filename-lexicographic within a root, then embedded bundle triggers
+    ///    (the registry's built-in order). Shadowing is applied before matching
+    ///    (a shadowed file is never in the registry).
     /// 3. The document `$schema` (always wins on conflict).
     ///
     /// When `$schema` is absent, no baseline is configured, and no triggers
@@ -562,62 +597,25 @@ impl DarkmatterSchemas {
         // rather than materialized (F29).
         let doc_json: Option<Value> = resolved.as_ref().map(|r| r.json_schema.clone());
 
-        let merged_json: Arc<Value> = match &self.baseline {
-            Some(base) => {
-                if trigger_layers.is_empty() && doc_json.is_none() {
-                    // Baseline only — share the Arc, no deep clone.
-                    Arc::clone(&base.json_schema)
-                } else {
-                    // Fold the higher-precedence layers into the borrowed baseline.
-                    let mut higher: Vec<Value> =
-                        Vec::with_capacity(trigger_layers.len() + 1);
-                    for layer in &trigger_layers {
-                        higher.push(layer.json_schema.clone());
-                    }
-                    if let Some(doc) = doc_json {
-                        higher.push(doc);
-                    }
-                    let mut higher = higher.into_iter();
-                    let mut acc =
-                        resolve::merge_baseline(&base.json_schema, higher.next().expect("non-empty"))?;
-                    for layer in higher {
-                        acc = resolve::merge_baseline(&acc, layer)?;
-                    }
-                    Arc::new(acc)
-                }
-            }
-            None => match (trigger_layers.is_empty(), doc_json) {
-                (true, None) => return Ok(None),
-                (true, Some(doc)) => Arc::new(doc),
-                (false, doc_opt) => {
-                    // No baseline: the first trigger is the (owned) merge base.
-                    let mut layers: Vec<Value> = trigger_layers
-                        .iter()
-                        .map(|l| l.json_schema.clone())
-                        .collect();
-                    if let Some(doc) = doc_opt {
-                        layers.push(doc);
-                    }
-                    let mut layers = layers.into_iter();
-                    let mut acc = layers.next().expect("non-empty");
-                    for layer in layers {
-                        acc = resolve::merge_baseline(&acc, layer)?;
-                    }
-                    Arc::new(acc)
-                }
-            },
+        let merged_json: Arc<Value> = match (&self.baseline, trigger_layers.is_empty(), doc_json) {
+            // Baseline only — share the Arc, no deep clone.
+            (Some(base), true, None) => Arc::clone(&base.json_schema),
+            (None, true, None) => return Ok(None),
+            (None, true, Some(doc)) => Arc::new(doc),
+            (Some(base), true, Some(doc)) => Arc::new(resolve::merge_baseline(&base.json_schema, doc)?),
+            // A lone trigger payload is shared as resolved.
+            (None, false, None) if trigger_layers.len() == 1 => Arc::clone(&trigger_layers[0].json_schema),
+            (baseline, false, doc) => merged_trigger_schema(
+                baseline.as_ref().map(|base| &base.json_schema),
+                &trigger_layers,
+                doc,
+            )?,
         };
 
         // Keep eager-file validation on the same request-scoped candidate plan
         // as expression-side `file_exists` and `frontmatter` resolution.
-        let validator =
-            self.cache.validator_for_shared(&merged_json, Some(&base_dir), &self.file_resolution_context)?;
-        let arm_validators = build_arm_validators(
-            &merged_json,
-            &self.cache,
-            &base_dir,
-            &self.file_resolution_context,
-        )?;
+        let validators =
+            CompiledValidators::build(&merged_json, &self.cache, Some(&base_dir), &self.file_resolution_context)?;
         let origins = build_origin_map_with_triggers(
             resolved.as_ref(),
             &trigger_layers,
@@ -634,8 +632,7 @@ impl DarkmatterSchemas {
             simplified: resolved.and_then(|r| r.simplified),
             json_schema: merged_json,
             origins,
-            validator,
-            arm_validators,
+            validators,
             base_dir: Some(base_dir),
             file_ref_fallback_dir: self.cache.file_ref_fallback_dir().map(Path::to_path_buf),
             file_resolution_context: self.file_resolution_context.clone(),
@@ -671,7 +668,7 @@ impl DarkmatterSchemas {
 
         // Registries built by `scan` carry pre-resolved payloads; programmatically
         // constructed registries do not and fall back to on-demand resolution.
-        let pre_resolved = !registry.payloads.is_empty();
+        let pre_resolved = registry.payloads.len() == registry.triggers.len();
 
         let evaluations =
             triggers::assemble::evaluate_registry(registry, &fm_json, document);
@@ -840,10 +837,7 @@ pub struct EffectiveSchema {
     /// source (R-5 Priority 2). Empty for root-union schemas, whose per-arm
     /// property provenance is not modelled in v1.
     pub origins: SchemaOriginMap,
-    validator: Arc<Validator>,
-    /// Per-arm validators when `json_schema` is a root `anyOf` union.
-    /// `None` for ordinary schemas.
-    arm_validators: Option<Vec<Arc<Validator>>>,
+    validators: CompiledValidators,
     /// Prompt document directory used to reproduce the validator's
     /// document-first, then repository-relative candidate plan in diagnostics.
     base_dir: Option<PathBuf>,
@@ -958,49 +952,26 @@ impl EffectiveSchema {
         positions: &PositionMap,
         phase: SchemaPhase,
     ) -> Result<ValidationReport, SchemaError> {
-        let (projected, mut json_schema) = match &self.simplified {
+        let (projected, projected_document) = match &self.simplified {
             Some(simplified) => {
                 let projected = phase::project(simplified, phase);
                 let projected_document = simplified::to_json_schema(&projected)?;
-                let json_schema =
-                    phase::merge_with_effective(&self.json_schema, projected_document)?;
-                (Some(projected), json_schema)
+                (Some(projected), Some(projected_document))
             }
-            None => (None, self.json_schema.as_ref().clone()),
+            None => (None, None),
         };
-        phase::make_passive(&mut json_schema);
-        let validator = Arc::new(validate::build_validator_with_callers(
-            &json_schema,
-            self.base_dir.as_deref(),
-            self.file_ref_fallback_dir.as_deref(),
-            &self.file_resolution_context,
-            self.caller_origins.clone(),
-        )?);
-        let arm_validators = json_schema
-            .get("anyOf")
-            .and_then(Value::as_array)
-            .map(|arms| {
-                arms.iter()
-                    .map(|arm| {
-                        let root = validate::wrap_arm_as_root_schema(arm);
-                        validate::build_validator_with_callers(
-                            &root,
-                            self.base_dir.as_deref(),
-                            self.file_ref_fallback_dir.as_deref(),
-                            &self.file_resolution_context,
-                            self.caller_origins.clone(),
-                        )
-                        .map(Arc::new)
-                    })
-                    .collect::<Result<Vec<_>, SchemaError>>()
-            })
-            .transpose()?;
+        let json_schema = phase_json_schema(&self.json_schema, projected_document, phase)?;
+        let mut cache = SHARED_VALIDATOR_CACHE.clone().with_caller_origins(self.caller_origins.clone());
+        if let Some(fallback) = self.file_ref_fallback_dir.as_deref() {
+            cache = cache.with_file_ref_fallback_dir(fallback);
+        }
+        let validators =
+            CompiledValidators::build(&json_schema, &cache, self.base_dir.as_deref(), &self.file_resolution_context)?;
         let projected = Self {
             simplified: projected,
-            json_schema: Arc::new(json_schema),
+            json_schema,
             origins: self.origins.clone(),
-            validator,
-            arm_validators,
+            validators,
             base_dir: self.base_dir.clone(),
             file_ref_fallback_dir: self.file_ref_fallback_dir.clone(),
             file_resolution_context: self.file_resolution_context.clone(),
@@ -1049,11 +1020,11 @@ impl EffectiveSchema {
             fallback: self.file_ref_fallback_dir.as_deref(),
             context: &self.file_resolution_context,
         };
-        let mut problems = match &self.arm_validators {
+        let mut problems = match &self.validators {
             // Root `anyOf` union. When a shared literal discriminant selects a
             // single arm, report only that arm's problems; otherwise fall back
             // to the closest-matching-arm report (byte-identical to before).
-            Some(arms) => {
+            CompiledValidators::RootUnion(arms) => {
                 match self
                     .json_schema
                     .get("anyOf")
@@ -1072,9 +1043,9 @@ impl EffectiveSchema {
             // Ordinary object schema. Narrow any discriminated union (property,
             // item, or nested field) to its selected arm; other locations are
             // untouched.
-            None => {
+            CompiledValidators::Object(validator) => {
                 let problems = validate::collect_problems_with_anchors(
-                    &self.validator,
+                    validator,
                     instance,
                     positions,
                     anchors,
@@ -1147,10 +1118,14 @@ impl EffectiveSchema {
         report
     }
 
-    /// Returns the compiled validator. Mainly for advanced callers; the
+    /// Returns the compiled validator of an object schema; `None` for a root
+    /// union, which is judged arm by arm. Mainly for advanced callers; the
     /// `validate` method is the normal entry point.
-    pub fn validator(&self) -> &Validator {
-        &self.validator
+    pub fn validator(&self) -> Option<&Validator> {
+        match &self.validators {
+            CompiledValidators::Object(validator) => Some(validator),
+            CompiledValidators::RootUnion(_) => None,
+        }
     }
 
     /// Normalizes eager-`file`-typed frontmatter values to their resolved
@@ -1539,9 +1514,12 @@ pub enum SchemaOriginKind {
 pub struct SchemaOrigin {
     /// Which layer the property's schema came from.
     pub kind: SchemaOriginKind,
-    /// The referenced schema file, when [`kind`](Self::kind) is
-    /// [`SchemaOriginKind::ReferencedFile`].
-    pub uri: Option<PathBuf>,
+    /// The source that declared the property: the referenced schema file
+    /// ([`SchemaOriginKind::ReferencedFile`]) or the trigger envelope
+    /// ([`SchemaOriginKind::Trigger`]): a [`SchemaSourceId::File`] for a
+    /// schema-root file, a [`SchemaSourceId::Embedded`] (`{bundle}/{name}`)
+    /// for a bundle trigger. `None` for the document and baseline layers.
+    pub source: Option<SchemaSourceId>,
 }
 
 impl SchemaOrigin {
@@ -1549,7 +1527,7 @@ impl SchemaOrigin {
     pub fn document() -> Self {
         Self {
             kind: SchemaOriginKind::Document,
-            uri: None,
+            source: None,
         }
     }
 
@@ -1557,7 +1535,7 @@ impl SchemaOrigin {
     pub fn baseline() -> Self {
         Self {
             kind: SchemaOriginKind::Baseline,
-            uri: None,
+            source: None,
         }
     }
 
@@ -1565,15 +1543,51 @@ impl SchemaOrigin {
     pub fn referenced_file(path: impl Into<PathBuf>) -> Self {
         Self {
             kind: SchemaOriginKind::ReferencedFile,
-            uri: Some(path.into()),
+            source: Some(SchemaSourceId::File(path.into())),
         }
     }
 
     /// A trigger-schema-payload origin carrying the envelope file path.
     pub fn trigger(path: impl Into<PathBuf>) -> Self {
+        Self::for_trigger(&triggers::TriggerSource::File(path.into()))
+    }
+
+    /// A trigger-schema-payload origin for the envelope at `source`.
+    pub fn for_trigger(source: &triggers::TriggerSource) -> Self {
         Self {
             kind: SchemaOriginKind::Trigger,
-            uri: Some(path.into()),
+            source: Some(source.source_id()),
+        }
+    }
+
+    /// The host file the declaration was read from. `None` for the document
+    /// and baseline layers and for an embedded trigger, which names no file.
+    #[must_use]
+    pub fn file(&self) -> Option<&Path> {
+        match &self.source {
+            Some(SchemaSourceId::File(path)) => Some(path),
+            _ => None,
+        }
+    }
+
+    /// The declaring trigger of a [`SchemaOriginKind::Trigger`] origin.
+    #[must_use]
+    pub fn trigger_source(&self) -> Option<triggers::TriggerSource> {
+        if self.kind != SchemaOriginKind::Trigger {
+            return None;
+        }
+        match self.source.as_ref()? {
+            SchemaSourceId::File(path) => Some(triggers::TriggerSource::File(path.clone())),
+            // Bundle names are one path segment, so the first `/` splits
+            // `{bundle}/{name}` unambiguously.
+            SchemaSourceId::Embedded(virtual_path) => {
+                let (bundle, name) = virtual_path.split_once('/')?;
+                Some(triggers::TriggerSource::Embedded {
+                    bundle: bundle.to_string(),
+                    name: name.to_string(),
+                })
+            }
+            SchemaSourceId::InlineDocument => None,
         }
     }
 }
@@ -1582,21 +1596,190 @@ impl SchemaOrigin {
 /// property name in schema declaration order.
 pub type SchemaOriginMap = indexmap::IndexMap<String, SchemaOrigin>;
 
-fn build_arm_validators(
-    schema: &Value,
-    cache: &ValidatorCache,
-    base_dir: &Path,
-    context: &biscuit_file::FileResolutionContext,
-) -> Result<Option<Vec<Arc<Validator>>>, SchemaError> {
-    let Some(arms) = schema.get("anyOf").and_then(Value::as_array) else {
-        return Ok(None);
-    };
-    let mut out = Vec::with_capacity(arms.len());
-    for arm in arms {
-        let arm_schema = validate::wrap_arm_as_root_schema(arm);
-        out.push(cache.validator_for(&arm_schema, Some(base_dir), context)?);
+/// `effective` judged at `phase`: the phase projection of its document schema
+/// (`projected_document`, when it has one) merged over it, made passive.
+///
+/// Memoized for the process over a few recent derivations, matched by `Arc`
+/// identity for `effective` (which an entry holds alive) and by value for the
+/// small projected document. A derivation copies and walks the whole
+/// effective schema, and a run judges the same schema at a phase several
+/// times; the shared result also lets the validator cache reuse one compiled
+/// validator for it.
+fn phase_json_schema(
+    effective: &Arc<Value>,
+    projected_document: Option<Value>,
+    phase: SchemaPhase,
+) -> Result<Arc<Value>, SchemaError> {
+    struct Derivation {
+        effective: Arc<Value>,
+        projected_document: Option<Value>,
+        phase: SchemaPhase,
+        derived: Arc<Value>,
     }
-    Ok(Some(out))
+    const RECENT_DERIVATIONS: usize = 8;
+    static DERIVATIONS: std::sync::Mutex<Vec<Derivation>> = std::sync::Mutex::new(Vec::new());
+
+    let same = |derivation: &Derivation| {
+        Arc::ptr_eq(&derivation.effective, effective)
+            && derivation.phase == phase
+            && derivation.projected_document == projected_document
+    };
+    {
+        let mut derivations = DERIVATIONS.lock().expect("phase schema memo poisoned");
+        if let Some(index) = derivations.iter().position(same) {
+            let hit = derivations.remove(index);
+            let derived = Arc::clone(&hit.derived);
+            derivations.push(hit);
+            return Ok(derived);
+        }
+    }
+
+    let mut json_schema = match projected_document.clone() {
+        Some(document) => phase::merge_with_effective(effective, document)?,
+        None => effective.as_ref().clone(),
+    };
+    phase::make_passive(&mut json_schema);
+    // Nothing to project and no eager file to make passive: the phase judges
+    // the effective schema itself, and shares its compiled validator.
+    let derived = if json_schema == **effective {
+        Arc::clone(effective)
+    } else {
+        Arc::new(json_schema)
+    };
+
+    let mut derivations = DERIVATIONS.lock().expect("phase schema memo poisoned");
+    if derivations.len() == RECENT_DERIVATIONS {
+        derivations.remove(0);
+    }
+    derivations.push(Derivation {
+        effective: Arc::clone(effective),
+        projected_document,
+        phase,
+        derived: Arc::clone(&derived),
+    });
+    Ok(derived)
+}
+
+/// The merge of `baseline`, the trigger `layers` (in order), and the document
+/// schema `doc`, highest precedence last.
+///
+/// Memoized for the process over a few recent merges. Trigger payloads are
+/// large (a host bundle can resolve to megabytes) and the same document is
+/// judged several times per run, so re-merging them would dominate every
+/// verdict. An entry holds its inputs alive and is matched by `Arc` identity
+/// for the baseline and payloads and by value for the (small) document
+/// schema, so a hit is always the merge of equal inputs. The shared result
+/// also keeps the validator cache's pointer-keyed content hash warm.
+fn merged_trigger_schema(
+    baseline: Option<&Arc<Value>>,
+    layers: &[TriggerLayer],
+    doc: Option<Value>,
+) -> Result<Arc<Value>, SchemaError> {
+    struct Merge {
+        baseline: Option<Arc<Value>>,
+        layers: Vec<Arc<Value>>,
+        doc: Option<Value>,
+        merged: Arc<Value>,
+    }
+    const RECENT_MERGES: usize = 8;
+    static MERGES: std::sync::Mutex<Vec<Merge>> = std::sync::Mutex::new(Vec::new());
+
+    let same = |merge: &Merge| {
+        merge.baseline.as_ref().map(Arc::as_ptr) == baseline.map(Arc::as_ptr)
+            && merge.layers.len() == layers.len()
+            && merge.layers.iter().zip(layers).all(|(held, layer)| Arc::ptr_eq(held, &layer.json_schema))
+            && merge.doc == doc
+    };
+    {
+        let mut merges = MERGES.lock().expect("trigger merge memo poisoned");
+        if let Some(index) = merges.iter().position(same) {
+            let hit = merges.remove(index);
+            let merged = Arc::clone(&hit.merged);
+            merges.push(hit);
+            return Ok(merged);
+        }
+    }
+
+    let mut higher = layers
+        .iter()
+        .map(|layer| layer.json_schema.as_ref().clone())
+        .chain(doc.clone());
+    let mut acc = match baseline {
+        Some(base) => resolve::merge_baseline(base, higher.next().expect("a trigger layer"))?,
+        None => higher.next().expect("a trigger layer"),
+    };
+    for layer in higher {
+        acc = resolve::merge_baseline(&acc, layer)?;
+    }
+    let merged = Arc::new(acc);
+
+    let mut merges = MERGES.lock().expect("trigger merge memo poisoned");
+    if merges.len() == RECENT_MERGES {
+        merges.remove(0);
+    }
+    merges.push(Merge {
+        baseline: baseline.cloned(),
+        layers: layers.iter().map(|layer| Arc::clone(&layer.json_schema)).collect(),
+        doc,
+        merged: Arc::clone(&merged),
+    });
+    Ok(merged)
+}
+
+/// The validators an effective schema judges with.
+#[derive(Clone)]
+enum CompiledValidators {
+    /// An ordinary object schema's validator.
+    Object(Arc<Validator>),
+    /// One validator per arm of a root `anyOf` union. Validation reports per
+    /// arm, so the union as a whole is never compiled.
+    RootUnion(Vec<Arc<Validator>>),
+}
+
+impl CompiledValidators {
+    fn build(
+        schema: &Arc<Value>,
+        cache: &ValidatorCache,
+        base_dir: Option<&Path>,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> Result<Self, SchemaError> {
+        match wrapped_root_arms(schema) {
+            Some(arms) => arms
+                .iter()
+                .map(|arm| cache.validator_for_shared(arm, base_dir, context))
+                .collect::<Result<Vec<_>, SchemaError>>()
+                .map(Self::RootUnion),
+            None => cache.validator_for_shared(schema, base_dir, context).map(Self::Object),
+        }
+    }
+}
+
+/// Each arm of `schema`'s root union, wrapped as a root schema, or `None` for
+/// a schema that is not a root union.
+///
+/// Memoized for the process over a few recent schemas (an entry holds its
+/// schema alive, so `Arc` identity is a sound key): a root union merged with
+/// a large trigger payload has megabyte-sized arms, and each verdict would
+/// otherwise copy and rehash them for the validator cache.
+fn wrapped_root_arms(schema: &Arc<Value>) -> Option<Arc<[Arc<Value>]>> {
+    type Wrapped = (Arc<Value>, Arc<[Arc<Value>]>);
+    const RECENT_SCHEMAS: usize = 8;
+    static WRAPPED: std::sync::Mutex<Vec<Wrapped>> = std::sync::Mutex::new(Vec::new());
+
+    let arms = schema.get("anyOf").and_then(Value::as_array)?;
+    let mut wrapped = WRAPPED.lock().expect("root arm memo poisoned");
+    if let Some((_, hit)) = wrapped.iter().find(|(held, _)| Arc::ptr_eq(held, schema)) {
+        return Some(Arc::clone(hit));
+    }
+    let arms: Arc<[Arc<Value>]> = arms
+        .iter()
+        .map(|arm| Arc::new(validate::wrap_arm_as_root_schema(arm)))
+        .collect();
+    if wrapped.len() == RECENT_SCHEMAS {
+        wrapped.remove(0);
+    }
+    wrapped.push((Arc::clone(schema), Arc::clone(&arms)));
+    Some(arms)
 }
 
 /// The top-level frontmatter key a problem is attributable to, mirroring the
@@ -1708,7 +1891,7 @@ fn build_origin_map_with_triggers(
                     .get("properties")
                     .and_then(Value::as_object)
                     .is_some_and(|p| p.contains_key(key))
-                    .then(|| SchemaOrigin::trigger(layer.source.clone()))
+                    .then(|| SchemaOrigin::for_trigger(&layer.source))
             });
             from_trigger.unwrap_or_else(SchemaOrigin::baseline)
         };
@@ -1718,8 +1901,9 @@ fn build_origin_map_with_triggers(
 }
 
 /// Collects all dependency edges for an effective schema: the document
-/// `$schema`'s imports + examples + referenced files, plus each trigger's
-/// envelope source + payload dependencies. Sorted and deduplicated.
+/// `$schema`'s imports + examples + referenced files, plus each file
+/// trigger's envelope + payload dependencies. An embedded trigger adds none:
+/// it cannot change while the host runs. Sorted and deduplicated.
 fn build_dependencies(
     resolved: Option<&resolve::ResolvedSchema>,
     trigger_layers: &[TriggerLayer],
@@ -1731,7 +1915,7 @@ fn build_dependencies(
         deps.extend(r.referenced_files.iter().cloned());
     }
     for layer in trigger_layers {
-        deps.push(layer.source.clone());
+        deps.extend(layer.source.path().map(Path::to_path_buf));
         deps.extend(layer.dependencies.iter().cloned());
     }
     deps.sort();
@@ -2869,9 +3053,9 @@ mod claudine_compat_tests {
         let origin = effective.origins.get("title").expect("title origin");
         assert_eq!(origin.kind, SchemaOriginKind::ReferencedFile);
         assert!(
-            origin.uri.as_ref().map(|p| p.ends_with("schema.yaml")).unwrap_or(false),
+            origin.file().map(|p| p.ends_with("schema.yaml")).unwrap_or(false),
             "expected the referenced file path, got {:?}",
-            origin.uri,
+            origin.source,
         );
     }
 
@@ -3466,7 +3650,7 @@ mod phase4_trigger_assembly {
             Some(SchemaOriginKind::Trigger),
             "model origin must be Trigger"
         );
-        let trigger_uri = model_origin.and_then(|o| o.uri.as_ref());
+        let trigger_uri = model_origin.and_then(SchemaOrigin::file);
         assert!(
             trigger_uri.is_some_and(|u| u.to_string_lossy().contains("claudine.trigger.yaml")),
             "trigger origin must point at the envelope file: {trigger_uri:?}"

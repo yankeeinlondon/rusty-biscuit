@@ -891,6 +891,16 @@ pub(crate) fn prepare_embedded_schema(
     path: &str,
     documents: &[EmbeddedDocument<'_>],
 ) -> Result<ResolvedSchema, SchemaError> {
+    prepare_embedded_schema_in(path, documents, "")
+}
+
+/// [`prepare_embedded_schema`] with every import confined to `{bundle}/`
+/// (no confinement when `bundle` is empty).
+pub(crate) fn prepare_embedded_schema_in(
+    path: &str,
+    documents: &[EmbeddedDocument<'_>],
+    bundle: &str,
+) -> Result<ResolvedSchema, SchemaError> {
     let unsupported = |message: &str| SchemaError::SchemaDocument {
         path: PathBuf::from(path),
         message: message.to_string(),
@@ -911,16 +921,53 @@ pub(crate) fn prepare_embedded_schema(
             return Err(unsupported("an embedded schema cannot be a whole-file reference"));
         }
     };
+    lower_embedded_schema(schema, path, documents, bundle)
+}
+
+/// Prepares an inline `$schema` mapping authored in the embedded document
+/// `importer`: its imports resolve against `documents` inside `{bundle}/`,
+/// and `@this` names the mapping's own entries.
+///
+/// ## Errors
+///
+/// As [`prepare_embedded_schema_in`]; a mapping that is not a single object
+/// schema is a [`SchemaError::SchemaDocument`] naming `importer`.
+pub(crate) fn prepare_embedded_inline_schema(
+    value: &YamlValue,
+    importer: &str,
+    documents: &[EmbeddedDocument<'_>],
+    bundle: &str,
+) -> Result<ResolvedSchema, SchemaError> {
+    let schema = parse_yaml_schema(value)?;
+    if matches!(schema, SimplifiedSchema::Union(_)) {
+        return Err(SchemaError::SchemaDocument {
+            path: PathBuf::from(importer),
+            message: "an embedded inline schema cannot be a root union".into(),
+        });
+    }
+    lower_embedded_schema(schema, importer, documents, bundle)
+}
+
+/// Expands a single-object embedded schema authored at `path` and lowers it.
+fn lower_embedded_schema(
+    schema: SimplifiedSchema,
+    path: &str,
+    documents: &[EmbeddedDocument<'_>],
+    bundle: &str,
+) -> Result<ResolvedSchema, SchemaError> {
     let (schema, _) = expand_imports(
         schema,
         Path::new(""),
         NamespaceKey::Embedded(path.to_string()),
         &SchemaSourcePath::root(),
-        NamespaceSource::Embedded(documents),
+        NamespaceSource::Embedded { documents, bundle },
     )?;
     let json_schema = to_json_schema(&schema)?;
     if contains_example_annotation(&json_schema) {
-        return Err(unsupported("an embedded schema cannot reference `example(...)` artifacts"));
+        return Err(SchemaError::SchemaDocument {
+            path: PathBuf::from(path),
+            message: "an embedded schema cannot reference `example(...)` artifacts".into(),
+        });
     }
     Ok(ResolvedSchema {
         simplified: Some(schema),
@@ -1144,8 +1191,12 @@ enum NamespaceSource<'a> {
         context: Box<biscuit_file::FileResolutionContext>,
     },
     /// The embedded table, by virtual path. Nothing is read from the disk or
-    /// the network, and every namespace is [`NamespaceKey::Embedded`].
-    Embedded(&'a [EmbeddedDocument<'a>]),
+    /// the network, and every namespace is [`NamespaceKey::Embedded`]. A
+    /// non-empty `bundle` confines every import to `{bundle}/`.
+    Embedded {
+        documents: &'a [EmbeddedDocument<'a>],
+        bundle: &'a str,
+    },
 }
 
 struct CachedNamespace {
@@ -1698,12 +1749,12 @@ impl ImportEngine<'_> {
             NamespaceSource::Files { schema_roots, context } => {
                 named_type_file_path(reference, &current.base_dir, schema_roots, context)?
             }
-            NamespaceSource::Embedded(documents) => {
-                let documents = *documents;
+            NamespaceSource::Embedded { documents, bundle } => {
+                let (documents, bundle) = (*documents, *bundle);
                 let NamespaceKey::Embedded(importer) = &current.key else {
                     unreachable!("an embedded expansion holds only embedded namespaces")
                 };
-                return self.resolve_embedded_namespace(documents, importer, reference);
+                return self.resolve_embedded_namespace(documents, bundle, importer, reference);
             }
         };
 
@@ -1744,6 +1795,7 @@ impl ImportEngine<'_> {
     fn resolve_embedded_namespace(
         &mut self,
         documents: &[EmbeddedDocument<'_>],
+        bundle: &str,
         importer: &str,
         reference: &str,
     ) -> Result<Namespace, SchemaError> {
@@ -1751,7 +1803,12 @@ impl ImportEngine<'_> {
             path: PathBuf::from(importer),
             message: format!("embedded import `{}`: {reason}", reference.trim()),
         };
-        let target = embedded::resolve_path(importer, reference).map_err(invalid)?;
+        let target = if bundle.is_empty() {
+            embedded::resolve_path(importer, reference)
+        } else {
+            embedded::resolve_bundle_path(bundle, importer, reference)
+        }
+        .map_err(invalid)?;
         let named_types = match self.embedded_cache.get(&target) {
             Some(cached) => Arc::clone(cached),
             None => {
@@ -1936,6 +1993,14 @@ fn load_named_types(path: &Path) -> Result<IndexMap<String, PropertyDef>, Schema
 /// The named types a schema document's text declares; `path` identifies the
 /// document in errors.
 fn named_types_from_text(text: &str, path: &Path) -> Result<IndexMap<String, PropertyDef>, SchemaError> {
+    // The classifier declines unparseable YAML; an import target must be
+    // a schema, so name the syntax error instead of "ambiguous".
+    if let Err(error) = serde_yaml_ng::from_str::<YamlValue>(text) {
+        return Err(SchemaError::SchemaDocument {
+            path: path.to_path_buf(),
+            message: format!("not valid YAML: {error}"),
+        });
+    }
     let Some(document) = parse_standalone_schema_document(text, path)? else {
         return Err(SchemaError::AmbiguousReferenced {
             path: path.to_path_buf(),
@@ -3255,7 +3320,7 @@ pub(crate) fn validate_simple_object_schema(
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-fn describe_yaml(value: &YamlValue) -> &'static str {
+pub(crate) fn describe_yaml(value: &YamlValue) -> &'static str {
     match value {
         YamlValue::Null => "null",
         YamlValue::Bool(_) => "boolean",
