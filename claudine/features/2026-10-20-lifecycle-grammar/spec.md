@@ -40,6 +40,7 @@ related:
     - 2026-10-22-tts-prewarm
     - 2026-10-24-sequence-containers
     - 2026-10-27-darkmatter-lifecycle-ownership
+implemented: true
 ---
 # Lifecycle Grammar
 

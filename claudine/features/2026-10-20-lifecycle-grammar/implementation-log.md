@@ -16,25 +16,6 @@ packages:
     - darkmatter
     - dmls
 human_review: false
-message_to_agent: |-
-    Phase 4 finished Wave 6. Read the log's "## Phase 4" section.
-
-    - `just test-l2` passes (282/282, tmux + WezTerm). The two
-      `level2_drain_ctrl_c_kitty` tests were NOT run: on macOS they open a
-      visible Kitty window. Record them as unrun, not passed.
-    - The opt-in prompts binary (`-F prompt-tests,test-fixtures --test
-      prompts`) is 63/71. The 8 failures predate this feature: seven assert
-      `prompts/_implement/implement-plan.md` content (`epilog: null`,
-      `_finish-before-exit.md`, the final-phase warning) that the author
-      removed in commit dddf5c988 before Phase 4; the router test looks for a
-      body heading in a 20-row stderr preview (body unchanged here). Report
-      them separately in Wave 8; do not fix them under this feature.
-    - New corpus test `internal_lifecycle_corpus_parses_under_current_grammar`
-      passes; it excludes `prompts/fix.md` by name (a draft using the
-      not-yet-existing `prep`/`interview` verbs).
-    - Route hashes were refreshed and pass without the update flag (AC11).
-    - `LifecycleRequeueEnqueueFailed` (unconstructed) keeps its variant name;
-      only its message now says `defer` (planned).
 source_files_during_phase_2:
     - claudine/cli/src/commands/compose/loop_run.rs
     - claudine/cli/src/commands/compose/prep.rs
@@ -361,6 +342,291 @@ skills_files_updated_during_phase_4:
     - .claude/skills/claudine/research-contracts.md
     - .claude/skills/claudine/timeline.md
     - .claude/skills/claudine/validations-and-handlers.md
+source_files_during_phase_5:
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/cli/tests/l1/lifecycle_set_shell_values.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/architecture.md
+source_code:
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+    - claudine/cli/src/commands/compose/loop_run.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/preflight.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/composition/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/coordinator.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/proxy.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/active_state_wiring.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/budget_scoping.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/lifecycle_ordering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/proxy.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/recovery_identity.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_evaluation.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_routing.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/unowned_handoff.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/commands/wrap/overlay.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/tests/common/incomplete_subagents.rs
+    - claudine/cli/tests/common/terminal_interrupt.rs
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/clarify.md
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/format.md
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/implement.md
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/plan.md
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/review.md
+    - claudine/cli/tests/fixtures/frozen_prompts/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/nested_span_regression/commit.md
+    - claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/characterization_error_routes.rs
+    - claudine/cli/tests/l1/compose_caller_file_provenance.rs
+    - claudine/cli/tests/l1/compose_initialize_acceptance.rs
+    - claudine/cli/tests/l1/compose_initialize_staged_boot.rs
+    - claudine/cli/tests/l1/compose_presence_parity.rs
+    - claudine/cli/tests/l1/composition_outputs.rs
+    - claudine/cli/tests/l1/ctx_launch_anchor.rs
+    - claudine/cli/tests/l1/ctx_per_run.rs
+    - claudine/cli/tests/l1/document_environment_routes.rs
+    - claudine/cli/tests/l1/effective_diagnostic_render.rs
+    - claudine/cli/tests/l1/handoff_owners.rs
+    - claudine/cli/tests/l1/inline_completion_lifecycle.rs
+    - claudine/cli/tests/l1/level1_provided_partial_file_pty.rs
+    - claudine/cli/tests/l1/level1_provider_overlay_home.rs
+    - claudine/cli/tests/l1/level1_review_router_partial_pty.rs
+    - claudine/cli/tests/l1/level1_structured_error_message.rs
+    - claudine/cli/tests/l1/lifecycle_downgrade_outcome.rs
+    - claudine/cli/tests/l1/lifecycle_literal_escapes.rs
+    - claudine/cli/tests/l1/lifecycle_set_shell_values.rs
+    - claudine/cli/tests/l1/loop_gate_ambient.rs
+    - claudine/cli/tests/l1/loop_initialize_state.rs
+    - claudine/cli/tests/l1/preflight_execution_parity.rs
+    - claudine/cli/tests/l1/provider_error_finalize.rs
+    - claudine/cli/tests/l1/provider_tail_launch.rs
+    - claudine/cli/tests/l1/provider_tail_ownership.rs
+    - claudine/cli/tests/l1/sequence_budget.rs
+    - claudine/cli/tests/l1/sequence_groups.rs
+    - claudine/cli/tests/l1/sequence_initialize_include_preflight.rs
+    - claudine/cli/tests/l1/sequence_jit.rs
+    - claudine/cli/tests/l1/sequence_schema.rs
+    - claudine/cli/tests/l1/setter_after_switch.rs
+    - claudine/cli/tests/l1/wrap_compose_preflight.rs
+    - claudine/cli/tests/l1/wrap_compose_validation.rs
+    - claudine/cli/tests/l1/wrap_opencode.rs
+    - claudine/cli/tests/l1/wrap_perf.rs
+    - claudine/cli/tests/l1/wrap_sequence_composition.rs
+    - claudine/cli/tests/l1/wrap_sigint.rs
+    - claudine/gen/tests/l1/agent_errors_check.rs
+    - claudine/lib/src/composition/coordinator/commit.rs
+    - claudine/lib/src/composition/coordinator/handoff.rs
+    - claudine/lib/src/composition/coordinator/tests.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/frontmatter_excerpt.rs
+    - claudine/lib/src/composition/frontmatter_excerpt/tests.rs
+    - claudine/lib/src/composition/lifecycle/action_shape.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/actions/tests.rs
+    - claudine/lib/src/composition/lifecycle/audio.rs
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/bindings/tests.rs
+    - claudine/lib/src/composition/lifecycle/control/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/action_dispatch.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/binding_contract.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mutation_visibility.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/proxy_with_evaluation.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/set_shell_values.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/parse.rs
+    - claudine/lib/src/composition/lifecycle/runtime/tests.rs
+    - claudine/lib/src/composition/lifecycle/source_map.rs
+    - claudine/lib/src/composition/lifecycle/tests/action_shape_control.rs
+    - claudine/lib/src/composition/lifecycle/tests/audio_emission.rs
+    - claudine/lib/src/composition/lifecycle/tests/diagnostics.rs
+    - claudine/lib/src/composition/lifecycle/tests/grammar.rs
+    - claudine/lib/src/composition/lifecycle/tests/guard_runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/tests/nested_span.rs
+    - claudine/lib/src/composition/lifecycle/tests/parse_config.rs
+    - claudine/lib/src/composition/lifecycle/tests/validation.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+    - claudine/lib/src/composition/looping/actions.rs
+    - claudine/lib/src/composition/looping/config.rs
+    - claudine/lib/src/composition/looping/config/tests.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/gate_ambient.rs
+    - claudine/lib/src/composition/looping/engine/tests/iteration_actions.rs
+    - claudine/lib/src/composition/looping/engine/tests/iteration_bindings.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/looping/engine/tests/mod.rs
+    - claudine/lib/src/composition/looping/engine/tests/post_checked_timing.rs
+    - claudine/lib/src/composition/looping/engine/tests/removed_loop_reads.rs
+    - claudine/lib/src/composition/looping/engine/tests/seed_state.rs
+    - claudine/lib/src/composition/looping/expression.rs
+    - claudine/lib/src/composition/looping/expression/tests.rs
+    - claudine/lib/src/composition/looping/types.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/preflight/tests.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/bootstrap/tests.rs
+    - claudine/lib/src/composition/prepare/tests.rs
+    - claudine/lib/src/composition/reserved.rs
+    - claudine/lib/src/composition/schema/supplied/tests.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/tests/fixtures/frozen_prompts/prompts/_reviews/cross-platform.md
+    - claudine/lib/tests/fixtures/frozen_prompts/prompts/clarify.md
+    - claudine/lib/tests/fixtures/frozen_prompts/prompts/review.md
+    - claudine/lib/tests/l1/agent_errors_fleet.rs
+    - claudine/lib/tests/l1/lifecycle_lift_ready_guard.rs
+    - claudine/lib/tests/l1/main.rs
+    - darkmatter/dmls/src/overlay/expressions/frontmatter_inventory_tests.rs
+    - darkmatter/dmls/tests/fixtures/sequence_descent/implement-plan.md
+    - darkmatter/lib/src/markdown/compose/context/effective_state.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/expression/binding.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/parser.rs
+    - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/tests/l1/dasherized_identifier_compose.rs
+    - darkmatter/lib/tests/l1/host_globals_compose.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/prompts/dasherized_identifier_corpus.rs
+    - claudine/lib/src/composition/lifecycle/control.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/retry_with_evaluation.rs
+    - claudine/lib/tests/l1/lifecycle_control_flow_spike.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/tests/l1/compose_removed_grammar.rs
+    - claudine/cli/tests/l1/compose_retry_overlay.rs
+    - claudine/cli/tests/l1/main.rs
+    - darkmatter/docs/schemas/claudine.yaml
+    - darkmatter/docs/schemas/claudine-types.yaml
+    - darkmatter/dmls/src/diagnostics/nested_span.rs
+    - darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+    - darkmatter/dmls/src/overlay/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/tests/l1/no_side_effects.rs
+    - darkmatter/lib/src/markdown/compose/context/capture/groups.rs
+    - darkmatter/lib/src/markdown/frontmatter.rs
+    - darkmatter/lib/src/markdown/mapping_orders.rs
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/schemas_constraints_block_matrix.rs
+    - darkmatter/lib/tests/fixtures/frozen_prompts/prompts/_reviews/feature-review.md
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/l1/compose_dasherized_identifiers.rs
+    - darkmatter/cli/tests/fixtures/frozen_prompts/prompts/plan.md
+    - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
+    - claudine/cli/tests/level2/level2_ac28_lifecycle_lazy_roots.rs
+    - claudine/cli/tests/level2/level2_ac2_worktree_compose.rs
+    - claudine/cli/tests/level2/level2_file_resolution_capture.rs
+    - claudine/cli/tests/level2/level2_initialize_generated_transclusion.rs
+    - claudine/cli/tests/level2/level2_lifecycle_action_forms.rs
+    - claudine/cli/tests/level2/level2_lifecycle_control.rs
+    - claudine/cli/tests/level2/level2_lifecycle_dispatch.rs
+    - claudine/cli/tests/level2/level2_lifecycle_loop.rs
+    - claudine/cli/tests/level2/level2_sequence_task_stream_capture.rs
+    - claudine/cli/tests/level2/level2_typed_error_render_capture.rs
+    - claudine/cli/tests/prompts/shipped_prompts.rs
+    - prompts/_add/add-context-variables.md
+    - prompts/_add/add-expressions.md
+    - prompts/_clarify/findings.md
+    - prompts/_implement/implement-feature.md
+    - prompts/_implement/implement-plan.md
+    - prompts/_implement/implement-review.md
+    - prompts/_implement/implement-suggestions.md
+    - prompts/_pr/diagnose.md
+    - prompts/_pr/dirty.md
+    - prompts/_pr/fix.md
+    - prompts/_pr/open.md
+    - prompts/_pr/push.md
+    - prompts/_pr/triage.md
+    - prompts/_prompt.md
+    - prompts/_reviews/cross-platform.md
+    - prompts/_reviews/dry.md
+    - prompts/_reviews/feature-review.md
+    - prompts/clarify.md
+    - prompts/commit.md
+    - prompts/format.md
+    - prompts/implement.md
+    - prompts/merge-conflicts.md
+    - prompts/plan.md
+    - prompts/pr.md
+    - prompts/review.md
+documentation:
+    - claudine/docs/research/agent-errors/_fleet.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - claudine/docs/providers/dispatch-inventory.json
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/inline/interpolation.md
+    - claudine/docs/getting-started/index.md
+    - claudine/docs/research/_TEMPLATE.md
+    - claudine/docs/research/acp/_fleet.md
+    - claudine/docs/research/agent-cli/_fleet.md
+    - claudine/docs/research/agent-logging/_fleet.md
+    - claudine/docs/research/agent-models/_fleet.md
+    - claudine/docs/research/agent-permissions/_fleet.md
+    - claudine/docs/research/hooks/_fleet.md
+    - claudine/docs/research/local_runners/_fleet.md
+    - claudine/docs/research/mcp/_fleet.md
+    - claudine/docs/research/memory/_fleet.md
+    - claudine/docs/research/model-config/_fleet.md
+    - claudine/docs/research/non-interactive-sessions/_fleet.md
+    - claudine/docs/research/plugins/_fleet.md
+    - claudine/docs/research/reasoning-level/_fleet.md
+    - claudine/docs/research/resume/_fleet.md
+    - claudine/docs/research/signals/_fleet.md
+    - claudine/docs/research/skills/_fleet.md
+    - claudine/docs/research/slash-commands/_fleet.md
+    - claudine/docs/research/steering/_fleet.md
+    - claudine/docs/research/subagents/_fleet.md
+    - claudine/docs/research/system-prompt/_fleet.md
+    - claudine/docs/research/usage/_fleet.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/flow-control/flow-control.md
+    - claudine/docs/topics/flow-control/looping.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/frontmatter-properties.md
+    - claudine/docs/topics/pre-flight-checks.md
+    - claudine/docs/topics/signal-handling.md
+    - claudine/docs/topics/state-management/side-effects.md
+    - claudine/lib/README.md
+completed_phase: 5
+implemented: true
 ---
 # Implementation Log for 2026-10-20-lifecycle-grammar (5 phases)
 
@@ -1401,3 +1667,190 @@ Migrated artifacts parse with zero grammar errors (the opt-in corpus test);
 refreshed hashes pass without update mode; `lint-lifecycle-doc-facets` passes;
 frozen fixtures still prove their behavior (`just test` green). Wave 6 is
 complete.
+
+## Phase 5
+
+Phase 5 is Waves 7 and 8: scoped verification, the prompt-results check,
+the residue audit, and the AC ledger. No subagents were used. All runs were
+on macOS (this host).
+
+### Wave 7 — gates
+
+| Gate | Result |
+| --- | --- |
+| `just test` in `claudine/` (before Phase 5 edits) | 8868 run, 8868 passed, 9 skipped (standing recipe skips) |
+| `just test` in `claudine/` (final, after Phase 5 edits) | **8870 run, 8870 passed, 9 skipped** (+2 new branch tests) |
+| `just lint` in `claudine/` (incl. `lint-lifecycle-doc-facets`), run twice | passed both times; the linker's `__eh_frame` warning is environmental |
+| L2 `claudine-cli` (`--features terminal-tests`, recipe tier filter `test(/(^|::)level2_/)` plus `!test(/kitty/)`) | **282 run, 282 passed**; tmux and WezTerm harnesses, no focus taken |
+| L2 `claudine-gen` (same tier filter) | 3 run, 3 passed |
+| `just test` in `darkmatter/` (incl. DMLS) | 9950 run, 9950 passed, 10 skipped |
+| `just lint` in `darkmatter/` | passed (incl. the `zed-dmls` wasm32-wasip2 build) |
+
+**Not run, not counted as passing:** the four `level2_drain_ctrl_c_kitty.rs`
+tests (`level2_second_kitty_ctrl_c_during_the_{compose,inline_compose,sequence,wrapper}_drain_exits_130`).
+Kitty is installed on this host, so they would launch a visible Kitty
+window. The no-focus rule excludes that, so they were left out of the L2 run
+by filter. (Phase 4 said "two"; the file has four.) None of them reads
+lifecycle grammar. The L2 run used `cargo nextest` with the recipe's own tier
+filter, because `just test-l2`'s unquoted argument forwarding cannot carry
+a filterset that contains parentheses.
+
+AC12 (Darkmatter) evidence is unchanged from Phase 3 and passes again in
+the `darkmatter/` run: extension loading and the inventory guards, the
+`nested_span` classifier tests, the `overlay/frontmatter.rs` pointer tests, and
+`mapping_only_corpus` with **no re-bless**.
+
+### Wave 8 — prompt results (AC10, AC11, AC15)
+
+Root `just test-prompts` exits 0 whether or not its checks pass. Its steps:
+
+- **Schema validation** (`md schema validate` over every internal prompt): 31
+  documents fail. **None of the failures is about lifecycle grammar.** Every
+  message is one of three kinds: a required input parameter missing (`base`,
+  `report`, `spec`, `review`, …), an expression-valued property that is not
+  of the declared type (`iteration`, `phase`, `total_phases`), or a
+  `{{ … }}` file reference that is invalid file-reference syntax. Untouched
+  prompts (`lineage.md`, `review-loop.md`, `_reviews/cycles.md`) fail the same
+  way. Filtering the messages for lifecycle keys and verbs returns nothing.
+  These are pre-existing and outside this feature.
+- **claudine** (`shipped_implement_plan_` with `prompt-tests`): 2/2 passed.
+- **claudine-cli** opt-in `prompts` binary: the recipe's run stops at the first
+  failures, so it was re-run with `--no-fail-fast`: **71 run, 63 passed, 8
+  failed**. These are the same 8 Phase 4 reported:
+  - Seven assert content of `prompts/_implement/implement-plan.md` that the
+    author removed in `dddf5c988` ("add frontmatter-edits rule and refine
+    implement prompts"), which predates this feature's migration. That commit
+    deleted the prompt's only lifecycle `set:` mappings (`epilog: null` and
+    `epilog: "{{message_to_agent}}"`) and the `_finish-before-exit.md`
+    transclusion. The failure messages confirm this:
+    `shipped_prompts_use_mapping_only_set` ("must contain a lifecycle `set`
+    mapping witness"), `shipped_prompt_corpus_parses_frontmatter` and
+    `shipped_prompt_contract::shipped_implement_plan_launches_without_a_sibling_spec`
+    (look for `epilog: null`),
+    `shipped_implement_plan_real_artifact_executes_mapping_set_before_provider_launch`
+    (looks for `epilog: "{{message_to_agent}}"`),
+    `shipped_implement_prompts_transclude_finish_before_exit`,
+    `shipped_implement_plan_final_phase_delivers_completion_flags`,
+    `shipped_implement_plan_warns_when_final_phase_exits_without_flags`.
+  - `shipped_implement_router_prefers_an_unimplemented_review_over_the_completed_plan`
+    looks for a body heading in a stderr preview that the rule blocks fill.
+    The routing itself is correct.
+  - Grammar evidence in the same run passes:
+    `internal_lifecycle_corpus_parses_under_current_grammar` (AC10), the four
+    `shipped_prompt_route_drift::` guards (AC11, no update flag), and all 13
+    `pr_flow_rehearsal` tests.
+- **claudine-cli L2** shipped-prompt rows: 3/3 passed.
+- **darkmatter** `prompts` binary: 10/10 passed.
+
+Live prompt tests are still opt-in (`prompt-tests`), and default behavior
+tests read frozen copies. No CI scheduling changed.
+
+### Wave 8 — residue audit (AC14, AC16)
+
+AC16's `rg` pattern over the eight listed trees hits 46 files. Each one is
+intentional:
+
+| Hits | Reason |
+| --- | --- |
+| `lifecycle/tests/grammar.rs`, `cli/tests/l1/compose_removed_grammar.rs`, `looping/engine/tests/removed_loop_reads.rs`, `lifecycle/bindings/tests.rs`, `looping/expression/tests.rs`, `looping/engine/tests/iteration_bindings.rs`, `cli/tests/l1/loop_gate_ambient.rs` | removed-grammar negative tests and "the old name in text is data" tests |
+| `lifecycle/parse.rs`, `lifecycle/bindings.rs`, `reserved.rs`, `looping/config.rs`, `error/mod.rs`, `lifecycle/validate.rs` | the retired-name constants, the removed-key detection, and `RemovedGrammar` docs |
+| `looping/actions/tests.rs` | `set` blocklist test: `_loop_count`/`_loop_is_first` stay reserved names |
+| `harness/report.rs`, `cli/tests/l1/authored_text_rendering.rs` (`_loop_countx`), `cli/tests/l1/prose_escape_guard.rs` | literal data or prose |
+| `reporting/queries/common.rs` | `human_in_loop_count`, a SQL alias (the pattern matches inside it) |
+| `sequence/task/{group,tests}.rs`, `cli/src/commands/wrap/sequence/task_run.rs`, `cli/tests/l1/error_guards/source_scan.rs`, Darkmatter `schemas/resolve.rs`, `render_tree/fold.rs`, `compose/transclusion/types.rs` | Rust struct fields or arguments named `stack` |
+| `claudine/docs/research/hooks/*.md` (10 files) | provider hook tables (each provider's own config grammar) |
+| `docs/topics/flow-control/{lifecycle,looping}.md`, `docs/topics/{frontmatter-properties,pre-flight-checks}.md`, `lib/README.md`, skill `timeline.md` | docs that name the removed spellings (removed-spellings table, "replaces `_loop_*`", the compatibility note, a history entry) |
+| `darkmatter/lib/tests/fixtures/clean/prompts-commit-464e2d90e.md` | a pinned historical prompt with a provenance file, used as `md clean` input (`clean_real_world_prompt.rs`); it is data and must not be rewritten |
+| `darkmatter/dmls/docs/diagnostics.md:200` | `- action: archive` is a `content_policy` example, not lifecycle |
+| `claudine/docs/schemas/partials/stack.yaml` | the draft schema partial's `stack` *type name*; out of scope (schema workstream) |
+
+Searching by structure for discriminator maps and communication
+`message`/`sound`/`route` parameters (`\{\s*action:`, `^\s+(sound|route):`)
+finds only Rust (`route:` arguments in messaging and steering,
+`{action:?}` format strings), the removed-spellings table row in
+`lifecycle.md`, and an old timeline entry.
+
+**Drift found and fixed (code wins):**
+
+- `claudine/lib/src/composition/preflight.rs` still described lifecycle shells
+  as "`action: shell`" (three places) and as the key/value form
+  "`{ action: shell, command: ... }`". These now say "`shell` action" and
+  "long-form `shell: { command: ... }`". `on_error` is still a `shell`
+  parameter, so it stays. This is a comment-only change.
+- AC14: `.claude/skills/claudine/architecture.md` named `say_first` in its
+  removed-grammar bullet. AC14 forbids that outside `timeline.md`. It now
+  says "the speech-ordering flag", as `SKILL.md` does.
+  `rg 'say_first|stack:' .claude/skills/claudine --glob '!timeline.md'` now
+  returns nothing.
+
+AC9's guard (`lifecycle_lift_ready_guard.rs`) passes. Snapshots are
+preserved: no implementation commit or working-tree change touches
+`spec.md` (other than this phase's `implemented` key) or `spike-results.md`.
+The branch's only spec commits are the pre-implementation planning commits
+`adfae0873` and `0702d5498`.
+
+### AC10 representative branch case (added)
+
+The plan asked for a hermetic CLI case recording branch-specific effects in
+order, with the other branch doing no work. The nearest existing case
+(`loop_gate_ambient::an_iterations_lifecycle_events_read_its_loop_values`)
+has one `info` per branch and no side effect. Two tests were added to
+`claudine/cli/tests/l1/lifecycle_set_shell_values.rs`:
+`only_the_selected_then_branch_runs_and_it_runs_in_order` and
+`only_the_selected_else_branch_runs_and_it_runs_in_order`. Each branch is
+`stderr`, `shell` (`git config --add claudine.branch <branch>`), `stderr`.
+Both shells are whitelisted, since approval covers both branches. Each test
+asserts the exact ordered `branch …` lines and that the repository config
+holds only the selected branch's mark. They use the file's existing
+`CliProcessFixture`, a provider stub (sh on Unix, `.cmd` on Windows), and a
+whitelist, so they are not `cfg`-gated. They follow the same path as the
+existing `a_real_run_runs_the_lifecycle_assignment_command_once`, which
+already runs on every OS. Time: about 0.4 s each.
+
+### AC ledger
+
+| AC | Evidence (all passing on macOS unless noted) |
+| --- | --- |
+| AC1 | `lifecycle/tests/grammar.rs` (every event list and dictionary, canonical order, root `when` rejected, loop `gate`, loose loop verbs, task `setup`/`teardown`). See the Phase 2 map. |
+| AC2 | `grammar.rs::{conditionals_nest_five_levels_deep, a_sixth_level_is_a_typed_error_naming_its_path, an_else_if_chain_counts_each_nested_when_and_siblings_do_not}` |
+| AC3 | `grammar.rs::{an_action_after_an_unconditional_directive_is_rejected_in_every_list, a_when_item_never_counts_as_unconditional, the_same_directive_in_sibling_branches_is_legal}` |
+| AC4 | parser `no_error` tests in `grammar.rs` (Phase 2 map); executor `runtime_set::bundle_no_error_cannot_suppress_its_set_failure`, `nested_no_error_does_not_suppress_an_evaluation_error` |
+| AC5 | parse: `with_is_accepted_on_retry_and_proxy`, `with_is_rejected_on_every_other_verb_resume_included`; evaluation: `executor/tests/retry_with_evaluation.rs`; transitions: `loop_control/tests/overlay_layering.rs` (repeated retry, retry then resume, proxy-owned document, no disk write, no re-evaluation, schema refresh failure), `retry_resume.rs::a_failed_retry_overlay_spends_no_attempt_and_stages_nothing`; binary: `cli/tests/l1/compose_retry_overlay.rs` |
+| AC6 | `grammar.rs` removed-grammar tests; `cli/tests/l1/compose_removed_grammar.rs` (27 rows × `compose`/`inline-compose`/`sequence`, plus the table guard and the render-time transclusion case); retired `_loop_*` reads: `removed_loop_reads.rs`, `loop_gate_ambient.rs` |
+| AC7 | `lifecycle/bindings/tests.rs`, `looping/expression/tests.rs`, `looping/engine/tests/{gate_ambient,iteration_bindings}.rs`, `seed_state.rs`, CLI `loop_gate_ambient.rs`; Darkmatter `host_globals_compose.rs` |
+| AC8 | `lifecycle/tests/audio_emission.rs` (both orders, interleaving, published before a transition, durable `LockedAudioSpool` queue across a transition, dry run publishes nothing) |
+| AC9 | `lib/tests/l1/lifecycle_lift_ready_guard.rs` |
+| AC10 | opt-in `cli/tests/prompts/shipped_prompts.rs::internal_lifecycle_corpus_parses_under_current_grammar` (passed in Phase 5's run); default L1 frozen-fixture coverage (`compose_initialize_acceptance::`, `compose_schema_cli.rs`, `shipped_prompts` L1); representative CLI branch case: `lifecycle_set_shell_values::only_the_selected_{then,else}_branch_runs_and_it_runs_in_order` (new) |
+| AC11 | `shipped_prompt_route_drift::` 4/4, without the update flag |
+| AC12 | Darkmatter `nested_span_tests::lifecycle_inventory_matches_the_authored_claudine_schema`, the classifier and pointer tests, `mapping_only_corpus` (no re-bless); passing in Phase 5's `darkmatter/` run |
+| AC13 | Phase 4 doc rewrite; `lint-lifecycle-doc-facets` passes; the looping page promises no alias period |
+| AC14 | `rg 'say_first\|stack:' .claude/skills/claudine --glob '!timeline.md'` returns nothing (after the fix above) |
+| AC15 | gates above; `just test-prompts` inspected; corpus and route-drift pass; 8 unrelated opt-in failures and 31 non-grammar schema-validation failures recorded separately |
+| AC16 | residue table above |
+| AC17 | `grammar.rs` (empty stacks, single-verb long form vs bundles, `say`/`speak`, unknown keys and parameters, both branches contribute shells, `initialize` shell and shell-valued `set` rejected in dead branches, authored paths); executor `conditions_control.rs` (selected branch evaluates operands only, a depth-two directive ends the event) |
+
+### Other operating systems
+
+No cross-host run was made in Phase 5. The Phase 5 code changes are a
+comment-only edit and two L1 tests that use an existing cross-platform
+pattern. Earlier phases recorded the same posture for their platform-neutral
+parser and overlay changes. CI's Linux and macOS cells on the pull request,
+and the nightly native-Windows and WSL2 cells, supply the remaining evidence.
+No environment or gate was added.
+
+### Departures and open items for review
+
+- The four Kitty L2 tests were not run (above).
+- The 8 opt-in prompt failures and the 31 prompt schema-validation failures
+  predate this feature. They are left for the author, per the plan's rule
+  not to widen scope.
+- Recorded in earlier phases and unchanged: the retry overlay is consumed at
+  `materialize_harness_prompt`, not on first read (Phase 3), and executor
+  recursion was pulled forward into Phase 2.
+
+### Checkpoint
+
+Every AC from AC1 to AC17 has passing evidence on this host, or a reported,
+unrelated exception (AC15's informational prompt failures). No approval
+flow, commit, or feature-directory move was performed.
+**Implementation complete, ready for review.**
