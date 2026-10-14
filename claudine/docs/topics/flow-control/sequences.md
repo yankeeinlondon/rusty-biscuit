@@ -44,7 +44,7 @@ A task declares **exactly one** executable field:
 |---|---|
 | `prompt: <file-ref>` | The referenced Markdown document (inline-compose if *that* document is configured for it, otherwise a normal compose) |
 | `shell: <string \| string[]>` | One or more shell commands |
-| `side_effect: <action>` | One Darkmatter side effect, in the standard lifecycle action grammar |
+| `side_effect: <action>` | One Darkmatter side effect, written as a one-verb lifecycle dictionary in short or long form (`side_effect: { set_frontmatter: ["state.md", "status", "done"] }`) |
 | `group: <group-ref \| inline group>` | A [group](#groups) |
 | `task: <file-ref>` | An externalized `kind: task` file |
 
@@ -55,7 +55,7 @@ source document's Markdown body. A step **with** one runs that instead of the
 body. A source with no body — a `kind: sequence` YAML file invoked directly —
 simply requires every step to carry an executable.
 
-Optional task fields: `name`, `setup:` / `teardown:` (action stacks), `params:`
+Optional task fields: `name`, `setup:` / `teardown:` (lifecycle action lists), `params:`
 (user setters passed to a `prompt` document), `timeout:` (per shell command),
 `operation:`, `flow:`. A field that cannot affect the chosen executable — say
 `params:` on a `shell:` task — is a typed error, not a silent no-op.
@@ -426,7 +426,7 @@ stdout that task captured.
 ## Mutating state with `set`
 
 `set` is the state-mutation side effect. It works anywhere the lifecycle action
-grammar applies — lifecycle stacks, task `setup:`/`teardown:`, and
+grammar applies — lifecycle events, task `setup:`/`teardown:`, and
 `side_effect:` tasks:
 
 ```yaml
@@ -528,17 +528,20 @@ rather than left to implementation judgment.
 kind: task
 prompt: review.md
 setup:
-    - when: "file_exists(foo/bar/baz.md)"
-      action:
+    - when: "file_exists('foo/bar/baz.md')"
+      then:
           - message: "the file exists"
-    - action:
-          - set:
-                title: "About to do the thing"
+    - set:
+          title: "About to do the thing"
 teardown:
     - when: "ctx.dirty_files"
-      action:
-          - message: "I've made a mess of the place"
+      message: "I've made a mess of the place"
 ```
+
+`setup:` and `teardown:` take the same grammar as a lifecycle event: an ordered
+list of actions and `when`/`then`/`else` items, or a single dictionary of verbs
+run in canonical order (`teardown: { info: "review task done" }`). See
+[Lifecycle — Writing an Event](lifecycle.md#writing-an-event).
 
 - `setup` runs before the primary action. If it fails, the primary action is skipped.
 - `teardown` runs exactly once after setup has started — including after primary
@@ -553,7 +556,7 @@ An external `task:` reference is exclusive with the other executables and is an
 immutable expansion of the referenced file — v1 does not support patching or
 overriding fields at the referencing site.
 
-A task's `side_effect` action and its `setup`/`teardown` stacks mutate
+A task's `side_effect` action and its `setup`/`teardown` actions mutate
 relative to the document that authored the task — its own directory and
 repository — not the document a `prompt:` step composes and runs. An
 externalized `task:` (or `group:`) file that carries `set_frontmatter` or

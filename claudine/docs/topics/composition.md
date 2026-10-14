@@ -735,7 +735,7 @@ What each error focuses on:
 
 | Error | Focus |
 |---|---|
-| Lifecycle guards, `proxy.with`/`set` shape errors, `InvalidFileReference`, the prompt/agent/model/interactive/hash type errors, `SchemaLoad` | the named property path (sequence indexes such as `initialize.stack[0].action[1].set` resolve; a sequence task's `tasks[0].…` path matches its unique authored suffix) |
+| Lifecycle guards, `proxy.with`/`set` shape errors, `InvalidFileReference`, the prompt/agent/model/interactive/hash type errors, `SchemaLoad` | the named property path (authored lifecycle paths such as `initialize[0].then[1].set` resolve; a sequence task's `tasks[0].…` path matches its unique authored suffix) |
 | `SchemaValidation`, `MissingProperties`, `UnresolvedFileReference`, `UnsupportedInteractiveSchema` | every named property, both where the frontmatter sets it and where `$schema` declares it: under an inline `$schema` mapping, or in **every** arm of a `$schema` union |
 | `SchemaParse` | the offending `$schema.<property>` line (a grammar span advances into a multi-line value), else the `$schema:` line |
 | `FrontmatterParse` | the line the YAML parser reported; for a near-miss `----` fence, the fence line |
@@ -1239,10 +1239,8 @@ Plain `ctx.*` in a composed document describes the caller's **launch context** �
   ```md
   ---
   start:
-      stack:
-          - action:
-                - shell: "git add notes.md"
-                - proxy: ./commit.md
+      - shell: "git add notes.md"
+      - proxy: ./commit.md
   ---
   ```
 
@@ -1253,7 +1251,7 @@ Plain `ctx.*` in a composed document describes the caller's **launch context** �
 - **Reuse is observable and attributable.** Every canonical preparation carries a Claudine-local document-epoch token whose recorder owns that epoch's launch construction, same-epoch extensions, ambient fallbacks, and populated-context observations under the stable consumer names `preflight`, `body`, `effective-frontmatter`, `loop-condition`, and `lifecycle`. The recorder is separate from Darkmatter's `ComposeContext`; overlapping parallel sequence workers therefore cannot contribute to one another's exact maps. Performance reports project both invocation totals and each sorted epoch map. Git working-state observations are counted apart from stable discovery, per group, and the `--perf` note lists them as `volatile observations [...]`: one per requesting run, never more. Canonical preparation records a fallback on the owning epoch if its prepared context is absent, so dropping the snapshot cannot pass a zero-fallback assertion invisibly.
 - **Target identity is layered, not captured.** `ctx.agent`, `ctx.model`, `env.AGENT`, and `env.MODEL` reflect the resolved target's environment overrides applied on top of the document's captured environment, preserving target-identity precedence on every route.
 - **The source context stays source-relative.** The active document's `SourceContext` (its authoring base, repository identity, and `FileResolutionContext`) remains authoritative for document-authored file references, transclusion, `$schema` discovery, and provenance. Source-relative resolution is unchanged by this contract.
-- **`current.*` is the lazy root.** It is a Darkmatter reserved root, not a fallback for a missing prepared `ctx.*`: `current.<key>` observes a fact through the invocation's refresh capability once per lifecycle event — every read in one event's notification fields and stack sees the same value, and the next event observes afresh. A key the invocation cannot observe renders `null` with a `PartialRuntimeCapture` diagnostic — never an ambient probe. Lazy is bounded by the request: Repository metadata and topology (`repo`, `repo_root`, `packages`, `area`, and the rest of the repository keys) are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does; only mutable Git and filesystem facts (`branch`, `recent_commits`, `dirty_files`) refresh. `current_env` is an ordinary frontmatter property, not a root. See [Context Variables — Binding time](state-management/context-variables.md#binding-time-eager-ctx-lazy-current).
+- **`current.*` is the lazy root.** It is a Darkmatter reserved root, not a fallback for a missing prepared `ctx.*`: `current.<key>` observes a fact through the invocation's refresh capability once per lifecycle event — every read in one event's stack sees the same value, and the next event observes afresh. A key the invocation cannot observe renders `null` with a `PartialRuntimeCapture` diagnostic — never an ambient probe. Lazy is bounded by the request: Repository metadata and topology (`repo`, `repo_root`, `packages`, `area`, and the rest of the repository keys) are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does; only mutable Git and filesystem facts (`branch`, `recent_commits`, `dirty_files`) refresh. `current_env` is an ordinary frontmatter property, not a root. See [Context Variables — Binding time](state-management/context-variables.md#binding-time-eager-ctx-lazy-current).
 
 In sequences, the graph phase runs before per-task target selection, so graph-resolved shell bytes cannot legally reference target identity: a command referencing `ctx.agent`, `ctx.model`, `env.AGENT`, or `env.MODEL` fails graph preflight with a typed target-identity rejection directing the author to the task that owns the target. Static bracket access such as `ctx["agent"]` is canonicalized to the same identity path. A computed index rooted at `ctx` or `env` also fails closed because its dynamic key could select a target-dependent leaf; computed indexes under other namespaces are unaffected. Per-task and just-in-time audits — where the selected target's environment is available — continue to expand those roots. The capture-owner drift guard in `cli/tests/l1/composition_seams.rs` rejects any new direct prepared-context capture outside the invocation owner and its allowlisted compatibility sites.
 
@@ -1283,10 +1281,8 @@ events and their handlers, and `finalize`.
 ---
 notes: "{{ env.NOTES_DIR }}/today.md"
 start:
-    stack:
-        - action:
-              - shell: "ls $NOTES_DIR"
-              - proxy: ./summarize.md
+    - shell: "ls $NOTES_DIR"
+    - proxy: ./summarize.md
 ---
 ::file {{NOTES_DIR}}/index.md
 ```
@@ -1425,7 +1421,17 @@ The table describes live entry. Direct documents with an authored `initialize` k
 
 ### Retry and resume re-entry
 
-Retry and resume replace only the **provider-attempt slice** of the active document. They refresh the document canonically (a fresh read, full validation), keep the document's overlay and proxy provenance, and retain and decrement their own budgets — a retry cannot reset its budget by replacing the attempt. Retry drops any live session and starts a fresh attempt; resume keeps the session and delivers its follow-up message. Proxy and the next loop iteration are the two transitions that grant *fresh* budgets, because both are new active-document scope; retry, resume, proxy, and loop counters each have their own labeled home rather than sharing one counter.
+Retry and resume replace only the **provider-attempt slice** of the active document. They refresh the document canonically (a fresh read, full validation), keep the document's retained proxy overlay and proxy provenance, and retain and decrement their own budgets — a retry cannot reset its budget by replacing the attempt. Retry drops any live session and starts a fresh attempt; resume keeps the session and delivers its follow-up message. Proxy and the next loop iteration are the two transitions that grant *fresh* budgets, because both are new active-document scope; retry, resume, proxy, and loop counters each have their own labeled home rather than sharing one counter.
+
+**A retry can carry a one-read overlay.** `retry: { with: { … } }` evaluates its mapping once when the directive fires (the same evaluation as `proxy.with`) and applies the result to the retried attempt's fresh read only. It is layered over the retained proxy overlay, so a key both name takes the retry's value. The overlay is never written to disk, and nothing after that one transition sees it: a later `retry` without `with`, a `resume`, or a `proxy` adoption reads the document without it. An overlay that fails to evaluate takes no transition and spends no retry budget. See [Flow Control Reference](flow-control/flow-control-reference.md).
+
+```yaml
+failure:
+    - retry:
+        max_attempts: 2
+        with:
+            reason: "{{ err.msg }}"
+```
 
 **Launch identity is rebuilt at the fresh-read boundary, not snapshotted at adoption.** Every retry/resume re-materializes the active document from disk and recomputes the whole launch bundle against *that* read — provider, the profile and binary it selects, the resume protocol that profile supports, model, interactivity, the permission mode `--yolo` actually achieves for that pair, the structured-output shape it implies, the MCP tag set lexed from the refreshed body, the provider argv, and the environment overlay (`harness_orch/loop_control/target_launch.rs::rebuild_launch_identity`, called at every fresh-read boundary). An attempt therefore launches with the identity the document it is about to run resolves to now, not with an adoption-time snapshot. What the document does not name falls back to the invocation's plan: a document with no `agent:` keeps the planned provider, and one with no `model:` (and no `--model`) keeps the planned model while it keeps that provider. A sequence step's plan is its reviewed or planned target; elsewhere the planned model is the invocation's own, minus a model the launched document's frontmatter chose, so a retry after `model:` is removed launches without it.
 
@@ -1476,7 +1482,7 @@ The coordinator is nested **inside** the command's own ownership — a handoff c
 
 ### Backward compatibility
 
-The authoring surface is additive: positional `proxy: target.md` is unchanged, key/value `{ action: proxy, target: target.md }` is unchanged, caller overrides continue to survive every handoff, cycle protection and hop limits are unchanged, and action parameters other than `proxy.with` still reject direct mapping values.
+The authoring surface is additive: short-form `proxy: target.md` and long-form `proxy: { target: target.md }` both hand off, caller overrides continue to survive every handoff, cycle protection and hop limits are unchanged, and action parameters other than `proxy.with` and `retry.with` still reject direct mapping values.
 
 > Reader note: the runtime refactor intentionally corrects behavior that
 > depended on the router path. A proxied target may now execute additional loop

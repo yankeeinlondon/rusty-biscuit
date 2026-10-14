@@ -742,13 +742,22 @@ Claudine will allow the host to communicate:
 - and communication wouldn't be complete unless **sound effects** were an option and Claudine doesn't disappoint
     - comes with a library of 60+ sound effects you can attach to your events
 
-As an example, should you want send a chat message, speak out loud, and send a sound effect ("no such thing as over communicating") when a Markdown document has passed all preflight checks you could:
+As an example, should you want send a chat message, play a sound effect, and speak out loud ("no such thing as over communicating") when a Markdown document has passed all preflight checks you could:
 
 ```yaml
 start:
     message: "We are about to start the build process for {{ctx.repo}} using {{env.AGENT}} agent"
     say: "Starting build process"
     effect: small-group-cheer
+```
+
+Written as a dictionary like this, the actions run in a fixed order (the message, then the sound effect, then the speech) whatever order you type the keys in. When you want to choose the order, write the event as a list instead; audio plays in the order it appears:
+
+```yaml
+start:
+    - say: "Starting build process"
+    - effect: small-group-cheer
+    - message: "We are about to start the build process for {{ctx.repo}} using {{env.AGENT}} agent"
 ```
 
 #### Side Effects & Flow Control
@@ -758,21 +767,24 @@ If you spend a lot of time around functional programmers you'll likely have hear
 So Claudine, wanted you to stop feeling ashamed about creating side-effects and start declaring them:
 
 ```yaml
-start: 
-    stack:
-        - {}
+start:
+    - shell: "git fetch --quiet"
+    - when: "fm.target == 'production'"
+      then:
+          - error: "refusing to run against production"
+      else:
+          - set_frontmatter: ["state.md", "status", "running"]
 ```
 
-- side effects are a part of the "stack" of all lifecycle events
-- this "stack" is operated as a FIFO stack (aka, items at top are executed first)
-- there are three types of side effects you can attach to a lifecycle event:
+- every lifecycle event is an ordered list of actions, run top to bottom
+- there are three types of side effects you can put in that list:
     - **Shell Commands** - _run a shell command and change some stuff (hey, break some stuff, you go kid)_
     - **Safe Effects Library** - _choose from a safe set of utilities that Claudine provides to you_
     - **Flow Control** - _proxy the execution to another document, force an error, exit successful if all the aims have been completed_
-- side effects, as well as all other items on the stack, are **conditional** (or at least can be)
-- every lifecycle event pulls from the stack until:
-    - a Flow Control event is matched (aka, conditional evaluates to `true`), or
-    - the stack has been emptied
+- any action can be made **conditional** with a `when` item: its `then` list runs when the condition is true and its optional `else` list when it is false (conditionals nest up to five levels)
+- an event runs its actions in order until:
+    - a Flow Control directive runs (it ends the whole event), or
+    - the list has been emptied
 
 > **Note:** creating side effects is valuable activity but never _emit_ a side effect ... no one likes that plus it smells bad
 

@@ -8,7 +8,7 @@ Shell commands can appear in three places during a Claudine session:
 
 1. **Template `::shell` directives** — Darkmatter's compose pipeline executes these during document composition. A prompt like `commit.md` might contain `::shell sniff repo packages` to inject dynamic content.
 2. **Frontmatter `$(cmd)` expressions** — top-level frontmatter string values of the form `$(command arg ...)` are evaluated by Darkmatter's frontmatter shell expansion phase, with the command's trimmed `stdout` written back into the frontmatter. Example: `today: $(date +%Y-%m-%d)`.
-3. **Lifecycle `shell` stack actions** — positional `shell: "…"` actions and key/value `{ action: shell, command: "…" }` actions declared in any reachable lifecycle stack (`initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, `loop`), and every command a lifecycle `set` value written as a whole-value `$( … )` can run (both branches of a ternary). Some are conditional (guarded by `when:` or reachable only on a recovery path) but they still need pre-authorization because there is no opportunity to prompt the user mid-session. A `set` value's command is approved under its bare bytes: `set: { clean: "$(git diff --quiet)::ok" }` approves `git diff --quiet`.
+3. **Lifecycle `shell` stack actions** — short-form `shell: "…"` and long-form `shell: { command: "…" }` actions declared in any reachable lifecycle stack (`initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, `loop`), in both the `then` and `else` bodies of every `when` guard, and every command a lifecycle `set` value written as a whole-value `$( … )` can run (both branches of a ternary). Some are conditional (guarded by `when:` or reachable only on a recovery path) but they still need pre-authorization because there is no opportunity to prompt the user mid-session. A `set` value's command is approved under its bare bytes: `set: { clean: "$(git diff --quiet)::ok" }` approves `git diff --quiet`.
 
 Without pre-flight, a shell command that lacks whitelist coverage would either block the process waiting for interactive approval that will never come (in a non-interactive session) or fail with a confusing error deep inside the composition pipeline. The pre-flight eliminates both problems by resolving all approvals upfront.
 
@@ -76,8 +76,7 @@ A transcluded partial is discovered with the state composition hands it: its par
 <!-- router.md -->
 ---
 start:
-  stack:
-    - action: {action: proxy, target: './target.md', with: {base: main}}
+  - proxy: {target: './target.md', with: {base: main}}
 ---
 
 <!-- target.md -->
@@ -96,6 +95,8 @@ The partial's command is approved as `git rev-parse --short main`, exactly what 
 
 Some values have no knowable bytes until the command runs: a shell probe such as `has_alias(…)` (discovery never launches the login shell), `as_markdown(…)` content, a lazy `current.*` read, and a frontmatter `$(…)` value that has not been expanded yet. A command built from one of these, directly or through a frontmatter value that reads one (in the same document or inherited by a partial), fails pre-flight with a dynamic command shape error naming the value, instead of being approved in a shape it will not run in. A caller override of such a value makes the command approvable again.
 
+A retired loop-value read (`_loop_count` and the other four `_loop_*` names) that only a transcluded partial introduces is met first by this discovery walk. It fails with the same `RemovedGrammar` error, naming the `loop.*` replacement, that composition would raise (its `path` is `render`), not with the generic `PreFlightDiscoveryFailed`.
+
 Each command is checked against shell policy (blacklist, whitelist, approval cache) and, if not already approved, the user is prompted. Once all template commands are approved, the approved set is passed to Darkmatter as `pre_approved_commands` on the `ComposeOptions` and composition proceeds.
 
 ### Phase 2: Lifecycle Shell Commands
@@ -103,7 +104,7 @@ Each command is checked against shell policy (blacklist, whitelist, approval cac
 Shell actions in `initialize` are validation errors, including false branches;
 whitelists, cached approvals, and `--yolo` cannot allow them.
 
-After composition, Claudine walks every reachable lifecycle stack in the effective frontmatter and discovers its `shell` actions — positional `shell: "…"` actions and key/value `{ action: shell, command: "…" }` actions across `start`, `success`, `blocked`, `failure`, `finalize`, and `loop` — and the commands of every `set` value written as a whole-value `$( … )`. Preparation fixes those commands' bytes from early-binding values first, so pre-flight approves exactly what the action later runs; see [Reading a Command's Result](flow-control/lifecycle.md#reading-a-commands-result).
+After composition, Claudine walks every reachable lifecycle stack in the effective frontmatter and discovers its `shell` actions — short-form `shell: "…"` and long-form `shell: { command: "…" }` actions, in every `then` and `else` body, across `start`, `success`, `blocked`, `failure`, `finalize`, and `loop` — and the commands of every `set` value written as a whole-value `$( … )`. Preparation fixes those commands' bytes from early-binding values first, so pre-flight approves exactly what the action later runs; see [Reading a Command's Result](flow-control/lifecycle.md#reading-a-commands-result).
 
 These commands flow through the same `resolve_shell_approvals` function and the same shared approval cache. Any command already approved in phase 1 is a cache hit. Only genuinely new commands trigger additional prompts.
 
@@ -113,7 +114,7 @@ An approval covers the bytes it was granted for, never a changed command. Every 
 
 - **A `proxy` target** gets its own full audit, as if it were invoked directly.
 - **A `retry` or `resume`** re-reads the document and audits its template commands with the attempt's state.
-- **A loop iteration** audits the template commands and the lifecycle `shell` commands its own state produces (`_loop_*`, carried values, lifecycle `set`). A command such as `::shell echo run-{{ n }}` is a new command on every iteration.
+- **A loop iteration** audits the template commands and the lifecycle `shell` commands its own state produces (`loop.*`, carried values, lifecycle `set`). A command such as `::shell echo run-{{ n }}` is a new command on every iteration.
 
 The approval handler is frozen after the first attempt, so these re-audits never prompt behind a running agent: a command already in the approval cache or the whitelist passes, and a new one is refused with the same "requires approval" error pre-flight gives. The first loop iteration is the exception; nothing has launched yet, so it may still prompt. A `proxy` target reopens the approval window for its own commands.
 
@@ -220,7 +221,7 @@ Pre-flight is especially important for non-interactive sessions where there is n
 
 ### Lifecycle Shell Actions
 
-Shell actions declared anywhere in the lifecycle stacks (positional `shell: "…"` actions and key/value `{ action: shell, command: "…" }` actions) are included in the pre-flight scan. This means all shell commands across the entire session lifecycle are authorized upfront, not just those in the template.
+Shell actions declared anywhere in the lifecycle stacks (short-form `shell: "…"` and long-form `shell: { command: "…" }` actions, in either branch of a `when` guard) are included in the pre-flight scan. This means all shell commands across the entire session lifecycle are authorized upfront, not just those in the template.
 
 ### Sequence Execution
 

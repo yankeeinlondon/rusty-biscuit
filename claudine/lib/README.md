@@ -385,6 +385,13 @@ Timeouts, shell policy, and runtime attempt classification for composed prompt p
 
 ## Compatibility Notes
 
+### Lifecycle Grammar (2026-10)
+
+- A lifecycle event is a list of actions or one dictionary of verbs, with `when`/`then`/`else` items nested up to five levels. The old `stack:` key, the `action:` aggregator and `{action: verb}` map, `say_first`, the communication `message`/`sound`/`route` parameters, and the `_loop_*` names are rejected with `CompositionError::RemovedGrammar`, which names the replacement. See [Lifecycle](../docs/topics/flow-control/lifecycle.md).
+- `LifecycleStackItem` and `LifecycleNotification` are removed. A stack is `Vec<LifecycleNode>` (`Action` or `Conditional`); `LifecycleAction` gained `path: LifecyclePath`, and `LifecycleConfig` holds only `stacks`.
+- Loop values are the `loop` global (`loop.count`, `loop.is_first`, `loop.is_last`, `loop.last_output`, `loop.last_exit_code`); `fm.loop` is the loop configuration.
+- `ProxyWith`/`ProxyWithValue`/`ProxyWithError` are now `WithOverlay`/`WithValue`/`WithOverlayError`, shared by `proxy` and `retry`. `LifecycleProxyWith*` errors are `LifecycleWith*`; `LifecycleProxyOnlyParameter` is `LifecycleWithUnsupported`. `LifecycleStackAmbiguous` and `LifecycleSetLongFormRemoved` are removed.
+
 ### Nested-Span Lifecycle Validation (2026-09)
 
 - `composition::lifecycle::validate_no_interpolation_leaks` and `CompositionError::LifecycleInterpolationLeak` are removed. Neither had a production caller.
