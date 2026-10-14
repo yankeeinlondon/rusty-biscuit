@@ -12,7 +12,7 @@
 //! ```text
 //! schema/src/
 //! ├── lib.rs              # Module declarations, runtime ABI check, re-exports
-//! ├── shared.rs           # Request-side helpers (cookies, FormFile, Paginated)
+//! ├── shared.rs           # Request-side helpers (cookies, FormFile)
 //! ├── anthropic.rs        # Small API module (single file)
 //! ├── emqx/               # Large API module (split directory)
 //! │   ├── mod.rs          #   API client structs and tags, re-exports, submodules
@@ -716,6 +716,8 @@ mod tests {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         }
     }
 
@@ -772,6 +774,8 @@ mod tests {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         }
     }
 
@@ -1050,6 +1054,8 @@ mod tests {
                 cross_origin: CrossOrigin::default(),
                 request_id_header: None,
                 secret_names: vec![],
+                default_pagination: None,
+                pagination_exceptions: vec![],
             };
 
             let temp_dir = TempDir::new().unwrap();
@@ -1104,6 +1110,8 @@ mod tests {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
 
         let temp_dir = TempDir::new().unwrap();
@@ -1143,6 +1151,8 @@ mod tests {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
 
         let temp_dir = TempDir::new().unwrap();
@@ -1190,6 +1200,8 @@ mod tests {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
 
         let api_b = RestApi {
@@ -1220,6 +1232,8 @@ mod tests {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         };
 
         (api_a, api_b)
@@ -1483,6 +1497,8 @@ mod tests {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         }
     }
 

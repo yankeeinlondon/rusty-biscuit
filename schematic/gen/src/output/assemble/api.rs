@@ -12,8 +12,9 @@ use quote::{format_ident, quote};
 use schematic_define::{Endpoint, RestApi};
 
 use crate::codegen::api_struct::api_tag_name;
+use crate::codegen::pagination::api_pager_view;
 use crate::codegen::{
-    ModuleDocBuilder, generate_api_struct, generate_endpoint_methods, generate_paginated_impl,
+    ModuleDocBuilder, generate_api_struct, generate_endpoint_methods, generate_pagination_impls,
     generate_request_struct_with_options,
 };
 
@@ -29,15 +30,18 @@ pub struct SplitApiParts {
     /// Module docs, submodule declarations, re-exports, and each API's
     /// client struct and tag type.
     pub mod_rs: TokenStream,
-    /// Request structs, their `EndpointSpec` and `Paginated` impls, form
-    /// bodies, call types, and the endpoint methods.
+    /// Request structs, their `EndpointSpec` and pager impls, form bodies,
+    /// call types, and the endpoint methods.
     pub requests_rs: TokenStream,
     /// The re-exported definition types.
     pub responses_rs: TokenStream,
 }
 
-/// The request structs, `Paginated` impls, call types, and endpoint methods
-/// of one API.
+/// The request structs, pager impls, call types, and endpoint methods of one
+/// API.
+///
+/// They are generated from the API's pager view, so a parameter a
+/// pagination strategy adopts is in none of them.
 ///
 /// An API-level `Cookie` header cannot be a client default header: the
 /// runtime refuses a default header that can carry a credential. So the API's
@@ -46,6 +50,8 @@ pub struct SplitApiParts {
 /// parameters into one `Cookie` header. `generate_api_struct` leaves them out
 /// of the default headers.
 fn api_requests(api: &RestApi, module_path: &str) -> TokenStream {
+    let api = api_pager_view(api);
+    let api = api.as_ref();
     let suffix = get_request_suffix(api);
     let api_cookies: Vec<(String, String)> = api
         .headers
@@ -64,9 +70,7 @@ fn api_requests(api: &RestApi, module_path: &str) -> TokenStream {
             &api_tag_name(api),
         ));
     }
-    for endpoint in &api.endpoints {
-        tokens.extend(generate_paginated_impl(endpoint, &suffix));
-    }
+    tokens.extend(generate_pagination_impls(api, &suffix));
     tokens.extend(generate_endpoint_methods(api));
     tokens
 }
@@ -81,29 +85,12 @@ fn with_api_cookies(endpoint: &Endpoint, api_cookies: &[(String, String)]) -> En
     endpoint
 }
 
-fn has_paginated(apis: &[&RestApi]) -> bool {
-    apis.iter().any(|api| {
-        api.endpoints
-            .iter()
-            .any(|ep| ep.params.as_ref().is_some_and(|p| p.pagination.is_some()))
-    })
-}
-
-fn shared_import(apis: &[&RestApi]) -> TokenStream {
-    if has_paginated(apis) {
-        quote! { use crate::shared::Paginated; }
-    } else {
-        TokenStream::new()
-    }
-}
-
 /// Assembles an API module with configurable options.
 pub fn assemble_api_module_with_options(api: &RestApi, options: &OutputOptions) -> TokenStream {
     let module_path = get_module_path(api);
     let requests = api_requests(api, &module_path);
     let api_struct = generate_api_struct(api);
     let module_docs = ModuleDocBuilder::new(api).build();
-    let shared_import = shared_import(&[api]);
 
     let definitions_import = if options.standalone {
         quote! {
@@ -120,8 +107,6 @@ pub fn assemble_api_module_with_options(api: &RestApi, options: &OutputOptions) 
         use serde::{Deserialize, Serialize};
 
         #definitions_import
-
-        #shared_import
 
         #api_struct
 
@@ -154,7 +139,6 @@ pub fn assemble_combined_api_module(apis: &[&RestApi]) -> TokenStream {
     let module_path = get_module_path(apis[0]);
     let combined_docs = build_combined_module_docs(apis);
     let definitions_import = build_definitions_import(&module_path);
-    let shared_import = shared_import(apis);
 
     let per_api_code = apis.iter().map(|api| {
         let api_struct = generate_api_struct(api);
@@ -172,8 +156,6 @@ pub fn assemble_combined_api_module(apis: &[&RestApi]) -> TokenStream {
         use serde::{Deserialize, Serialize};
 
         #definitions_import
-
-        #shared_import
 
         #(#per_api_code)*
     }
@@ -213,7 +195,7 @@ fn build_combined_module_docs(apis: &[&RestApi]) -> TokenStream {
 /// - `mod.rs` - module docs, submodule declarations, re-exports, and the
 ///   API's client struct and tag type
 /// - `requests.rs` - all request structs with their `EndpointSpec` and
-///   `Paginated` impls, the call types, and the endpoint methods
+///   pager impls, the call types, and the endpoint methods
 /// - `responses.rs` - definitions re-exports
 pub fn assemble_split_api_module(api: &RestApi, options: &OutputOptions) -> SplitApiParts {
     let module_path = get_module_path(api);
@@ -257,7 +239,6 @@ fn split_parts(
     definitions_import: TokenStream,
     module_path: &str,
 ) -> SplitApiParts {
-    let shared_import = shared_import(apis);
     // The endpoint methods in `requests.rs` extend the API structs.
     let api_items: Vec<_> = apis
         .iter()
@@ -280,8 +261,6 @@ fn split_parts(
 
     let requests_rs = quote! {
         use serde::{Deserialize, Serialize};
-
-        #shared_import
 
         use super::responses::*;
         use super::{#(#api_items),*};

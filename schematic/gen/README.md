@@ -216,8 +216,8 @@ The generator follows a multi-phase pipeline:
 │  │ Structs       │ │ Impls         │ │ Tag, Constructor      │  │
 │  └───────────────┘ └───────────────┘ └───────────────────────┘  │
 │  ┌───────────────┐ ┌───────────────┐ ┌───────────────────────┐  │
-│  │ Shared Request│ │ Paginated     │ │ Module Docs           │  │
-│  │ Helpers       │ │ Trait         │ │ Generation            │  │
+│  │ Shared Request│ │ Pager         │ │ Module Docs           │  │
+│  │ Helpers       │ │ Impls         │ │ Generation            │  │
 │  └───────────────┘ └───────────────┘ └───────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
                                 │
@@ -263,7 +263,7 @@ The generator produces per-API module files:
 schema/src/
 ├── lib.rs           # Module declarations, SCHEMATIC_RUNTIME_ABI and its compile-time check, `pub use schematic_runtime`
 ├── prelude.rs       # Each API's client struct, plus the runtime's Call, CallError, Credential, FullCall, Response, ...
-├── shared.rs        # encode_cookie_value, combine_cookie_headers, FormFile, the Paginated marker trait
+├── shared.rs        # encode_cookie_value, combine_cookie_headers, FormFile
 ├── ws_shared.rs     # WebSocket support shared by the *_ws modules
 ├── anthropic.rs     # A module under 2000 formatted lines stays one file
 ├── lmstudio.rs
@@ -978,8 +978,7 @@ Code generation for individual components:
 | `generate_request_struct_with_options(&endpoint, suffix, module_path, api_marker)` | The same, with the module path used in doc examples and the type `EndpointSpec::Api` names; generated modules pass the API's tag (`{Api}Api`) |
 | `PLACEHOLDER_API_MARKER` | The marker (`Api`) named by request structs generated without an API |
 | `generate_request_helpers()` | Creates the request helpers of `shared.rs`: `encode_cookie_value`, `combine_cookie_headers`, `FormFile` |
-| `generate_paginated_trait()` | Creates `Paginated` marker trait |
-| `generate_paginated_impl(&endpoint, suffix)` | Creates `impl Paginated` for paginated endpoints |
+| `generate_pagination_impls(&api, suffix)` | Creates the `schematic_runtime::pager::Paginated` impl and the capability marker impls of every paginated list endpoint |
 | `ModuleDocBuilder` | Builds a generated module's `//!` documentation |
 
 ### `output`
@@ -992,7 +991,7 @@ Assembly, validation, and file writing:
 | `assemble_api_module(&api)` | Assembles a single API module |
 | `assemble_combined_api_module(&apis)` | Combines multiple APIs sharing a module path into one `TokenStream` |
 | `assemble_lib_rs(&apis)` | Generates lib.rs with module declarations and the runtime ABI marker and check |
-| `assemble_shared_module()` | Generates shared.rs with the request helpers and the `Paginated` trait |
+| `assemble_shared_module()` | Generates shared.rs with the request helpers |
 | `assemble_prelude(&apis)` | Generates prelude.rs with convenient re-exports |
 | `generate_and_write(&api, &dir, dry_run)` | Full generation of one API (the API is the whole crate) |
 | `generate_and_write_all(&apis, &dir, dry_run)` | Full generation: `apis` is the whole crate; obsolete generated modules are deleted |
@@ -1117,23 +1116,28 @@ let req: CreateMessageRequest = body.into();
 
 ## Pagination Support
 
-The generator supports pagination with the `Paginated` marker trait:
-
-- Endpoints with pagination configured via `EndpointParams::pagination` automatically get `impl Paginated`
-- The `Paginated` trait is defined in `shared.rs` and can be used for generic pagination utilities
+A list endpoint is paginated when its definition authors a strategy, as the
+API's `default_pagination` or a `pagination_exceptions` row. For each one the
+generator emits `impl schematic_runtime::pager::Paginated` on the request
+type, with the strategy as a constant, plus one capability marker impl per
+control the strategy authors; the paging itself is the runtime's. The
+endpoint's call type forwards to the pager, so only authored controls exist:
 
 ```rust
-use schematic_schema::schematic_runtime::EndpointSpec;
-use schematic_schema::shared::Paginated;
+let releases = gh.list_releases("owner", "repo").page_size(50).collect_all().await?;
 
-// Generic pagination helper over any paginated endpoint of OpenAI
-async fn fetch_all_pages<R>(client: &OpenAI, first: R) -> Vec<R::Success>
-where
-    R: Paginated + EndpointSpec<Api = OpenAIApi>,
-{
-    // Implementation that handles pagination
+let mut pages = gh.list_releases("owner", "repo").pages();
+while let Some(page) = pages.next().await? {
+    for release in page.items { /* ... */ }
 }
 ```
+
+- A parameter the strategy adopts (for example `page` or `per_page`) is not
+  a request field or setter; the pager controls it.
+- A setter named like a pager control the call type forwards gains a
+  `_param` suffix, reported as an `endpoint-method-rename` warning.
+- The legacy `EndpointParams::pagination` metadata and alternates generate
+  nothing.
 
 ## Safety Guarantees
 

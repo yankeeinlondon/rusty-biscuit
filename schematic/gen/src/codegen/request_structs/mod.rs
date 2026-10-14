@@ -6,7 +6,7 @@
 
 mod body;
 mod derives;
-mod endpoint_spec;
+pub(crate) mod endpoint_spec;
 mod form;
 mod into_parts;
 mod named_params;

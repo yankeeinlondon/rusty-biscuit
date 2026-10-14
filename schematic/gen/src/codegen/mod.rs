@@ -13,16 +13,19 @@
 //!   struct and the call type it returns
 //! - [`request_structs`] - Generates per-endpoint request structs and their
 //!   `schematic_runtime::EndpointSpec` implementations
+//! - [`pagination`] - Generates the `schematic_runtime::pager::Paginated`
+//!   and capability marker impls of paginated list endpoints
 //! - [`shared`] - Generates the request-side helpers of `shared.rs`
-//! - [`traits`] - Generates the `Paginated` marker trait and its impls
 //!
 //! ## Code Generation Flow
 //!
 //! 1. Each endpoint gets a request struct via [`generate_request_struct`]
-//! 2. Each API gets its client struct and tag via [`generate_api_struct`]
-//! 3. Each API gets its endpoint methods and call types via
+//! 2. Each paginated endpoint gets its pager impls via
+//!    [`generate_pagination_impls`]
+//! 3. Each API gets its client struct and tag via [`generate_api_struct`]
+//! 4. Each API gets its endpoint methods and call types via
 //!    [`generate_endpoint_methods`]
-//! 4. `shared.rs` gets the request helpers via [`generate_request_helpers`]
+//! 5. `shared.rs` gets the request helpers via [`generate_request_helpers`]
 //!
 //! ## Output Format
 //!
@@ -35,9 +38,9 @@
 pub mod api_struct;
 pub mod endpoint_methods;
 pub mod module_docs;
+pub mod pagination;
 pub mod request_structs;
 pub mod shared;
-pub mod traits;
 
 pub use api_struct::generate_api_struct;
 pub use endpoint_methods::generate_endpoint_methods;
@@ -48,4 +51,4 @@ pub use request_structs::{
     generate_request_struct_with_suffix,
 };
 pub use shared::generate_request_helpers;
-pub use traits::{generate_paginated_impl, generate_paginated_trait};
+pub use pagination::generate_pagination_impls;

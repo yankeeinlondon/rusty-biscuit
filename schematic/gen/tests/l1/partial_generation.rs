@@ -57,6 +57,8 @@ fn api(name: &str, module: &str, suffix: Option<&str>, endpoints: Vec<Endpoint>)
         cross_origin: CrossOrigin::default(),
         request_id_header: None,
         secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     }
 }
 

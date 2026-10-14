@@ -64,6 +64,8 @@ pub use collection::{build_postman_collection, build_postman_collection_grouped}
 ///     cross_origin: CrossOrigin::default(),
 ///     request_id_header: None,
 ///     secret_names: vec![],
+///     default_pagination: None,
+///     pagination_exceptions: vec![],
 /// };
 ///
 /// let path = write_postman(&api, Path::new("/tmp"), false).unwrap();
@@ -126,6 +128,8 @@ pub fn write_postman(api: &RestApi, dir: &Path, dry_run: bool) -> Result<PathBuf
 ///     cross_origin: CrossOrigin::default(),
 ///     request_id_header: None,
 ///     secret_names: vec![],
+///     default_pagination: None,
+///     pagination_exceptions: vec![],
 /// };
 ///
 /// let path = write_postman_grouped(&[&api1], "ollama", Path::new("/tmp"), false).unwrap();

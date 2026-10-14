@@ -138,6 +138,13 @@ pub enum Feature {
     InvalidOutputFilename,
     /// A JSON type with no schema in the module's OpenAPI registry.
     IncompleteSchemaRegistry,
+    /// The shape of a pagination strategy, alone or on its endpoint.
+    PaginationStrategy,
+    /// A pagination exceptions row or the list shape it names: unknown or
+    /// duplicate ids, item selectors, item types.
+    PaginationException,
+    /// A pagination strategy input against the endpoint's declared parameters.
+    PaginationParameter,
 }
 
 impl Feature {
@@ -163,6 +170,9 @@ impl Feature {
             Self::InvalidModulePath => "invalid-module-path",
             Self::InvalidOutputFilename => "invalid-output-filename",
             Self::IncompleteSchemaRegistry => "incomplete-schema-registry",
+            Self::PaginationStrategy => "pagination-strategy",
+            Self::PaginationException => "pagination-exception",
+            Self::PaginationParameter => "pagination-parameter",
         }
     }
 }

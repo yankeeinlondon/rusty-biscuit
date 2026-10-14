@@ -98,7 +98,7 @@ pub use inference::infer_module_path;
 /// compile time that the runtime it builds against has the same value;
 /// partial generation refuses to keep modules generated for another value.
 /// It changes together with the runtime's constant, which a test checks.
-pub const RUNTIME_ABI: u32 = 3;
+pub const RUNTIME_ABI: u32 = 4;
 
 
 pub use export::openapi::{

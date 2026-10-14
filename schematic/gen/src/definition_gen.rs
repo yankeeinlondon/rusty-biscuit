@@ -156,6 +156,11 @@ fn rest_api_tokens(api: &RestApi) -> TokenStream {
             cross_origin: #cross_origin,
             request_id_header: #request_id_header,
             secret_names: #secret_names,
+            // An imported document yields no pagination. Authored pagination
+            // for an imported API lives in a hand-written overlay the importer
+            // never writes, so it is not emitted here.
+            default_pagination: None,
+            pagination_exceptions: vec![],
         }
     }
 }
@@ -466,6 +471,8 @@ mod tests {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         }
     }
 

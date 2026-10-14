@@ -240,7 +240,7 @@ fn generated_files_exist_and_have_expected_structure() {
     let lib_content =
         std::fs::read_to_string(src_dir.join("lib.rs")).expect("Failed to read lib.rs");
     assert!(lib_content.contains("//!"));
-    assert!(lib_content.contains("pub const SCHEMATIC_RUNTIME_ABI: u32 = 3;"));
+    assert!(lib_content.contains("pub const SCHEMATIC_RUNTIME_ABI: u32 = 4;"));
     assert!(lib_content.contains("schematic_runtime::ABI == SCHEMATIC_RUNTIME_ABI"));
     assert!(lib_content.contains("pub use schematic_runtime;"));
     assert!(lib_content.contains("pub mod shared;"));
@@ -325,6 +325,8 @@ fn generate_code_for_various_api_configurations() {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         },
         // API with all HTTP methods
         RestApi {
@@ -401,6 +403,8 @@ fn generate_code_for_various_api_configurations() {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         },
         // API with multiple path parameters
         RestApi {
@@ -431,6 +435,8 @@ fn generate_code_for_various_api_configurations() {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         },
     ];
 
@@ -528,6 +534,8 @@ fn binary_response_declares_bytes_success_and_binary_decoder() {
         cross_origin: CrossOrigin::default(),
         request_id_header: None,
         secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     };
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
@@ -586,6 +594,8 @@ fn text_response_declares_string_success_and_text_decoder() {
         cross_origin: CrossOrigin::default(),
         request_id_header: None,
         secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     };
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
@@ -639,6 +649,8 @@ fn empty_response_declares_unit_success_and_empty_decoder() {
         cross_origin: CrossOrigin::default(),
         request_id_header: None,
         secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     };
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
@@ -728,6 +740,8 @@ fn mixed_response_types_declare_each_endpoint_decoder() {
         cross_origin: CrossOrigin::default(),
         request_id_header: None,
         secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     };
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
@@ -879,12 +893,13 @@ fn multiple_apis_compile() {
 }
 
 // =============================================================================
-// Pagination Trait Tests
+// Legacy Pagination Metadata
 // =============================================================================
 
-/// Tests that paginated endpoints generate the Paginated trait implementation.
+/// Legacy `with_pagination` metadata is inert for pager emission (R8): it
+/// adds ordinary query parameters and nothing pagination-related.
 #[test]
-fn paginated_endpoints_generate_paginated_trait() {
+fn legacy_pagination_metadata_emits_no_pager() {
     use schematic_define::params::{EndpointParams, PaginationStyle};
     use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
 
@@ -931,6 +946,8 @@ fn paginated_endpoints_generate_paginated_trait() {
         cross_origin: CrossOrigin::default(),
         request_id_header: None,
         secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     };
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
@@ -938,35 +955,22 @@ fn paginated_endpoints_generate_paginated_trait() {
 
     generate_and_write(&api, &src_dir, false).expect("Failed to generate code");
 
-    // Check the shared.rs for the Paginated trait
-    let shared_content =
-        std::fs::read_to_string(src_dir.join("shared.rs")).expect("Failed to read shared.rs");
-
-    assert!(
-        shared_content.contains("pub trait Paginated"),
-        "shared.rs should define Paginated trait"
-    );
-
-    // Check the API module for the trait impl
     let api_content = std::fs::read_to_string(src_dir.join("paginatedtest.rs"))
         .expect("Failed to read paginatedtest.rs");
 
-    // Paginated endpoint should implement the trait
     assert!(
-        api_content.contains("impl Paginated for ListItemsRequest"),
-        "ListItemsRequest should implement Paginated"
+        !api_content.contains("schematic_runtime::pager") && !api_content.contains("Paginated for"),
+        "legacy metadata must not emit a pager:\n{api_content}"
     );
-
-    // Non-paginated endpoint should NOT implement the trait
     assert!(
-        !api_content.contains("impl Paginated for GetItemRequest"),
-        "GetItemRequest should NOT implement Paginated"
+        api_content.contains("pub per_page: Option<i64>"),
+        "the materialized query parameters stay ordinary fields:\n{api_content}"
     );
 }
 
-/// Tests that shared.rs contains the Paginated trait.
+/// shared.rs holds request helpers only; paging is the runtime's.
 #[test]
-fn shared_module_contains_paginated_trait() {
+fn shared_module_defines_no_pagination_trait() {
     let api = define_openai_api();
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let src_dir = temp_dir.path().join("src");
@@ -977,12 +981,8 @@ fn shared_module_contains_paginated_trait() {
         std::fs::read_to_string(src_dir.join("shared.rs")).expect("Failed to read shared.rs");
 
     assert!(
-        shared_content.contains("pub trait Paginated"),
-        "shared.rs should define Paginated trait"
-    );
-    assert!(
-        shared_content.contains("Marker trait for paginated request types"),
-        "Paginated trait should have doc comment"
+        !shared_content.contains("Paginated"),
+        "shared.rs must not define a pagination trait:\n{shared_content}"
     );
 }
 
@@ -1119,6 +1119,8 @@ fn grouped_export_fails_when_module_registry_missing() {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         }
     }
 

@@ -51,6 +51,8 @@ use super::variables::merge_variables;
 ///     cross_origin: CrossOrigin::default(),
 ///     request_id_header: None,
 ///     secret_names: vec![],
+///     default_pagination: None,
+///     pagination_exceptions: vec![],
 /// };
 ///
 /// let collection = build_postman_collection(&api);
@@ -155,6 +157,8 @@ pub fn build_postman_collection(api: &RestApi) -> PostmanCollection {
 ///     cross_origin: CrossOrigin::default(),
 ///     request_id_header: None,
 ///     secret_names: vec![],
+///     default_pagination: None,
+///     pagination_exceptions: vec![],
 /// };
 ///
 /// let api2 = RestApi {
@@ -175,6 +179,8 @@ pub fn build_postman_collection(api: &RestApi) -> PostmanCollection {
 ///     cross_origin: CrossOrigin::default(),
 ///     request_id_header: None,
 ///     secret_names: vec![],
+///     default_pagination: None,
+///     pagination_exceptions: vec![],
 /// };
 ///
 /// let collection = build_postman_collection_grouped(&[&api1, &api2], "ollama");

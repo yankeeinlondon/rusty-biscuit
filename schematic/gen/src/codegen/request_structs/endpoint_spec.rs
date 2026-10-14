@@ -49,7 +49,7 @@ pub(super) fn generate_endpoint_spec_impl(
     }
 }
 
-fn method_tokens(method: &RestMethod) -> TokenStream {
+pub(crate) fn method_tokens(method: &RestMethod) -> TokenStream {
     match method {
         RestMethod::Get => quote! { schematic_runtime::Method::GET },
         RestMethod::Post => quote! { schematic_runtime::Method::POST },

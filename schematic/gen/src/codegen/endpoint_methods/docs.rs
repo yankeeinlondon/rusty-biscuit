@@ -68,7 +68,7 @@ pub(super) fn endpoint_method_doc(
 
 /// The doc lines of a call type.
 pub(super) fn call_type_doc(api_name: &str, names: &EndpointNames) -> Vec<String> {
-    vec![
+    let mut lines = vec![
         format!(
             " A call to the `{id}` endpoint, returned by [`{api}::{method}`].",
             id = names.endpoint_id,
@@ -81,7 +81,16 @@ pub(super) fn call_type_doc(api_name: &str, names: &EndpointNames) -> Vec<String
          the optional values, returns the whole response instead, and [`build`](Self::build) checks the \
          call without sending it."
             .to_string(),
-    ]
+    ];
+    if names.pager.is_some() {
+        lines.push(String::new());
+        lines.push(
+            " The list is paginated: [`pager`](Self::pager) returns a \
+             [`Pager`](schematic_runtime::pager::Pager) over its pages."
+                .to_string(),
+        );
+    }
+    lines
 }
 
 /// The doc lines of a setter.

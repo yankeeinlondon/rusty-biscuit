@@ -307,17 +307,27 @@ pub fn doctored_runtime(runtime: &Path, destination: &Path, abi: u32) {
     fs::write(destination.join("Cargo.toml"), toml_crate::to_string(&table).expect("serialize"))
         .expect("write runtime copy manifest");
 
-    for entry in fs::read_dir(runtime.join("src")).expect("list runtime src") {
-        let path = entry.expect("runtime src entry").path();
-        let target = destination.join("src").join(path.file_name().expect("file name"));
-        fs::copy(&path, &target).unwrap_or_else(|e| panic!("copy {}: {e}", path.display()));
-    }
+    copy_tree(&runtime.join("src"), &destination.join("src"));
     let lib = destination.join("src/lib.rs");
     let source = fs::read_to_string(&lib).expect("read runtime lib.rs");
     let marker = "pub const ABI: u32 = ";
     let start = source.find(marker).expect("the runtime declares its ABI") + marker.len();
     let end = start + source[start..].find(';').expect("the ABI declaration ends");
     fs::write(&lib, format!("{}{abi}{}", &source[..start], &source[end..])).expect("write runtime lib.rs");
+}
+
+/// Copies the files below `from` into `to`, subdirectories included.
+fn copy_tree(from: &Path, to: &Path) {
+    fs::create_dir_all(to).unwrap_or_else(|e| panic!("create {}: {e}", to.display()));
+    for entry in fs::read_dir(from).unwrap_or_else(|e| panic!("list {}: {e}", from.display())) {
+        let path = entry.expect("directory entry").path();
+        let target = to.join(path.file_name().expect("file name"));
+        if path.is_dir() {
+            copy_tree(&path, &target);
+        } else {
+            fs::copy(&path, &target).unwrap_or_else(|e| panic!("copy {}: {e}", path.display()));
+        }
+    }
 }
 
 /// Relative path to file bytes (or `None` for a directory) under one root.

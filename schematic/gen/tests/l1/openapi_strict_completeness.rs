@@ -58,6 +58,8 @@ fn synthetic_api(name: &str, response_type: &str) -> RestApi {
         cross_origin: CrossOrigin::default(),
         request_id_header: None,
         secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     }
 }
 
@@ -260,6 +262,8 @@ fn request_body_types_must_be_registered() {
         cross_origin: CrossOrigin::default(),
         request_id_header: None,
         secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     };
 
     let registry = SchemaRegistry::new();

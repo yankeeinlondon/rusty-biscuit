@@ -152,22 +152,3 @@ impl FormFile {
         }
     }
 }
-/// Marker trait for paginated request types.
-///
-/// Request types that implement this trait support pagination parameters
-/// and can be used with generic pagination utilities.
-///
-/// ## Examples
-///
-/// ```text
-/// use schematic_schema::shared::Paginated;
-///
-/// fn fetch_all_pages<R: Paginated>(request: R) -> Vec<R::Success>
-/// where
-///     R: EndpointSpec,
-/// {
-///     // Implementation that handles pagination automatically
-///     todo!()
-/// }
-/// ```
-pub trait Paginated {}

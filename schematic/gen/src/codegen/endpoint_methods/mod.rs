@@ -26,6 +26,12 @@
 //! }
 //! ```
 //!
+//! The call type of a paginated endpoint also forwards to its
+//! `schematic_runtime::pager::Pager`: `pager()`, one method per pager control
+//! the strategy authors (`page`, `offset`, `after`, `before`, `page_size`),
+//! and, for a strategy without a session, `pages()`, `fetch_page()`, and
+//! `collect_all()`.
+//!
 //! Names come from [`names::resolve_names`]; the method docs from [`docs`].
 
 mod docs;
@@ -38,6 +44,7 @@ use quote::{format_ident, quote};
 use schematic_define::{Endpoint, RestApi};
 
 use crate::codegen::api_struct::api_tag_name;
+use crate::codegen::pagination::{KnobForward, PagerForwards};
 use crate::codegen::request_structs::request_body_type_name;
 use crate::codegen::request_structs::shared::{
     param_field_name, query_param_type_to_rust_type, type_name_to_tokens,
@@ -144,6 +151,11 @@ fn call_type(api_name: &str, tag: &proc_macro2::Ident, names: &EndpointNames) ->
         }
     });
 
+    let pager = names
+        .pager
+        .as_ref()
+        .map(|pager| pager_forwards(tag, &request, pager));
+
     quote! {
         #(#[doc = #doc])*
         #[derive(Clone, Debug)]
@@ -184,6 +196,8 @@ fn call_type(api_name: &str, tag: &proc_macro2::Ident, names: &EndpointNames) ->
             pub fn build(self) -> Result<Self, schematic_runtime::InvalidArgument> {
                 self.0.build().map(Self)
             }
+
+            #pager
         }
 
         impl<'a> ::core::future::IntoFuture for #call<'a> {
@@ -199,6 +213,77 @@ fn call_type(api_name: &str, tag: &proc_macro2::Ident, names: &EndpointNames) ->
                 ::core::future::IntoFuture::into_future(self.0)
             }
         }
+    }
+}
+
+/// The pager methods of a paginated endpoint's call type. Each is a thin
+/// `#[inline]` forward, so only the ones a dependent calls are compiled.
+fn pager_forwards(
+    tag: &proc_macro2::Ident,
+    request: &proc_macro2::Ident,
+    forwards: &PagerForwards,
+) -> TokenStream {
+    let pager = quote! { schematic_runtime::pager::Pager<'a, #tag, #request> };
+    let knobs = forwards.knobs.iter().map(|knob| {
+        let name = format_ident!("{}", knob.name());
+        let doc = format!(" See [`Pager::{name}`](schematic_runtime::pager::Pager::{name}).");
+        let (arg, ty) = match knob {
+            KnobForward::Page => (quote! { number }, quote! { u64 }),
+            KnobForward::Offset => (quote! { offset }, quote! { u64 }),
+            KnobForward::After => (
+                quote! { cursor },
+                quote! { impl Into<<#request as schematic_runtime::pager::ResumeAfter>::Cursor> },
+            ),
+            KnobForward::Before => (
+                quote! { cursor },
+                quote! { impl Into<<#request as schematic_runtime::pager::ResumeBefore>::Cursor> },
+            ),
+            KnobForward::PageSize => (quote! { size }, quote! { u32 }),
+        };
+        quote! {
+            #[doc = #doc]
+            #[inline]
+            pub fn #name(self, #arg: #ty) -> #pager {
+                self.0.pager().#name(#arg)
+            }
+        }
+    });
+    let iteration = forwards.sessionless.then(|| {
+        quote! {
+            /// See [`Pager::pages`](schematic_runtime::pager::Pager::pages).
+            #[inline]
+            pub fn pages(self) -> schematic_runtime::pager::Pages<'a, #tag, #request> {
+                self.0.pager().pages()
+            }
+
+            /// See [`Pager::fetch_page`](schematic_runtime::pager::Pager::fetch_page).
+            #[inline]
+            pub fn fetch_page(
+                self,
+            ) -> schematic_runtime::CallFuture<'a, schematic_runtime::pager::PageResult<#request>> {
+                self.0.pager().fetch_page()
+            }
+
+            /// See [`Pager::collect_all`](schematic_runtime::pager::Pager::collect_all).
+            #[inline]
+            pub fn collect_all(
+                self,
+            ) -> schematic_runtime::CallFuture<'a, schematic_runtime::pager::CollectResult<#request>> {
+                self.0.pager().collect_all()
+            }
+        }
+    });
+
+    quote! {
+        /// See [`Call::pager`](schematic_runtime::Call::pager).
+        #[inline]
+        pub fn pager(self) -> #pager {
+            self.0.pager()
+        }
+
+        #(#knobs)*
+
+        #iteration
     }
 }
 

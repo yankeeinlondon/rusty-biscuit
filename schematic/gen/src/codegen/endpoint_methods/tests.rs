@@ -58,6 +58,8 @@ fn api(name: &str, endpoints: Vec<Endpoint>) -> RestApi {
         cross_origin: CrossOrigin::default(),
         request_id_header: None,
         secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     }
 }
 

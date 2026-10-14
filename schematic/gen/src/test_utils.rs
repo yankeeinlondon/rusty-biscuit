@@ -35,6 +35,8 @@ pub fn make_api(name: &str, base_url: &str, auth: AuthStrategy, env_auth: Vec<St
         cross_origin: CrossOrigin::default(),
         request_id_header: None,
         secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     }
 }
 
@@ -63,6 +65,8 @@ pub fn make_api_with_endpoint(
         cross_origin: CrossOrigin::default(),
         request_id_header: None,
         secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     }
 }
 
@@ -123,6 +127,8 @@ pub fn make_simple_api() -> RestApi {
         cross_origin: CrossOrigin::default(),
         request_id_header: None,
         secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     }
 }
 
@@ -185,6 +191,8 @@ pub fn make_complex_api() -> RestApi {
         cross_origin: CrossOrigin::default(),
         request_id_header: None,
         secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     }
 }
 

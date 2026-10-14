@@ -33,6 +33,8 @@ fn make_api(name: &str, auth: AuthStrategy, env_auth: Vec<String>) -> RestApi {
         cross_origin: CrossOrigin::default(),
         request_id_header: None,
         secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     }
 }
 
@@ -55,6 +57,8 @@ fn make_api_with_endpoints(name: &str, endpoints: Vec<Endpoint>) -> RestApi {
         cross_origin: CrossOrigin::default(),
         request_id_header: None,
         secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     }
 }
 
@@ -88,6 +92,8 @@ fn make_basic_auth_api(name: &str, username_env: &str, password_env: &str) -> Re
         cross_origin: CrossOrigin::default(),
         request_id_header: None,
         secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     }
 }
 

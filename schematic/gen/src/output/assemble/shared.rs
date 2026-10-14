@@ -3,17 +3,16 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::codegen::{generate_paginated_trait, generate_request_helpers};
+use crate::codegen::generate_request_helpers;
 
 /// Assembles the shared module code (shared.rs).
 ///
-/// It holds only what generated request types use to build their parts (the
-/// cookie helpers and `FormFile`) and the `Paginated` marker trait. Request
-/// execution, the response envelope, errors, credentials, redirects,
-/// deadlines, and redaction are `schematic-runtime`'s.
+/// It holds only what generated request types use to build their parts: the
+/// cookie helpers and `FormFile`. Request execution, the response envelope,
+/// errors, credentials, redirects, deadlines, redaction, and paging are
+/// `schematic-runtime`'s.
 pub fn assemble_shared_module() -> TokenStream {
     let request_helpers = generate_request_helpers();
-    let paginated_trait = generate_paginated_trait();
 
     quote! {
         //! Request-side helpers shared by the generated API modules.
@@ -25,7 +24,5 @@ pub fn assemble_shared_module() -> TokenStream {
         use serde::{Deserialize, Serialize};
 
         #request_helpers
-
-        #paginated_trait
     }
 }

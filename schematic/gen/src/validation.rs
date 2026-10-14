@@ -47,6 +47,8 @@
 //!     cross_origin: CrossOrigin::default(),
 //!     request_id_header: None,
 //!     secret_names: vec![],
+//!     default_pagination: None,
+//!     pagination_exceptions: vec![],
 //! };
 //!
 //! let rust = validate_rust_client(&[&api]);
@@ -64,7 +66,11 @@ use schematic_define::{
     ApiKeyLocation, ApiRequest, ApiResponse, AuthMethod, Endpoint, EnvAuthStrategy, FormFieldKind,
     ParamDef, QueryParamType, RestApi,
 };
-use schematic_definitions::registry::SchemaRegistry;
+use schematic_define::pagination::{
+    PaginationRuleGroup, Resolution, Step, resolve, validate_pagination,
+};
+use schematic_definitions::registry::{SchemaRegistry, get_registry, registry_key_for};
+use serde_json::Value;
 
 use crate::codegen::endpoint_methods::{call_type_name, resolve_names};
 use crate::diagnostics::{Feature, Output, Severity, ValidationDiagnostic};
@@ -85,7 +91,7 @@ pub const QUERY_IN_PATH_SEVERITY: Severity = Severity::Warning;
 /// Names every generated module brings into scope with `use`.
 ///
 /// A generated item with one of these names would clash with the import.
-const IMPORTED_TYPE_NAMES: &[&str] = &["Deserialize", "Serialize", "Paginated"];
+const IMPORTED_TYPE_NAMES: &[&str] = &["Deserialize", "Serialize"];
 
 /// Generated crate files a REST module name must not reuse.
 const RESERVED_MODULE_NAMES: &[&str] = &["lib", "shared", "prelude", "ws_shared"];
@@ -400,6 +406,170 @@ fn check_rust_api(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
         check_raw_body_content_type(api, endpoint, diagnostics);
         check_sent_params(api, endpoint, diagnostics);
     }
+
+    check_pagination(api, diagnostics);
+}
+
+/// Checks the API's pagination: the define-side rules, then the item types
+/// and item locations the Rust client relies on.
+///
+/// Item checks run only for paginated lists. A named item type is checked
+/// against the API's schema registry, top-level and nested schemas alike, and
+/// an item location is walked through the response type's registered schema.
+/// Where the registry cannot describe a type (no registry, an unregistered or
+/// qualified type, an unresolvable reference), the check is skipped and the
+/// runtime enforces the location instead; nothing is reported as checked.
+fn check_pagination(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
+    if api.default_pagination.is_none() && api.pagination_exceptions.is_empty() {
+        return;
+    }
+    let error = |endpoint: Option<&str>, feature: Feature, message: String| {
+        ValidationDiagnostic::new(Severity::Error, &api.name, endpoint, feature, Output::Rust, message)
+    };
+
+    for diagnostic in validate_pagination(api) {
+        let feature = match diagnostic.error.group() {
+            PaginationRuleGroup::Strategy => Feature::PaginationStrategy,
+            PaginationRuleGroup::Exception => Feature::PaginationException,
+            PaginationRuleGroup::Parameter => Feature::PaginationParameter,
+        };
+        diagnostics.push(error(diagnostic.endpoint.as_deref(), feature, diagnostic.to_string()));
+    }
+
+    // Built on first use: most APIs name no item type the registry could check.
+    let mut registry: Option<Option<SchemaRegistry>> = None;
+    let mut known_names: Option<BTreeSet<String>> = None;
+    for endpoint in &api.endpoints {
+        let Resolution::Paginated { list, .. } = resolve(api, endpoint) else {
+            continue;
+        };
+        let id = Some(endpoint.id.as_str());
+        let authored_type = api
+            .pagination_exceptions
+            .iter()
+            .find(|entry| entry.endpoint == endpoint.id)
+            .and_then(|entry| entry.collection.item_type.as_deref());
+
+        if let Some(item_type) = authored_type.filter(|ty| !ty.trim().is_empty()) {
+            if syn::parse_str::<syn::Type>(item_type).is_err() {
+                diagnostics.push(error(
+                    id,
+                    Feature::PaginationException,
+                    format!("invalid-item-type: item type `{item_type}` is not valid Rust type syntax"),
+                ));
+            } else if is_plain_named_type(item_type) {
+                let registry = registry.get_or_insert_with(|| get_registry(&registry_key_for(&api.name)));
+                if let Some(registry) = registry {
+                    let names = known_names.get_or_insert_with(|| {
+                        registry.to_openapi_schemas().into_keys().collect()
+                    });
+                    if !names.contains(item_type) {
+                        diagnostics.push(error(
+                            id,
+                            Feature::PaginationException,
+                            format!(
+                                "unknown-item-type: item type `{item_type}` is not a schema of \
+                                 this API's registry; use a registered type, a primitive, or a \
+                                 qualified path such as `serde_json::Value`"
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+
+        let ApiResponse::Json(schema) = &endpoint.response else {
+            continue;
+        };
+        if list.items.is_root_array() || !is_plain_named_type(&schema.type_name) {
+            continue;
+        }
+        let registry = registry.get_or_insert_with(|| get_registry(&registry_key_for(&api.name)));
+        let Some(root) = registry.as_ref().and_then(|r| r.get(&schema.type_name)) else {
+            continue;
+        };
+        if item_location_is_array(root.as_value(), &list.items.record) == Some(false) {
+            diagnostics.push(error(
+                id,
+                Feature::PaginationException,
+                format!(
+                    "not-an-array-location: `{}` is not an array in the registered schema of `{}`",
+                    list.items, schema.type_name
+                ),
+            ));
+        }
+    }
+}
+
+/// Whether `type_name` is a single identifier naming a non-primitive type,
+/// the only kind a schema registry can know.
+fn is_plain_named_type(type_name: &str) -> bool {
+    const PRIMITIVES: &[&str] = &[
+        "bool", "char", "str", "String", "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16",
+        "u32", "u64", "u128", "usize", "f32", "f64",
+    ];
+    syn::parse_str::<syn::Ident>(type_name).is_ok() && !PRIMITIVES.contains(&type_name)
+}
+
+/// Walks a selector's record steps through a JSON schema.
+///
+/// `Some(false)` means the schema demonstrably has no array at some fan-out;
+/// `Some(true)` that every fan-out is an array; `None` that the schema cannot
+/// tell (a missing property, an unresolved reference, a union).
+fn item_location_is_array(root: &Value, steps: &[Step]) -> Option<bool> {
+    let mut node = root;
+    for step in steps {
+        node = resolve_schema_node(root, node)?;
+        match step {
+            Step::Key(key) => node = node.get("properties")?.get(key)?,
+            Step::Each => {
+                let types: Vec<&str> = match node.get("type")? {
+                    Value::String(single) => vec![single.as_str()],
+                    Value::Array(many) => many.iter().filter_map(Value::as_str).collect(),
+                    _ => return None,
+                };
+                if !types.contains(&"array") {
+                    return Some(false);
+                }
+                node = node.get("items")?;
+            }
+        }
+    }
+    Some(true)
+}
+
+/// Follows `$ref`, a single-member `allOf`, and a nullable `anyOf`/`oneOf`
+/// to the schema node that describes a value.
+fn resolve_schema_node<'a>(root: &'a Value, mut node: &'a Value) -> Option<&'a Value> {
+    // A bound against reference cycles; real schemas need a few hops.
+    for _ in 0..32 {
+        if let Some(reference) = node.get("$ref").and_then(Value::as_str) {
+            node = root.pointer(reference.strip_prefix('#')?)?;
+            continue;
+        }
+        if let Some([only]) = node.get("allOf").and_then(Value::as_array).map(Vec::as_slice) {
+            node = only;
+            continue;
+        }
+        if let Some(variants) = node
+            .get("anyOf")
+            .or_else(|| node.get("oneOf"))
+            .and_then(Value::as_array)
+        {
+            let mut non_null = variants
+                .iter()
+                .filter(|variant| variant.get("type").and_then(Value::as_str) != Some("null"));
+            match (non_null.next(), non_null.next()) {
+                (Some(only), None) => {
+                    node = only;
+                    continue;
+                }
+                _ => return None,
+            }
+        }
+        return Some(node);
+    }
+    None
 }
 
 /// Reports each endpoint-method or setter rename as a warning, and each name
@@ -919,6 +1089,8 @@ mod tests {
             cross_origin: CrossOrigin::default(),
             request_id_header: None,
             secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         }
     }
 
@@ -1279,11 +1451,11 @@ mod tests {
             (
                 "endpoint struct clashes with an import",
                 RestApi {
-                    request_suffix: Some("ated".to_string()),
-                    ..api_with(vec![get("Pagin")])
+                    request_suffix: Some("ize".to_string()),
+                    ..api_with(vec![get("Serial")])
                 },
                 Feature::GeneratedNameCollision,
-                Some("Pagin"),
+                Some("Serial"),
             ),
             (
                 "text request body with a control character in its content type",

@@ -27,6 +27,9 @@ use schematic_define::{
     Endpoint, EndpointParams, FormField, OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType,
     ParamDef, ParamStyle, PkceRequirement, QueryParamType, RestApi, RestMethod,
 };
+use schematic_define::pagination::{
+    Collection, CursorSource, LinkSource, MoreSignal, PageSize, PaginationException, Strategy,
+};
 use schematic_gen::output::{
     RustOutputRequest, Selection, generate_and_write_all, get_module_path, prepare_rust_output,
 };
@@ -71,6 +74,10 @@ const FIXTURE_COVERAGE: &[(&str, &[&str])] = &[
         &["request-id-header", "secret-names", "deny-cross-origin", "query-and-header-secrets"],
     ),
     ("FixtureNames", &["endpoint-method-renames", "keyword-setter"]),
+    (
+        "FixturePages",
+        &["page-number-pager", "cursor-pager", "next-link-pager", "adopted-parameters"],
+    ),
 ];
 
 /// Request and response types for the fixture APIs, one module per API.
@@ -119,6 +126,27 @@ pub struct Echo {
 "#,
     ),
     ("fixture_names", ""),
+    (
+        "fixture_pages",
+        r#"
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Entry {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct EntryCursorPage {
+    pub data: Vec<Entry>,
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct EntryLinkPage {
+    pub values: Vec<Entry>,
+    pub next: Option<String>,
+}
+"#,
+    ),
 ];
 
 fn endpoint(id: &str, method: RestMethod, path: &str, response: ApiResponse) -> Endpoint {
@@ -154,6 +182,8 @@ fn fixture_api(name: &str, module: &str, auth: AuthStrategy, endpoints: Vec<Endp
         cross_origin: CrossOrigin::default(),
         request_id_header: None,
         secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
     }
 }
 
@@ -170,6 +200,53 @@ fn named_param(name: &str, param_type: QueryParamType) -> ParamDef {
 
 fn located_params(query: Vec<ParamDef>, header: Vec<ParamDef>, cookie: Vec<ParamDef>) -> EndpointParams {
     EndpointParams { query, header, cookie, ..Default::default() }
+}
+
+/// A page-number default (adopting `page` and `per_page`, keeping `state`),
+/// a resumable cursor on a wrapper list, and a body next link.
+fn pages_fixture() -> RestApi {
+    let int = |name| named_param(name, QueryParamType::Integer);
+    let mut list_entries =
+        endpoint("ListEntries", RestMethod::Get, "/entries", ApiResponse::json_type("Vec<Entry>"));
+    list_entries.params = Some(located_params(
+        vec![int("page"), int("per_page"), named_param("state", QueryParamType::String)],
+        vec![],
+        vec![],
+    ));
+    let mut list_cursor =
+        endpoint("ListCursor", RestMethod::Get, "/cursor", ApiResponse::json_type("EntryCursorPage"));
+    list_cursor.params = Some(located_params(vec![named_param("after", QueryParamType::String)], vec![], vec![]));
+    let list_linked =
+        endpoint("ListLinked", RestMethod::Get, "/linked", ApiResponse::json_type("EntryLinkPage"));
+
+    let mut api = fixture_api(
+        "FixturePages",
+        "fixture_pages",
+        AuthStrategy::None,
+        vec![list_entries, list_cursor, list_linked],
+    );
+    api.default_pagination = Some(
+        Strategy::page_number("page", MoreSignal::link_rel("next"))
+            .page_size(PageSize::new("per_page").max(100))
+            .build(),
+    );
+    api.pagination_exceptions = vec![
+        PaginationException::new(
+            "ListCursor",
+            Collection::at("data").item_type("Entry").paginate(
+                Strategy::cursor("after", CursorSource::last_item("id"))
+                    .more_when(MoreSignal::has_more("has_more"))
+                    .resumable(),
+            ),
+        ),
+        PaginationException::new(
+            "ListLinked",
+            Collection::at("values")
+                .item_type("Entry")
+                .paginate(Strategy::next_link(LinkSource::body("next"))),
+        ),
+    ];
+    api
 }
 
 fn fixture_apis() -> Vec<RestApi> {
@@ -365,6 +442,7 @@ fn fixture_apis() -> Vec<RestApi> {
         ),
         settings,
         names,
+        pages_fixture(),
     ]
 }
 
@@ -1246,6 +1324,22 @@ const MISUSES: &[(&str, &str, &str, &str)] = &[
         "Response",
     ),
     (
+        "a pager for an endpoint with no pagination",
+        "fn misuse(client: FixtureBearer) {
+            let _ = client.send(ListWidgetsRequest::default()).pager();
+        }",
+        "E0277",
+        "is not paginated",
+    ),
+    (
+        "a pager control the definition does not author",
+        "fn misuse(client: schematic_schema::fixture_pages::FixturePages) {
+            let _ = client.list_linked().pager().page_size(5);
+        }",
+        "E0277",
+        "has no authored page size",
+    ),
+    (
         "the removed injected-client constructor",
         "fn misuse() {
             let _ = FixtureBearer::with_client_and_base_url(todo!(), \"http://127.0.0.1:1\");
@@ -1289,6 +1383,24 @@ async fn used(client: FixtureBearer, deadline: schematic_schema::schematic_runti
 }
 ";
 
+/// The pager surface of freshly generated paginated endpoints, called from a
+/// file that imports only the API struct and an item type.
+const PAGER_CONTROL: &str = "#![allow(dead_code)]
+use schematic_schema::fixture_pages::{Entry, FixturePages};
+
+async fn used(client: FixturePages) {
+    let mut pages = client.list_entries().state(String::from(\"open\")).page_size(10).pages();
+    if let Ok(Some(page)) = pages.next().await {
+        let _: Vec<Entry> = page.items;
+    }
+    if let Ok(page) = client.list_cursor().after(\"x\").fetch_page().await {
+        let _: Vec<Entry> = page.items;
+    }
+    let _: Result<Vec<Entry>, _> = client.list_linked().collect_all().await;
+    let _ = client.list_entries().page(2).page_limit(3).collect_all().await;
+}
+";
+
 #[test]
 fn slow_generated_types_reject_misuse_at_compile_time() {
     let lockfile = biscuit_test_harness::manifest_dir!().join("../schema/Cargo.lock");
@@ -1304,6 +1416,7 @@ fn slow_generated_types_reject_misuse_at_compile_time() {
     }";
     fresh.add_test_file("misuse_control", &format!("{MISUSE_PRELUDE}{control}\n"));
     fresh.add_test_file("endpoint_methods_control", ENDPOINT_METHODS_CONTROL);
+    fresh.add_test_file("pager_control", PAGER_CONTROL);
     for (index, (_, snippet, _, _)) in MISUSES.iter().enumerate() {
         fresh.add_test_file(&format!("misuse_{index}"), &format!("{MISUSE_PRELUDE}{snippet}\n"));
     }
@@ -1331,6 +1444,11 @@ fn slow_generated_types_reject_misuse_at_compile_time() {
     assert!(
         located("endpoint_methods_control").is_empty(),
         "endpoint methods must compile with only the API struct imported{hint}:\n{}",
+        run.stderr
+    );
+    assert!(
+        located("pager_control").is_empty(),
+        "the generated pager surface must compile{hint}:\n{}",
         run.stderr
     );
     for (index, (misuse, snippet, code, named)) in MISUSES.iter().enumerate() {

@@ -8,8 +8,16 @@
 //! - An endpoint method named like a method of the API struct gains an
 //!   `_endpoint` suffix ([`RenameReason::ApiStructMethod`]).
 //! - A setter is its request field's name, so it matches the request's
-//!   `with_*` method. A setter named like a method every call type has gains
-//!   a `_param` suffix ([`RenameReason::SharedCallMethod`]).
+//!   `with_*` method. A setter named like a method every call type has, or
+//!   reserves for its pager, gains a `_param` suffix
+//!   ([`RenameReason::SharedCallMethod`]).
+//! - A setter named like a pager control its own call type forwards
+//!   (`page`, `offset`, `after`, `before`, `page_size`) gains a `_param`
+//!   suffix ([`RenameReason::PagerMethod`]). Only paginated endpoints
+//!   forward controls, and only the ones their strategy authors.
+//! - A parameter the endpoint's pagination strategy adopts has no setter: the
+//!   names are resolved on the endpoint's [`pager_view`], as the request
+//!   struct is generated.
 //! - Two endpoint methods, or two setters of one call type, that still share
 //!   a name are a [`NameConflict`]; generation refuses them rather than
 //!   inventing a numbered name.
@@ -24,6 +32,7 @@ use std::fmt;
 use schematic_define::openapi::import::naming::{sanitize_rust_field_ident, to_snake_case};
 use schematic_define::{Endpoint, RestApi};
 
+use crate::codegen::pagination::{PagerForwards, pager_forwards, pager_view};
 use crate::codegen::request_structs::shared::{
     QueryParamInfo, extract_cookie_params, extract_header_params, extract_query_params,
     param_field_name,
@@ -34,9 +43,10 @@ use crate::output::get_request_suffix;
 /// call. A setter with one of these names gains a `_param` suffix.
 pub const SHARED_CALL_METHODS: &[&str] = &["anonymous", "credential", "deadline", "full", "build"];
 
-/// Methods later work adds to every call type (pagination), reserved now so
-/// that adding them renames no setter a caller already uses.
-pub const PLANNED_CALL_METHODS: &[&str] = &["pages", "fetch_page", "collect_all"];
+/// The pager entry points of a paginated endpoint's call type, reserved on
+/// every call type so that authoring pagination for an endpoint later renames
+/// no setter a caller already uses.
+pub const PLANNED_CALL_METHODS: &[&str] = &["pager", "pages", "fetch_page", "collect_all"];
 
 /// Methods a call type has through the traits it implements. A setter with
 /// one of these names would shadow the trait method in method-call syntax.
@@ -87,6 +97,9 @@ pub enum RenameReason {
     /// An endpoint method's snake-case id is a Rust keyword or not an
     /// identifier, so the request-field sanitizer changed it.
     NotAnIdentifier,
+    /// A setter took a `_param` suffix: the call type forwards the
+    /// endpoint's pager control of that name.
+    PagerMethod,
 }
 
 impl fmt::Display for RenameReason {
@@ -95,6 +108,7 @@ impl fmt::Display for RenameReason {
             Self::SharedCallMethod => "every call type has a method of that name",
             Self::ApiStructMethod => "the API struct has a method of that name",
             Self::NotAnIdentifier => "it is a Rust keyword or not an identifier",
+            Self::PagerMethod => "the endpoint's pager has a method of that name",
         })
     }
 }
@@ -230,6 +244,8 @@ pub struct EndpointNames {
     pub method: String,
     /// The setters, in query, header, cookie declaration order.
     pub setters: Vec<SetterName>,
+    /// The pager methods of a paginated endpoint's call type.
+    pub pager: Option<PagerForwards>,
 }
 
 /// The generated names of every endpoint of one API.
@@ -320,6 +336,13 @@ fn endpoint_names(
         sanitized
     };
 
+    let pager = pager_forwards(api, endpoint);
+    let endpoint = pager_view(api, endpoint);
+    let is_pager_control = |name: &str| {
+        pager
+            .as_ref()
+            .is_some_and(|pager| pager.knobs.iter().any(|knob| knob.name() == name))
+    };
     let located = [
         (ParamLocation::Query, extract_query_params(&endpoint.params)),
         (ParamLocation::Header, extract_header_params(&endpoint.params)),
@@ -332,6 +355,10 @@ fn endpoint_names(
             let setter = if is_call_type_method(&field) {
                 let renamed = format!("{field}_param");
                 rename(RenameTarget::Setter, &field, &renamed, RenameReason::SharedCallMethod);
+                renamed
+            } else if is_pager_control(&field) {
+                let renamed = format!("{field}_param");
+                rename(RenameTarget::Setter, &field, &renamed, RenameReason::PagerMethod);
                 renamed
             } else {
                 field.clone()
@@ -352,6 +379,7 @@ fn endpoint_names(
         request_type,
         method,
         setters,
+        pager,
     }
 }
 
