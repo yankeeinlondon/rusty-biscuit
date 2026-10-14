@@ -69,7 +69,7 @@ pub fn run_triggers(file: &Path, request: &MdRequest) -> Result<()> {
     }
     for trigger in &trace.triggers {
         let status = if trigger.matched { "<green>matched</green>" } else { "<red>not matched</red>" };
-        emit(&terminal, format!("- {} — {status}", escaped(&trigger.source)));
+        emit(&terminal, format!("- {} — {status}", Prose::escape_text(&trigger.source.to_string())));
         for arm in &trigger.arms {
             let result = if arm.matched {
                 "<green>matched</green>".to_string()
