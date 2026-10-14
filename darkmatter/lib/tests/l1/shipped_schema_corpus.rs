@@ -56,6 +56,9 @@ enum Class {
     EnvelopeRejected,
     /// A definition does not parse; `error` is part of the expected message.
     Draft { error: &'static str },
+    /// A `kind: trigger-schema` envelope: never a standalone schema, and its
+    /// `$schema` payload parses and resolves inline from its own directory.
+    Trigger,
 }
 
 struct Exception {
@@ -154,14 +157,14 @@ const EXCEPTIONS: &[Exception] = &[
     exception(
         "claudine/schemas",
         "claudine.yaml",
-        Class::Placeholder,
-        "reserved for Claudine's global-variable schema",
+        Class::Trigger,
+        "Claudine's frontmatter catalog, applied by trigger",
     ),
     exception(
         "claudine/schemas",
-        "partials/lifecycle.yaml",
-        Class::EnvelopeRejected,
-        "`description` header key",
+        "inline-compose.yaml",
+        Class::Trigger,
+        "inline-compose's document metadata, applied by trigger",
     ),
     // claudine/docs/schemas: design drafts, not loaded by any reader.
     exception(
@@ -254,6 +257,13 @@ const EXCEPTIONS: &[Exception] = &[
 /// one of the core types, with the canonical keywords it uses; `any` parses as
 /// `unknown`. Native YAML null declarations parse as `null`.
 const CORE_TYPE_USERS: &[(&str, &[&str])] = &[
+    // Zero-argument verbs take `null` or an empty `unknown[]`, generated verbs
+    // and loose bodies are `unknown`, and `shell` types the shell command.
+    ("claudine/schemas/action.yaml", &["null", "shell", "unknown"]),
+    ("claudine/schemas/lifecycle.yaml", &["null", "shell", "unknown"]),
+    // The sequence overlay keys, the sequence list, and the hash payload.
+    ("claudine/schemas/claudine.yaml", &["unknown"]),
+    ("claudine/schemas/inline-compose.yaml", &["unknown"]),
     // `set_frontmatter.value` has a native null arm; the undefined actions are
     // `unknown` placeholders.
     (
@@ -644,6 +654,16 @@ fn shipped_schema_artifacts_parse_passively() {
                 definitions += parsed.len();
                 record_core_types(&mut core_type_users, &label, &parsed);
             }
+            Class::Trigger => {
+                assert_eq!(outcome, Ok(None), "{label} is a trigger, never a standalone schema");
+                assert!(
+                    matches!(parse_trigger_envelope_from_str(&artifact.source), Ok(Some(_))),
+                    "{label} must parse as a trigger envelope",
+                );
+                let parsed = bodies.unwrap_or_else(|failures| panic!("{label}: {failures:#?}"));
+                definitions += parsed.len();
+                record_core_types(&mut core_type_users, &label, &parsed);
+            }
             Class::Draft { error } => {
                 let failures = bodies.expect_err(&format!("{label} now parses; reclassify it"));
                 assert!(
@@ -751,7 +771,7 @@ fn loadable_shipped_schemas_resolve_and_lower() {
                 assert_lowered(&resolved, &label);
                 resolved_files += 1;
             }
-            Class::EnvelopeRejected | Class::NotASchema => {
+            Class::EnvelopeRejected | Class::NotASchema | Class::Trigger => {
                 if artifact.class == Class::EnvelopeRejected {
                     let error = resolve_schema_with_roots(&reference, dir, &[], &context)
                         .expect_err(&format!("{label} now loads; remove its exception"));

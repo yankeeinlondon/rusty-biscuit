@@ -493,7 +493,7 @@ fn path_field_input_matrix() {
         ("control", "  $path: \"^docs/**\"", Outcome::Applies),
         // No `$path` leaves an arm with no condition at all: the existing
         // vacuous-arm error, not "matches nothing".
-        ("absent", "  {}", Outcome::LoadError(&["vacuous"])),
+        ("absent", "  {}", Outcome::LoadError(&["at least one key"])),
         ("explicit null", "  $path: null", Outcome::LoadError(&["$path must be", "got null"])),
         ("empty value", "  $path:", Outcome::LoadError(&["$path must be", "got null"])),
         ("wrong type, whole field", "  $path: 123", Outcome::LoadError(&["$path must be", "got number"])),

@@ -528,7 +528,7 @@ fn walk_matrix(format: Format, shipped: &str) {
                             message.contains("property `action`") || message.contains(&format!("doc-{n}-"))
                         }
                     };
-                    let syntax = message.contains("is neither a valid standalone SimplifiedSchema")
+                    let syntax = message.contains("not valid YAML")
                         || message.starts_with("load: Failed to parse frontmatter");
                     at_site && (syntax || message.contains("`$constraints"))
                 };
