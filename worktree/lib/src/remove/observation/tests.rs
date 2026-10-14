@@ -239,6 +239,31 @@ fn settle(observation: &mut Observation, kept: &mut Drain) {
     }
 }
 
+/// Whether every change is in the very next drain. FSEvents promises no
+/// ordering, so on macOS a change can arrive in a later drain instead (see the
+/// `fsevents` adapter); it must still arrive, and no loss may be reported.
+const DRAIN_IS_A_BARRIER: bool = !cfg!(target_os = "macos");
+
+/// Drains made after the first, while waiting for a late FSEvents event.
+const LATE_DRAINS: usize = 20;
+
+/// The next drain where the drain is a barrier; elsewhere the drains up to the
+/// one where `done` holds, kept together.
+fn drain_until(observation: &mut Observation, done: impl Fn(&Drain) -> bool) -> Drain {
+    let mut kept = observation.drain();
+    if DRAIN_IS_A_BARRIER {
+        return kept;
+    }
+    for _ in 0..LATE_DRAINS {
+        if done(&kept) || kept.lost.is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        kept = then(kept, observation.drain());
+    }
+    kept
+}
+
 fn then(mut kept: Drain, drain: Drain) -> Drain {
     kept.events.extend(drain.events);
     kept.lost = kept.lost.or(drain.lost);
@@ -259,54 +284,61 @@ fn native(layout: &Layout, options: ObserverOptions) -> Option<Observation> {
 }
 
 #[test]
-fn native_drain_is_a_barrier_for_every_change_kind() {
+fn native_drain_delivers_every_change_kind() {
     let layout = Layout::new();
     let Some(mut observation) = native(&layout, ObserverOptions::default()) else { return };
     let sub = layout.checkout.join("sub");
 
-    // No sleep anywhere: each change must be in the very next drain. A
-    // macOS drain waits about 11 ms for fseventsd, so it runs fewer rounds;
-    // a flush without the marker already failed by round 5.
+    // No sleep before a drain: where the drain is a barrier each change must
+    // be in the very next one. A macOS drain waits about 11 ms for fseventsd,
+    // so it runs fewer rounds.
     let rounds = if cfg!(target_os = "macos") { 25 } else { 50 };
     for round in 0..rounds {
         let name = format!("sub/f{round}.txt");
         fs::write(layout.checkout.join(&name), b"x").unwrap();
-        let drain = observation.drain();
+        let drain = drain_until(&mut observation, |drain| has(drain, &tree(&name), EventKind::Created));
         assert!(has(&drain, &tree(&name), EventKind::Created), "round {round}: {:?}", summary(&drain));
+        assert_eq!(drain.lost, None, "round {round}");
     }
 
     fs::write(sub.join("file.txt"), b"changed").unwrap();
-    assert!(has(&observation.drain(), &tree("sub/file.txt"), EventKind::Modified));
+    let drain = drain_until(&mut observation, |drain| has(drain, &tree("sub/file.txt"), EventKind::Modified));
+    assert!(has(&drain, &tree("sub/file.txt"), EventKind::Modified), "{:?}", summary(&drain));
 
     let mut permissions = fs::metadata(sub.join("file.txt")).unwrap().permissions();
     permissions.set_readonly(true);
     fs::set_permissions(sub.join("file.txt"), permissions).unwrap();
     let metadata = if METADATA_IS_DISTINCT { EventKind::Metadata } else { EventKind::Modified };
-    assert!(has(&observation.drain(), &tree("sub/file.txt"), metadata));
+    let drain = drain_until(&mut observation, |drain| has(drain, &tree("sub/file.txt"), metadata));
+    assert!(has(&drain, &tree("sub/file.txt"), metadata), "{:?}", summary(&drain));
 
     fs::rename(sub.join("f0.txt"), layout.checkout.join("moved.txt")).unwrap();
-    let drain = observation.drain();
     let (from, to) = if MOVE_ACROSS_DIRECTORIES_IS_A_RENAME {
         (EventKind::MovedFrom, EventKind::MovedTo)
     } else {
         (EventKind::Removed, EventKind::Created)
     };
+    let drain = drain_until(&mut observation, |drain| {
+        has(drain, &tree("sub/f0.txt"), from) && has(drain, &tree("moved.txt"), to)
+    });
     assert!(has(&drain, &tree("sub/f0.txt"), from), "{:?}", summary(&drain));
     assert!(has(&drain, &tree("moved.txt"), to), "{:?}", summary(&drain));
 
     fs::rename(sub.join("f2.txt"), sub.join("renamed.txt")).unwrap();
-    let drain = observation.drain();
+    let drain = drain_until(&mut observation, |drain| {
+        has(drain, &tree("sub/f2.txt"), EventKind::MovedFrom) && has(drain, &tree("sub/renamed.txt"), EventKind::MovedTo)
+    });
     assert!(has(&drain, &tree("sub/f2.txt"), EventKind::MovedFrom), "{:?}", summary(&drain));
     assert!(has(&drain, &tree("sub/renamed.txt"), EventKind::MovedTo), "{:?}", summary(&drain));
 
     fs::create_dir(sub.join("newdir")).unwrap();
-    let drain = observation.drain();
+    let drain = drain_until(&mut observation, |drain| drain.events.iter().any(|event| event.scope == tree("sub/newdir")));
     let created = drain.events.iter().find(|event| event.scope == tree("sub/newdir")).expect("directory creation");
     assert_eq!((created.kind, created.directory), (EventKind::Created, Some(true)));
 
     fs::remove_file(sub.join("f1.txt")).unwrap();
-    let drain = observation.drain();
-    assert!(has(&drain, &tree("sub/f1.txt"), EventKind::Removed));
+    let drain = drain_until(&mut observation, |drain| has(drain, &tree("sub/f1.txt"), EventKind::Removed));
+    assert!(has(&drain, &tree("sub/f1.txt"), EventKind::Removed), "{:?}", summary(&drain));
     assert_eq!(drain.lost, None);
 }
 

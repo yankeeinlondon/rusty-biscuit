@@ -60,8 +60,11 @@ deletion engine decides which are the operation's own.
     drain, never dropped without `CoverageLost`, and the per-entry checks
     before unlink (inode, size, ns mtime, mode, BLAKE3) and unregistration's
     index/HEAD reread are what protect work. The burst test asserts eventual
-    delivery. A true barrier would need kqueue (an fd per directory and
-    file). To diagnose, record the callback's event IDs and compare a late
+    delivery, and the shared adapter tests use `drain_until`
+    (`DRAIN_IS_A_BARRIER` is false only on macOS): Linux and Windows must
+    show each change in the very next drain, macOS within `LATE_DRAINS`
+    later ones, with no loss. Even a single write was seen to miss a quiet
+    round. A true barrier would need kqueue (an fd per directory and file). To diagnose, record the callback's event IDs and compare a late
     path's ID with the marker's.
   - **`FSEventStreamStart` returns before events flow**; `start` runs one
     barrier before returning, or a change right after it is missed.
