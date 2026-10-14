@@ -52,8 +52,7 @@ const REPOSITORY_SCOPED_ROUTER_DOC: &str = "\
 ---
 title: implicit router
 initialize:
-  stack:
-    - action: {proxy: \"^prompts/_implement/implement-suggestions.md\"}
+  - {proxy: \"^prompts/_implement/implement-suggestions.md\"}
 ---
 Router body (never used — the run proxies away at initialize).
 ";
@@ -67,8 +66,7 @@ const EXPLICIT_ROUTER_DOC: &str = "\
 ---
 title: explicit router
 initialize:
-  stack:
-    - action: {proxy: \"./prompts/_implement/implement-suggestions.md\"}
+  - {proxy: \"./prompts/_implement/implement-suggestions.md\"}
 ---
 Router body (never used — the run proxies away at initialize).
 ";
@@ -84,8 +82,7 @@ const NO_MATCH_ROUTER_DOC: &str = "\
 ---
 title: no-match router
 initialize:
-  stack:
-    - action: {proxy: \"missing/target.md\"}
+  - {proxy: \"missing/target.md\"}
 ---
 Router body (never used — the run proxies away at initialize).
 ";
@@ -541,7 +538,7 @@ fn level2_proxy_keeps_caller_file_parameter_anchored_to_launch_directory_in_tmux
     let router = root.join("router.md");
     write(
         &router,
-        "---\n$schema:\n  spec: 'file(eager; required)'\ninitialize:\n  stack:\n    - action: {proxy: target.md}\n---\nROUTER\n",
+        "---\n$schema:\n  spec: 'file(eager; required)'\ninitialize:\n  - {proxy: target.md}\n---\nROUTER\n",
     );
 
     let claudine = cargo_bin("claudine").display().to_string();

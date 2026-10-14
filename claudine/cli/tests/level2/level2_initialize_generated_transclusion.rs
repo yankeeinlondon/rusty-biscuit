@@ -56,12 +56,10 @@ const ROUTER_DOC: &str = "\
 ---
 spec: \"\"
 initialize:
-  stack:
-    - when: \"spec && !frontmatter(spec, 'implemented')\"
-      action:
-        - proxy: ./_implement/implement-plan.md
-    - action:
-        - error: \"router fell through\"
+  - when: \"spec && !frontmatter(spec, 'implemented')\"
+    then:
+      - proxy: ./_implement/implement-plan.md
+  - error: \"router fell through\"
 ---
 Router body (never composed: the run proxies away at initialize).
 ";
@@ -78,11 +76,9 @@ spec: \"\"
 phase: 1
 log: \"{{{{ dirname(spec) + '/implementation-log.md' }}}}\"
 initialize:
-  stack:
-    - action:
-        - ensure_file: \"{{{{log}}}}\"
-        - append_line: [\"{events}\", initialize]
-        - append_line: [\"{{{{log}}}}\", \"{LOG_MARKER}\"]
+  - ensure_file: \"{{{{log}}}}\"
+  - append_line: [\"{events}\", initialize]
+  - append_line: [\"{{{{log}}}}\", \"{LOG_MARKER}\"]
 ---
 {BODY_MARKER} phase {{{{phase}}}}.
 
@@ -266,7 +262,7 @@ fn level2_direct_initialize_shell_has_no_effect_when_approval_is_unavailable() {
     let staged = stage("l2-init-gen-unapproved");
     let effect = staged.fixture.workspace_path().join("initialize-effect.txt");
     let document = format!(
-        "---\ninitialize:\n  stack:\n    - action:\n        - shell: \"touch {effect}\"\n---\n{BODY_MARKER}\n",
+        "---\ninitialize:\n  - shell: \"touch {effect}\"\n---\n{BODY_MARKER}\n",
         effect = sh_quote(&effect.display().to_string()),
     );
     write(&staged.fixture.cwd().join("direct.md"), &document);
@@ -301,8 +297,12 @@ fn level2_sequence_preflight_note_renders_for_an_include_initialize_would_create
     let cwd = staged.fixture.cwd();
     write(
         &cwd.join("target.md"),
-        "---\ninitialize:\n  stack:\n    - action:\n        - ensure_file: generated/notes.md\n---\n\
-         TARGET\n\n::file generated/notes.md\n",
+        "---\n\
+         initialize:\n  \
+         - ensure_file: generated/notes.md\n\
+         ---\n\
+         TARGET\n\n\
+         ::file generated/notes.md\n",
     );
     write(
         &cwd.join("seq.md"),

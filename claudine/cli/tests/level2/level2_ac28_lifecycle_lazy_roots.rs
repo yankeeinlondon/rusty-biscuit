@@ -141,10 +141,10 @@ fn stage() -> Fixture {
     fixture
 }
 
-/// One lifecycle stack that records `event` with the lazy root resolved.
+/// One lifecycle list item that records `event` with the lazy root resolved.
 fn recorder(event: &str) -> String {
     format!(
-        "  stack:\n    - action: {{append_line: [\"events.log\", \
+        "    - {{append_line: [\"events.log\", \
          \"{event} branch={{{{ current.branch }}}}\"]}}\n"
     )
 }
@@ -170,7 +170,7 @@ fn probe_document(extra_frontmatter: &str) -> String {
     }
     // The loop gate is the seventh event. `max: 1` holds the run to a single
     // iteration; the gate still fires once, which is what AC28 asks about.
-    document.push_str("loop:\n  max: 1\n  while: \"false\"\n");
+    document.push_str("loop:\n  max: 1\n  while: \"false\"\n  gate:\n");
     document.push_str(&recorder("loop"));
     document.push_str("---\nBody\n");
     document
@@ -366,12 +366,12 @@ fn level2_ac28_lazy_roots_refresh_between_lifecycle_events() {
     let mut document = String::from("---\ntitle: AC28 per-event freshness\n");
     for event in ["initialize", "start", "success", "finalize"] {
         document.push_str(event);
-        document.push_str(":\n  stack:\n    - action: {append_line: [\"events.log\", \"");
+        document.push_str(":\n    - {append_line: [\"events.log\", \"");
         document.push_str(event);
         document.push_str(" lazy={{ current.branch }} eager={{ ctx.branch }}\"]}\n");
         if event == "start" {
             document.push_str(&format!(
-                "    - action: {{shell: \"git checkout -q -b {BRANCH_AFTER}\"}}\n"
+                "    - {{shell: \"git checkout -q -b {BRANCH_AFTER}\"}}\n"
             ));
         }
     }

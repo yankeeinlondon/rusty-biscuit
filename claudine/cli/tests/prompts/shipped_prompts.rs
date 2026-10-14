@@ -69,6 +69,67 @@ fn shipped_prompt_corpus_parses_frontmatter() {
     );
 }
 
+/// Internal drafts whose lifecycle is authored in verbs that do not exist yet
+/// (`prompts/fix.md` sketches `prep` and `interview`, and says so in its own
+/// comment). Migrating a draft's grammar cannot make it parse, so it is
+/// excluded by name rather than left to fail the corpus.
+const DRAFT_LIFECYCLE_PROMPTS: &[&str] = &["prompts/fix.md"];
+
+/// Every internal document that carries frontmatter — the root, Claudine, and
+/// Darkmatter `prompts/`, the research template, and every research fleet —
+/// parses under the current lifecycle grammar, so a retired spelling surfaces
+/// here as its `RemovedGrammar` hint rather than at someone's next launch.
+///
+/// [`DRAFT_LIFECYCLE_PROMPTS`] names the drafts that are excluded on purpose.
+#[test]
+fn internal_lifecycle_corpus_parses_under_current_grammar() {
+    use claudine::composition::lifecycle::parse_lifecycle_config;
+    use common::lifecycle_set_corpus::frontmatter_value;
+
+    let root = workspace_root();
+    let mut files = Vec::new();
+    collect_markdown_files(&root.join("prompts"), &mut files);
+    collect_markdown_files(&root.join("claudine/prompts"), &mut files);
+    collect_markdown_files(&root.join("darkmatter/prompts"), &mut files);
+    files.push(root.join("claudine/docs/research/_TEMPLATE.md"));
+    let research = root.join("claudine/docs/research");
+    for entry in std::fs::read_dir(&research).expect("research directory") {
+        let fleet = entry.expect("research entry").path().join("_fleet.md");
+        if fleet.is_file() {
+            files.push(fleet);
+        }
+    }
+    files.sort();
+
+    let mut parsed = 0;
+    let mut failures = Vec::new();
+    for path in &files {
+        let text = std::fs::read_to_string(path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+        if !text.starts_with("---") {
+            continue;
+        }
+        let relative = path.strip_prefix(&root).unwrap_or(path).display().to_string();
+        if DRAFT_LIFECYCLE_PROMPTS.contains(&relative.replace('\\', "/").as_str()) {
+            continue;
+        }
+        match Markdown::try_from(path.as_path()) {
+            Ok(markdown) => match parse_lifecycle_config(&frontmatter_value(&markdown), path) {
+                Ok(_) => parsed += 1,
+                Err(error) => failures.push(format!("{relative}: {error}")),
+            },
+            Err(error) => failures.push(format!("{relative}: frontmatter does not parse: {error}")),
+        }
+    }
+
+    assert!(parsed > 0, "the internal lifecycle corpus must not be empty");
+    assert!(
+        failures.is_empty(),
+        "internal documents whose lifecycle does not parse:\n{}",
+        failures.join("\n")
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn shipped_implement_plan_real_artifact_executes_mapping_set_before_provider_launch() {

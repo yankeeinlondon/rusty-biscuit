@@ -15,8 +15,8 @@
 //!   `merge_frontmatter: ["state.md", "{{ payload }}"]` merges the object stored
 //!   in `payload`, proving the whole-value typed-resolution escape hatch reaches
 //!   the side-effect engine.
-//! - **key/value literal default** — a key/value `{ action: message, message:
-//!   "fm.title" }` sends the **literal** string `fm.title`, while the
+//! - **key/value literal default** — a key/value `stderr: { text: "fm.title" }`
+//!   sends the **literal** string `fm.title`, while the
 //!   `{{ fm.title }}` equivalent resolves the value. This is the breaking
 //!   change the spec calls out: key/value string parameters are literal by
 //!   default.
@@ -181,20 +181,17 @@ fn level2_action_forms_mixed_success_stack_writes_frontmatter() {
 title: ACTFORMS_TITLE
 phase: phase-6
 start:
-  stack:
-    - action: {append_line: ["events.log", "start"]}
+  - {append_line: ["events.log", "start"]}
 success:
-  stack:
-    - when: "file_exists('state.md')"
-      action:
-        - set_frontmatter: ["state.md", "status", "production ready in {{ fm.phase }}"]
-        - stderr: "SUCCESS_COMM {{ fm.title }}"
-        - action: shell
+  - when: "file_exists('state.md')"
+    then:
+      - set_frontmatter: ["state.md", "status", "production ready in {{ fm.phase }}"]
+      - stderr: "SUCCESS_COMM {{ fm.title }}"
+      - shell:
           command: "echo shell-ran >> events.log"
-    - action: {append_line: ["events.log", "success"]}
+  - {append_line: ["events.log", "success"]}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#;
@@ -244,12 +241,10 @@ title: typed write-through
 payload:
   owner: ken
 success:
-  stack:
-    - action: {set_frontmatter: ["state.md", "ready", "{{ true }}"]}
-    - action: {merge_frontmatter: ["state.md", "{{ fm.payload }}"]}
+  - {set_frontmatter: ["state.md", "ready", "{{ true }}"]}
+  - {merge_frontmatter: ["state.md", "{{ fm.payload }}"]}
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#;
@@ -291,16 +286,12 @@ fn level2_action_forms_keyvalue_literal_default() {
     let doc = r#"---
 title: LITDEFAULT_TITLE
 success:
-  stack:
-    - action:
-        action: stderr
-        message: "LITERAL=fm.title"
-    - action:
-        action: stderr
-        message: "INTERP={{ fm.title }}"
+  - stderr:
+      text: "LITERAL=fm.title"
+  - stderr:
+      text: "INTERP={{ fm.title }}"
 finalize:
-  stack:
-    - action: {append_line: ["events.log", "finalize"]}
+  - {append_line: ["events.log", "finalize"]}
 ---
 Body
 "#;
