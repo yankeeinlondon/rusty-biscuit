@@ -92,6 +92,12 @@ impl<'a, A: Api, R: EndpointSpec<Api = A>> Call<'a, A, R> {
         self
     }
 
+    /// The client, request, and per-call settings, for a pager that sends
+    /// the call page by page with the same settings.
+    pub(crate) fn into_inner(self) -> (&'a Client<A>, R, CallOptions) {
+        (self.client, self.request, self.options)
+    }
+
     /// Makes the await return the whole [`Response`] envelope rather than
     /// only the data. Chain it last: the per-call settings stay available on
     /// the result, but an endpoint's own setters do not.

@@ -1,0 +1,20 @@
+error[E0277]: `ListItems` has no resumable cursor
+ --> tests/fixtures/compile_fail/pager_after_without_a_resumable_cursor.rs
+  |
+  |     let _ = client.send(ListItems).pager().after("c".to_owned());
+  |                                            ^^^^^ `.after(..)` needs a resumable cursor in the definition
+  |
+help: the trait `ResumeAfter` is not implemented for `ListItems`
+ --> tests/fixtures/compile_fail/pager_after_without_a_resumable_cursor.rs
+  |
+  | struct ListItems;
+  | ^^^^^^^^^^^^^^^^
+  = note: the definition for `ListItems` does not mark a cursor strategy `resumable`
+note: required by a bound in `Pager::<'a, A, R>::after`
+ --> src/pager/pages.rs
+  |
+  |     pub fn after(mut self, cursor: impl Into<<R as ResumeAfter>::Cursor>) -> Self
+  |            ----- required by a bound in this associated function
+  |     where
+  |         R: ResumeAfter,
+  |            ^^^^^^^^^^^ required by this bound in `Pager::<'a, A, R>::after`

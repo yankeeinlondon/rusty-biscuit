@@ -532,8 +532,9 @@ struct FirstHop {
 /// The `elapsed` of its metadata stops at that head; the caller sets the
 /// whole-send time once it has produced the outcome.
 enum Exchange {
-    /// A reply that is not a followable redirect, with its body unread.
-    Final { meta: ResponseMeta, body: LiveBody },
+    /// A reply that is not a followable redirect, with its body unread, and
+    /// the URL of the hop that received it, before any credential.
+    Final { meta: ResponseMeta, body: LiveBody, url: Url },
     /// A redirect that stopped the send, with its body read.
     Stopped { meta: ResponseMeta, body: Bytes, stop: Stop },
 }
@@ -583,12 +584,27 @@ impl<A: Api> Client<A> {
     where
         R: EndpointSpec<Api = A>,
     {
+        self.send_located(request, options).await.map(|(response, _)| response)
+    }
+
+    /// A typed send that also returns the URL of the hop that received the
+    /// final reply, after redirects and before any credential, so a pager
+    /// can resolve a relative link against it; `None` when a redirect
+    /// stopped the send. The URL is unredacted: it is read, never stored.
+    pub(crate) async fn send_located<R>(
+        &self,
+        request: R,
+        options: &CallOptions,
+    ) -> Result<(Response<R::Success, R::Failure>, Option<Url>), TransportError>
+    where
+        R: EndpointSpec<Api = A>,
+    {
         let start = Instant::now();
         let inner = self.validated_for::<R>(start)?;
-        let (mut meta, outcome) = match inner.execute(request, options, start).await? {
-            Exchange::Final { meta, body } => {
+        let (mut meta, outcome, url) = match inner.execute(request, options, start).await? {
+            Exchange::Final { meta, body, url } => {
                 let outcome = classify_reply::<R>(body, inner.hooks.stage::<R>(&meta)).await;
-                (meta, outcome)
+                (meta, outcome, Some(url))
             }
             Exchange::Stopped { meta, body, stop } => {
                 let kind = match stop {
@@ -596,11 +612,11 @@ impl<A: Api> Client<A> {
                     Stop::Refused(reason) => ErrorKind::RedirectRefused { reason },
                     Stop::Failed { target, category } => ErrorKind::RedirectFailed { target, category },
                 };
-                (meta, Outcome::Failure(ApiError { kind, body }))
+                (meta, Outcome::Failure(ApiError { kind, body }), None)
             }
         };
         meta.elapsed = start.elapsed();
-        Ok(completed(options.deadline.as_ref(), meta, outcome))
+        Ok((completed(options.deadline.as_ref(), meta, outcome), url))
     }
 
     /// Sends `request` and returns its reply's metadata and body bytes
@@ -638,7 +654,7 @@ impl<A: Api> Client<A> {
         let start = Instant::now();
         let inner = self.validated_for::<R>(start)?;
         let (mut meta, body, completion) = match inner.execute(request, options, start).await? {
-            Exchange::Final { meta, body } => match body.collect().await {
+            Exchange::Final { meta, body, .. } => match body.collect().await {
                 Ok(bytes) => (meta, bytes, RawCompletion::Complete),
                 Err(failure) => (meta, failure.retained, RawCompletion::BodyInterrupted),
             },
@@ -788,7 +804,11 @@ impl Inner {
             );
             let body = live_body(reply, &expiration);
             if !is_followable_redirect(status) {
-                return Ok(Exchange::Final { meta: response_meta, body });
+                return Ok(Exchange::Final {
+                    meta: response_meta,
+                    body,
+                    url: current.url.clone(),
+                });
             }
 
             // A redirect's body is read before the next hop, both as evidence

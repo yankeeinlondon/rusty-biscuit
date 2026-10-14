@@ -25,7 +25,10 @@
 //! - the [`OriginPolicy`] that governs redirects and followed links;
 //! - [`Client::send_raw`] and its [`RawResponse`], for a reply without
 //!   decoding;
-//! - the two response [`hooks`], gated by [`SupportsHooks`].
+//! - the two response [`hooks`], gated by [`SupportsHooks`];
+//! - the [`pager`] for list endpoints whose definition authors a pagination
+//!   strategy: [`Call::pager`] and the generated endpoint calls' pager
+//!   controls, `pages()`, `fetch_page()`, and `collect_all()`.
 //!
 //! ## The governing rule
 //!
@@ -61,6 +64,7 @@ pub mod hooks;
 pub mod meta;
 pub mod options;
 pub mod origin;
+pub mod pager;
 pub mod raw;
 pub mod redact;
 pub mod response;
@@ -99,4 +103,4 @@ pub use response::{
 /// value its generator was built against, and the generator's partial
 /// generation refuses to keep modules generated against a different value.
 /// Increment it with every change that generated code can observe.
-pub const ABI: u32 = 3;
+pub const ABI: u32 = 4;

@@ -1,0 +1,20 @@
+error[E0599]: no method named `page_size` found for struct `schematic_runtime::pager::Pages<'a, A, R>` in the current scope
+  --> tests/fixtures/compile_fail/pager_knob_after_pages.rs
+   |
+   |     let _ = client.send(ListItems).pager().pages().page_size(10);
+   |                                    -------         ^^^^^^^^^
+   |                                    |
+   |                                    method `page_size` is available on `Pager<'_, Example, ListItems>`
+   |
+help: there is a method `set_page_size` with a similar name
+   |
+55 |     let _ = client.send(ListItems).pager().pages().set_page_size(10);
+   |                                                    ++++
+
+error[E0599]: no method named `page` found for struct `schematic_runtime::pager::Pages<'a, A, R>` in the current scope
+ --> tests/fixtures/compile_fail/pager_knob_after_pages.rs
+  |
+  |     let _ = client.send(ListItems).pager().pages().page(2);
+  |                                    -------         ^^^^ method not found in `schematic_runtime::pager::Pages<'_, Example, ListItems>`
+  |                                    |
+  |                                    method `page` is available on `Pager<'_, Example, ListItems>`

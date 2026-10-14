@@ -61,8 +61,8 @@ pub struct RequestMeta {
     pub headers: HeaderMap,
     /// Source of the credential that was sent.
     pub auth: AuthMethod,
-    /// Page number when the send is part of a paginated operation. Reserved
-    /// for pagers, which are planned; the runtime always leaves it `None`.
+    /// The page's position in its traversal, from 1, when the send is a
+    /// [pager](crate::pager)'s page request; `None` for every other send.
     pub page: Option<u32>,
 }
 
