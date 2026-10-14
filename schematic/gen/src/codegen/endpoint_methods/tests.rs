@@ -688,7 +688,7 @@ fn public_type_names(dir: &std::path::Path, names: &mut BTreeSet<String>) {
 /// are checked here.
 #[test]
 fn no_shipped_call_type_shares_a_name_with_a_definitions_type() {
-    let definitions = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../definitions/src");
+    let definitions = biscuit_test_harness::manifest_dir!().join("../definitions/src");
     let mut defined = BTreeSet::new();
     public_type_names(&definitions, &mut defined);
     assert!(defined.contains("Release"), "the scan finds definitions types");

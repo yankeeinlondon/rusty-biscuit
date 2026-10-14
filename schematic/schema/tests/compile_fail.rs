@@ -29,8 +29,13 @@ fn slow_generated_pager_surface_reports_the_intended_diagnostics() {
     let wrapper = EnvGuard::clear(&["RUSTC_WRAPPER"]);
     wrapper.set("RUSTC_WRAPPER", "");
     let cases = trybuild::TestCases::new();
-    cases.pass(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/pass/*.rs"));
-    let compile_fail = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/compile_fail");
+    let fixtures = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR")
+            .expect("Cargo or Nextest supplies the generated crate's manifest directory"),
+    )
+    .join("tests/fixtures");
+    cases.pass(fixtures.join("pass/*.rs"));
+    let compile_fail = fixtures.join("compile_fail");
     if cfg!(windows) {
         let mut portable = 0;
         for entry in std::fs::read_dir(compile_fail).expect("the compile-fail fixtures are readable") {
@@ -46,6 +51,6 @@ fn slow_generated_pager_surface_reports_the_intended_diagnostics() {
         }
         assert!(portable > 0, "no compile-fail case is comparable on Windows");
     } else {
-        cases.compile_fail(format!("{compile_fail}/*.rs"));
+        cases.compile_fail(compile_fail.join("*.rs"));
     }
 }
