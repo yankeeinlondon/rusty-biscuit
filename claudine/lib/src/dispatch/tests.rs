@@ -10,11 +10,12 @@ use std::collections::HashMap;
 fn bridge_settings(config: &ClaudineConfig) -> GlobalSettings {
     GlobalSettings {
         default_log_target: None,
+        tts_prewarm: config.tts.prewarm_enabled(),
         tts: match &config.tts {
             TtsValue::Boolean(false) => None,
             TtsValue::Boolean(true) => None,
             TtsValue::Config(cfg) => Some(TtsSettings {
-                provider: Some(cfg.provider.clone()),
+                provider: cfg.provider.clone(),
                 voice: match &cfg.voice {
                     Some(VoiceSelection::Single(v)) => Some(v.clone()),
                     _ => None,
@@ -546,9 +547,10 @@ fn bridge_settings_from_tts_config() {
     use crate::config::tts::{Gender, TtsConfigSettings, TtsValue, VoiceSelection};
     let config = ClaudineConfig {
         tts: TtsValue::Config(TtsConfigSettings {
-            provider: "say".to_string(),
+            provider: Some("say".to_string()),
             voice: Some(VoiceSelection::Single("Samantha".to_string())),
             gender: Gender::Female,
+            prewarm: None,
         }),
         ..ClaudineConfig::default()
     };
@@ -564,12 +566,13 @@ fn bridge_settings_from_tts_config_gendered_voice() {
     use crate::config::tts::{Gender, TtsConfigSettings, TtsValue, VoiceSelection};
     let config = ClaudineConfig {
         tts: TtsValue::Config(TtsConfigSettings {
-            provider: "elevenlabs".to_string(),
+            provider: Some("elevenlabs".to_string()),
             voice: Some(VoiceSelection::Gendered {
                 male: "Alex".to_string(),
                 female: "Samantha".to_string(),
             }),
             gender: Gender::Female,
+            prewarm: None,
         }),
         ..ClaudineConfig::default()
     };

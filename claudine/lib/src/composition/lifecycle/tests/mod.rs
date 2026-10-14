@@ -138,4 +138,5 @@ mod guard_runtime;
 mod mixed_span;
 mod nested_span;
 mod parse_config;
+mod tts_settings;
 mod validation;

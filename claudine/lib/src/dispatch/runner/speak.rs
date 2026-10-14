@@ -65,7 +65,11 @@ pub(super) fn tts_config_from_claudine(
         TtsValue::Boolean(true) => {}
         TtsValue::Config(settings) => {
             if voice_override.is_none() {
-                if let Some(provider) = biscuit_speaks::parse_provider_name(&settings.provider) {
+                if let Some(provider) = settings
+                    .provider
+                    .as_deref()
+                    .and_then(biscuit_speaks::parse_provider_name)
+                {
                     tts = tts.with_failover(TtsFailoverStrategy::SpecificProvider(provider));
                 }
 
@@ -83,7 +87,11 @@ pub(super) fn tts_config_from_claudine(
                     }
                     None => {}
                 }
-            } else if let Some(provider) = biscuit_speaks::parse_provider_name(&settings.provider) {
+            } else if let Some(provider) = settings
+                .provider
+                .as_deref()
+                .and_then(biscuit_speaks::parse_provider_name)
+            {
                 tts = tts.with_failover(TtsFailoverStrategy::SpecificProvider(provider));
             }
         }
@@ -206,9 +214,10 @@ mod tests {
     #[test]
     fn tts_config_from_claudine_single_voice() {
         let config = claudine_config_with_tts(TtsValue::Config(TtsConfigSettings {
-            provider: "say".to_string(),
+            provider: Some("say".to_string()),
             voice: Some(VoiceSelection::Single("Samantha".to_string())),
             gender: Gender::Female,
+            prewarm: None,
         }));
         let tts = tts_config_from_claudine(&config, None, None);
         assert_eq!(tts.requested_voice.as_deref(), Some("Samantha"));
@@ -221,12 +230,13 @@ mod tests {
     #[test]
     fn tts_config_from_claudine_gendered_voice_female_default() {
         let config = claudine_config_with_tts(TtsValue::Config(TtsConfigSettings {
-            provider: "say".to_string(),
+            provider: Some("say".to_string()),
             voice: Some(VoiceSelection::Gendered {
                 male: "Alex".to_string(),
                 female: "Samantha".to_string(),
             }),
             gender: Gender::Female,
+            prewarm: None,
         }));
         let tts = tts_config_from_claudine(&config, None, None);
         assert_eq!(tts.requested_voice.as_deref(), Some("Samantha"));
@@ -235,12 +245,13 @@ mod tests {
     #[test]
     fn tts_config_from_claudine_gendered_voice_male_default() {
         let config = claudine_config_with_tts(TtsValue::Config(TtsConfigSettings {
-            provider: "say".to_string(),
+            provider: Some("say".to_string()),
             voice: Some(VoiceSelection::Gendered {
                 male: "Alex".to_string(),
                 female: "Samantha".to_string(),
             }),
             gender: Gender::Male,
+            prewarm: None,
         }));
         let tts = tts_config_from_claudine(&config, None, None);
         assert_eq!(tts.requested_voice.as_deref(), Some("Alex"));
@@ -249,12 +260,13 @@ mod tests {
     #[test]
     fn tts_config_from_claudine_gender_override_selects_male_voice() {
         let config = claudine_config_with_tts(TtsValue::Config(TtsConfigSettings {
-            provider: "say".to_string(),
+            provider: Some("say".to_string()),
             voice: Some(VoiceSelection::Gendered {
                 male: "Alex".to_string(),
                 female: "Samantha".to_string(),
             }),
             gender: Gender::Female,
+            prewarm: None,
         }));
         let tts = tts_config_from_claudine(&config, None, Some(Gender::Male));
         assert_eq!(tts.requested_voice.as_deref(), Some("Alex"));
@@ -263,9 +275,10 @@ mod tests {
     #[test]
     fn tts_config_from_claudine_voice_override_wins_over_config() {
         let config = claudine_config_with_tts(TtsValue::Config(TtsConfigSettings {
-            provider: "say".to_string(),
+            provider: Some("say".to_string()),
             voice: Some(VoiceSelection::Single("Samantha".to_string())),
             gender: Gender::Female,
+            prewarm: None,
         }));
         let tts = tts_config_from_claudine(&config, Some("Karen"), None);
         assert_eq!(tts.requested_voice.as_deref(), Some("Karen"));
@@ -274,9 +287,10 @@ mod tests {
     #[test]
     fn tts_config_from_claudine_voice_override_sets_provider() {
         let config = claudine_config_with_tts(TtsValue::Config(TtsConfigSettings {
-            provider: "say".to_string(),
+            provider: Some("say".to_string()),
             voice: Some(VoiceSelection::Single("Samantha".to_string())),
             gender: Gender::Female,
+            prewarm: None,
         }));
         let tts = tts_config_from_claudine(&config, Some("Karen"), None);
         assert_eq!(tts.requested_voice.as_deref(), Some("Karen"));
@@ -284,5 +298,59 @@ mod tests {
             tts.failover_strategy,
             TtsFailoverStrategy::SpecificProvider(_)
         ));
+    }
+
+    /// The `tts` value as a user writes it in `config.json`.
+    fn hook_config_for(tts: serde_json::Value) -> (bool, TtsConfig) {
+        let config: ClaudineConfig =
+            serde_json::from_value(serde_json::json!({ "preferred_agent": "claude", "tts": tts }))
+                .unwrap();
+        let hook_speech_on = !matches!(config.tts, TtsValue::Boolean(false));
+        (hook_speech_on, tts_config_from_claudine(&config, None, None))
+    }
+
+    #[test]
+    fn provider_less_object_drives_hook_speak_exactly_as_true() {
+        let as_true = hook_config_for(serde_json::json!(true));
+        assert_eq!(hook_config_for(serde_json::json!({ "prewarm": false })), as_true);
+        assert_eq!(hook_config_for(serde_json::json!({ "prewarm": true })), as_true);
+        assert_eq!(hook_config_for(serde_json::json!({})), as_true);
+        assert!(as_true.0, "true enables hook speech");
+        assert!(matches!(
+            as_true.1.failover_strategy,
+            TtsFailoverStrategy::FirstAvailable
+        ));
+    }
+
+    #[test]
+    fn prewarm_never_changes_hook_speak_for_an_object() {
+        let without = hook_config_for(serde_json::json!({ "provider": "say", "voice": "Samantha" }));
+        let with_off = hook_config_for(
+            serde_json::json!({ "provider": "say", "voice": "Samantha", "prewarm": false }),
+        );
+        assert_eq!(with_off, without);
+        assert!(with_off.0);
+        assert!(matches!(
+            with_off.1.failover_strategy,
+            TtsFailoverStrategy::SpecificProvider(TtsProvider::Host(HostTtsProvider::Say))
+        ));
+        assert_eq!(with_off.1.requested_voice.as_deref(), Some("Samantha"));
+    }
+
+    #[test]
+    fn provider_less_object_keeps_its_voice_with_the_default_provider() {
+        let (on, tts) = hook_config_for(serde_json::json!({ "voice": "Samantha" }));
+        assert!(on);
+        assert_eq!(tts.requested_voice.as_deref(), Some("Samantha"));
+        assert!(matches!(tts.failover_strategy, TtsFailoverStrategy::FirstAvailable));
+    }
+
+    #[test]
+    fn false_and_absent_keep_hook_speech_off() {
+        let (on, _) = hook_config_for(serde_json::json!(false));
+        assert!(!on);
+        let config: ClaudineConfig =
+            serde_json::from_value(serde_json::json!({ "preferred_agent": "claude" })).unwrap();
+        assert!(matches!(config.tts, TtsValue::Boolean(false)));
     }
 }

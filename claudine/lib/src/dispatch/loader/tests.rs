@@ -828,3 +828,191 @@ fn load_claudine_config_does_not_backup_new_format() {
         "new format should not produce a backup"
     );
 }
+
+// =====================================================================
+// `tts` input robustness matrix (config.json, JSON5)
+// =====================================================================
+
+/// The real `config.json` shape with the `tts` entry left as a slot, so each
+/// matrix cell is exactly one edit to the same document.
+const TTS_MATRIX_FIXTURE: &str = r#"{
+    // written by `claudine init`
+    preferred_agent: "claude",
+    logging: true,
+    TTS_ENTRY
+}"#;
+
+/// What the rest of Claudine sees after loading: the bridged playback
+/// settings `(provider, voice)` (or `None` for no hook speech settings) and
+/// the effective pre-warm switch.
+type BridgedTts = (Option<(Option<String>, Option<String>)>, bool);
+
+fn load_tts_cell(tts_entry: &str) -> Result<BridgedTts> {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    std::fs::write(&path, TTS_MATRIX_FIXTURE.replace("TTS_ENTRY", tts_entry)).unwrap();
+    let config = load_claudine_config(Some(&path), None)?;
+    let settings = bridge_tts_settings(&config);
+    Ok((
+        settings.tts.map(|tts| (tts.provider, tts.voice)),
+        settings.tts_prewarm,
+    ))
+}
+
+fn assert_tts_cell(cell: &str, tts_entry: &str, expected: BridgedTts) {
+    match load_tts_cell(tts_entry) {
+        Ok(actual) => assert_eq!(actual, expected, "{cell}: `{tts_entry}`"),
+        Err(error) => panic!("{cell}: `{tts_entry}` should load, got {error}"),
+    }
+}
+
+fn assert_tts_cell_rejected(cell: &str, tts_entry: &str) {
+    match load_tts_cell(tts_entry) {
+        Ok(actual) => panic!("{cell}: `{tts_entry}` should be rejected, loaded as {actual:?}"),
+        Err(ClaudineError::ConfigNotFound(_)) => {
+            panic!("{cell}: `{tts_entry}` was read as a missing config, not rejected")
+        }
+        Err(_) => {}
+    }
+}
+
+fn bridged(provider: Option<&str>, voice: Option<&str>, prewarm: bool) -> BridgedTts {
+    (
+        Some((provider.map(str::to_string), voice.map(str::to_string))),
+        prewarm,
+    )
+}
+
+#[test]
+fn tts_config_input_robustness_matrix() {
+    // Control row: the unedited fixture loads with its provider and pre-warm on.
+    assert_tts_cell(
+        "control",
+        r#"tts: { provider: "kokoro", voice: "af_heart" },"#,
+        bridged(Some("kokoro"), Some("af_heart"), true),
+    );
+
+    // Column `tts`.
+    assert_tts_cell("tts absent", "", (None, true));
+    assert_tts_cell_rejected("tts null", "tts: null,");
+    assert_tts_cell_rejected("tts wrong type", r#"tts: "say","#);
+    assert_tts_cell("tts empty object", "tts: {},", bridged(None, None, true));
+    assert_tts_cell(
+        "tts duplicate key (JSON5 is last-wins)",
+        r#"tts: false, tts: { provider: "kokoro", voice: "af_heart" },"#,
+        bridged(Some("kokoro"), Some("af_heart"), true),
+    );
+    assert_tts_cell_rejected(
+        "tts trailing content",
+        r#"tts: { provider: "kokoro", voice: "af_heart" } }, trailing"#,
+    );
+
+    // Column `provider`.
+    assert_tts_cell(
+        "provider absent",
+        r#"tts: { voice: "af_heart" },"#,
+        bridged(None, Some("af_heart"), true),
+    );
+    assert_tts_cell_rejected(
+        "provider null",
+        r#"tts: { provider: null, voice: "af_heart" },"#,
+    );
+    assert_tts_cell_rejected(
+        "provider wrong type",
+        r#"tts: { provider: 1, voice: "af_heart" },"#,
+    );
+    // An empty name loads as before; playback treats it as an unknown
+    // provider and falls back to automatic selection.
+    assert_tts_cell(
+        "provider empty",
+        r#"tts: { provider: "", voice: "af_heart" },"#,
+        bridged(Some(""), Some("af_heart"), true),
+    );
+    assert_tts_cell(
+        "provider duplicate key (JSON5 is last-wins)",
+        r#"tts: { provider: "say", provider: "kokoro", voice: "af_heart" },"#,
+        bridged(Some("kokoro"), Some("af_heart"), true),
+    );
+
+    // Column `prewarm`.
+    assert_tts_cell(
+        "prewarm false",
+        r#"tts: { provider: "kokoro", voice: "af_heart", prewarm: false },"#,
+        bridged(Some("kokoro"), Some("af_heart"), false),
+    );
+    assert_tts_cell(
+        "prewarm true",
+        r#"tts: { provider: "kokoro", voice: "af_heart", prewarm: true },"#,
+        bridged(Some("kokoro"), Some("af_heart"), true),
+    );
+    assert_tts_cell_rejected(
+        "prewarm null",
+        r#"tts: { provider: "kokoro", voice: "af_heart", prewarm: null },"#,
+    );
+    assert_tts_cell_rejected(
+        "prewarm wrong type",
+        r#"tts: { provider: "kokoro", voice: "af_heart", prewarm: "no" },"#,
+    );
+    assert_tts_cell(
+        "prewarm duplicate key (JSON5 is last-wins)",
+        r#"tts: { provider: "kokoro", voice: "af_heart", prewarm: true, prewarm: false },"#,
+        bridged(Some("kokoro"), Some("af_heart"), false),
+    );
+
+    // Unknown keys stay rejected, including near-misses for the new switch.
+    assert_tts_cell_rejected(
+        "unknown key",
+        r#"tts: { provider: "kokoro", enabled: true },"#,
+    );
+    assert_tts_cell_rejected("misspelled prewarm", "tts: { pre_warm: false },");
+}
+
+#[test]
+fn tts_shapes_bridge_to_the_documented_prewarm_and_playback_settings() {
+    // One row per shape in the configuration's shape table.
+    assert_tts_cell("absent", "", (None, true));
+    assert_tts_cell("true", "tts: true,", bridged(None, None, true));
+    assert_tts_cell("false", "tts: false,", (None, true));
+    assert_tts_cell(
+        "object without prewarm",
+        r#"tts: { provider: "say", voice: "Samantha" },"#,
+        bridged(Some("say"), Some("Samantha"), true),
+    );
+    assert_tts_cell(
+        "object with prewarm false",
+        r#"tts: { provider: "say", voice: "Samantha", prewarm: false },"#,
+        bridged(Some("say"), Some("Samantha"), false),
+    );
+    assert_tts_cell(
+        "object without provider",
+        "tts: { prewarm: false },",
+        bridged(None, None, false),
+    );
+}
+
+#[test]
+fn tts_object_round_trips_without_materializing_defaults() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    std::fs::write(&path, r#"{ preferred_agent: "claude", tts: { prewarm: false } }"#).unwrap();
+
+    for pass in 0..2 {
+        let config = load_claudine_config(Some(&path), None).unwrap();
+        assert!(!config.tts.prewarm_enabled(), "pass {pass}");
+        save_claudine_config(&config, &path).unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved["tts"]["prewarm"], serde_json::json!(false), "pass {pass}");
+        assert!(saved["tts"].get("provider").is_none(), "pass {pass}: {saved}");
+    }
+
+    // An object that never wrote `prewarm` must not gain it on save.
+    std::fs::write(&path, r#"{ preferred_agent: "claude", tts: { provider: "say" } }"#).unwrap();
+    let config = load_claudine_config(Some(&path), None).unwrap();
+    save_claudine_config(&config, &path).unwrap();
+    let saved: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert!(saved["tts"].get("prewarm").is_none(), "{saved}");
+    let reloaded = load_claudine_config(Some(&path), None).unwrap();
+    assert!(reloaded.tts.prewarm_enabled());
+}

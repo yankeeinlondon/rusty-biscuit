@@ -6,7 +6,7 @@ use crate::protect::ProtectConfig;
 use crate::provider::Provider;
 
 /// Global settings that apply to all event bindings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GlobalSettings {
     /// Default log target used when an event's `Log` action
@@ -19,6 +19,15 @@ pub struct GlobalSettings {
     #[serde(default)]
     pub tts: Option<TtsSettings>,
 
+    /// Whether lifecycle `say` phrases may be synthesized ahead of time.
+    ///
+    /// Kept apart from `tts` because `tts` is `None` for `"tts": false`
+    /// while pre-warm stays on there. Defaults to `true`, including when
+    /// `config.json` cannot be loaded, matching the auto-detected playback
+    /// configuration lifecycle `say` uses in that case.
+    #[serde(default = "default_tts_prewarm")]
+    pub tts_prewarm: bool,
+
     /// Link strategy settings used for canonical provider selection and ordering.
     #[serde(default)]
     pub linking: Option<LinkingSettings>,
@@ -30,6 +39,23 @@ pub struct GlobalSettings {
     /// Messaging destination settings for `Message` actions.
     #[serde(default)]
     pub messaging: Option<ScopedMessagingSettings>,
+}
+
+impl Default for GlobalSettings {
+    fn default() -> Self {
+        Self {
+            default_log_target: None,
+            tts: None,
+            tts_prewarm: default_tts_prewarm(),
+            linking: None,
+            protect: None,
+            messaging: None,
+        }
+    }
+}
+
+fn default_tts_prewarm() -> bool {
+    true
 }
 
 /// TTS configuration forwarded to biscuit-speaks.
