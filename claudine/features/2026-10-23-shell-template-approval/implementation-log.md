@@ -7,17 +7,105 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+packages:
+    - darkmatter
+    - darkmatter-cli
+    - claudine
+    - claudine-cli
 human_review: false
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/grammar.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/canonical.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/typing.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/matching.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/tests.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/tokenize.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/policy.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/store.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/subtype.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/tests/l1/shell_template_policy.rs
+    - darkmatter/lib/tests/l1/main.rs
+docs_updated_during_phase_2:
+    - darkmatter/docs/inline/preflight-checks.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/compose.md
 message_to_agent: |-
-    Phase 1 changed no source. Its output is the "Contract Definition (Wave 2)" section of this log (C1–C10). Read it before Phase 2; it names the shared module (`darkmatter/.../shell_expansion/template/`), the types, the owner of each file, and the acceptance-to-task map.
+    Phase 3 landed discovery provenance and structured approval transport (details in the "Phase 3" log section). What Phase 4 needs:
 
-    Phase 2 notes:
-    1. The covers relation is `darkmatter::markdown::schemas::is_subtype(&declared, &rule)`. It returns true for any two identical types, including unions and containers. Check that the rule atom is a supported string-like, non-array atom before calling it (C3). Handle the broad `string` rule separately.
-    2. Canonical rule text (C4): write literal runs bare when safe, otherwise double-quote them with the §3 escapes. The reader accepts both forms. AC11 requires the exact line `template just clean --out {{ string }}/build`.
-    3. Confirm whether `schemas::completion::alternative_accepts` enforces constraints such as `min` and `pattern` without coercing. If it does not, validate through `EffectiveSchema` on a one-property document. Record the choice.
-    4. `store.rs::load_ruleset` warns with `tracing::warn!` and no line number. The spec needs file and line in the warning, and the matrix test must be able to capture it.
-    5. Nested-sequence and container-`finalize` acceptance cases are deferred: those surfaces do not exist until 2026-10-24-sequence-containers lands. Use today's spelling `outputs`, not `seq.outputs`.
+    1. Template execution is the only missing link. `prepare_directive` (darkmatter `shell_expansion/mod.rs`) admits only exact members of `ShellPreApprovals`, so a site approved only by its shape is refused with `NotPreApproved` at execution. Add the template path there: re-parse with `parser::authored_template` / `parse_authored`, re-type against the owner schema, require `contains_template(&shape)`, then fill. Never insert the resolved bytes.
+    2. `ShellExpansionError::MissingValue` and `TemplateGrammar` exist, and both are fatal through `shell_input_violation()`. `TemplateValueRejected` and `TemplateTarget` are still to be added, with their first producer. The template-mode result-cache key (C7) is also still to be added.
+    3. Sequence wiring (C8) is untouched. Sequence preflight still raises `SequenceShellLateBinding`. Pass `ComposeOptions::with_deferred_shell_roots(DeferredShellRoots::new(["outputs", "loop", "group"]))` (plus any task parameter names derived from late roots) to the task-document discovery requests. Approve their `TemplateRequired` candidates; `claudine::composition::preflight::approve_commands` already does this through `harness::shell::validate_and_approve_template_site`. Sequence task `shell:` and stack commands do not go through Darkmatter discovery, so build their candidates with `parse_authored` + `project_types` yourself.
+    4. A frontmatter `$( … )` with a deferred hole still hits `DynamicCommandShape` in `scan_one_frontmatter` (`detect_dynamic_frontmatter_command_shape`) when the root is unbound. This fails closed. Relax it only together with frontmatter template execution.
+    5. The `md` prompt (`darkmatter/cli/src/approval.rs`) and Claudine's CLI handler do not yet show `request.template` or offer the shape choice. The batch path (`compose_preflight_approvals`) already persists every row, including `AllowTemplatePersist`, and treats an unoffered choice as `Denied`. Prompts must read `request.offered`.
+    6. Discovery links a site to its resolved bytes by document order (body, shell-block) or by key (frontmatter). On a count mismatch the site stays unlinked (`resolved: None`) and its bytes are approved as plain entries.
+    7. Claudine's session cache is `HashMap<ApprovalKey, _>`. A policy write failure is `HarnessError::ShellPolicyWriteFailed` (`io.write_failed`) and caches nothing.
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/approval.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/canonical.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/grammar.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/tests.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/parser.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/expression/binding.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/nested.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/compose/preflight/approval.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/src/markdown/compose/preflight/lifecycle.rs
+    - darkmatter/lib/src/markdown/compose/preflight/mod.rs
+    - darkmatter/lib/src/markdown/compose/tests/schema.rs
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/shell_template_discovery.rs
+    - darkmatter/lib/tests/l1/preflight_repository_sigils.rs
+    - darkmatter/lib/tests/l1/shell_result_values.rs
+    - darkmatter/lib/tests/l1/transcluded_shell_failure.rs
+    - darkmatter/cli/src/approval.rs
+    - darkmatter/cli/tests/l1/compose_shell.rs
+    - claudine/lib/src/harness/shell.rs
+    - claudine/lib/src/harness/error.rs
+    - claudine/lib/src/harness/audit.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/preflight/tests.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/coordinator/tests.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/prepare/bootstrap/tests.rs
+    - claudine/lib/src/composition/prepare/service/tests.rs
+    - claudine/lib/src/composition/prepare/tests.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/invocation_context/document_tests.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/shell_approval.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/shell_missing_values.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/inline/preflight-checks.md
+    - claudine/docs/topics/pre-flight-checks.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/claudine/cli-commands.md
 ---
 
 # Implementation Log for 2026-10-23-shell-template-approval (6 phases)
@@ -407,3 +495,266 @@ pub fn resolve_direct_target(program: &str, path: Option<&OsStr>, cwd: &Path) ->
     - Sequence task-stack `set $( … )` is never resolved at preflight. Sequence Position (P4) fixes it.
     - The policy loader's warnings carry no line number. Policy Persistence (P2) fixes it.
 - Status: Phase 1 complete.
+
+## Phase 2
+
+- 2026-10-14: started Phase 2 (template grammar, type projection, policy persistence, policy matching). All source changes are in Darkmatter; Claudine compiles unchanged against them.
+
+### Template Grammar (Wave 3)
+
+- New module `darkmatter/lib/src/markdown/compose/shell_expansion/template/` (`mod.rs`, `grammar.rs`, `canonical.rs`, `typing.rs`, `matching.rs`, `tests.rs`), exported as `shell_expansion::template`.
+- `parse_authored(text)` finds every `{{ … }}` span with `ExpressionFinder::scan_plain`, which is the same scanner interpolation uses, before it reads quotes, whitespace, or operators. A span's own `||`, quotes, and spaces never split or chain the command. A hole stays inside its containing argument, quoted or not. Quoting rules and the four curated redirects mirror `tokenize`.
+- Arguments are normalized: adjacent literal runs merge and empty runs drop, so spelling variants have equal parts. `""` stays one empty literal argument; the resolved-byte tokenizer drops it, but template mode keeps it, as spec §4 requires.
+- Redirects are kept in authored order (`RedirectOp`). `redirection_config(ops)` lowers them through `apply_redirection`, which was extracted from `tokenize::parse_pipeline`. The two modes therefore share one implementation of the dup semantics, and a test compares the two lowerings on five orderings.
+- `TemplateGrammarError` variants: the contract's set plus `InterpolationLiteral` (`{{{ … }}}` and literal tokens are refused in template mode). An unquoted lone `&` is `Background`; the resolved-byte tokenizer still treats it as a literal character.
+- **Departures from C1/C2, recorded per plan rule 2:**
+    - `Placeholder` has `expression`, `span`, and `typing` but not yet `timing`. `HoleTiming` belongs to Discovery Provenance (Phase 3), which adds the field when it has a producer.
+    - `ShellApprovalDecision::AllowTemplatePersist` and the `ShellExpansionError` variants `MissingValue`, `TemplateValueRejected`, `TemplateGrammar`, and `TemplateTarget` are **not** added yet. Each would be an unused variant that every exhaustive match (`prepare_directive`, `preflight/lifecycle.rs`, Claudine `harness/shell.rs`) would have to handle with invented behavior. Approval Transport (P3) and Shared Validation (P4) add them alongside their first producer. The phases are sequential, so the single-owner rule is not at risk.
+    - `FilledChain`/`FilledSegment` (C7) are defined now because blacklist matching against filled argv is a Phase 2 task. `FilledSegment` carries the lowered `RedirectionConfig`, not `Vec<RedirectOp>`, so that `FilledChain::from_pipeline` can represent a resolved-byte pipeline (which has no authored order) in the same form.
+    - `ApprovalType::StringLike` wraps a `StringLikeType`, not a bare `PropertyAtom`. `PropertyAtom` is only `PartialEq` (it holds `f64` constraints), but `ShellRuleEntry` needs `Eq + Hash`. `StringLikeType` stores the identity atom (boxed) and compares and hashes by its canonical text.
+
+### Type Projection (Wave 4)
+
+- `project_hole(expression, schema: Option<&SimplifiedSchema>, host_globals)` → `HoleType { approval, validator, provenance }`. `CommandTemplate::project_types` applies it to every hole. Only `Expr::Variable` naming a bare top-level property (`dir`, `fm.dir`) reads a declaration. Every other case uses the broad-string fallback with a `FallbackScalar` validator: dotted paths, calls, operators, Darkmatter reserved roots (`fm`, `ctx`, `env`, `current`), host globals (`loop`, `outputs`, …), undeclared names, and no projection. The provenance is recorded in each case.
+- A root `SimplifiedSchema::Union` gives a declaration only when every arm that declares the property declares it identically. Otherwise the hole falls back as `NoProjection`. (Spec §2 names only "root union of mixed shapes"; this is the conservative reading for an all-Simplified union whose arms disagree.)
+- The approval type is `StringLike` for a single, non-array, always-text atom other than `string`. Its identity keeps only canonical `alphanumeric` options, sorted and deduplicated `enum` members, and a `literal` value. A `string` declaration, numeric, boolean, union, container, and unresolved declarations get `BroadString` while keeping `HoleValidator::Declared` (boxed). `HoleType::display_type()` gives the prompt form, e.g. `string (validated as number(min(1)))`.
+- A new `schemas::is_string_like(atom)` is exported from `simplified/subtype.rs`. It is `!is_array && is_always_text(atom)` and reuses the dependency's own list of always-text types instead of copying it. `rule_covers` gates `is_subtype` behind it, which handles the Phase 1 departure (`is_subtype` accepts any identical pair).
+- **Open item 3 from Phase 1, resolved:** `schemas::completion::alternative_accepts` lowers the atom on its own with `required` added and validates it through the cached structural JSON-Schema validator. It **enforces** constraints (`min`, `pattern`, …) and **never coerces**: `12345` fails `alphanumeric`, and `"2"` fails `number`. Only `file` values are judged by syntax alone. `HoleValidator::accepts` therefore uses it over the flattened, non-array alternatives of the declaration, and no one-property `EffectiveSchema` document is needed. Tests: `values_are_validated_as_declared_without_conversion` and `numeric_and_union_declarations_disclose_a_string_hole_and_keep_their_validator`.
+
+### Policy Persistence (Wave 4)
+
+- `ShellRuleEntry::Template(TemplateShape)` was added. `ShellRuleEntry` and `ChainOperator` now derive `Hash`.
+- Canonical rule text (C4): `TemplateShape::canonical_text()` writes a literal run bare when every character is safe, and otherwise double-quotes it with the §3 escapes. AC11's line `template just clean --out {{ string }}/build` is produced exactly; a doc test checks it. `TemplateShape::parse_rule` accepts bare and quoted runs and decodes escapes before it recognizes holes. It finds the closing `}}` outside quoted strings, so a quoted `enum` member may contain braces.
+- The rule reader rejects:
+    - an unescaped brace inside quotes (`UnescapedBrace`), so a hand-written `"{{ string }}"` is reported rather than silently read as literal text;
+    - a program-word hole;
+    - a constraint, with or without `;`;
+    - a description;
+    - a named type (including `{{ 123 }}`, which the type grammar reads as a name);
+    - array, union, and non-string-like types;
+    - unknown options;
+    - invalid escapes;
+    - control characters;
+    - unterminated quotes or holes.
+- `store::load_ruleset_with_warnings(path)` returns `(ShellRuleSet, Vec<PolicyLineWarning { path, line, text, reason }>)`. `load_ruleset` keeps its signature and emits each warning through `tracing::warn!`, now with `file:line`. This resolves open item 4 from Phase 1.
+- Deduplication now preserves order through a `HashSet<ShellRuleEntry>` instead of the old sort. The old sort could not order template entries, and nothing depended on the sorted order; the whole Darkmatter and Claudine suites pass.
+- `append_whitelist_template` / `append_blacklist_template` append one line deduplicated by parsed shape (they read the file first). They refuse with `PolicyIo` (`InvalidData`) if the canonical text would not read back as the same shape. A failed write is always a typed `PolicyIo`. Only approval types are ever written, never a placeholder value.
+
+### Policy Matching (Wave 5)
+
+- Whitelist: `TemplateShape::covers(candidate)` requires the same segment count, operators, ordered redirects, program, argument count, byte-equal literals, and hole positions, plus `rule_covers` for each hole. `ShellRuleSet::template_covers` exposes it.
+- Blacklist (`blocks_shape`, `blocks_filled`, `ShellRuleSet::template_blocks_shape`, `ShellRuleSet::blocks_filled`). **Interpretation recorded per plan rule 2**, following spec §8's "a deny list must err toward refusing":
+    - holes match any hole regardless of type;
+    - redirects are ignored;
+    - a single-segment rule matches any segment of a chain (a multi-segment rule must match the whole chain, operators included);
+    - against a filled command, each hole matches any run of its containing argument (`*` semantics, linear greedy match).
+- `policy::check_template_blacklist(shape, user_blacklist)` is the preflight check. It runs the built-in blacklist on fixed program words and known literal arguments, and **keeps hole positions** (`KnownArg::{Literal, Partial}`): `git {{ x }} reset` is not read as `git reset`, while `git reset {{ x }}` and `psql -c DROP{{ x }}` are refused. It then applies user `prefix` rules, `exact` rules for hole-free segments, and `template` rules by shape. `check_builtin_blacklist` delegates to the same table walk, so its behavior is unchanged.
+- `policy::check_filled_chain(chain, user_blacklist)` is the runtime check: built-in first, then user `exact`/`prefix`/`template` over **every** segment before any starts. Shared Validation (P4) calls it.
+- **Behavior change now live:** `check_user_blacklist` also applies template blacklist rules to the command it is given, so a hand-written `template deploy {{ string }}` in `.darkmatter-shell-blacklist` already blocks a resolved-byte `deploy prod` in both Darkmatter's `prepare_directive` and Claudine's `validate_and_approve_command_parts`. Multi-segment template blacklist rules reach resolved-byte chains only when P4 wires `check_filled_chain` into execution.
+
+### Requirement-to-test mapping
+
+| Requirement | Tests |
+| --- | --- |
+| Grammar: holes before syntax, containing argument, empty args, chains, redirect order and lowering, every refusal | `template::tests::{a_placeholder_is_recognized_before_its_spaces_quotes_and_operators, literals_and_holes_stay_in_their_containing_argument, an_empty_quoted_argument_is_one_present_empty_literal, quoting_and_whitespace_spellings_have_one_shape, chains_keep_their_operators_and_redirections_their_order, redirections_lower_exactly_as_the_resolved_byte_tokenizer_does, unsupported_template_grammar_is_a_typed_error, values_are_never_parsed_only_authored_text_is}` |
+| Canonical text: AC11 line, round trip with quotes, backslashes, braces, `{{` literal, newline/CR/tab, Unicode, `%`, `!`, empty args, adjacent holes, operators-as-literals; reader forms; rejections | `template::tests::{the_canonical_text_of_the_build_clean_example_is_bare, canonical_text_round_trips_every_literal_and_boundary, the_reader_accepts_bare_and_quoted_literal_runs_alike, malformed_rule_text_is_rejected, rule_types_keep_only_their_canonical_identity}` |
+| AC3 store round trip; malformed lines with file and line; I/O failures | L1 `shell_template_policy::{exact_prefix_and_template_rules_survive_write_read_write_read, a_constraint_or_program_word_hole_line_is_skipped_with_its_file_and_line, unreadable_and_non_utf8_policy_files_are_policy_io_failures}` |
+| Policy robustness matrix (whitelist and blacklist, 17 cells plus a blank document, control row, sentinels) | L1 `shell_template_policy::{the_whitelist_robustness_matrix, the_blacklist_robustness_matrix}`. The blacklist walk also asserts that preflight (`check_template_blacklist`) and runtime (`check_filled_chain`) agree on every cell |
+| AC4 argument-list matching | L1 `whitelist_templates_match_on_the_argument_list` (whitespace/quoting variants match; a changed literal, an extra argument, a moved hole, a changed operator, a changed redirect order, dropped redirects, and an added hole do not) |
+| AC5 covers table | L1 `the_covers_table_holds_for_a_declared_placeholder` (every §7 row, plus the broad `string` rule on every row), `a_broad_string_declaration_is_never_covered_by_a_narrower_rule`, `unsupported_rule_types_never_load_even_when_identical_to_the_declaration` |
+| AC17 provenance (primitive portion) | L1 `a_bare_property_reads_its_resolved_named_type`, `only_a_bare_top_level_property_reads_a_declaration`, `a_local_child_schema_types_its_own_placeholders`, `numeric_and_union_declarations_disclose_a_string_hole_and_keep_their_validator`, `values_are_validated_as_declared_without_conversion`; malformed constraints with and without `;` in `malformed_rule_text_is_rejected` and the store test |
+| AC13 primitives | L1 `a_string_template_cannot_authorize_a_dangerous_filled_value`, `preflight_keeps_hole_positions_when_checking_known_words`, `user_blacklists_block_filled_commands_with_and_without_authored_holes`, `a_blocked_later_segment_blocks_the_whole_chain`, `a_blacklist_template_matches_on_shape_whatever_the_hole_type`; `policy::tests::a_hole_keeps_its_position_and_never_matches_a_literal_word` |
+
+- **Matrix scope.** The plan asks that the matrix be walked through "public composition approval results". Template approvals reach composition only in P3/P4. This phase therefore observes the public library decisions instead: `load_ruleset_with_warnings`, `ShellRuleSet::template_covers`, `check_template_blacklist`, and `check_filled_chain`. The composition-level walk is listed under Phase 5's Execution Corpus ("the policy matrix").
+- **Code-smell audit of touched reader paths:**
+    - no `#[serde(default)]`;
+    - no `Option` collapsing absent and null;
+    - no `filter_map(.. as_str())` on loaded data (the only `filter_map`s select rule variants);
+    - no `unwrap_or_default()` or `.ok()` on a parse.
+  A missing file still defines an empty rule set, as the format specifies.
+- **Tiers:** the unit tests are in the `darkmatter` lib target. The L1 tests are declared in `tests/l1/main.rs` (`mod shell_template_policy;`), and no tier marker is used. The new L1 tests take about 0.05 s in total.
+
+### Gates (macOS)
+
+- `just lint` (darkmatter): clean (library, CLI, DMLS, zed-dmls wasm). The first run hit `clippy::large_enum_variant` on `ApprovalType`/`ArgPart`; it was fixed by boxing the identity atom and the declared validator.
+- `just test` (darkmatter): 9278 run, 9278 passed, 10 skipped.
+- `just lint` (claudine): clean.
+- `just test` (claudine): 8677 run, 8677 passed, 9 skipped. This is the final summary line; Phase 1 reported 9152 from its own invocation. No Claudine test or target was changed in this phase.
+- Doc tests for the new public items (`parse_authored`, `TemplateShape::canonical_text`, `HoleType::display_type`, `is_string_like`): 4 passed (`cargo test --doc -p darkmatter -- template is_string_like`).
+- **No cross-OS run.** This phase adds pure string parsing, typing, and matching, plus the existing line-based file read. There is no process spawn, no path comparison, and no `cfg(windows)` code. `content.lines()` already strips `\r\n`. Native argv evidence on all four OSes is Phase 5's Package Gates.
+- No pre-existing failures were seen. Nothing was skipped.
+
+### Docs and skills
+
+- `darkmatter/docs/inline/preflight-checks.md` gained a "File format" subsection: the three rule kinds, hole types, quoting and escapes, which template lines are skipped and why, and the blacklist template behavior that is live now. Whitelist authorization, the shape choice, and the run-time check are marked **planned**.
+- `.claude/skills/darkmatter/compose.md` gained a "Typed shell templates" subsection for agents: module placement, authored parsing, the approval-type/validator split, the `rule_covers` gate, blacklist semantics, and the warnings loader.
+- No Claudine skill change: no Claudine code or behavior changed in this phase.
+
+- Status: Phase 2 complete.
+
+## Phase 3
+
+- 2026-10-14: started Phase 3 (Discovery Provenance, Approval Transport). One agent implemented both tasks, because both touch the shared types in `template/` and `shell_expansion/types.rs` (contract C1 single-owner rule).
+
+### Discovery Provenance (Wave 6)
+
+- **New shared types**, in `template/candidate.rs` and exported from `template`:
+    - `ShellCandidate { site: CommandSite, template, resolved: Option<Vec<String>>, requirement: ModeRequirement }`
+    - `CommandSite { source_file, origin, owner }`
+    - `ModeRequirement::{AnyMode, TemplateRequired}`
+    - `DeferredShellRoots`
+- `Placeholder.timing: HoleTiming::{ApprovalTime, Deferred { roots }}` was added, completing the C2 departure recorded in Phase 2.
+- `ComposePreflightReport.candidates` holds **one candidate per command site, never merged by bytes**.
+    - `collect_effects` now returns a `CollectedEffects` struct.
+    - Entries stay deduplicated by normalized bytes, as before.
+- **Authored sites.** Each surface is read from the *authored* text, alongside the existing resolved discovery:
+    - body `::shell`: `parser::authored_directive_commands` + `authored_template`, which drops `--when-error`/`--no-cache`/`::timeout:` exactly as `extract_options_from_tokens` does;
+    - `::shell-block`: `group_logical_commands` over the authored block bodies;
+    - frontmatter `$( … )`: `frontmatter_shell_expansion::authored_shell_template`. A conditional `$( a ? b : c )` is never a template, and gets the new `TemplateGrammarError::Conditional`.
+- **Linking a site to its resolved bytes.** Each site is matched to the bytes discovery resolved for it:
+    - body and shell-block sites by document order (interpolation inserts data, never a directive);
+    - frontmatter sites by key.
+    - If the counts differ, the site stays unlinked (`resolved: None`) rather than guessed. Its bytes are still approved as entries, so this fails closed.
+    - **Decision (plan rule 6 asks for a recorded choice):** linking by order instead of re-filling the template. A resolved-byte command tokenizes interpolated text, so `a b` becomes two arguments there, while a template fill keeps one argument. The two forms cannot be compared byte for byte.
+- **Typing.** `CandidateScope::build` types holes with `project_types(owner_schema, host_globals)`.
+    - The owner schema is assembled lazily, only for a site that has a placeholder: `prepare_schemas(...).effective_for(...).simplified` for that document. A transcluded child uses its own schema.
+    - Host globals come from `HostGlobals::roots()` (new, crate-private).
+- **Deferral.**
+    - A hole is `Deferred` when its expression reads a root from `ComposeOptions::with_deferred_shell_roots` (new). It is also `Deferred` when it reads a frontmatter key whose authored value reads such a root, directly or transitively (`derived_deferred_keys`).
+    - Derived keys pass to children through `InheritedDiscovery.deferred`.
+    - A deferred hole is never evaluated.
+    - A site with a deferred hole is `TemplateRequired`. It contributes no resolved-byte entry, and fails with the new `ShellExpansionError::TemplateGrammar` when its authored text is not a valid template.
+    - Declaring a root deferred is independent of `BindingView`/host-global availability (plan rule 4).
+- **Missing values (AC1).**
+    - Every approval-time hole is evaluated against the document's discovery state: `ResolvingLookup` over the prepared document state, with the discovery request's resolution context.
+    - A `null` result raises the new `ShellExpansionError::MissingValue { ctx, command, expression, origin }`. The command is the authored text; the value is never included.
+    - An evaluation error is left to the existing strict paths, so parse and unavailable-binding errors are unchanged.
+    - When the grammar fails, holes are found with `ExpressionFinder::scan_plain`. A missing value therefore also refuses a command that runs only as resolved bytes.
+    - Claudine's lifecycle `shell` and `set $( … )` resolution (`preflight::resolve_shell_command_expr`) applies the same rule. It composes the command and each placeholder as whole values in **one** `SubtreeCompose` call, because the `composition_seams` drift guard allows one call per site. It raises `LifecycleShellResolution`, whose source is Darkmatter's typed `MissingValue`.
+- **Unsuppressible.** `MarkdownError::shell_input_violation()` (new) finds `MissingValue`/`TemplateGrammar` anywhere in the cause chain. It was added to `transclusion_failure_is_fatal` (`pipeline/phases.rs`) and to nested `is_structural` (`nested.rs`). Neither error is `ExecutionFailed`, so `when_error` cannot absorb them.
+- **Not done here, by design (recorded for Phase 4).**
+    - Claudine sequence preflight does not yet declare `outputs`/`loop`/`group` deferred, and it still raises `SequenceShellLateBinding` (C8, Sequence Position).
+    - Mapping *task parameters* derived from late roots onto deferral is part of that same wiring. Darkmatter already follows derived frontmatter keys and inherited keys. A task parameter reaches the task document as data, so the host passes its name in `DeferredShellRoots` when that parameter reads a late root.
+    - A frontmatter `$( … )` whose hole is deferred still meets the existing `DynamicCommandShape` refusal (`detect_dynamic_frontmatter_command_shape`) when the deferred root is not bound in discovery. This fails closed. Frontmatter template-mode execution is Phase 4 (Shared Validation).
+    - Discovery's body interpolation still evaluates every body span in lenient mode. With Claudine's preflight `BindingView`, a late root is `Unavailable`, so nothing is observed. "Not evaluated" is therefore guaranteed for the candidate check, not for the pre-existing body interpolation pass.
+
+### Approval Transport (Wave 6)
+
+- **New shared types**, in `template/approval.rs`:
+    - `ShellPreApprovals { exact: HashSet<String>, templates: HashSet<TemplateShape> }`, with `From<HashSet<String>>` (exact only) and `FromIterator<String>`;
+    - `ApprovalKey::{Exact { policy_root, normalized }, Template { policy_root, shape }}`;
+    - `OfferedChoices { exact, shape, prefix }`;
+    - `TemplateApprovalView { shape, display }`;
+    - `CommandTemplate::display_text()`, which gives `{{ expr: type }}` with the validator disclosure.
+- **Departure from C6, recorded per plan rule 2:** `ApprovalKey::Template` holds the `TemplateShape` itself instead of its canonical text, so keys compare structurally. `policy_root` is an `Option`, because Claudine runs without a policy root in some paths.
+- **Darkmatter**
+    - `ComposeOptions.pre_approved_commands: Option<ShellPreApprovals>`.
+        - `with_pre_approved_commands(impl Into<ShellPreApprovals>)`.
+        - Its identity hash encodes templates only when present, so resolved-byte sets keep their fingerprint.
+        - `with_deferred_shell_roots` is also hashed only when non-empty.
+    - `ShellApprovalDecision::AllowTemplatePersist` was added.
+    - `ShellApprovalRequest` gains `offered` and `template`. An unknown value is never encoded as bytes: a template-required request has an empty `normalized_exact`.
+    - `SharedShellExpansionRuntime.allow_once`/`pending_allow_once` are now `HashSet<ApprovalKey>`; `ReservationGuard` holds keys. The reservation, condvar, and drop-release semantics are unchanged.
+    - **Membership.**
+        - `validate_pre_approved` checks it through `first_unapproved`. A template-required site must have its shape approved. A resolved-byte entry needs its bytes approved, unless every site resolving to those bytes is approved by its shape.
+        - `prepare_directive` admits only exact members. **Template-mode execution is Phase 4**, so a site approved only by its shape is refused with `NotPreApproved` at execution. It is never run as interpolated bytes, and nothing inserts the resolved bytes.
+        - A resolved-byte prompt that returns `AllowTemplatePersist` (not offered) is treated as `Deny`.
+    - **`compose_preflight_approvals` (the `md` batch path) now decides per site.**
+        - The order is: the blacklists for every entry; then per candidate an `exact` rule, a `template` rule (the shape is blacklist-checked by `check_template_blacklist`), a `prefix` rule, and finally the handler with the site's `offered` choices and template view.
+        - Unlinked entries keep the old per-entry flow.
+        - Every choice now **persists its row**: exact, prefix, template, and blacklist exact or template. This also fixes the pre-existing defect recorded in Phase 1, where this path persisted nothing. It was assigned to Approval Prompts (Phase 4), but `AllowTemplatePersist` could not be handled without it.
+        - A failed write is `PolicyIo` and approves nothing.
+        - A choice the request did not offer is `Denied`.
+- **Claudine**
+    - `PreFlightResult.approved_commands`, `PrepareOptions.pre_approved_commands`, `CallerInputLayers.pre_approved_commands`, and `add_approved_commands` now carry `ShellPreApprovals`.
+    - So do every CLI handoff and re-audit set: `compose/prep.rs` loop iteration and staged stabilization, `staged_boot.rs`, sequence `mod.rs`/`phase1c.rs`/`jit.rs`/`iterate.rs`, and harness `prompt.rs`.
+    - `preflight_bootstrap_shell` and `preflight_document_shell` return it too.
+    - Lifecycle `set` values pass their bytes as an exact-only `ShellPreApprovals`.
+    - `SharedApprovalCache` and `ShellApprovalOptions.approval_cache` are keyed by `ApprovalKey`.
+    - `harness::shell` was restructured around a private `SessionPolicy`.
+        - `validate_and_approve_command_parts` keeps its behavior, messages, and order. It now keys the cache by `ApprovalKey::exact(policy_root, …)`, and a failed policy write is the new `HarnessError::ShellPolicyWriteFailed { path, source }` (`io.write_failed`) **with nothing cached**. Before this change the write failure was silently ignored (`let _ =`) and the decision cached.
+        - New `validate_and_approve_template_site(candidate, options) -> TemplateShape` applies, in order: the template blacklist; a template rule or prefix rules for every program; the template cache key; then the handler with the site's offered choices. An exact decision never covers it.
+        - New `template_rule_covers` and `check_command_blacklists`.
+    - `composition::preflight::approve_commands` now takes Darkmatter's `candidates`.
+        - Template-required sites are approved by shape.
+        - A resolved-byte site whose bytes no exact rule covers, and whose shape a template rule covers, is approved by shape.
+        - Its bytes are still checked against both blacklists, but they are not prompted for or added to the exact set unless another site needs them as bytes.
+        - Errors map through one `audit_failure` helper, keeping the existing `ShellCommandDenied`/`ShellApprovalUnavailable` families.
+- **Result cache:** unchanged. The template-mode result key (C7) arrives with template execution in Phase 4.
+
+### Comment drift fixed
+
+- Darkmatter `preflight/mod.rs` and `preflight/approval.rs` module docs, `preflight/lifecycle.rs` steps, the `ComposeOptions.pre_approved_commands` field doc, and the `prepare_directive` fast-path comment.
+- Claudine `resolve_shell_approvals` doc, `execute_set_shell_values` doc, `PreFlightResult`, and `CallerInputLayers`.
+- The sequence comments listed in Phase 1 (`sequence/preflight/*`, `task/*`) still describe today's behavior, which is unchanged. They change with Sequence Position and Sequence Dispatch in Phase 4.
+
+### Requirement-to-test mapping
+
+| Requirement | Tests |
+| --- | --- |
+| AC1: missing value on every Darkmatter surface (null, absent, `fm.` namespace, shell-block, frontmatter, invalid grammar), typed error naming command, expression, and origin | L1 `darkmatter::l1 shell_template_discovery::a_null_or_absent_value_fails_preflight_on_every_shell_surface` |
+| AC1: empty string, 0, false, fallback, and absent-with-fallback are present | `shell_template_discovery::empty_zero_false_and_fallback_values_are_present` |
+| AC1: unsuppressible by `--when-error`; non-shell null still renders empty | `shell_template_discovery::a_missing_value_is_unsuppressible_and_a_non_shell_null_still_renders_empty` |
+| AC1: nothing runs (frontmatter `git init` marker) | `shell_template_discovery::compose_fails_with_the_missing_value_before_any_command_runs` |
+| AC1 end to end, `md compose` (body, absent, frontmatter, shell-block; marker proves nothing ran; empty string runs) | `darkmatter-cli::l1 compose_shell::test_compose_refuses_a_missing_shell_value_before_running_anything`, `test_compose_runs_a_shell_command_whose_value_is_an_empty_string` |
+| AC1 end to end, `claudine compose` (body, frontmatter, lifecycle `shell`, lifecycle `set $( … )`; marker; empty string runs) | `claudine-cli::l1 shell_missing_values::a_missing_value_fails_pre_flight_on_every_shell_surface`, `an_empty_string_value_is_present_and_runs` |
+| AC16/AC17: one candidate per site, owner-schema typing for root vs transcluded child, owner key | `shell_template_discovery::each_site_keeps_its_authored_template_and_its_owners_types` |
+| Directive options are not template arguments; a hole stays in its containing argument | `shell_template_discovery::directive_options_are_not_template_arguments_and_holes_stay_whole` |
+| No shape for a hole-free site | `shell_template_discovery::a_site_without_placeholders_offers_no_shape` |
+| Deferral: direct, derived through frontmatter, mixed with approval-time holes; no entry for a late site; offered choices | `shell_template_discovery::a_late_root_is_not_evaluated_and_requires_a_template` |
+| A late read does not mask a missing approval-time value | `shell_template_discovery::a_late_read_with_a_missing_approval_time_value_still_fails` |
+| A late site with invalid grammar fails as `TemplateGrammar` (unsuppressible) | `shell_template_discovery::a_late_command_that_is_not_a_valid_template_fails_preflight` |
+| Without declared deferral, the same read is approval-time | `shell_template_discovery::without_declared_late_roots_the_same_read_is_an_approval_time_value` |
+| AC15: exact and template approvals never authorize each other, including at the execution gate | `shell_template_discovery::exact_and_template_approvals_never_authorize_each_other` |
+| Membership is proved and never manufactured; a changed declared type is not a member | `shell_template_discovery::the_gate_accepts_a_shape_approval_and_never_adds_its_bytes` |
+| AC12: exact pre-approvals still run resolved bytes | `shell_template_discovery::exact_pre_approvals_still_run_resolved_bytes` (plus the whole unchanged corpus) |
+| AC8 foundation, `md` path: offered choices, template display, each choice persists its row | `shell_template_discovery::a_resolved_site_prompt_offers_exact_and_shape_and_each_choice_persists_its_row`, `a_template_required_site_is_offered_no_exact_choice` |
+| Precedence exact, then template, then prefix | `shell_template_discovery::rules_are_preferred_exact_then_template_then_prefix` (md), `claudine composition::preflight::tests::a_template_rule_approves_a_resolved_site_by_shape_and_an_exact_rule_wins` |
+| A persisted template covers a late site; an exact rule does not | `shell_template_discovery::a_persisted_template_rule_covers_a_late_site_without_prompting` |
+| Shape blacklist; blacklisting persists the shape | `shell_template_discovery::a_shape_blacklist_refuses_a_late_site_and_blacklisting_persists_the_shape`, `claudine … a_template_blacklist_refuses_the_site_before_any_prompt` |
+| AC15: a failed write is a typed policy failure; nothing approved or cached | `shell_template_discovery::a_failed_template_write_is_a_policy_failure_and_approves_nothing`, `claudine … a_failed_policy_write_is_typed_and_caches_no_decision` (template and exact) |
+| AC17: the owner schema flows into the persisted rule, with numeric disclosure | `shell_template_discovery::a_hole_type_follows_the_owner_schema_into_the_persisted_rule` |
+| Mode- and policy-root-tagged runtime reservations; failure releases | `darkmatter … template::tests::session_reservations_are_keyed_by_mode_and_policy_root` |
+| Claudine: a template site is offered its shape and persists it; the cache key is template | `claudine … a_template_site_is_offered_its_shape_and_persists_the_template_row` |
+| Claudine: exact cache entries and rules never answer for a template site; an unoffered exact choice is denied and persists nothing | `claudine … an_exact_decision_never_answers_for_a_template_site` |
+| Claudine: policy-root isolation of the session cache | `claudine … a_template_decision_is_scoped_to_its_policy_root` |
+| Claudine: a shape-approved site's bytes still meet the blacklist | `claudine … a_shape_approved_site_still_checks_its_bytes_against_the_blacklist` |
+| Claudine: a late document site with no approval fails pre-flight naming it | `claudine … a_late_document_site_without_an_approval_fails_pre_flight_naming_it` |
+
+- **Tiers.**
+    - Darkmatter L1 tests are declared in `tests/l1/main.rs` (`mod shell_template_discovery;`).
+    - Claudine CLI L1 tests are declared in `cli/tests/l1/main.rs` (`mod shell_missing_values;`).
+    - Claudine lib tests are in `composition/preflight/tests.rs`. The runtime unit test is in `template/tests.rs`.
+    - No tier marker is used.
+    - Timing: all new tests are fast. The two CLI process tests take about 1.7 s and 0.7 s; each lib test takes under 0.1 s.
+- **Input robustness matrix:** not applicable. No configuration reader changed in this phase; the policy-file reader is the same one Phase 2 matrix-tested.
+
+### Gates (macOS)
+
+- `just test` (darkmatter): 10053 run, 10053 passed, 10 skipped.
+- `just test` (claudine): 9162 run, 9162 passed, 9 skipped.
+    - The first run failed the `composition_seams::subtree_compose_baseline_holds_the_line` drift guard: the lifecycle missing-value check had added a second `SubtreeCompose` call. It was fixed by folding both reads into the existing call.
+- `just lint` (darkmatter): clean. Two fixes were needed: `#[allow(clippy::too_many_arguments)]` on `scan_one_frontmatter`, matching `collect_recursive`, and a needless borrow in a test.
+- `just lint` (claudine): clean.
+- **No cross-OS run.** This phase adds no `cfg(windows)` code, no new spawn path, and no path comparison except `canonicalize_simplified` for owner keys. The new process tests spawn `git` through `host_path()`, as `lifecycle_set_shell_values.rs` already does on every OS. Native argv evidence on all four OSes remains Phase 5.
+- No pre-existing failures were seen. Nothing was skipped.
+
+### Docs and skills
+
+- `darkmatter/docs/inline/preflight-checks.md` gained:
+    - a "Missing values" section;
+    - template-rule precedence;
+    - the persisted `md` choices, and policy-write failure;
+    - request `offered`/`template`;
+    - per-site `candidates`, late values (`with_deferred_shell_roots`), and the structured membership proof.
+    - **planned** markers for template-mode execution and the `md` prompt's shape choice.
+- `claudine/docs/topics/pre-flight-checks.md` gained:
+    - a "Missing Values" section;
+    - template-rule precedence and the template-only approval of late sites;
+    - `io.write_failed`;
+    - the mode- and policy-root-keyed cache;
+    - `ShellPreApprovals` membership.
+    - **planned** markers for template execution and sequence late-root declaration.
+- Skills: `.claude/skills/darkmatter/compose.md` (discovery provenance and transport) and `.claude/skills/claudine/cli-commands.md` (the shell pre-flight row).
+
+- Status: Phase 3 complete.

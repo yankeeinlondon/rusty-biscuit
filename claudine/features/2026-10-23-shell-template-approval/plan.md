@@ -8,7 +8,94 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+packages:
+    - darkmatter
+    - darkmatter-cli
+    - claudine
+    - claudine-cli
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/grammar.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/canonical.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/typing.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/matching.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/tests.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/tokenize.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/policy.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/store.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/subtype.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/tests/l1/shell_template_policy.rs
+    - darkmatter/lib/tests/l1/main.rs
+docs_updated_during_phase_2:
+    - darkmatter/docs/inline/preflight-checks.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/compose.md
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/approval.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/canonical.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/grammar.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/tests.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/parser.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/expression/binding.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/nested.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/compose/preflight/approval.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/src/markdown/compose/preflight/lifecycle.rs
+    - darkmatter/lib/src/markdown/compose/preflight/mod.rs
+    - darkmatter/lib/src/markdown/compose/tests/schema.rs
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/shell_template_discovery.rs
+    - darkmatter/lib/tests/l1/preflight_repository_sigils.rs
+    - darkmatter/lib/tests/l1/shell_result_values.rs
+    - darkmatter/lib/tests/l1/transcluded_shell_failure.rs
+    - darkmatter/cli/src/approval.rs
+    - darkmatter/cli/tests/l1/compose_shell.rs
+    - claudine/lib/src/harness/shell.rs
+    - claudine/lib/src/harness/error.rs
+    - claudine/lib/src/harness/audit.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/preflight/tests.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/coordinator/tests.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/prepare/bootstrap/tests.rs
+    - claudine/lib/src/composition/prepare/service/tests.rs
+    - claudine/lib/src/composition/prepare/tests.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/invocation_context/document_tests.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/shell_approval.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/shell_missing_values.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/inline/preflight-checks.md
+    - claudine/docs/topics/pre-flight-checks.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/claudine/cli-commands.md
 ---
 
 # Shell Template Approval Implementation Plan
@@ -57,7 +144,7 @@ Implement reusable typed shell approval across Darkmatter composition and Claudi
 
 ### Wave 3 — Shared Template Model
 
-- [ ] **Template Grammar**
+- [x] **Template Grammar**
   - Depends on Phase 1. Extend Darkmatter tokenization to recognize complete expression spans before shell operators/quotes, keeping literals and holes within their containing word.
   - Preserve empty arguments, chain operators, and ordered curated redirections. Reject program-word holes in every chain segment, holes in redirect targets/operators, unsupported pipes/semicolons/background syntax, and command substitution in template mode.
   - Implement the canonical one-line literal encoding and decoding before hole recognition: quotes, backslashes, escaped braces, newline/carriage-return/tab, and rejection of other stored control characters.
@@ -65,12 +152,12 @@ Implement reusable typed shell approval across Darkmatter composition and Claudi
 
 ### Wave 4 — Independent Policy Work
 
-- [ ] **Type Projection**
+- [x] **Type Projection**
   - Depends on Wave 3. Resolve bare properties against the owning effective schema, including child schemas, inheritance, local setters, and resolved named types.
   - Keep original validators and constraints separate from persisted approval types. Implement scalar fallback conversion, the broad-string approval exception, and covers matching through the dependency API.
   - Test every covers-table row and provenance/fallback case, including numeric and union declarations, container rejection, numeric values under alphanumeric declarations, and unsupported narrower pairs even when identical.
 
-- [ ] **Policy Persistence**
+- [x] **Policy Persistence**
   - Depends on Wave 3; can run concurrently with Type Projection in `store.rs` and store tests using the shared type interface.
   - Load and append `template` rules beside unchanged exact/prefix rules; canonicalize parsed shapes/options for deduplication without persisting runtime values or document-local named definitions.
   - Skip malformed template lines with file-and-line warnings, including constraints with or without a semicolon, unknown options, unresolved names, unsupported rule types, and program-word holes. A malformed line must not invalidate unrelated valid rules.
@@ -99,7 +186,7 @@ Use one table-driven matrix test for this format, parameterized over whitelist a
 
 ### Wave 5 — Policy Integration
 
-- [ ] **Policy Matching**
+- [x] **Policy Matching**
   - Depends on both Wave 4 tasks. Match whitelist templates by argument positions, literals, holes, operators, ordered redirects, and covers; match blacklist templates by shape regardless of hole types.
   - Add blacklist matching against filled argv, including resolved-byte candidates without authored holes. Retain exact and prefix rules and existing flag policy.
   - Check fixed program/literal positions at preflight without deleting holes or shifting subcommand positions. Check complete filled chains before any segment starts.
@@ -111,13 +198,13 @@ Use one table-driven matrix test for this format, parameterized over whitelist a
 
 ### Wave 6 — Discovery and Approval
 
-- [ ] **Discovery Provenance**
+- [x] **Discovery Provenance**
   - Depends on Phase 2. Retain authored expressions, spans, owner schema, source site, and declared late dependencies throughout Darkmatter's condition-blind discovery, including transcluded children and frontmatter commands.
   - Track indirect deferred dependencies through derived frontmatter/task parameters without evaluating them or running effects. Separate host-declared deferral from runtime lexical availability using the existing binding/discovery seams.
   - Check approval-time presence before any effects: null/absent produce one typed missing-value error; empty string, zero, false, and present fallback expressions succeed. Preserve parse/unavailable-binding errors and non-shell null rendering.
   - Preserve static includes/generated-content restrictions, pending shell-dependency refusals, and effect-dependent expression refusals. Add no executable discovery path.
 
-- [ ] **Approval Transport**
+- [x] **Approval Transport**
   - Depends on Phase 2 and the Wave 2 interface; can run concurrently with Discovery Provenance in approval/cache/prepared-option files. The discovery owner publishes candidates through the agreed interface.
   - Replace byte-only pre-approved sets with explicit resolved-byte/template approvals across Darkmatter options, Claudine preparation/service layers, prepared graphs, lifecycle shell values, and CLI handoff/re-audit paths.
   - Implement candidate-specific choices, precedence, typed decision variant, mode/policy-root/type-tagged cache keys, and existing concurrent reservation/failure-release semantics.
