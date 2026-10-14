@@ -28,7 +28,19 @@ clarified: false
 implemented: false
 human_review: false
 message_to_agent: |-
-  Endpoint methods are implemented and reviewed. Build pagination on generated endpoint Call types, with thin inherent forwards into the shared runtime pager; generic request-object paging is secondary. Ordinary await returns data or CallError; use the full-response path internally to retain page evidence. Endpoint setters precede full(). Runtime/generator ABI is 3. Read Refresh notes and the 2026-10-13 Refresh log before Phase 1.
+  Phase 1 (preflight) is complete. The prerequisite gate passes and there is no blocker. Read "## Phase 1" in implementation-log.md before starting Phase 2, especially "Integration corrections" and "Inventory decisions". Facts that differ from this spec:
+  - There is no `validate_api`. Wire pagination validation into `validate_rust_client` in schematic/gen/src/validation.rs, emitting `ValidationDiagnostic` (format `severity= api= endpoint= feature= output=: msg`) with new `Feature` ids.
+  - `RestApi` has no `Default`. The two new fields touch the 18 production literals, 3 registry test literals, the importer builder (define/src/openapi/import/builder.rs:362), the emitter (gen/src/definition_gen.rs:141-159), and about 100 test literals.
+  - There is no public relative-URL resolver, and the envelope URL is redacted. The pager lives in the runtime crate and uses an in-crate seam for the unredacted final URL, `RequestMeta.page`, and a wrapper `EndpointSpec` to send absolute next links through the checked path.
+  - Pager entry points are runtime methods on `schematic_runtime::Call`, reached by thin generated forwards through `self.0`. Bump the ABI from 3 to 4 when generated pager impls land, and extend `PLANNED_CALL_METHODS` with every new knob name.
+  - trybuild and wiremock are already runtime dev-dependencies.
+  - Serde on the pagination model is a round-trip facility only: no definition reader exists, so the configuration-reader matrix does not apply. Phase 2.3 keeps strict round-trip and decode tests.
+  - Bitbucket has 8 wrapper lists, not 9: `GetSource` is a Binary non-list.
+  - ElevenLabs `ListVoices` stays unpaginated (`page_token` vs `next_page_token` is unresolved).
+  - GitLab `ListIssueParticipants` and Gitea `GetTagReference` need opt-out entries. The U-row wrapper collections get explicit unpaginated entries.
+  - The OpenAI API default page size carries no max.
+  - model-citizen does not depend on schematic-schema.
+  - Required-scope authorization is recorded as the author's phase-by-phase run instruction. Network verification and the EMQX ListAuthUsers fix are skipped (still pending).
 parent: ../../reviews/2026-07-31-macro-review/spec.md
 depends_on:
     - 2026-10-12-schematic-runtime-envelope

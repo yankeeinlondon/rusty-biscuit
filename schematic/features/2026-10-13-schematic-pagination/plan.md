@@ -4,6 +4,11 @@ created: 2026-10-11
 phase: 1
 agent: codex/gpt-6.1-sol
 yolo: true
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages: []
 ---
 
 # Schematic pagination implementation plan
@@ -47,7 +52,7 @@ Each phase records changes, decisions, validation, deviations, and remaining ris
 
 ### Wave 1 — Sequential preflight
 
-- [ ] **1.1 Contract refresh**
+- [x] **1.1 Contract refresh**
   - Read the preceding runtime and endpoint-method review outcomes, including endpoint-methods review 3 and this spec’s refreshed notes, and the current implementation. Produce a contract map covering every refresh item in the spec, including `RedirectFailed`, invalid-argument kinds, response decomposition, cleanup deadline precedence, and the final RestApi literal shape.
   - Confirm generation integrity supplied partial generation, the isolated compile check, query-parameter separation, and diagnostics. Record absent prerequisites and stop dependent work at this gate.
   - Review actual authorization for regeneration, dependent migrations, runtime/dev-dependency changes, definition authoring, and docs. Record the two optional authorization-dependent steps separately.
@@ -55,12 +60,12 @@ Each phase records changes, decisions, validation, deviations, and remaining ris
 
 ### Wave 2 — Parallel baseline work
 
-- [ ] **1.2 Coverage inventory**
+- [x] **1.2 Coverage inventory**
   - Own the endpoint inventory in the log: enumerate all 18 APIs, every list candidate, explicit non-GET lists, GET arrays requiring opt-out, and declared legacy pagination. Recount current list/endpoint/legacy totals rather than hard-coding historical counts.
   - For each candidate record item type, selector, resolution origin, intended strategy/knobs, evidence category/source/date, and unpaginated reason. Reconcile the OpenAI S6/S7/S8 groups and the three special opt-outs.
   - Search every actual direct/relevant dependent for adopted-field construction and setters, including calls customizing one page. Build an exact field-removal-to-call-site migration ledger; do not begin sniff's broader client retirement.
 
-- [ ] **1.3 Artifact baseline**
+- [x] **1.3 Artifact baseline**
   - Own baseline artifacts in a temporary directory: capture generated sources, OpenAPI and Postman outputs, and existing request surfaces from the landed generator. Record the generated-crate build time and compiler/cache context.
   - Verify baseline generation/compilation, area L1/lint, schema tests/lint, and the isolated-output check using current non-interactive recipes. Preserve existing failures and expected differences without overwriting user changes.
   - Identify which supported serialized authoring inputs are actually read; finalize the input-matrix applicability and field inventory below before Phase 2.
