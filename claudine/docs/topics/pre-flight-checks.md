@@ -99,6 +99,21 @@ A retired loop-value read (`_loop_count` and the other four `_loop_*` names) tha
 
 Each command is checked against shell policy (blacklist, whitelist, approval cache) and, if not already approved, the user is prompted. Once all template commands are approved, the approved set is passed to Darkmatter as `pre_approved_commands` on the `ComposeOptions` and composition proceeds.
 
+### Missing Values
+
+A shell command never runs with a missing value. A placeholder whose expression evaluates to `null` (an absent property reads as `null`) fails pre-flight before anything runs, on every surface: `::shell`, `::shell-block`, frontmatter `$( … )`, a lifecycle `shell` action, and a lifecycle `set` value written as `$( … )`.
+
+```md
+---
+target: null
+start:
+  - shell: "git init --quiet ran"
+---
+::shell ls {{ target }}
+```
+
+`claudine compose doc.md` stops at pre-flight, naming `ls {{ target }}` and `target`, and the `start` shell never runs. An empty string, `0`, `false`, and a fallback that yields a value (`{{ target || 'src' }}`) are present. Outside shell commands, `null` still renders as an empty string.
+
 ### Phase 2: Lifecycle Shell Commands
 
 Shell actions in `initialize` are validation errors, including false branches;
@@ -130,6 +145,10 @@ Each command is checked against Claudine's shell policy:
 
 Commands that match the whitelist are marked as approved. Commands that match a blacklist are rejected immediately with a clear error. Everything else is presented to the user.
 
+A document command with a placeholder is also matched by its shape. When no `exact` rule covers its bytes but a `template` rule covers its shape, the command is approved by that shape: an `exact` rule wins, then a `template` rule, then a `prefix` rule. Its bytes are still checked against both blacklists. **Planned:** running a shape-approved command in template mode; until then, a command approved only by its shape is refused when it would run (`NotPreApproved`), never run as interpolated bytes.
+
+A command whose value is produced later in the run has no bytes at pre-flight and is approved only by its shape: a `template` rule, `prefix` rules for each of its programs, or a decision for that shape. An `exact` rule or an earlier exact decision never covers it. Discovery reports such a command when its host declares the late root to Darkmatter (`ComposeOptions::with_deferred_shell_roots`). **Planned:** sequence pre-flight declaring `outputs`, `loop`, and `group` this way, in place of today's `SequenceShellLateBinding` refusal.
+
 ### User Prompt
 
 Any command not already covered by the whitelist or approval cache is presented to the user one at a time. The user sees the command, its source file, and line number, and can choose:
@@ -142,9 +161,11 @@ Any command not already covered by the whitelist or approval cache is presented 
 
 If the user denies any command, Claudine stops. No provider session is started. The error message states exactly which command was denied and confirms that nothing was executed.
 
+A persistent choice that cannot be written to its policy file fails pre-flight with `io.write_failed`, naming the file. The decision is not cached, so it is neither a persistent approval nor an implicit "allow once".
+
 ### Shared Approval Cache
 
-The approval cache is an in-memory `HashMap<String, CachedApprovalDecision>` wrapped in `Arc<Mutex<...>>`. It serves three purposes:
+The approval cache is an in-memory `HashMap<ApprovalKey, CachedApprovalDecision>` wrapped in `Arc<Mutex<...>>`. Each key records its execution mode (the command's resolved bytes, or a template shape with its placeholder types) and the policy root it was judged against, so a decision for bytes never answers for a shape, a shape with a different placeholder type is a different key, and a decision under one policy root never answers under another. It serves three purposes:
 
 1. **Cross-phase deduplication**: A command approved during template discovery (phase 1) is not re-prompted during harness discovery (phase 2).
 2. **Cross-step reuse for sequences**: The sequence orchestrator builds a fresh `ShellApprovalOptions` per step but clones the same `Arc` cache into each one. An "allow once" approval from step 1 carries forward to step 5 without re-prompting.
@@ -158,7 +179,7 @@ Claudine and Darkmatter each have shell approval infrastructure, but they serve 
 
 **Claudine's role is authorization.** It takes the list from Darkmatter, combines it with commands from the harness, checks everything against the whitelist, and prompts the user for anything that is missing. Claudine is the single source of truth for what is allowed.
 
-**During composition**, Darkmatter receives the pre-approved set and trusts it completely. It skips its own whitelist, blacklist, and approval handler checks. This means Darkmatter's standalone approval flow (which still works when used outside of Claudine) is bypassed entirely when Claudine provides pre-approvals.
+**During composition**, Darkmatter receives the pre-approved set (`ShellPreApprovals`: resolved bytes and template shapes) and skips its own whitelist, blacklist, and approval handler checks. Each command must prove it is a member: its resolved bytes are in the exact set, or its authored shape is in the template set. Nothing at execution adds bytes to the set. This means Darkmatter's standalone approval flow (which still works when used outside of Claudine) is bypassed entirely when Claudine provides pre-approvals.
 
 This separation ensures that:
 
