@@ -189,6 +189,10 @@ mod switch_catalog_guard;
 mod system_prompt_perf_bench;
 mod test_placement;
 mod test_seam_gate_guard;
+// Reads the `CLAUDINE_TEST_PREWARM` seam, which only `test-fixtures` builds
+// compile, and records launches with Unix shell-stub providers.
+#[cfg(all(unix, feature = "test-fixtures"))]
+mod tts_prewarm;
 #[cfg(unix)]
 mod wrap_antigravity_exit_signal;
 mod wrap_basics;
