@@ -91,7 +91,7 @@ fn sequence_step_preparation_is_one_exact_document_epoch() {
         &context,
         &claudine::composition::LayeredOverrides::new(),
         &BTreeMap::new(),
-        std::collections::HashSet::new(),
+        Default::default(),
         false,
     )
     .unwrap();
@@ -195,7 +195,7 @@ fn template_preflight_resolves_against_document_dir() {
     let result = approve_document_shell(&source, &options, &approval_options).unwrap();
 
     assert!(
-        result.approved_commands.contains("echo true"),
+        result.approved_commands.contains_exact("echo true"),
         "template preflight must resolve file_exists(spec) against the document \
          dir, CWD-independently; approved: {:?}",
         result.approved_commands,
@@ -247,13 +247,13 @@ fn template_preflight_does_not_resolve_launch_only_file() {
     let result = approve_document_shell(&source, &options, &approval_options).unwrap();
 
     assert!(
-        result.approved_commands.contains("echo false"),
+        result.approved_commands.contains_exact("echo false"),
         "launch-only spec.md is unreachable from the document context, so \
          file_exists(spec) resolves false; approved: {:?}",
         result.approved_commands,
     );
     assert!(
-        !result.approved_commands.contains("echo true"),
+        !result.approved_commands.contains_exact("echo true"),
         "document-backed resolution must not see the launch-area file; approved: {:?}",
         result.approved_commands,
     );

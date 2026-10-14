@@ -84,7 +84,7 @@ pub(super) struct StepComposition {
     pub(super) prepared: PreparedComposition,
     /// `approved` plus every command this step's template and lifecycle
     /// discovery added, so the next step inherits them.
-    pub(super) approved: HashSet<String>,
+    pub(super) approved: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
 }
 
 /// Fold this step's overrides from the four just-in-time layers.
@@ -169,7 +169,7 @@ pub(super) fn compose_step(
     ctx: &StepComposeContext<'_>,
     set_overrides: &LayeredOverrides,
     env_overrides: &BTreeMap<String, String>,
-    approved: HashSet<String>,
+    approved: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
     allow_empty_body: bool,
 ) -> Result<StepComposition, CompositionError> {
     // Schema pre-validation before the shell pass. A step whose effective
@@ -210,7 +210,7 @@ pub(super) fn compose_step(
     let mut approved = approved;
     let template_preflight =
         composition::approve_document_shell(&step_source, &prepare_options, &approval_options)?;
-    approved.extend(template_preflight.approved_commands.iter().cloned());
+    approved.extend(template_preflight.approved_commands.clone());
     prepare_options.pre_approved_commands = Some(approved.clone());
 
     // Inline steps prepare via `prepare_inline_with_schema` so the composed

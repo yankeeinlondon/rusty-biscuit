@@ -82,7 +82,7 @@ pub(crate) fn bootstrap_document(
     entry: DocumentEntryReason,
     mut options: PrepareOptions,
     approval_options: &claudine::harness::ShellApprovalOptions,
-) -> Result<(BootstrapPreparation, HashSet<String>), CompositionError> {
+) -> Result<(BootstrapPreparation, darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals), CompositionError> {
     let approved =
         claudine::composition::preflight_bootstrap_shell(source, mode, &options, approval_options)?;
     options.pre_approved_commands = Some(approved.clone());
@@ -336,7 +336,7 @@ pub(crate) fn reread_and_audit(
     original_ref: &str,
     overlay: &indexmap::IndexMap<String, serde_json::Value>,
     mut options: PrepareOptions,
-    approved: HashSet<String>,
+    approved: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
     approval_options: &claudine::harness::ShellApprovalOptions,
 ) -> Result<(ResolvedCompositionSource, PrepareOptions), CompositionError> {
     let source = crate::commands::wrap::load_overlaid_document(path, original_ref, overlay)?;

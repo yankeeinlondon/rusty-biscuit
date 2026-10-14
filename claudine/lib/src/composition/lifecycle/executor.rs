@@ -341,8 +341,8 @@ pub struct ShellValueRequest<'a> {
 /// earlier event.
 ///
 /// Each value's commands are exactly the bytes preflight approved, so they are
-/// its pre-approved set; a lifecycle `shell` action runs its approved bytes on
-/// the same terms. Commands run in the request's launch directory, as a
+/// its resolved-byte pre-approved set; a lifecycle `shell` action runs its
+/// approved bytes on the same terms. Commands run in the request's launch directory, as a
 /// lifecycle `shell` action does, and from `child_environment` when one is
 /// given (otherwise they inherit this process's).
 ///
@@ -358,7 +358,7 @@ pub fn execute_set_shell_values(
         .values
         .iter()
         .flat_map(|value| value.commands())
-        .collect();
+        .collect::<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals>();
     let mut options = ComposeOptions::new_with_context(request.context.clone())
         .with_source_file(request.source_path)
         .with_pre_approved_commands(approved)

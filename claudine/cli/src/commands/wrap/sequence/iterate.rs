@@ -67,7 +67,7 @@ pub(super) struct SequenceRunContext<'a> {
     pub(super) compose: &'a StepComposeContext<'a>,
     /// Every command approved during the sequence-wide validation pass, so a
     /// step's just-in-time prepare never stops to prompt.
-    pub(super) approved: HashSet<String>,
+    pub(super) approved: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
     /// User `--set` overrides after the single interactive collection pass.
     pub(super) user_set_overrides: Option<Value>,
     pub(super) interrupted: &'a Arc<AtomicBool>,

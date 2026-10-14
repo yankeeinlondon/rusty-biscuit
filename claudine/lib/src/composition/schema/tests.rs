@@ -1777,7 +1777,7 @@ fn post_shell_valid_value_passes() {
     );
 
     let opts = PrepareOptions {
-        pre_approved_commands: Some(approve_echo()),
+        pre_approved_commands: Some(approve_echo().into()),
         ..PrepareOptions::new(crate::test_support::context())
     };
     let prepared = prepare_direct_with_schema(&source, opts).unwrap();
@@ -1811,7 +1811,7 @@ fn post_shell_invalid_required_returns_schema_validation_error() {
     );
 
     let opts = PrepareOptions {
-        pre_approved_commands: Some(approve_echo()),
+        pre_approved_commands: Some(approve_echo().into()),
         ..PrepareOptions::new(crate::test_support::context())
     };
     let err = prepare_direct_with_schema(&source, opts).unwrap_err();
@@ -1842,7 +1842,7 @@ fn post_shell_invalid_optional_is_dropped_with_diagnostic() {
     );
 
     let opts = PrepareOptions {
-        pre_approved_commands: Some(approve_echo()),
+        pre_approved_commands: Some(approve_echo().into()),
         ..PrepareOptions::new(crate::test_support::context())
     };
     let prepared = prepare_direct_with_schema(&source, opts).unwrap();

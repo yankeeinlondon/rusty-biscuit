@@ -265,7 +265,7 @@ fn caller_input_layers_round_trip_through_the_assembly_point() {
     layers
         .env_overrides
         .insert("MODEL".to_string(), "gpt-5".to_string());
-    layers.add_approved_commands(["basename x.md".to_string()]);
+    layers.add_approved_commands(["basename x.md".to_string()].into_iter().collect());
 
     let options = layers.apply_to(PrepareOptions {
         // A target-specific field the layers must not clobber.
@@ -298,17 +298,17 @@ fn newly_approved_commands_extend_rather_than_replace() {
     let mut layers = CallerInputLayers::new(crate::test_support::context());
     assert!(layers.pre_approved_commands.is_none());
 
-    layers.add_approved_commands(Vec::new());
+    layers.add_approved_commands(Default::default());
     assert!(
         layers.pre_approved_commands.is_none(),
         "approving nothing must not materialize an empty set"
     );
 
-    layers.add_approved_commands(["git status".to_string()]);
-    layers.add_approved_commands(["basename x.md".to_string()]);
+    layers.add_approved_commands(["git status".to_string()].into_iter().collect());
+    layers.add_approved_commands(["basename x.md".to_string()].into_iter().collect());
 
     let approved = layers.pre_approved_commands.unwrap();
-    assert!(approved.contains("git status") && approved.contains("basename x.md"));
+    assert!(approved.contains_exact("git status") && approved.contains_exact("basename x.md"));
 }
 
 /// Restores the process CWD on drop, panic included.

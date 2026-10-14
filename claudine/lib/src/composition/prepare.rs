@@ -99,8 +99,10 @@ pub struct PrepareOptions {
     pub proxy_overlay: indexmap::IndexMap<String, serde_json::Value>,
     /// Immutable raw caller overrides paired with their launch-time origins.
     pub caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
-    /// Commands pre-approved during pre-flight shell discovery.
-    pub pre_approved_commands: Option<std::collections::HashSet<String>>,
+    /// Commands pre-approved during pre-flight shell discovery: resolved
+    /// bytes and template shapes.
+    pub pre_approved_commands:
+        Option<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals>,
     /// Extra environment variables to inject into the composition context.
     pub env_overrides: BTreeMap<String, String>,
     /// Enable Darkmatter composition performance collection.
@@ -526,12 +528,10 @@ pub fn preflight_document_shell(
     source: &ResolvedCompositionSource,
     options: &PrepareOptions,
     approval_options: &crate::harness::ShellApprovalOptions,
-) -> Result<std::collections::HashSet<String>, CompositionError> {
+) -> Result<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals, CompositionError> {
     match approve_document_shell(source, options, approval_options) {
         Ok(result) => Ok(result.approved_commands),
-        Err(CompositionError::PreFlightDiscoveryFailed(_)) => {
-            Ok(std::collections::HashSet::new())
-        }
+        Err(CompositionError::PreFlightDiscoveryFailed(_)) => Ok(Default::default()),
         Err(e) => Err(e),
     }
 }
@@ -935,7 +935,9 @@ fn bootstrap_compose_options(
         canonical_compose_options(source, &ctx, options, schema_phase)
             .with_deferred_schema_verdict(true)
             .only_frontmatter_surface()
-            .with_pre_approved_commands(std::collections::HashSet::new());
+            .with_pre_approved_commands(
+                darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals::new(),
+            );
     Ok((ctx, prepared_request(compose_opts, options)?))
 }
 
@@ -955,7 +957,7 @@ pub fn preflight_bootstrap_shell(
     mode: CompositionMode,
     options: &PrepareOptions,
     _approval_options: &crate::harness::ShellApprovalOptions,
-) -> Result<std::collections::HashSet<String>, CompositionError> {
+) -> Result<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals, CompositionError> {
     observe_prepared_context(
         options,
         crate::invocation_context::PreparedContextConsumer::Preflight,
@@ -965,7 +967,7 @@ pub fn preflight_bootstrap_shell(
         &source.markdown,
         &compose_opts,
     ) else {
-        return Ok(std::collections::HashSet::new());
+        return Ok(Default::default());
     };
     if let Some(entry) = entries.first() {
         return Err(CompositionError::LifecycleInvalid {
@@ -976,7 +978,7 @@ pub fn preflight_bootstrap_shell(
             expected_fields: Vec::new(),
         });
     }
-    Ok(std::collections::HashSet::new())
+    Ok(Default::default())
 }
 
 /// Compose the bootstrap read of one document: effective frontmatter and

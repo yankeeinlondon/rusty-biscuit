@@ -23,12 +23,16 @@ use crate::composition::lifecycle::bindings::{
 };
 use crate::composition::lifecycle_actions::{LifecycleActionKind, for_each_action_mut};
 use crate::harness::shell::{ShellApprovalOptions, tokenize_words_strict};
+use darkmatter::markdown::compose::shell_expansion::template::{
+    ModeRequirement, ShellCandidate, ShellPreApprovals,
+};
 
 /// Result of pre-flight shell command approval.
 #[derive(Debug)]
 pub struct PreFlightResult {
-    /// Normalized command strings approved for execution.
-    pub approved_commands: HashSet<String>,
+    /// The approvals granted: normalized resolved bytes, and template shapes
+    /// for sites approved by shape.
+    pub approved_commands: ShellPreApprovals,
     /// Total commands discovered across all sources.
     pub total_discovered: usize,
     /// Commands that were already whitelisted.
@@ -38,7 +42,8 @@ pub struct PreFlightResult {
 }
 
 /// Scans all sources of shell commands, checks whitelist, prompts user,
-/// returns the full pre-approved set.
+/// returns the full pre-approved set: resolved bytes, and the shapes of
+/// document sites approved by a template rule or as templates.
 ///
 /// ## Sources
 ///
@@ -78,6 +83,7 @@ pub fn resolve_shell_approvals(
     lifecycle_source_path: Option<&std::path::Path>,
 ) -> Result<PreFlightResult, CompositionError> {
     let mut all_commands: Vec<(String, std::path::PathBuf, usize)> = Vec::new();
+    let mut candidates: Vec<ShellCandidate> = Vec::new();
 
     // -- Source 1: Template ::shell directives ---------------------------------
     // Darkmatter discovers condition-blind: every command that could run under
@@ -98,6 +104,7 @@ pub fn resolve_shell_approvals(
                 entry.origin.line_number(),
             ));
         }
+        candidates.extend(preflight.candidates);
     }
 
     // -- Source 2: Lifecycle stack shell commands ------------------------------
@@ -114,7 +121,7 @@ pub fn resolve_shell_approvals(
         }
     }
 
-    approve_commands(all_commands, approval_options)
+    approve_commands(all_commands, &candidates, approval_options)
 }
 
 /// Approve every shell command a sequence's preflight graph can reach.
@@ -137,6 +144,7 @@ pub fn resolve_graph_shell_approvals(
     prompt_compose_request: &dyn Fn(&Path) -> Result<ComposeRequest, CompositionError>,
 ) -> Result<PreFlightResult, CompositionError> {
     let mut all_commands: Vec<(String, std::path::PathBuf, usize)> = Vec::new();
+    let mut candidates: Vec<ShellCandidate> = Vec::new();
 
     for command in &graph.shell_commands {
         all_commands.push((command.command.clone(), command.source_file.clone(), 0));
@@ -155,17 +163,57 @@ pub fn resolve_graph_shell_approvals(
                 entry.origin.line_number(),
             ));
         }
+        candidates.extend(preflight.candidates);
     }
 
-    approve_commands(all_commands, approval_options)
+    approve_commands(all_commands, &candidates, approval_options)
 }
 
-/// Deduplicate discovered commands and run each through the approval gate.
+/// Approve every document command site, then the remaining resolved bytes.
+///
+/// A site that may run only as a template is approved by its shape. A
+/// resolved-byte site whose bytes no `exact` rule covers, but whose shape a
+/// `template` rule covers, is approved by its shape too: an exact rule wins,
+/// then a template rule, then a prefix rule. The bytes of a site approved by
+/// its shape are still checked against the blacklists; they join the exact
+/// set only when another site needs them as bytes.
 fn approve_commands(
     all_commands: Vec<(String, std::path::PathBuf, usize)>,
+    candidates: &[ShellCandidate],
     approval_options: &ShellApprovalOptions,
 ) -> Result<PreFlightResult, CompositionError> {
-    approve_discovered_commands(all_commands, approval_options)
+    let mut templates = ShellPreApprovals::new();
+    let mut by_shape: HashSet<String> = HashSet::new();
+    let mut by_bytes: HashSet<String> = HashSet::new();
+    for candidate in candidates {
+        let line = candidate.site.origin.line_number();
+        let source_file = &candidate.site.source_file;
+        let audit = |error| audit_failure(error, candidate.display_command(), source_file, line, approval_options);
+        if candidate.requirement == ModeRequirement::TemplateRequired {
+            let shape = crate::harness::shell::validate_and_approve_template_site(candidate, approval_options)
+                .map_err(audit)?;
+            templates.insert_template(shape);
+            continue;
+        }
+        let Some(keys) = &candidate.resolved else {
+            continue;
+        };
+        match crate::harness::shell::template_rule_covers(candidate, approval_options).map_err(audit)? {
+            Some(shape) => {
+                templates.insert_template(shape);
+                by_shape.extend(keys.iter().cloned());
+            }
+            None => by_bytes.extend(keys.iter().cloned()),
+        }
+    }
+    let shape_only: HashSet<String> = by_shape.difference(&by_bytes).cloned().collect();
+    let mut result = approve_discovered_commands_with(all_commands, &shape_only, approval_options)?;
+    result.total_discovered += candidates
+        .iter()
+        .filter(|candidate| candidate.requirement == ModeRequirement::TemplateRequired)
+        .count();
+    result.approved_commands.extend(templates);
+    Ok(result)
 }
 
 /// Audit only the shell commands reachable from `signals`.
@@ -199,6 +247,17 @@ pub(super) fn approve_discovered_commands(
     all_commands: Vec<(String, std::path::PathBuf, usize)>,
     approval_options: &ShellApprovalOptions,
 ) -> Result<PreFlightResult, CompositionError> {
+    approve_discovered_commands_with(all_commands, &HashSet::new(), approval_options)
+}
+
+/// [`approve_discovered_commands`], where the bytes in `shape_only` belong
+/// only to sites already approved by their shape: they are checked against
+/// the blacklists and neither prompted for nor added to the exact set.
+fn approve_discovered_commands_with(
+    all_commands: Vec<(String, std::path::PathBuf, usize)>,
+    shape_only: &HashSet<String>,
+    approval_options: &ShellApprovalOptions,
+) -> Result<PreFlightResult, CompositionError> {
     // -- Deduplicate -----------------------------------------------------------
     let unique: Vec<(String, std::path::PathBuf, usize)> = {
         let mut seen = HashSet::new();
@@ -209,7 +268,7 @@ pub(super) fn approve_discovered_commands(
     };
 
     let total_discovered = unique.len();
-    let mut approved = HashSet::new();
+    let mut approved = ShellPreApprovals::new();
 
     // Snapshot the approval cache size before we start so we can distinguish
     // whitelisted commands from interactively-approved ones.
@@ -225,6 +284,13 @@ pub(super) fn approve_discovered_commands(
         let parts: Vec<String> =
             tokenize_words_strict(normalized).unwrap_or_else(|_| vec![normalized.clone()]);
 
+        if shape_only.contains(normalized) {
+            crate::harness::shell::check_command_blacklists(&parts, approval_options).map_err(|error| {
+                audit_failure(error, normalized.clone(), source_file, *line, approval_options)
+            })?;
+            continue;
+        }
+
         match crate::harness::shell::validate_and_approve_command_parts(
             &parts,
             approval_options,
@@ -232,7 +298,7 @@ pub(super) fn approve_discovered_commands(
             Some(*line),
         ) {
             Ok(_) => {
-                approved.insert(normalized.clone());
+                approved.insert_exact(normalized.clone());
             }
             Err(crate::harness::error::HarnessError::ShellCommandDenied { command }) => {
                 if approval_options.approval_handler.is_some() {
@@ -290,6 +356,43 @@ pub(super) fn approve_discovered_commands(
         already_whitelisted,
         user_approved,
     })
+}
+
+/// The typed preflight failure for a site or command the shell audit refused.
+fn audit_failure(
+    error: crate::harness::error::HarnessError,
+    command: String,
+    source_file: &Path,
+    line: usize,
+    approval_options: &ShellApprovalOptions,
+) -> CompositionError {
+    use crate::harness::error::HarnessError;
+    match error {
+        HarnessError::ShellCommandDenied { .. } if approval_options.approval_handler.is_some() => {
+            CompositionError::ShellCommandDenied {
+                command,
+                source_file: source_file.to_path_buf(),
+                line,
+            }
+        }
+        HarnessError::ShellCommandDenied { .. } => CompositionError::ShellApprovalUnavailable {
+            command,
+            source_file: source_file.to_path_buf(),
+            line,
+            failure: if approval_options.dry_run {
+                ShellApprovalFailure::DryRun
+            } else {
+                ShellApprovalFailure::NoHandler
+            },
+        },
+        HarnessError::ShellCommandBlacklisted { reason, .. } => CompositionError::ShellApprovalUnavailable {
+            command,
+            source_file: source_file.to_path_buf(),
+            line,
+            failure: ShellApprovalFailure::Blacklisted(reason),
+        },
+        other => CompositionError::PreFlightShellAuditFailed { source: other },
+    }
 }
 
 /// Resolves the `{{ }}` interpolation inside every lifecycle `shell` command
@@ -513,8 +616,26 @@ fn resolve_shell_command_expr(
     }
 
     let (view, globals) = runtime_bindings_enclosed(scope, LifecycleValues::default(), enclosing_loop);
-    let value = serde_json::Value::String(raw.clone());
-    let resolved = SubtreeCompose::new(&value, state)
+
+    // A shell command never runs with a missing value. The command and each
+    // of its placeholders, as a whole value, resolve in one subtree so the
+    // placeholders keep their types: a `null` refuses the command, while an
+    // empty string, zero, and `false` are present.
+    let placeholders: Vec<String> = darkmatter::markdown::compose::expression::ExpressionFinder::scan_plain(raw)
+        .expressions
+        .into_iter()
+        .map(|location| location.expression)
+        .collect();
+    let value = serde_json::Value::Array(
+        std::iter::once(serde_json::Value::String(raw.clone()))
+            .chain(
+                placeholders
+                    .iter()
+                    .map(|expression| serde_json::Value::String(format!("{{{{ {expression} }}}}"))),
+            )
+            .collect(),
+    );
+    let composed = SubtreeCompose::new(&value, state)
         .with_resolution_context(resolution_ctx.clone())
         .with_globals(globals)
         .with_binding_view(view)
@@ -526,6 +647,38 @@ fn resolve_shell_command_expr(
             message: e.to_string(),
             source: Some(Box::new(e)),
         })?;
+    let serde_json::Value::Array(mut composed) = composed else {
+        unreachable!("an array subtree composes to an array");
+    };
+    if let Some(expression) = placeholders
+        .iter()
+        .zip(composed.iter().skip(1))
+        .find_map(|(expression, read)| read.is_null().then_some(expression))
+    {
+        let error = darkmatter::markdown::compose::ShellExpansionError::MissingValue {
+            ctx: Box::new(biscuit_terminal::errors::SourceContext::new(
+                source_path.to_path_buf(),
+                source_path.to_path_buf(),
+                raw.clone(),
+            )),
+            command: raw.clone(),
+            expression: expression.clone(),
+            origin: darkmatter::markdown::compose::ShellCommandOrigin::Frontmatter {
+                key: property.to_string(),
+                line: None,
+            },
+        };
+        return Err(CompositionError::LifecycleShellResolution {
+            source_path: source_path.to_path_buf(),
+            property: property.to_string(),
+            raw: raw.clone(),
+            message: format!(
+                "shell command reads `{expression}`, which is missing; a shell command never runs with a missing value"
+            ),
+            source: Some(Box::new(darkmatter::markdown::MarkdownError::ShellExpansion(Box::new(error)))),
+        });
+    }
+    let resolved = composed.swap_remove(0);
 
     let resolved = match resolved {
         serde_json::Value::String(s) => s,

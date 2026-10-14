@@ -1079,7 +1079,7 @@ fn build_and_run_loop(
     let runtime_state = runtime_cell(step_scope);
     // A staged document's stabilized reread and the approvals it earned. Later
     // iterations compose from it, never from the pre-`initialize` snapshot.
-    let mut stabilized: Option<(ResolvedCompositionSource, std::collections::HashSet<String>)> =
+    let mut stabilized: Option<(ResolvedCompositionSource, darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals)> =
         None;
     let staged_start = std::time::Instant::now();
     // A halting loop renders the failed iteration's error in its final block;
@@ -1792,7 +1792,7 @@ fn frozen_loop_approvals(
 struct StagedBoot {
     bootstrap: claudine::composition::BootstrapPreparation,
     /// The approvals granted so far: the bootstrap's frontmatter commands.
-    approved: std::collections::HashSet<String>,
+    approved: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
     approval_options: claudine::harness::ShellApprovalOptions,
 }
 

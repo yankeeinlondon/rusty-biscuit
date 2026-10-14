@@ -1,6 +1,6 @@
 //! Core types for composition workflows.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -15,12 +15,14 @@ use super::launch_workspace::LaunchWorkspaceContext;
 use super::lifecycle::LifecycleConfig;
 use crate::diagnostics::DiagnosticSnapshot;
 use crate::harness::shell::CachedApprovalDecision;
+use darkmatter::markdown::compose::shell_expansion::template::{ApprovalKey, ShellPreApprovals};
 use crate::provider::Provider;
 
 /// Shared approval cache that can be reused across composition runs
 /// (e.g. steps of one sequence) so that previously approved commands
-/// do not prompt again.
-pub type SharedApprovalCache = Arc<Mutex<HashMap<String, CachedApprovalDecision>>>;
+/// do not prompt again. Keys are tagged with their execution mode and
+/// policy root.
+pub type SharedApprovalCache = Arc<Mutex<HashMap<ApprovalKey, CachedApprovalDecision>>>;
 
 /// Which composition mode to use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -516,13 +518,13 @@ pub struct CallerInputLayers {
     /// The request's file-resolution context, captured before the first
     /// source is resolved.
     pub file_resolution_context: biscuit_file::FileResolutionContext,
-    /// Shell commands approved during the original pre-flight discovery.
-    /// Shell commands approved so far in this invocation.
+    /// Shell commands approved so far in this invocation: resolved bytes and
+    /// template shapes.
     ///
     /// Grows as a fresh document's own pre-flight approves its own commands
-    /// (see [`add_approved_commands`][Self::add_approved_commands]); an exact
-    /// already-approved command never re-prompts.
-    pub pre_approved_commands: Option<HashSet<String>>,
+    /// (see [`add_approved_commands`][Self::add_approved_commands]); an
+    /// already-approved command or shape never re-prompts.
+    pub pre_approved_commands: Option<ShellPreApprovals>,
     /// Composition env overrides (e.g. `AGENT`, `MODEL`, `YOLO`) injected into
     /// the [`ComposeContext`][darkmatter::markdown::compose::ComposeContext] for
     /// the run.
@@ -627,15 +629,14 @@ impl CallerInputLayers {
         options
     }
 
-    /// Fold commands a document's own pre-flight just approved into the
+    /// Fold approvals a document's own pre-flight just granted into the
     /// invocation-wide approved set.
-    pub fn add_approved_commands(&mut self, commands: impl IntoIterator<Item = String>) {
-        let mut commands = commands.into_iter().peekable();
-        if commands.peek().is_none() {
+    pub fn add_approved_commands(&mut self, commands: ShellPreApprovals) {
+        if commands.is_empty() {
             return;
         }
         self.pre_approved_commands
-            .get_or_insert_with(HashSet::new)
+            .get_or_insert_with(ShellPreApprovals::new)
             .extend(commands);
     }
 }

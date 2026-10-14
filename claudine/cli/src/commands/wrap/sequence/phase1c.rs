@@ -39,7 +39,7 @@ pub(super) struct SequencePreflight {
     /// Every shell command approved across all steps, template and lifecycle
     /// alike. Handed to each just-in-time prepare as `pre_approved_commands`, so
     /// a running sequence never stops for an approval prompt.
-    pub(super) approved_commands: HashSet<String>,
+    pub(super) approved_commands: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
     /// The user `--set` overrides after any interactive collection pass, so the
     /// values the user supplied here are the ones every step composes against.
     pub(super) resolved_overrides: Option<serde_json::Value>,
@@ -66,7 +66,7 @@ pub(super) fn run_phase_1c_with_schema(
     user_set_overrides: &Option<serde_json::Value>,
     ctx: &StepComposeContext<'_>,
     effective_fail_fast: bool,
-    initial_cumulative_approved: HashSet<String>,
+    initial_cumulative_approved: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
     interrupted: &Arc<AtomicBool>,
     silent: bool,
 ) -> Result<Option<SequencePreflight>> {
@@ -172,7 +172,7 @@ struct StepMissingContext {
 }
 
 enum Phase1cAttempt {
-    Success(HashSet<String>),
+    Success(darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals),
     Missing(Vec<StepMissingContext>),
     Interrupted,
 }
@@ -201,7 +201,7 @@ fn run_phase_1c_attempt(
     user_set_overrides: &Option<serde_json::Value>,
     ctx: &StepComposeContext<'_>,
     effective_fail_fast: bool,
-    initial_cumulative_approved: HashSet<String>,
+    initial_cumulative_approved: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
     interrupted: &Arc<AtomicBool>,
 ) -> Result<Phase1cAttempt> {
     let total_steps = plan.steps.len();

@@ -174,7 +174,7 @@ mod tests {
             .approval_cache
             .lock()
             .unwrap()
-            .insert("echo hello".to_string(), CachedApprovalDecision::Allowed);
+            .insert(darkmatter::markdown::compose::shell_expansion::template::ApprovalKey::exact(None, "echo hello"), CachedApprovalDecision::Allowed);
         options
     }
 

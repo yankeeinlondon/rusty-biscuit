@@ -102,7 +102,7 @@ impl Fixture {
 
 struct Prepared {
     composition: PreparedComposition,
-    approved: HashSet<String>,
+    approved: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
     options: PrepareOptions,
 }
 
@@ -154,7 +154,7 @@ fn assert_document_reads(fixture: &Fixture, prepared: &Prepared, dir: &str) {
     assert!(prompt.contains(&format!("shell={value}")), "the executed command reads {dir}: {prompt}");
     assert_eq!(
         prepared.approved,
-        HashSet::from([format!("echo shell={value}")]),
+        HashSet::from([format!("echo shell={value}")]).into(),
         "the approved command text reads {dir}",
     );
     let environment = prepared.options.document_epoch.as_ref().unwrap().environment();

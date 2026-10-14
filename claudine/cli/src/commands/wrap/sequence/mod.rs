@@ -71,9 +71,9 @@ fn approve_preflight_graph(
     launch_area: Option<&std::path::Path>,
     invocation: &claudine::invocation_context::InvocationContext,
     graph_context: &darkmatter::markdown::compose::ComposeContext,
-) -> Result<HashSet<String>> {
+) -> Result<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals> {
     if graph.shell_commands.is_empty() && graph.prompt_documents.is_empty() {
-        return Ok(HashSet::new());
+        return Ok(Default::default());
     }
 
     let approval_options = super::apply_composition_shell_overrides(

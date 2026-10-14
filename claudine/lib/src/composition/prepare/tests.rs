@@ -974,7 +974,7 @@ fn direct_composition_runs_shell_in_configured_working_directory() {
     let mut approved = std::collections::HashSet::new();
     approved.insert(executable);
     let options = PrepareOptions {
-        pre_approved_commands: Some(approved),
+        pre_approved_commands: Some(approved.into()),
         shell_working_directory: Some(work_dir.path().to_path_buf()),
         ..PrepareOptions::new(crate::test_support::context())
     };

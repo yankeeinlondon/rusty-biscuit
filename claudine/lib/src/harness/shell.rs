@@ -10,10 +10,14 @@ use std::time::Instant;
 
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::compose::ShellCommandOrigin;
+use darkmatter::markdown::compose::shell_expansion::template::{
+    ApprovalKey, OfferedChoices, ShellCandidate, TemplateShape,
+};
 use darkmatter::markdown::compose::shell_expansion::tokenize::{ShellToken, tokenize};
 use darkmatter::markdown::compose::shell_expansion::{
-    ShellApprovalHandler, ShellExpansionError, ShellExpansionOptions, check_builtin_blacklist,
-    check_user_blacklist, check_whitelist, normalize_command, resolve_policy_paths,
+    ShellApprovalDecision, ShellApprovalHandler, ShellExpansionError, ShellExpansionOptions,
+    ShellPolicyPaths, ShellRuleSet, check_builtin_blacklist, check_template_blacklist,
+    check_user_blacklist, check_whitelist, normalize_command, resolve_policy_paths, store,
 };
 
 use tracing::{debug, info_span};
@@ -35,8 +39,10 @@ pub struct ShellApprovalOptions {
     pub policy_root: Option<PathBuf>,
     /// Callback for interactive command approval.
     pub approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
-    /// Session-local cache for repeated approval decisions.
-    pub approval_cache: Arc<Mutex<HashMap<String, CachedApprovalDecision>>>,
+    /// Session-local cache for repeated approval decisions, keyed by
+    /// execution mode and policy root, so a resolved-byte decision never
+    /// answers for a template or the reverse.
+    pub approval_cache: Arc<Mutex<HashMap<ApprovalKey, CachedApprovalDecision>>>,
     /// When set, a non-TTY unapproved command is reported with dry-run
     /// framing (a `Cannot dry-run: …` message pointing at `--yolo` /
     /// pre-approval) instead of the generic "no approval handler" guidance.
@@ -162,6 +168,11 @@ pub fn validate_and_approve_command_parts(
     let executable = &parts[0];
     let args: Vec<String> = parts[1..].to_vec();
     let normalized = normalize_command(executable, &args);
+    let approved = || ApprovedRuntimeCommand {
+        raw: raw.clone(),
+        executable: executable.to_string(),
+        args: args.clone(),
+    };
 
     // Check built-in blacklist
     if let Some(reason) = check_builtin_blacklist(executable, &args) {
@@ -172,36 +183,8 @@ pub fn validate_and_approve_command_parts(
         });
     }
 
-    // Display source for approval prompts — use real provenance when available.
-    let display_source = match (source_file, &options.policy_root) {
-        (Some(path), _) => ComposeSource::File(path.to_path_buf()),
-        (None, Some(root)) => ComposeSource::File(root.join("dummy")),
-        (None, None) => ComposeSource::Unknown,
-    };
-    let display_origin = ShellCommandOrigin::Body {
-        line: source_line.unwrap_or(0),
-    };
-
-    // Without a policy root there are no user policy files to consult: the
-    // built-in blacklist, the session cache, and the approval handler decide.
-    let policy_paths = match &options.policy_root {
-        Some(policy_root) => Some(policy_paths_at(policy_root).ok_or_else(|| {
-            HarnessError::ShellCommandDenied {
-                command: raw.clone(),
-            }
-        })?),
-        None => None,
-    };
-
-    // Load and check user blacklist
-    let blacklist = policy_paths
-        .as_ref()
-        .and_then(|paths| {
-            darkmatter::markdown::compose::shell_expansion::store::load_ruleset(&paths.blacklist)
-                .ok()
-        })
-        .unwrap_or_default();
-    if check_user_blacklist(&blacklist, executable, &args, &normalized) {
+    let policy = SessionPolicy::load(options, &raw)?;
+    if check_user_blacklist(&policy.blacklist, executable, &args, &normalized) {
         debug!("shell command blocked by user blacklist");
         return Err(HarnessError::ShellCommandBlacklisted {
             command: raw.clone(),
@@ -210,162 +193,315 @@ pub fn validate_and_approve_command_parts(
     }
 
     // Check whitelist — if whitelisted, approve immediately
-    let whitelist = policy_paths
-        .as_ref()
-        .and_then(|paths| {
-            darkmatter::markdown::compose::shell_expansion::store::load_ruleset(&paths.whitelist)
-                .ok()
-        })
-        .unwrap_or_default();
-    if check_whitelist(&whitelist, executable, &normalized) {
+    if check_whitelist(&policy.whitelist, executable, &normalized) {
         debug!("shell command approved via whitelist");
-        return Ok(ApprovedRuntimeCommand {
-            raw,
-            executable: executable.to_string(),
-            args,
-        });
+        return Ok(approved());
     }
 
-    if let Some(decision) = options
-        .approval_cache
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .get(&normalized)
-        .copied()
-    {
-        match decision {
-            CachedApprovalDecision::Allowed => {
-                debug!("shell command approved via cache");
-                return Ok(ApprovedRuntimeCommand {
-                    raw,
-                    executable: executable.to_string(),
-                    args,
-                });
-            }
-            CachedApprovalDecision::Denied => {
-                debug!("shell command denied via cache");
-                return Err(HarnessError::ShellCommandDenied {
-                    command: raw.clone(),
-                });
-            }
-            CachedApprovalDecision::Blacklisted => {
-                debug!("shell command blacklisted via cache");
-                return Err(HarnessError::ShellCommandBlacklisted {
-                    command: raw.clone(),
-                    reason: "command was previously blacklisted during this session".to_string(),
-                });
-            }
-        }
+    let key = ApprovalKey::exact(options.policy_root.as_deref(), normalized.clone());
+    if let Some(decision) = cached_decision(&options.approval_cache, &key) {
+        debug!(?decision, "shell command decided via cache");
+        return decision_result(decision, &raw).map(|()| approved());
     }
 
     // If not whitelisted, invoke approval handler. A decision is recorded in
     // the policy files, so a handler needs a policy root.
-    if let (Some(handler), Some(policy_paths)) = (&options.approval_handler, &policy_paths) {
-        let request = darkmatter::markdown::compose::shell_expansion::ShellApprovalRequest {
-            source: display_source.clone(),
-            origin: display_origin,
-            raw_command: raw.clone(),
-            executable: executable.to_string(),
-            args: args.clone(),
-            normalized_exact: normalized.clone(),
-            whitelist_path: policy_paths.whitelist.clone(),
-            blacklist_path: policy_paths.blacklist.clone(),
-            alias_name: None,
-            chain_executables: Vec::new(),
-        };
-
-        match handler.approve(request) {
-            Ok(decision) => {
-                use darkmatter::markdown::compose::shell_expansion::ShellApprovalDecision;
-                match decision {
-                    ShellApprovalDecision::AllowExactPersist => {
-                        debug!("handler approved (AllowExactPersist), persisting to whitelist");
-                        let _ = darkmatter::markdown::compose::shell_expansion::store::append_whitelist_exact(
-                            policy_paths,
-                            &normalized,
-                        );
-                        cache_approval_decision(
-                            &options.approval_cache,
-                            &normalized,
-                            CachedApprovalDecision::Allowed,
-                        );
-                    }
-                    ShellApprovalDecision::AllowCommandPersist => {
-                        debug!("handler approved (AllowCommandPersist), persisting to whitelist");
-                        let _ = darkmatter::markdown::compose::shell_expansion::store::append_whitelist_prefix(
-                            policy_paths,
-                            executable,
-                        );
-                        cache_approval_decision(
-                            &options.approval_cache,
-                            &normalized,
-                            CachedApprovalDecision::Allowed,
-                        );
-                    }
-                    ShellApprovalDecision::AllowOnce => {
-                        debug!("handler approved (AllowOnce)");
-                        cache_approval_decision(
-                            &options.approval_cache,
-                            &normalized,
-                            CachedApprovalDecision::Allowed,
-                        );
-                    }
-                    ShellApprovalDecision::Deny => {
-                        debug!("handler denied command");
-                        cache_approval_decision(
-                            &options.approval_cache,
-                            &normalized,
-                            CachedApprovalDecision::Denied,
-                        );
-                        return Err(HarnessError::ShellCommandDenied {
-                            command: raw.clone(),
-                        });
-                    }
-                    ShellApprovalDecision::BlacklistPersist => {
-                        debug!("handler blacklisted command");
-                        let _ = darkmatter::markdown::compose::shell_expansion::store::append_blacklist_exact(
-                            policy_paths,
-                            &normalized,
-                        );
-                        cache_approval_decision(
-                            &options.approval_cache,
-                            &normalized,
-                            CachedApprovalDecision::Blacklisted,
-                        );
-                        return Err(HarnessError::ShellCommandBlacklisted {
-                            command: raw.clone(),
-                            reason: "user blacklisted this command".to_string(),
-                        });
-                    }
-                }
-            }
-            Err(_) => {
-                debug!("handler returned error, denying command");
-                return Err(HarnessError::ShellCommandDenied {
-                    command: raw.clone(),
-                });
-            }
-        }
-    } else {
+    let (Some(handler), Some(policy_paths)) = (&options.approval_handler, &policy.paths) else {
         debug!("no approval handler and not whitelisted, denying command");
         return Err(HarnessError::ShellCommandDenied { command: raw });
+    };
+    let request = darkmatter::markdown::compose::shell_expansion::ShellApprovalRequest {
+        source: display_source(options, source_file),
+        origin: ShellCommandOrigin::Body {
+            line: source_line.unwrap_or(0),
+        },
+        raw_command: raw.clone(),
+        executable: executable.to_string(),
+        args: args.clone(),
+        normalized_exact: normalized.clone(),
+        whitelist_path: policy_paths.whitelist.clone(),
+        blacklist_path: policy_paths.blacklist.clone(),
+        alias_name: None,
+        chain_executables: Vec::new(),
+        offered: OfferedChoices::resolved_bytes(),
+        template: None,
+    };
+    let Ok(decision) = handler.approve(request) else {
+        debug!("handler returned error, denying command");
+        return Err(HarnessError::ShellCommandDenied { command: raw });
+    };
+    // A policy write that fails is reported, and nothing is cached: the
+    // decision is neither a persistent approval nor an implicit once.
+    let cached = match decision {
+        ShellApprovalDecision::AllowExactPersist => {
+            debug!("handler approved (AllowExactPersist), persisting to whitelist");
+            persist(store::append_whitelist_exact(policy_paths, &normalized), policy_paths)?;
+            CachedApprovalDecision::Allowed
+        }
+        ShellApprovalDecision::AllowCommandPersist => {
+            debug!("handler approved (AllowCommandPersist), persisting to whitelist");
+            persist(store::append_whitelist_prefix(policy_paths, executable), policy_paths)?;
+            CachedApprovalDecision::Allowed
+        }
+        ShellApprovalDecision::AllowOnce => {
+            debug!("handler approved (AllowOnce)");
+            CachedApprovalDecision::Allowed
+        }
+        // The shape choice is never offered for resolved bytes.
+        ShellApprovalDecision::Deny | ShellApprovalDecision::AllowTemplatePersist => {
+            debug!("handler denied command");
+            CachedApprovalDecision::Denied
+        }
+        ShellApprovalDecision::BlacklistPersist => {
+            debug!("handler blacklisted command");
+            persist(store::append_blacklist_exact(policy_paths, &normalized), policy_paths)?;
+            CachedApprovalDecision::Blacklisted
+        }
+    };
+    cache_approval_decision(&options.approval_cache, key, cached);
+    fresh_decision_result(cached, &raw)?;
+    debug!("shell command approved");
+    Ok(approved())
+}
+
+/// Approves a command site by its template shape, for a site that may run
+/// only as a template (a placeholder's value is produced later in the run).
+///
+/// Policy order matches resolved-byte approval: the built-in and user
+/// blacklists (by shape, keeping each placeholder's position), then a
+/// `template` whitelist rule, then `prefix` rules for every fixed program,
+/// then the session cache, then the handler. An exact rule never covers a
+/// template site.
+///
+/// ## Returns
+///
+/// The approved shape.
+///
+/// ## Errors
+///
+/// `ShellCommandBlacklisted`, `ShellCommandDenied` (also when the handler
+/// returns a choice the request did not offer), or `ShellPolicyWriteFailed`
+/// when a persistent decision cannot be written.
+pub fn validate_and_approve_template_site(
+    candidate: &ShellCandidate,
+    options: &ShellApprovalOptions,
+) -> Result<TemplateShape, HarnessError> {
+    let command = candidate.display_command();
+    let _span = info_span!("harness_shell_validate_template", command = %command).entered();
+    let Some(shape) = candidate.shape() else {
+        return Err(HarnessError::ShellCommandDenied { command });
+    };
+
+    let policy = SessionPolicy::load(options, &command)?;
+    if let Some(reason) = check_template_blacklist(&shape, &policy.blacklist) {
+        return Err(HarnessError::ShellCommandBlacklisted { command, reason });
+    }
+    let programs: Vec<&str> = shape.segments.iter().map(|segment| segment.program.as_str()).collect();
+    if policy.whitelist.template_covers(&shape)
+        || programs.iter().all(|program| policy.whitelist.matches_prefix(program))
+    {
+        debug!("template site approved via whitelist");
+        return Ok(shape);
     }
 
-    debug!("shell command approved");
-    Ok(ApprovedRuntimeCommand {
-        raw,
-        executable: executable.to_string(),
-        args,
+    let key = ApprovalKey::template(options.policy_root.as_deref(), shape.clone());
+    if let Some(decision) = cached_decision(&options.approval_cache, &key) {
+        return decision_result(decision, &command).map(|()| shape);
+    }
+
+    let (Some(handler), Some(policy_paths)) = (&options.approval_handler, &policy.paths) else {
+        return Err(HarnessError::ShellCommandDenied { command });
+    };
+    let mut distinct = std::collections::HashSet::new();
+    let chain_executables: Vec<String> = programs
+        .iter()
+        .filter(|program| distinct.insert(**program))
+        .map(|program| program.to_string())
+        .collect();
+    let offered = candidate.offered();
+    let request = darkmatter::markdown::compose::shell_expansion::ShellApprovalRequest {
+        source: ComposeSource::File(candidate.site.source_file.clone()),
+        origin: candidate.site.origin.clone(),
+        raw_command: command.clone(),
+        executable: programs.first().map(|program| program.to_string()).unwrap_or_default(),
+        args: Vec::new(),
+        normalized_exact: String::new(),
+        whitelist_path: policy_paths.whitelist.clone(),
+        blacklist_path: policy_paths.blacklist.clone(),
+        alias_name: None,
+        chain_executables: if chain_executables.len() > 1 { chain_executables } else { Vec::new() },
+        offered,
+        template: candidate.approval_view(),
+    };
+    let Ok(decision) = handler.approve(request) else {
+        return Err(HarnessError::ShellCommandDenied { command });
+    };
+    let cached = match decision {
+        ShellApprovalDecision::AllowTemplatePersist if offered.shape => {
+            persist(store::append_whitelist_template(policy_paths, &shape), policy_paths)?;
+            CachedApprovalDecision::Allowed
+        }
+        ShellApprovalDecision::AllowCommandPersist if offered.prefix => {
+            let mut persisted = std::collections::HashSet::new();
+            for program in &programs {
+                if persisted.insert(*program) {
+                    persist(store::append_whitelist_prefix(policy_paths, program), policy_paths)?;
+                }
+            }
+            CachedApprovalDecision::Allowed
+        }
+        ShellApprovalDecision::AllowOnce => CachedApprovalDecision::Allowed,
+        ShellApprovalDecision::BlacklistPersist => {
+            persist(store::append_blacklist_template(policy_paths, &shape), policy_paths)?;
+            CachedApprovalDecision::Blacklisted
+        }
+        // Deny, or a choice the request did not offer (exact bytes do not
+        // exist for this site).
+        _ => CachedApprovalDecision::Denied,
+    };
+    cache_approval_decision(&options.approval_cache, key, cached);
+    fresh_decision_result(cached, &command).map(|()| shape)
+}
+
+/// The shape that approves a resolved-byte site by a `template` whitelist
+/// rule, when no `exact` rule covers all of its bytes.
+///
+/// `None` when the site has no placeholder, an exact rule covers it, or no
+/// template rule does; its bytes are then approved as resolved bytes.
+///
+/// ## Errors
+///
+/// `ShellCommandBlacklisted` when the shape matches the built-in or a user
+/// blacklist.
+pub fn template_rule_covers(
+    candidate: &ShellCandidate,
+    options: &ShellApprovalOptions,
+) -> Result<Option<TemplateShape>, HarnessError> {
+    let (Some(shape), Some(keys)) = (candidate.shape(), &candidate.resolved) else {
+        return Ok(None);
+    };
+    let command = candidate.display_command();
+    let policy = SessionPolicy::load(options, &command)?;
+    if keys.iter().all(|key| policy.whitelist.matches_exact(key)) || !policy.whitelist.template_covers(&shape) {
+        return Ok(None);
+    }
+    if let Some(reason) = check_template_blacklist(&shape, &policy.blacklist) {
+        return Err(HarnessError::ShellCommandBlacklisted { command, reason });
+    }
+    Ok(Some(shape))
+}
+
+/// Checks resolved bytes against the built-in and user blacklists only, for
+/// a command whose site is approved by its shape.
+///
+/// ## Errors
+///
+/// `ShellCommandBlacklisted` on a match.
+pub fn check_command_blacklists(parts: &[String], options: &ShellApprovalOptions) -> Result<(), HarnessError> {
+    let Some((executable, args)) = parts.split_first() else {
+        return Ok(());
+    };
+    let raw = parts.join(" ");
+    if let Some(reason) = check_builtin_blacklist(executable, args) {
+        return Err(HarnessError::ShellCommandBlacklisted { command: raw, reason });
+    }
+    let policy = SessionPolicy::load(options, &raw)?;
+    if check_user_blacklist(&policy.blacklist, executable, args, &normalize_command(executable, args)) {
+        return Err(HarnessError::ShellCommandBlacklisted {
+            command: raw,
+            reason: "command matches user blacklist".to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// The user policy one approval reads: the rule files under the policy root,
+/// or none when there is no root.
+struct SessionPolicy {
+    paths: Option<ShellPolicyPaths>,
+    whitelist: ShellRuleSet,
+    blacklist: ShellRuleSet,
+}
+
+impl SessionPolicy {
+    /// Without a policy root there are no user policy files to consult: the
+    /// built-in blacklist, the session cache, and the approval handler decide.
+    fn load(options: &ShellApprovalOptions, command: &str) -> Result<Self, HarnessError> {
+        let paths = match &options.policy_root {
+            Some(policy_root) => Some(policy_paths_at(policy_root).ok_or_else(|| {
+                HarnessError::ShellCommandDenied {
+                    command: command.to_string(),
+                }
+            })?),
+            None => None,
+        };
+        let load = |path: Option<&Path>| path.and_then(|path| store::load_ruleset(path).ok()).unwrap_or_default();
+        Ok(Self {
+            whitelist: load(paths.as_ref().map(|paths| paths.whitelist.as_path())),
+            blacklist: load(paths.as_ref().map(|paths| paths.blacklist.as_path())),
+            paths,
+        })
+    }
+}
+
+/// Display source for approval prompts — real provenance when available.
+fn display_source(options: &ShellApprovalOptions, source_file: Option<&Path>) -> ComposeSource {
+    match (source_file, &options.policy_root) {
+        (Some(path), _) => ComposeSource::File(path.to_path_buf()),
+        (None, Some(root)) => ComposeSource::File(root.join("dummy")),
+        (None, None) => ComposeSource::Unknown,
+    }
+}
+
+fn persist(result: Result<(), ShellExpansionError>, paths: &ShellPolicyPaths) -> Result<(), HarnessError> {
+    result.map_err(|source| HarnessError::ShellPolicyWriteFailed {
+        path: match &source {
+            ShellExpansionError::PolicyIo { path, .. } => path.clone(),
+            _ => paths.whitelist.clone(),
+        },
+        source: Box::new(source),
     })
 }
 
+fn cached_decision(
+    cache: &Arc<Mutex<HashMap<ApprovalKey, CachedApprovalDecision>>>,
+    key: &ApprovalKey,
+) -> Option<CachedApprovalDecision> {
+    cache.lock().unwrap_or_else(|e| e.into_inner()).get(key).copied()
+}
+
+/// [`decision_result`] for a decision the handler just made.
+fn fresh_decision_result(decision: CachedApprovalDecision, command: &str) -> Result<(), HarnessError> {
+    match decision {
+        CachedApprovalDecision::Blacklisted => Err(HarnessError::ShellCommandBlacklisted {
+            command: command.to_string(),
+            reason: "user blacklisted this command".to_string(),
+        }),
+        decision => decision_result(decision, command),
+    }
+}
+
+/// The outcome of a cached decision.
+fn decision_result(decision: CachedApprovalDecision, command: &str) -> Result<(), HarnessError> {
+    match decision {
+        CachedApprovalDecision::Allowed => Ok(()),
+        CachedApprovalDecision::Denied => Err(HarnessError::ShellCommandDenied {
+            command: command.to_string(),
+        }),
+        CachedApprovalDecision::Blacklisted => Err(HarnessError::ShellCommandBlacklisted {
+            command: command.to_string(),
+            reason: "command was previously blacklisted during this session".to_string(),
+        }),
+    }
+}
+
 fn cache_approval_decision(
-    cache: &Arc<Mutex<HashMap<String, CachedApprovalDecision>>>,
-    normalized: &str,
+    cache: &Arc<Mutex<HashMap<ApprovalKey, CachedApprovalDecision>>>,
+    key: ApprovalKey,
     decision: CachedApprovalDecision,
 ) {
     let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
-    cache.insert(normalized.to_string(), decision);
+    cache.insert(key, decision);
 }
 
 /// Execute an approved command asynchronously and return its exit code and stdout/stderr.
