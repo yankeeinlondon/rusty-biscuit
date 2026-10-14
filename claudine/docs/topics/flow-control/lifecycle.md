@@ -708,13 +708,13 @@ loop:
   while: "iteration < max_iterations"
   actions:
     - increment(iteration)
-  stderr: "loop gate"
-  stack:
-    - action: { info: "finished iteration {{_loop_count}} of {{max_iterations}}" }
+  gate:
+    - stderr: "loop gate"
+    - info: "finished iteration {{loop.count}} of {{max_iterations}}"
 ---
 ```
 
-This runs three times and reports `finished iteration 1 of 3`, then `2 of 3`, then `3 of 3`. The gate follows each iteration and asks its question of the iteration that just ran, so `<` is right here: with `<=` the gate after the third iteration would still say "continue" and a fourth would run. The message reads `_loop_count`, which inside the `loop:` block is the count of the iteration that just finished (see [Loop Gate Concerns](#loop-gate-concerns)).
+This runs three times and reports `finished iteration 1 of 3`, then `2 of 3`, then `3 of 3`. The gate follows each iteration and asks its question of the iteration that just ran, so `<` is right here: with `<=` the gate after the third iteration would still say "continue" and a fourth would run. The message reads `loop.count`, which inside the `loop:` block is the count of the iteration that just finished (see [Loop Gate Concerns](#loop-gate-concerns)).
 
 ### Recover from a usage cap by switching providers
 
