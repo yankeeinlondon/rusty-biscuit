@@ -19,55 +19,50 @@ timeout: 3h
 start:
     message: "🔎  diagnosing the local test failures that blocked the push of `{{branch}}` in {{ ctx.area_description || ctx.repo }}"
 success:
-    stack:
-        # Same single nudge as the push stage: the agent's session still holds the
-        # investigation, so ask once before treating a missing verdict as an error.
-        - when: "frontmatter(report, 'status') != 'diagnosed' && !frontmatter(report, 'diagnosis_nudged')"
-          action:
-              - set_frontmatter: ["{{ report }}", "diagnosis_nudged", "{{ true }}"]
-              - warn: "the diagnosing agent finished without completing the report; asking it to finish"
-              - resume: "You ended the session before the diagnosis was recorded. In the frontmatter of {{ report }}, fill in `failures`, `summary`, and `issue` as the report contract describes, put the detailed write-up in the body, set `status: diagnosed`, and then stop."
-        - when: "frontmatter(report, 'status') != 'diagnosed'"
-          action:
-              - message: "💥  the local test failures on `{{branch}}` could not be diagnosed; the push log is at `{{log}}`"
-              - say: "The local test failures could not be diagnosed."
-              - error: "the diagnosing agent did not set `status: diagnosed` in {{report}}"
-        - action:
-              - info: "diagnosis: {{ frontmatter(report, 'summary') }}"
-              - message: |-
-                    🔎  diagnosis of the blocked push of `{{branch}}` in {{ ctx.area_description || ctx.repo }}:
+    # Same single nudge as the push stage: the agent's session still holds the
+    # investigation, so ask once before treating a missing verdict as an error.
+    - when: "frontmatter(report, 'status') != 'diagnosed' && !frontmatter(report, 'diagnosis_nudged')"
+      then:
+          - set_frontmatter: ["{{ report }}", "diagnosis_nudged", "{{ true }}"]
+          - warn: "the diagnosing agent finished without completing the report; asking it to finish"
+          - resume: "You ended the session before the diagnosis was recorded. In the frontmatter of {{ report }}, fill in `failures`, `summary`, and `issue` as the report contract describes, put the detailed write-up in the body, set `status: diagnosed`, and then stop."
+    - when: "frontmatter(report, 'status') != 'diagnosed'"
+      then:
+          - message: "💥  the local test failures on `{{branch}}` could not be diagnosed; the push log is at `{{log}}`"
+          - say: "The local test failures could not be diagnosed."
+          - error: "the diagnosing agent did not set `status: diagnosed` in {{report}}"
+    - info: "diagnosis: {{ frontmatter(report, 'summary') }}"
+    - message: |-
+          🔎  diagnosis of the blocked push of `{{branch}}` in {{ ctx.area_description || ctx.repo }}:
 
-                    {{ frontmatter(report, 'summary') }}
-              - say: "The blocked push has been diagnosed. {{ frontmatter(report, 'summary') }}"
-        - when: "on_failure == 'stop'"
-          action:
-              - info: "the PR for `{{branch}}` is paused with its diagnosis in {{report}}"
-              - message: "⏸️  the PR for `{{branch}}` is paused with its diagnosis in `{{report}}`"
-              - stop
-        - when: "on_failure == 'fix'"
-          action:
-              - action: proxy
+          {{ frontmatter(report, 'summary') }}
+    - say: "The blocked push has been diagnosed. {{ frontmatter(report, 'summary') }}"
+    - when: "on_failure == 'stop'"
+      then:
+          - info: "the PR for `{{branch}}` is paused with its diagnosis in {{report}}"
+          - message: "⏸️  the PR for `{{branch}}` is paused with its diagnosis in `{{report}}`"
+          - stop
+    - when: "on_failure == 'fix'"
+      then:
+          - proxy:
                 target: ./fix.md
                 with:
                     base: "{{ base }}"
                     report: "{{ report }}"
                     committed: "{{ committed }}"
-        - action:
-              - action: proxy
-                target: ./triage.md
-                with:
-                    base: "{{ base }}"
-                    report: "{{ report }}"
-                    committed: "{{ committed }}"
+    - proxy:
+          target: ./triage.md
+          with:
+              base: "{{ base }}"
+              report: "{{ report }}"
+              committed: "{{ committed }}"
 failure:
-    stack:
-        - when: "err.category == 'timeout'"
-          action:
-              - warn: "the diagnosing agent was stopped by a timeout ({{err.code}}); resuming its session"
-              - resume: "You were stopped by a timeout. Continue the diagnosis from where you left off. If a step cannot finish in the time left, record what you established, lower `confidence` accordingly, and complete the report."
-        - action:
-              - message: "❌  diagnosing the blocked push of `{{branch}}` failed ({{ctx.agent}}/{{ctx.model}}: {{err.msg}}); the push log is at `{{log}}`"
-              - say: "Diagnosing the blocked push failed."
+    - when: "err.category == 'timeout'"
+      then:
+          - warn: "the diagnosing agent was stopped by a timeout ({{err.code}}); resuming its session"
+          - resume: "You were stopped by a timeout. Continue the diagnosis from where you left off. If a step cannot finish in the time left, record what you established, lower `confidence` accordingly, and complete the report."
+    - message: "❌  diagnosing the blocked push of `{{branch}}` failed ({{ctx.agent}}/{{ctx.model}}: {{err.msg}}); the push log is at `{{log}}`"
+    - say: "Diagnosing the blocked push failed."
 ---
 
 # Diagnose a Blocked Push

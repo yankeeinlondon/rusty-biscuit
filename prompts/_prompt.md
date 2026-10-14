@@ -8,7 +8,7 @@ description: |-
 
     This file is itself composed when it is transcluded. Every example is therefore inside a fenced code block, where nothing is evaluated, and every brace span in running text is written as an interpolation literal.
 $prompt:
-    lifecycle: boolean(required) -> include the lifecycle events, stacks, and flow-control section (_default is `true`_)
+    lifecycle: boolean(required) -> include the lifecycle events, actions, and flow-control section (_default is `true`_)
     flow: boolean(required) -> include the multi-document section on proxy handoffs, sequences, and loops (_default is `true`_)
     testing: boolean(required) -> include the section on rehearsing a prompt without launching a model (_default is `true`_)
 lifecycle: true
@@ -48,7 +48,7 @@ Three commands run a prompt:
 | `claudine inline-compose <file>` | the agent writes the document's own body, driven by a frontmatter `prompt:` |
 | `claudine sequence <file>` | runs an ordered list of steps, each its own composition |
 
-This describes Claudine as of **2026-09-28**. When it disagrees with the references or with what you observe, they win, so when a fact here matters to your decision, confirm it. `claudine context` lists every `ctx` property, `claudine context --expressions` lists every function and operator, and `claudine context --side-effects` lists every mutation verb. The references are `claudine/docs/topics/composition.md`, `claudine/docs/topics/flow-control/lifecycle.md`, `claudine/docs/topics/flow-control/`, and `darkmatter/docs/inline/`.
+This describes Claudine as of **2026-10-14**. When it disagrees with the references or with what you observe, they win, so when a fact here matters to your decision, confirm it. `claudine context` lists every `ctx` property, `claudine context --expressions` lists every function and operator, and `claudine context --side-effects` lists every mutation verb. The references are `claudine/docs/topics/composition.md`, `claudine/docs/topics/flow-control/lifecycle.md`, `claudine/docs/topics/flow-control/`, and `darkmatter/docs/inline/`.
 
 ### Composition: what runs before the agent sees anything
 
@@ -96,25 +96,23 @@ initialize → (schema verdict, shell approval) → start → agent → success 
                                                  blocked fires instead when the run stops before the agent launches
 ```
 
-Each event is a frontmatter key. It holds notification fields and an ordered `stack:` of conditional actions.
+Each event is a frontmatter key whose value is an ordered list of actions. Put guarded actions under `when` and `then`, with an optional `else` body. A short, unguarded event can instead be a dictionary of verbs; dictionaries run in canonical order, so use a list whenever order matters. The former `stack:` wrapper and `action:` aggregator are removed grammar.
 
 ```yaml
 success:
-    stack:
-        - when: "frontmatter(report, 'status') == 'passed'"
-          action:
-              - success: "pushed {{ frontmatter(report, 'branch') }}"
-              - action: proxy
+    - when: "frontmatter(report, 'status') == 'passed'"
+      then:
+          - success: "pushed {{ frontmatter(report, 'branch') }}"
+          - proxy:
                 target: ./open.md
                 with:
                     report: "{{ report }}"
-        - action:
-              - error: "the agent did not record an outcome in {{ report }}"
+    - error: "the agent did not record an outcome in {{ report }}"
 ```
 
 - **Where a notification goes.** `info`, `warn`, `success`, and `stderr` print to the terminal. `message` goes to the configured messaging route and prints **nothing** locally. `say` and `effect` are audio. An outcome the caller must see in the terminal needs one of the first group.
 - **Values are literal text.** Only `when`, `while`, and `until` are expressions. Everywhere else a brace span opts in, and it is resolved when the event fires, so a hook reports the state at that moment. A brace span inside a quoted string *inside* an expression is rejected; build the string with `+`.
-- **Two action forms.** Positional is `verb: value`, or `verb: [a, b, c]` for several arguments. Key/value is `action: verb` plus named parameters, and is required for `with:`, `on_error:`, and `no_error:`. A stack item holds at most one flow-control action, and it must be last.
+- **Two action forms.** Short form is `verb: value`, or `verb: [a, b, c]` for several arguments. Long form is `verb: { parameter: value }`, used for named parameters such as `with`, `on_error`, and `no_error`. A flow-control action ends the whole event, including any enclosing conditional; an unconditional directive must be last in its list. Place `say` and `effect` in the order you want them to run; `say_first` is removed grammar.
 - **`err`** exists only in `blocked`, `failure`, and `finalize`. Match on `err.code`, `err.category`, `err.is_transient`, or `err.is_throttled`, never on message text. `err.msg` is safe to speak or post.
 
 Flow control:
@@ -122,7 +120,7 @@ Flow control:
 | Action | What it does | What to know |
 |---|---|---|
 | `skip` | opts the whole document out: no agent, no `finalize` | valid in `initialize` only; the clean way to not run |
-| `stop` | ends this event's stack | **does not prevent the agent launching**; a gate that must prevent a launch uses `skip`, or `error` |
+| `stop` | ends this event | **does not prevent the agent launching**; a gate that must prevent a launch uses `skip`, or `error` |
 | `error: "reason"` | fails the event | from `initialize` or `start` it stops the run before the agent launches |
 | `proxy` | hands the run to another document, which enters at its own `initialize` | one-way; see the next section |
 | `retry: N` | re-runs with a fresh agent session | `start` fires again, `initialize` does not |
@@ -133,14 +131,14 @@ Rules that shape a design:
 
 - **`initialize` is shell-free**, and a document that declares `initialize` may not use a frontmatter `$(…)` at all. Approval cannot lift either rule. Put shell work in `start` or later, or drop `initialize` and gate from `start`.
 - **A lifecycle `shell` action cannot hand back its output or exit status.** A non-zero exit fails the item unless `no_error: true`. To branch on a command's result from `start` or later, assign it with `set` and a whole-value `$(…)`, which takes the same suffixes as the frontmatter form (`set: { clean: "$(git diff --quiet)::ok" }`), then gate the next item on it. The command is approved up front like every other.
-- **Verify in `success`; do not trust the agent's exit.** Have the agent record its outcome in a file, read it with `frontmatter(file, 'key')`, and end the stack with an unconditional `error` so that a missing outcome is a failure.
+- **Verify in `success`; do not trust the agent's exit.** Have the agent record its outcome in a file, read it with `frontmatter(file, 'key')`, and end the event with an unconditional `error` so that a missing outcome is a failure.
 - **Nudge before giving up.** When the outcome is missing, `resume` the session once and ask for it. Runtime state does not survive re-entry, so record that the nudge happened with `set_frontmatter` on a file.
 - **A bounded retry counts on disk.** `retry: N` has no exhaustion event. Use `increment_frontmatter` in `start`, which fires on every attempt, and gate a "gave up" branch on the count.
 ::end-block
 ::block when="flow"
 ### More than one document
 
-- **Share state through a file, not through prose.** Give the flow one report file with a documented frontmatter contract. Each stage writes its outcome there and each lifecycle stack reads it. Create it fresh for each run; a reused file carries the previous run's answers.
+- **Share state through a file, not through prose.** Give the flow one report file with a documented frontmatter contract. Each stage writes its outcome there and each lifecycle event reads it. Create it fresh for each run; a reused file carries the previous run's answers.
 - **A router needs no agent.** A document can do all its routing in `initialize` or `start` and never launch. Give it a short body that tells an agent that reaches it to do nothing and report the fault.
 - **`proxy … with:`** parameterizes the target. Values keep their types, are resolved at the source when the event fires, and are never written to disk. The overlay reaches only the immediate target, so forward what the next hop needs explicitly. It can set any top-level key, including a lifecycle block, which is how a reusable prompt such as `commit.md` can be given a continuation it does not know about.
 - **A proxy chain visits a document once.** Returning to an earlier document is rejected as a cycle, and a chain is limited to 16 hops. A flow that must repeat a stage cannot do it with `proxy`; that is what a sequence is for.
@@ -152,7 +150,7 @@ Rules that shape a design:
     - A step's document may declare `interactive: true` and runs interactively. Only the sequence document itself may not.
     - A step's document may `proxy`; the target runs within the same step, and the step completes once.
     - `sequence_id` names the run and is the right seed for a per-run file name.
-- **A loop** (`loop: { while | until, action, max }`) repeats one document. Each iteration is a full composition cycle, and `initialize` fires only on the first. **The condition is checked at the end of an iteration**, against the state that iteration ran with, and the `action` is applied only when the loop continues. A loop therefore always runs at least once, and `while: "n < 2"` counting from `0` runs three times (`n` is `0`, `1`, then `2`). For zero iterations, `skip` from `initialize`. The ambient values are `_loop_count`, `_loop_is_first`, `_loop_is_last`, `_loop_last_output`, and `_loop_last_exit_code`. A `proxy` from any event of an iteration ends the loop and hands off.
+- **A loop** (`loop: { while | until, action, max }`) repeats one document. Each iteration is a full composition cycle, and `initialize` fires only on the first. **The condition is checked at the end of an iteration**, against the state that iteration ran with, and the `action` is applied only when the loop continues. A loop therefore always runs at least once, and `while: "n < 2"` counting from `0` runs three times (`n` is `0`, `1`, then `2`). For zero iterations, `skip` from `initialize`. The ambient values are `loop.count`, `loop.is_first`, `loop.is_last`, `loop.last_output`, and `loop.last_exit_code`. A `proxy` from any event of an iteration ends the loop and hands off.
 - **In this repository every git commit goes through `prompts/commit.md`.** A stage that produces changes stages them and hands off; it never runs `git commit`.
 ::end-block
 
@@ -160,7 +158,7 @@ Rules that shape a design:
 
 - **Give facts, not chores.** Anything the agent would certainly look up (the branch, the commits being proposed, which packages changed, whether `main` is behind its remote) belongs in the prompt, gathered by `ctx` or a shell block. Tell the agent the facts are current so it does not re-derive them.
 - **One stage, one job.** A stage that pushes should not also diagnose. A small body wastes less context on paths that are not taken, and each stage can pin the `agent:` and `model:` its job deserves.
-- **Name the deliverable and its format.** When a lifecycle stack reads a value, the body must tell the agent exactly which file, property, and values to write.
+- **Name the deliverable and its format.** When a lifecycle action reads a value, the body must tell the agent exactly which file, property, and values to write.
 - **Say what is out of bounds.** A stage that must not commit, push, or repair has to be told so, along with which stage does.
 - Claudine already appends a system prompt telling a non-interactive agent that nobody can answer it. Do not repeat that; add only what is specific to the task, such as where to record what it cannot ask.
 
@@ -214,7 +212,7 @@ Each item below is an open defect, specified in the fix `2026-09-20-lifecycle-ha
 ::end-block
 
 ::block when="!defects_trusted || !contains(defects_fixed, 'F8')"
-- **The `loop:` block's own `info`, `warn`, `message`, and stack cannot read the `_loop_*` values**, and referencing one there fails the run. Report loop progress from `start` or `success`, which can.
+- **The `loop:` block's own lifecycle actions cannot read the `loop.*` values**, and referencing one there fails the run. Report loop progress from `start` or `success`, which can.
 ::end-block
 
 ::block when="!defects_trusted || !contains(defects_fixed, 'D1')"
@@ -222,7 +220,7 @@ Each item below is an open defect, specified in the fix `2026-09-20-lifecycle-ha
 ::end-block
 
 ::block when="!defects_trusted || !contains(defects_fixed, 'D2')"
-- **Claudine's run header can show a `description` wrongly.** Underscores are read as emphasis even inside inline code, so `_pr/open.md` can appear as `pr/open.md`, and a stray `</i>` can appear. A diagnostic that quotes a name such as `_loop_count` loses its underscore the same way. The source is right: read names from the file, and do not rename files or variables to suit the header.
+- **Claudine's run header can show a `description` wrongly.** Underscores are read as emphasis even inside inline code, so `_pr/open.md` can appear as `pr/open.md`, and a stray `</i>` can appear. The source is right: read names from the file, and do not rename files or variables to suit the header.
 ::end-block
 
 ::end-block
@@ -232,7 +230,7 @@ Each item below is an open defect, specified in the fix `2026-09-20-lifecycle-ha
 
 - **`--dry-run`** composes and prints the body. It fires **no lifecycle events** and follows no `proxy`, so it proves the body and the expressions and nothing about the flow. It still runs `::shell` and `$(…)` for real.
 - **Stub the provider** to exercise the real flow. Put an executable named after the provider first on `PATH`; a provider is only a program that reads a prompt, prints text, and exits. Have it recognize each stage by the body's first heading and edit the report the way a real agent would. Run it in a scratch repository whose `origin` is a local bare repository, with `HOME` pointed at an empty directory so that no messaging route or voice is configured, and with `PLAYA_DRY_RUN=1` and `CLAUDINE_RENDEZVOUS_REPORT=false`. Every route can then be driven to completion in seconds, and nothing is pushed.
-- **To stop before the agent launches**, which is how a lifecycle-only probe is written, end the `start` stack with an `error`.
+- **To stop before the agent launches**, which is how a lifecycle-only probe is written, end the `start` event with an `error`.
 - **`cargo nextest run -p claudine-cli --test l1 shipped_prompt_contract::`** checks every file under `prompts/`: schemas parse, expressions parse, and no lifecycle value nests a brace span inside a string literal. Run it after any change to a prompt.
 - Claudine's banner for each stage says whether it launched `Interactive`, which a stub run does show. A stub cannot show that an interactive session behaved, or that `resume` works, because it has no session. Those need the L2 tmux harness (see the `rust-testing` and `biscuit-test-harness` skills).
 ::end-block

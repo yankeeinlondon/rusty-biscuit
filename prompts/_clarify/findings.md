@@ -19,10 +19,8 @@ design: |-
     {{ file_exists(parent_dir(review) + "/design.md") ? parent_dir(review) + "/spec.md" : null  }}
 # document lifecycle
 initialize:
-    stack:
-        - action:
-              - stderr: |-
-                    To clarify the _findings_ in a review this prompt needs a valid **review document** passed in. There is no way to _infer_ what 
-                    document was intended without any hints provided.
-              - stop
+    - stderr: |-
+          To clarify the _findings_ in a review this prompt needs a valid **review document** passed in. There is no way to _infer_ what
+          document was intended without any hints provided.
+    - stop
 ---

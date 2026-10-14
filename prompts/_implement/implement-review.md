@@ -13,14 +13,13 @@ report: "{{ dirname(review) + '/' + 'implementation-report-' + iteration + '.md'
 initial_review: {{ review }}
 yolo: true
 initialize:
-    stack:
-        - when: "!frontmatter(review, 'implemented') && !is_indexed_file(review)"
-          action:
-              - message: "🏃  starting the _implementation_ of the findings/suggestions in the review {{parent_dir(review)}}"
-        - when: "frontmatter(review, 'implemented') && !is_indexed_file(review) && find_latest_index(review) && frontmatter(find_latest_index(review), 'implemented')"
-          action:
-              - message: "😵  the initial review `{{review}}` was _implemented_ and so was the most recent iteration of the review cycle: `find_latest_index(review)`! Nothing to implement."
-              - error: "the review `{{review}}` and the follow-on review/implement cycle is ready for another _review_ not an _implemenation_!"
+    - when: "!frontmatter(review, 'implemented') && !is_indexed_file(review)"
+      then:
+          - message: "🏃  starting the _implementation_ of the findings/suggestions in the review {{parent_dir(review)}}"
+    - when: "frontmatter(review, 'implemented') && !is_indexed_file(review) && find_latest_index(review) && frontmatter(find_latest_index(review), 'implemented')"
+      then:
+          - message: "😵  the initial review `{{review}}` was _implemented_ and so was the most recent iteration of the review cycle: `find_latest_index(review)`! Nothing to implement."
+          - error: "the review `{{review}}` and the follow-on review/implement cycle is ready for another _review_ not an _implemenation_!"
 ---
 ::file "../_no_formatting.md"
 

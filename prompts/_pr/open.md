@@ -11,29 +11,25 @@ $schema:
 body_file: "{{ replace_last(report, '.md', '.pr-body.md') }}"
 timeout: 20m
 success:
-    stack:
-        - when: "frontmatter(report, 'status') == 'pr_opened' && frontmatter(report, 'pr_url')"
-          action:
-              - success: "pull request ready: {{ frontmatter(report, 'pr_url') }}"
-              - message: "🚀  pull request for `{{branch}}` is open and CI/CD is running: {{ frontmatter(report, 'pr_url') }}"
-              - say: "The pull request is open and CI CD is running."
-              - stop
-        - action:
-              - message: |-
-                    💥  could not open a pull request for `{{branch}}` in {{ ctx.area_description || ctx.repo }}; the branch is pushed, so `gh pr create` can still be run by hand
+    - when: "frontmatter(report, 'status') == 'pr_opened' && frontmatter(report, 'pr_url')"
+      then:
+          - success: "pull request ready: {{ frontmatter(report, 'pr_url') }}"
+          - message: "🚀  pull request for `{{branch}}` is open and CI/CD is running: {{ frontmatter(report, 'pr_url') }}"
+          - say: "The pull request is open and CI CD is running."
+          - stop
+    - message: |-
+          💥  could not open a pull request for `{{branch}}` in {{ ctx.area_description || ctx.repo }}; the branch is pushed, so `gh pr create` can still be run by hand
 
-                    {{ frontmatter(report, 'summary') }}
-              - say: "The branch passed local testing, but the pull request could not be opened."
-              - error: "no pull request URL was recorded in {{report}}"
+          {{ frontmatter(report, 'summary') }}
+    - say: "The branch passed local testing, but the pull request could not be opened."
+    - error: "no pull request URL was recorded in {{report}}"
 failure:
-    stack:
-        - when: "err.is_transient || err.is_throttled"
-          action:
-              - warn: "opening the pull request failed with a recoverable error ({{err.code}}); retrying once"
-              - retry: 1
-        - action:
-              - message: "❌  opening the pull request for `{{branch}}` failed ({{ctx.agent}}/{{ctx.model}}: {{err.msg}}); the branch is pushed, so `gh pr create` can still be run by hand"
-              - say: "Opening the pull request failed."
+    - when: "err.is_transient || err.is_throttled"
+      then:
+          - warn: "opening the pull request failed with a recoverable error ({{err.code}}); retrying once"
+          - retry: 1
+    - message: "❌  opening the pull request for `{{branch}}` failed ({{ctx.agent}}/{{ctx.model}}: {{err.msg}}); the branch is pushed, so `gh pr create` can still be run by hand"
+    - say: "Opening the pull request failed."
 ---
 
 # Open the Pull Request
