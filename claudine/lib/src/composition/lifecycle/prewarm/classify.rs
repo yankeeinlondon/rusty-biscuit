@@ -25,7 +25,7 @@ use serde_json::{Map, Value};
 use super::super::bindings::{
     EnclosingLoop, LifecycleScope, LifecycleValues, runtime_bindings_enclosed,
 };
-use super::super::executor::{evaluate_operand_in, is_template_operand};
+use super::super::executor::evaluate_operand_in;
 
 /// The frontmatter namespace root.
 const FRONTMATTER_ROOT: &str = "fm";
@@ -40,14 +40,29 @@ const CAPTURED_ROOTS: [&str; 2] = ["ctx", "env"];
 /// never captures context, reads live runtime state, or reads the process
 /// environment.
 #[derive(Debug, Clone)]
-pub(crate) struct PrewarmInputs {
+pub struct PrewarmInputs {
     /// The effective frontmatter the phrase's document was prepared with.
-    pub frontmatter: Map<String, Value>,
+    pub(crate) frontmatter: Map<String, Value>,
     /// The `ctx`/`env` binding the phrase would be spoken with.
-    pub context: DocumentContext,
+    pub(crate) context: DocumentContext,
     /// Top-level frontmatter keys a sequence injects per task. They are late
     /// even though they read as frontmatter.
-    pub sequence_injected_keys: BTreeSet<String>,
+    pub(crate) sequence_injected_keys: BTreeSet<String>,
+}
+
+impl PrewarmInputs {
+    /// A prepared document's inputs: its effective frontmatter and the
+    /// `ctx`/`env` binding its lifecycle events are spoken with.
+    ///
+    /// A non-object `frontmatter` reads as empty.
+    #[must_use]
+    pub fn captured(frontmatter: &Value, context: ComposeContext) -> Self {
+        Self {
+            frontmatter: frontmatter.as_object().cloned().unwrap_or_default(),
+            context: DocumentContext::Captured(context),
+            sequence_injected_keys: BTreeSet::new(),
+        }
+    }
 }
 
 /// Whether a document's `ctx`/`env` capture exists yet.

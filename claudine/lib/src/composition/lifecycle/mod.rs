@@ -43,7 +43,7 @@ pub mod control;
 pub mod executor;
 pub mod runtime;
 mod parse;
-pub(crate) mod prewarm;
+pub mod prewarm;
 mod source_map;
 mod validate;
 
