@@ -1,9 +1,10 @@
 //! The input robustness matrix for block `$constraints` on reused and inline
 //! objects (`2026-10-13-named-type-presence-and-local-names`, Phase 5).
 //!
-//! The fixture is the shipped `lifecycle-action` named type from
+//! The fixture is the shipped `lifecycle-branch-bundle` named type from
 //! `darkmatter/docs/schemas/claudine-types.yaml`, which declares
-//! `$constraints: { min-keys: 1 }`. Every cell makes one edit to that block,
+//! `$constraints: { min-keys: 1 }`; the matrix names its copy
+//! `lifecycle-action`. Every cell makes one edit to that block,
 //! then judges it at two sites:
 //!
 //! - **reused**: the type lives in a standalone schema file and a document
@@ -119,13 +120,13 @@ fn render_document_mapping(format: Format, entries: &[(String, Node)]) -> String
 
 // ── the shipped fixture ───────────────────────────────────────────────────
 
-/// The shipped `lifecycle-action` members other than `$constraints`, each
+/// The shipped `lifecycle-branch-bundle` members other than `$constraints`, each
 /// as JSON text, after checking the shipped block is still `{ min-keys: 1 }`.
 fn shipped_lifecycle_action(shipped: &str) -> Vec<(String, Node)> {
     let value: YamlValue = serde_yaml_ng::from_str(shipped).expect("shipped claudine-types.yaml parses");
-    let definition = value["$schema"]["lifecycle-action"]
+    let definition = value["$schema"]["lifecycle-branch-bundle"]
         .as_mapping()
-        .expect("claudine-types.yaml defines `lifecycle-action` as an object");
+        .expect("claudine-types.yaml defines `lifecycle-branch-bundle` as an object");
     let block: YamlValue = serde_yaml_ng::from_str("min-keys: 1").unwrap();
     assert_eq!(
         definition.get("$constraints"),

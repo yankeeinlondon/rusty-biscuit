@@ -82,7 +82,7 @@ pub enum FmPathSegment<'a> {
 }
 
 /// Renders typed segments in dotted notation: keys join with `.`, indices are
-/// bracketed (`initialize.stack[0].when`), so a key named `0` stays `.0`.
+/// bracketed (`failure[0].else[1].when`), so a key named `0` stays `.0`.
 ///
 /// This is the one dotted formatter; [`FmEntry::dotted`] is built with it.
 pub fn format_dotted(segments: &[FmPathSegment<'_>]) -> String {
@@ -977,54 +977,95 @@ mod tests {
         let text = concat!(
             "---\n",
             "initialize:\n",
-            "  stack:\n",
-            "    - when: ctx.ok\n",
-            "      action: stop\n",
-            "    - action:\n",
-            "        - skip\n",
+            "  - when: ctx.ok\n",
+            "    then: [stop]\n",
+            "  - when: ctx.retry\n",
+            "    then:\n",
+            "      - skip\n",
             "---\n\nbody\n",
         );
         let ast = ast(text);
         let when_index = ast
             .entries()
             .iter()
-            .position(|e| e.pointer == "/initialize/stack/0/when")
+            .position(|e| e.pointer == "/initialize/0/when")
             .unwrap();
         let when = &ast.entries()[when_index];
-        assert_eq!(when.dotted, "initialize.stack[0].when");
+        assert_eq!(when.dotted, "initialize[0].when");
         assert_eq!(when.role, FmEntryRole::MappingProperty);
         assert_eq!(&text[when.key_span.clone().unwrap()], "when");
         assert_eq!(&text[when.value_span.clone()], "ctx.ok");
-        assert_eq!(when.depth, 3);
+        assert_eq!(when.depth, 2);
         let item = &ast.entries()[when.parent.unwrap()];
-        assert_eq!(item.pointer, "/initialize/stack/0");
+        assert_eq!(item.pointer, "/initialize/0");
         assert_eq!(item.role, FmEntryRole::SequenceItem { index: 0 });
         assert_eq!(item.kind, FmValueKind::Mapping);
-        assert_eq!(item.depth, 2);
-        assert_eq!(ast.entries()[item.parent.unwrap()].pointer, "/initialize/stack");
+        assert_eq!(item.depth, 1);
+        assert_eq!(ast.entries()[item.parent.unwrap()].pointer, "/initialize");
         assert_eq!(
             ast.path_at(when_index),
             vec![
                 FmPathSegment::Key("initialize"),
-                FmPathSegment::Key("stack"),
                 FmPathSegment::Index(0),
                 FmPathSegment::Key("when"),
             ]
         );
         assert_eq!(format_dotted(&ast.path_at(when_index)), when.dotted);
 
-        let skip = ast.entry_by_dotted("initialize.stack[1].action[0]").unwrap();
-        assert_eq!(skip.pointer, "/initialize/stack/1/action/0");
+        let skip = ast.entry_by_dotted("initialize[1].then[0]").unwrap();
+        assert_eq!(skip.pointer, "/initialize/1/then/0");
         assert_eq!(skip.scalar.as_deref(), Some("skip"));
-        assert_eq!(skip.depth, 4);
+        assert_eq!(skip.depth, 3);
         assert_eq!(
-            ast.entry_by_key_path(&["initialize", "stack", "1", "action", "0"]).unwrap().pointer,
+            ast.entry_by_key_path(&["initialize", "1", "then", "0"]).unwrap().pointer,
             skip.pointer
         );
+        // A flow-sequence body item is addressed the same way.
+        let stop = ast.entry_by_pointer("/initialize/0/then/0").unwrap();
+        assert_eq!(stop.dotted, "initialize[0].then[0]");
+        assert_eq!(stop.scalar.as_deref(), Some("stop"));
         // The cursor on `when`'s value belongs to the item mapping, not the
-        // `stack` sequence.
+        // event's sequence.
         let offset = when.value_span.start;
         assert_eq!(ast.entry_at_offset(offset).unwrap().pointer, when.pointer);
+    }
+
+    #[test]
+    fn test_lifecycle_pointers_mirror_the_claudine_authored_path() {
+        let text = concat!(
+            "---\n",
+            "start:\n",
+            "  say: hi\n",
+            "failure:\n",
+            "  - when: err\n",
+            "    then: [stop]\n",
+            "    else:\n",
+            "      - info: x\n",
+            "      - shell:\n",
+            "          command: make\n",
+            "loop:\n",
+            "  while: ok\n",
+            "  gate:\n",
+            "    - when: ctx.ok\n",
+            "      then:\n",
+            "        - warn: w\n",
+            "---\n\nbody\n",
+        );
+        let ast = ast(text);
+        for (dotted, pointer, scalar) in [
+            ("start.say", "/start/say", "hi"),
+            ("failure[0].when", "/failure/0/when", "err"),
+            ("failure[0].then[0]", "/failure/0/then/0", "stop"),
+            ("failure[0].else[1].shell.command", "/failure/0/else/1/shell/command", "make"),
+            ("loop.gate[0].when", "/loop/gate/0/when", "ctx.ok"),
+            ("loop.gate[0].then[0].warn", "/loop/gate/0/then/0/warn", "w"),
+        ] {
+            let entry = ast.entry_by_dotted(dotted).unwrap_or_else(|| panic!("{dotted}"));
+            assert_eq!(entry.pointer, pointer);
+            assert_eq!(entry.scalar.as_deref(), Some(scalar), "{dotted}");
+            let index = ast.index_of(entry).unwrap();
+            assert_eq!(format_dotted(&ast.path_at(index)), dotted);
+        }
     }
 
     #[test]

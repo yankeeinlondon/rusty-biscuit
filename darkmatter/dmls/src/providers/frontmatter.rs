@@ -2137,7 +2137,7 @@ fn root_arm_discriminant_json(arm: &SchemaArm) -> Value {
 /// the first inline-object arm of each property. An empty path yields `root`.
 ///
 /// A key followed by an [`FmPathSegment::Index`] descends an array arm's item
-/// shape (`initialize.stack[0]`); a bare key descends a non-array arm. Every
+/// shape (`initialize[0]`); a bare key descends a non-array arm. Every
 /// other shape fails closed with `None`: an index with no preceding key, an
 /// index into a non-array arm, a key into an array-only property, a nested
 /// array index, or a property with no inline-object arm (e.g. the opaque

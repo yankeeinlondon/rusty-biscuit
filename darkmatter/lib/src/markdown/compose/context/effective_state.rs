@@ -519,9 +519,24 @@ impl<'a> ResolvingLookup<'a> {
     }
 }
 
+impl ResolvingLookup<'_> {
+    /// The host global `path` reads, when its root is one.
+    fn host_global(
+        &self,
+        path: &str,
+    ) -> Option<
+        Result<super::super::expression::ResolvedBinding, super::super::expression::ExpressionError>,
+    > {
+        self.resolution_context.host_globals.as_ref()?.resolve(path)
+    }
+}
+
 impl super::super::expression::EvaluationLookup for ResolvingLookup<'_> {
     fn get(&self, path: &str) -> Option<Value> {
-        self.state.get(path)
+        match self.host_global(path) {
+            Some(global) => global.ok().and_then(super::super::expression::ResolvedBinding::into_value),
+            None => self.state.get(path),
+        }
     }
 
     fn resolve(
@@ -529,15 +544,33 @@ impl super::super::expression::EvaluationLookup for ResolvingLookup<'_> {
         path: &str,
     ) -> Result<super::super::expression::ResolvedBinding, super::super::expression::ExpressionError>
     {
-        super::super::expression::EvaluationLookup::resolve(self.state, path)
+        match self.host_global(path) {
+            Some(global) => global,
+            None => super::super::expression::EvaluationLookup::resolve(self.state, path),
+        }
+    }
+
+    fn binding_view(&self) -> Option<&super::super::expression::BindingView> {
+        self.resolution_context.host_globals.as_ref().map(super::super::expression::HostGlobals::view)
     }
 
     fn format_resolved(&self, path: &str, value: &Value) -> String {
-        super::super::expression::EvaluationLookup::format_resolved(self.state, path, value)
+        let root = path.split('.').next().unwrap_or(path);
+        match &self.resolution_context.host_globals {
+            Some(globals) if globals.declares(root) => super::super::expression::default_format(value),
+            _ => super::super::expression::EvaluationLookup::format_resolved(self.state, path, value),
+        }
     }
 
     fn get_string(&self, path: &str) -> String {
-        self.state.get_string(path)
+        match self.host_global(path) {
+            Some(global) => global
+                .ok()
+                .and_then(super::super::expression::ResolvedBinding::into_value)
+                .map(|value| super::super::expression::default_format(&value))
+                .unwrap_or_default(),
+            None => self.state.get_string(path),
+        }
     }
 
     fn resolution_context(&self) -> Option<super::super::expression::ResolutionContext> {

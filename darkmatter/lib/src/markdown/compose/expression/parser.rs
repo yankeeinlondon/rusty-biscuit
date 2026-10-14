@@ -2138,7 +2138,7 @@ mod tests {
                 "(a)-1",
                 r#""x"-1"#,
                 "false - 1",
-                "_loop_count - 1",
+                "_iter_count - 1",
             ] {
                 assert_subtraction(src);
             }

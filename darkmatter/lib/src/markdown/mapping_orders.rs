@@ -251,22 +251,20 @@ mod tests {
     fn collect_indexes_nested_mappings_by_json_pointer() {
         let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(concat!(
             "start:\n",
-            "  stack:\n",
-            "    - action:\n",
-            "        set:\n",
-            "          z_last_lexically: true\n",
-            "          a_first_lexically: false\n",
+            "  - set:\n",
+            "      z_last_lexically: true\n",
+            "      a_first_lexically: false\n",
         ))
         .unwrap();
 
         let orders = MappingOrders::collect(&value);
 
         assert_eq!(
-            orders.get("/start/stack/0/action/set"),
+            orders.get("/start/0/set"),
             Some(["z_last_lexically".to_string(), "a_first_lexically".to_string()].as_slice()),
         );
         assert_eq!(orders.get(""), Some(["start".to_string()].as_slice()));
-        assert_eq!(orders.get("/start/stack/1"), None);
+        assert_eq!(orders.get("/start/1"), None);
     }
 
     #[test]
@@ -288,19 +286,17 @@ mod tests {
         let json5 = concat!(
             "{\n",
             "  // comments, unquoted keys, and trailing commas are JSON5\n",
-            "  start: {stack: [{action: {set: {\n",
+            "  start: [{set: {\n",
             "    z_last_lexically: true,\n",
             "    'a/first': [1, null, {y: 1, b: 2}],\n",
-            "  }}}]},\n",
+            "  }}],\n",
             "}\n",
         );
         let yaml = concat!(
             "start:\n",
-            "  stack:\n",
-            "    - action:\n",
-            "        set:\n",
-            "          z_last_lexically: true\n",
-            "          a/first: [1, null, {y: 1, b: 2}]\n",
+            "  - set:\n",
+            "      z_last_lexically: true\n",
+            "      a/first: [1, null, {y: 1, b: 2}]\n",
         );
 
         let orders: MappingOrders = biscuit_file::Json5::from_str(json5)
@@ -309,11 +305,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            orders.get("/start/stack/0/action/set"),
+            orders.get("/start/0/set"),
             Some(["z_last_lexically".to_string(), "a/first".to_string()].as_slice()),
         );
         assert_eq!(
-            orders.get("/start/stack/0/action/set/a~1first/2"),
+            orders.get("/start/0/set/a~1first/2"),
             Some(["y".to_string(), "b".to_string()].as_slice()),
         );
         let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).unwrap();

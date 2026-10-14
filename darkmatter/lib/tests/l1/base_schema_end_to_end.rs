@@ -192,7 +192,7 @@ fn claudine_schema_file_resolves_as_baseline() {
 
 #[test]
 fn claudine_schema_accepts_typed_lifecycle_stack() {
-    let md: Markdown = "---\nstart:\n  info: Starting\n  stack:\n    - when: env.CI == 'true'\n      action:\n        - message: Build started\n        - action: shell\n          command: cargo test\n          no_error: true\n---\nBody\n".into();
+    let md: Markdown = "---\nstart:\n  - info: Starting\n  - when: env.CI == 'true'\n    then:\n      - message: Build started\n      - shell:\n          command: cargo test\n          no_error: true\nsuccess:\n  info: Done\n  effect: tick\n---\nBody\n".into();
     let report = DarkmatterSchemas::new(crate::request_support::cwd_context())
         .with_baseline_from_file(claudine_schema_path())
         .expect("Claudine schema must load")
@@ -208,19 +208,19 @@ fn claudine_schema_accepts_typed_lifecycle_stack() {
 
 #[test]
 fn claudine_schema_rejects_malformed_lifecycle_stack() {
-    let md: Markdown = "---\nstart:\n  stack: run-now\n---\nBody\n".into();
+    let md: Markdown = "---\nstart: run-now\n---\nBody\n".into();
     let report = DarkmatterSchemas::new(crate::request_support::cwd_context())
         .with_baseline_from_file(claudine_schema_path())
         .expect("Claudine schema must load")
         .validate(&md)
         .expect("validation must run");
 
-    assert!(!report.valid, "a lifecycle stack must be an array");
+    assert!(!report.valid, "a lifecycle stack must be a list or a dictionary");
 }
 
 #[test]
 fn claudine_schema_accepts_loop_controls_and_lifecycle_concerns_together() {
-    let md: Markdown = "---\nloop:\n  while: step < 3\n  action:\n    op: increment\n    prop: step\n  info: Iteration complete\n  stack:\n    - action: stop\n---\nBody\n".into();
+    let md: Markdown = "---\nloop:\n  while: step < 3\n  action:\n    op: increment\n    prop: step\n  info: Iteration complete\n  warn: Iteration ended\n---\nBody\n".into();
     let report = DarkmatterSchemas::new(crate::request_support::cwd_context())
         .with_baseline_from_file(claudine_schema_path())
         .expect("Claudine schema must load")

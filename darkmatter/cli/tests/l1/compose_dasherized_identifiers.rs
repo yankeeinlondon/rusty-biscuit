@@ -11,9 +11,9 @@ use predicates::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const KEBAB_DOCUMENT: &str = "---\nspec-name: alpha\nlabel: \"v={{ spec-name }}\"\n_loop_count: 3\n---\n\
+const KEBAB_DOCUMENT: &str = "---\nspec-name: alpha\nlabel: \"v={{ spec-name }}\"\n_iter_count: 3\n---\n\
 Bare: [{{ spec-name }}] Doc: [{{ fm.spec-name }}] Bracket: [{{ fm['spec-name'] }}] \
-Label: [{{ label }}] Prev: [{{ _loop_count - 1 }}|{{ 4-2 }}]\n";
+Label: [{{ label }}] Prev: [{{ _iter_count - 1 }}|{{ 4-2 }}]\n";
 
 #[test]
 fn compose_resolves_a_kebab_key_three_ways_through_the_binary() {

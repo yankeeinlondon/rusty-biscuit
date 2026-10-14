@@ -537,6 +537,11 @@ pub struct ComposeOptions {
     /// of these subtrees. Default: empty (no behavior change for any caller).
     pub(crate) exclude_keys: std::collections::HashSet<String>,
 
+    /// Globals the host declares for this composition and every transcluded
+    /// child. Default: `None` (no globals; every root outside the reserved
+    /// namespaces is a document property).
+    pub(crate) host_globals: Option<crate::markdown::compose::expression::HostGlobals>,
+
     // ── Named-object string coercion (Sequence Plus) ───────────────
     /// Frontmatter keys whose OBJECT values render their `name` string field
     /// when interpolated in inline string context (`{{key}}`). Whole-value
@@ -666,6 +671,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("context", &self.context)
             .field("remote_read_config", &self.remote_read_config)
             .field("exclude_keys", &self.exclude_keys)
+            .field("host_globals", &self.host_globals)
             .field("name_coercion_keys", &self.name_coercion_keys)
             .field("file_ref_fallback_dir", &self.file_ref_fallback_dir)
             .finish()
@@ -942,6 +948,7 @@ impl ComposeOptions {
             preflight_graph: None,
             remote_fetch: None,
             exclude_keys: std::collections::HashSet::new(),
+            host_globals: None,
             name_coercion_keys: Vec::new(),
             file_ref_fallback_dir: None,
         }
@@ -1573,6 +1580,7 @@ impl ComposeOptions {
         context.current = self.current_authority();
         context.caller_file_provenance = self.caller_file_provenance.clone();
         context.nested_compose = self.nested_compose.clone();
+        context.host_globals = self.host_globals.clone();
         context
     }
 
@@ -1618,6 +1626,7 @@ impl ComposeOptions {
         context.alias_resolutions = self.alias_resolutions.clone();
         context.current = self.current_authority();
         context.caller_file_provenance = self.caller_file_provenance.clone();
+        context.host_globals = self.host_globals.clone();
         context
     }
 
@@ -1921,6 +1930,28 @@ impl ComposeOptions {
     /// compose-time resolution.
     pub fn exclude_keys(&self) -> &std::collections::HashSet<String> {
         &self.exclude_keys
+    }
+
+    /// Declares host globals for this composition and every transcluded child.
+    ///
+    /// A variable root is classified as a reserved namespace, then a declared
+    /// global, then a document property, so a declared global wins over a
+    /// same-named frontmatter key for bare, dotted, and bracket reads in
+    /// frontmatter and body interpolation, `when=` conditions, and page
+    /// blocks, while `fm.<name>` still reads the key. A compose-time
+    /// frontmatter value may read a declared global even when a deferred key
+    /// ([`with_exclude_keys`](Self::with_exclude_keys)) has the same name.
+    /// Reading a global declared unavailable fails with
+    /// [`BindingError::Unavailable`](crate::markdown::compose::expression::BindingError::Unavailable).
+    ///
+    /// Default: none.
+    #[must_use]
+    pub fn with_host_globals(
+        mut self,
+        globals: crate::markdown::compose::expression::HostGlobals,
+    ) -> Self {
+        self.host_globals = Some(globals);
+        self
     }
 
     /// Sets the frontmatter keys whose OBJECT values render their `name` string
@@ -2695,6 +2726,7 @@ impl ComposeOptions {
             current,
             schema_phase,
             exclude_keys,
+            host_globals,
             name_coercion_keys,
             portable_env,
             absolute_fallback_warning,
@@ -3064,6 +3096,12 @@ impl ComposeOptions {
                 enc.str(key);
             }
         }
+        // Encoded only when present, so an option set without globals keeps
+        // its historical fingerprint.
+        if let Some(globals) = host_globals {
+            enc.field("host_globals");
+            enc.str(&globals.identity());
+        }
         // Ordered vector: preserve the caller's coercion precedence.
         enc.field("name_coercion_keys");
         enc.count(name_coercion_keys.len());
@@ -3211,6 +3249,10 @@ impl ComposeOptions {
         cenc.bool(*caller_owns_post_shell_verdict);
         cenc.field("schema_phase");
         cenc.tag(schema_phase_tag(*schema_phase));
+        if let Some(globals) = host_globals {
+            cenc.field("host_globals");
+            cenc.str(&globals.identity());
+        }
         cenc.field("name_coercion_keys");
         cenc.count(name_coercion_keys.len());
         for key in name_coercion_keys {

@@ -85,7 +85,7 @@ pub use absence::{StaticVariableRead, static_variable_reads};
 pub use ast::{BinaryOp, Expr, SpannedExpr, SpannedExprKind};
 pub use binding::{
     Availability, BindingError, BindingView, BindingViewBuilder, EvaluationSession,
-    GlobalDeclaration, LazyProvider, ResolvedBinding, RootClass, RuntimeBinding, ScopeId,
+    GlobalDeclaration, HostGlobals, LazyProvider, ResolvedBinding, RootClass, RuntimeBinding, ScopeId,
     UnavailabilityReason, UnavailableBinding, is_reserved_namespace,
 };
 pub use catalog::{

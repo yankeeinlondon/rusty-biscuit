@@ -1523,7 +1523,7 @@ fn schema_validate_shipped_claudine_schema_accepts_reused_lifecycle_and_loop_typ
     // absent, which authored validation permits.
     let doc = shipped_claudine_document(
         &process,
-        "initialize:\n  say: hello\n  stack:\n    - when: 'true'\n      action:\n        notify: hi\nloop:\n  max: 3\n  action:\n    op: increment\n    prop: n\n",
+        "initialize:\n  - say: hello\n  - when: 'true'\n    then:\n      notify: hi\nloop:\n  max: 3\n  action:\n    op: increment\n    prop: n\n  gate:\n    - stop\n",
     );
 
     let (code, report) = validate_json(&process, &doc, &[]);
@@ -1532,19 +1532,19 @@ fn schema_validate_shipped_claudine_schema_accepts_reused_lifecycle_and_loop_typ
     assert_eq!(report["valid"], true, "{report}");
 }
 
-/// `lifecycle-action` is an open mapping with `min-keys: 1`; an empty action
-/// matches none of the `action` union's arms.
+/// `lifecycle-stack-item` is an open mapping with `min-keys: 1`; an empty
+/// item matches neither arm of the `lifecycle-entry` union.
 #[test]
-fn schema_validate_shipped_claudine_schema_rejects_an_empty_lifecycle_action() {
+fn schema_validate_shipped_claudine_schema_rejects_an_empty_lifecycle_item() {
     let process = CliProcessFixture::new();
-    let doc = shipped_claudine_document(&process, "initialize:\n  stack:\n    - action: {}\n");
+    let doc = shipped_claudine_document(&process, "initialize:\n  - {}\n");
 
     let (code, report) = validate_json(&process, &doc, &[]);
 
     assert_eq!(code, Some(1), "{report}");
     let found = problems(&report);
     assert_eq!(found.len(), 1, "{report}");
-    assert_eq!(found[0].0, "/initialize/stack/0/action", "{report}");
+    assert_eq!(found[0].0, "/initialize/0", "{report}");
     assert!(found[0].1.contains("anyOf"), "{report}");
 }
 

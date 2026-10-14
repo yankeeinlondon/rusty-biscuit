@@ -74,8 +74,8 @@ fn kebab_key_drives_a_when_condition() {
 #[test]
 fn subtraction_still_evaluates_where_the_left_operand_cannot_continue_a_name() {
     let composed = compose(
-        "---\n_loop_count: 3\nphase: 5\nphase-2: two\nitems: [10, 20]\n---\n\
-         Arith: [{{ _loop_count - 1 }}|{{ 4-2 }}|{{ length(items)-1 }}|{{ items[0]-1 }}|{{ (phase)-1 }}|{{ phase - 2 }}|{{ phase-2 }}]\n",
+        "---\n_iter_count: 3\nphase: 5\nphase-2: two\nitems: [10, 20]\n---\n\
+         Arith: [{{ _iter_count - 1 }}|{{ 4-2 }}|{{ length(items)-1 }}|{{ items[0]-1 }}|{{ (phase)-1 }}|{{ phase - 2 }}|{{ phase-2 }}]\n",
     );
     assert!(
         composed.content().contains("Arith: [2|2|1|9|4|3|two]"),

@@ -105,30 +105,32 @@ fn hover_text(hover: &Hover) -> &str {
 #[test]
 fn nested_shape_consumes_array_index_against_item_type() {
     let root = claudine_root();
-    let item = nested_shape(&root, &[Key("initialize"), Key("stack"), Index(0)])
-        .expect("stack item shape");
-    for key in ["when", "action", "no_error"] {
-        assert!(item.properties.contains_key(key), "{key} on the stack item");
+    let item = nested_shape(&root, &[Key("initialize"), Index(0)]).expect("list item shape");
+    for key in ["when", "then", "else", "no_error"] {
+        assert!(item.properties.contains_key(key), "{key} on the list item");
     }
-    let when = def_at_path(&root, &[Key("initialize"), Key("stack"), Index(0), Key("when")])
-        .expect("initialize.stack[0].when resolves");
+    let when = def_at_path(&root, &[Key("initialize"), Index(0), Key("when")])
+        .expect("initialize[0].when resolves");
     assert!(is_expression_def(when));
-    assert!(def_at_path(&root, &[Key("loop"), Key("stack"), Index(3), Key("when")]).is_some());
+    let nested = def_at_path(&root, &[Key("failure"), Index(0), Key("else"), Index(1), Key("when")])
+        .expect("failure[0].else[1].when resolves");
+    assert!(is_expression_def(nested));
+    assert!(def_at_path(&root, &[Key("loop"), Key("gate"), Index(3), Key("when")]).is_some());
 }
 
 #[test]
 fn nested_shape_fails_closed_on_mismatched_segments() {
     let root = claudine_root();
-    // A key where the array item is required.
-    assert!(nested_shape(&root, &[Key("initialize"), Key("stack")]).is_none());
-    assert!(def_at_path(&root, &[Key("initialize"), Key("stack"), Key("when")]).is_none());
+    // A key where the array item is required (`loop.gate` is list-only).
+    assert!(nested_shape(&root, &[Key("loop"), Key("gate")]).is_none());
+    assert!(def_at_path(&root, &[Key("loop"), Key("gate"), Key("when")]).is_none());
     // An index under a non-array property.
-    assert!(nested_shape(&root, &[Key("initialize"), Index(0)]).is_none());
+    assert!(nested_shape(&root, &[Key("loop"), Index(0)]).is_none());
     // A leading index, and a nested index SimplifiedSchema cannot declare.
     assert!(nested_shape(&root, &[Index(0)]).is_none());
-    assert!(nested_shape(&root, &[Key("initialize"), Key("stack"), Index(0), Index(0)]).is_none());
+    assert!(nested_shape(&root, &[Key("loop"), Key("gate"), Index(0), Index(0)]).is_none());
     // A key literally named `0` is not an index.
-    assert!(nested_shape(&root, &[Key("initialize"), Key("stack"), Key("0")]).is_none());
+    assert!(nested_shape(&root, &[Key("loop"), Key("gate"), Key("0")]).is_none());
 }
 
 #[test]
@@ -211,15 +213,15 @@ fn context_aware_walk_selects_discriminated_arm_inside_array_items() {
 
 #[test]
 fn transparent_crossing_serves_key_only_authoring_ancestry() {
-    let text = "---\ninitialize:\n  stack:\n    - when: ok\n---\n\nbody\n";
+    let text = "---\nloop:\n  gate:\n    - when: ok\n---\n\nbody\n";
     with_ctx(text, true, |ctx| {
         let shape = known_shape(ctx);
-        let keys = [Key("initialize"), Key("stack"), Key("when")];
+        let keys = [Key("loop"), Key("gate"), Key("when")];
         let mut transparent = ShapeMemo::new(ArrayCrossing::Transparent);
         assert!(def_at_path_ctx(ctx, &shape, &keys, &mut transparent).is_some());
         let mut explicit = ShapeMemo::new(ArrayCrossing::Explicit);
         assert!(def_at_path_ctx(ctx, &shape, &keys, &mut explicit).is_none());
-        let indexed = [Key("initialize"), Key("stack"), Index(0), Key("when")];
+        let indexed = [Key("loop"), Key("gate"), Index(0), Key("when")];
         assert!(def_at_path_ctx(ctx, &shape, &indexed, &mut explicit).is_some());
         assert!(def_at_path_ctx(ctx, &shape, &indexed, &mut transparent).is_none());
     });
@@ -231,18 +233,26 @@ fn transparent_crossing_serves_key_only_authoring_ancestry() {
 fn shipped_claudine_predicates_are_expression_typed() {
     let root = claudine_root();
     for path in [
-        vec![Key("initialize"), Key("stack"), Index(0), Key("when")],
-        vec![Key("failure"), Key("stack"), Index(2), Key("when")],
+        vec![Key("initialize"), Index(0), Key("when")],
+        vec![Key("failure"), Index(2), Key("when")],
+        vec![Key("failure"), Index(0), Key("then"), Index(1), Key("when")],
+        vec![Key("failure"), Index(0), Key("else"), Index(0), Key("when")],
         vec![Key("loop"), Key("while")],
         vec![Key("loop"), Key("until")],
-        vec![Key("loop"), Key("stack"), Index(0), Key("when")],
+        vec![Key("loop"), Key("gate"), Index(0), Key("when")],
     ] {
         let def = def_at_path(&root, &path).unwrap_or_else(|| panic!("{path:?} resolves"));
         assert!(is_expression_def(def), "{} is expression-typed", format_dotted(&path));
     }
-    // Communication fields stay strings: they are interpolated, not conditions.
-    let say = def_at_path(&root, &[Key("success"), Key("say")]).unwrap();
-    assert!(!is_expression_def(say));
+    // Verb values are interpolated, not conditions.
+    for path in [
+        vec![Key("success"), Key("say")],
+        vec![Key("success"), Index(0), Key("say")],
+        vec![Key("loop"), Key("say")],
+    ] {
+        let def = def_at_path(&root, &path);
+        assert!(def.is_none_or(|def| !is_expression_def(def)), "{}", format_dotted(&path));
+    }
 }
 
 #[test]
@@ -250,11 +260,12 @@ fn predicates_inside_stack_items_reach_expression_values_without_executing() {
     let text = concat!(
         "---\n",
         "initialize:\n",
-        "  stack:\n",
-        "    - when: \"$(touch /tmp/dmls-must-not-run) == 'x'\"\n",
-        "      action: stop\n",
-        "    - when: err.kind == 'timeout'\n",
-        "      action: stop\n",
+        "  - when: \"$(touch /tmp/dmls-must-not-run) == 'x'\"\n",
+        "    then: [stop]\n",
+        "  - when: err.kind == 'timeout'\n",
+        "    then:\n",
+        "      - when: nested_flag\n",
+        "        then: [stop]\n",
         "loop:\n",
         "  until: '{{ ctx.area }}'\n",
         "  say: done\n",
@@ -270,8 +281,9 @@ fn predicates_inside_stack_items_reach_expression_values_without_executing() {
         assert_eq!(
             reached,
             vec![
-                ("initialize.stack[0].when", "$(touch /tmp/dmls-must-not-run) == 'x'"),
-                ("initialize.stack[1].when", "err.kind == 'timeout'"),
+                ("initialize[0].when", "$(touch /tmp/dmls-must-not-run) == 'x'"),
+                ("initialize[1].when", "err.kind == 'timeout'"),
+                ("initialize[1].then[0].when", "nested_flag"),
                 ("loop.until", "{{ ctx.area }}"),
             ]
         );
@@ -324,9 +336,8 @@ fn expression_pass_materializes_each_distinct_ancestor_shape_once() {
 const STACK_DOC: &str = concat!(
     "---\n",
     "initialize:\n",
-    "  stack:\n",
-    "    - when: ctx.today\n",
-    "      action: stop\n",
+    "  - when: ctx.today\n",
+    "    then: [stop]\n",
     "---\n\nbody\n",
 );
 
@@ -376,14 +387,14 @@ fn hover_is_silent_on_synthetic_item_positions() {
 #[test]
 fn completion_works_inside_list_items() {
     // A key being authored on a blank line inside an existing item mapping.
-    let text = "---\ninitialize:\n  stack:\n    - when: ok\n      \n      no_error: true\n---\n\nbody\n";
+    let text = "---\ninitialize:\n  - when: ok\n    \n    no_error: true\n---\n\nbody\n";
     with_ctx(text, true, |ctx| {
-        let offset = text.find("ok\n").unwrap() + 3 + 6;
+        let offset = text.find("ok\n").unwrap() + 3 + 4;
         let items = completion(ctx, offset);
-        assert!(items.iter().any(|item| item.label == "action"), "{items:#?}");
+        assert!(items.iter().any(|item| item.label == "then"), "{items:#?}");
     });
     // A list-item predicate value offers the expression catalog.
-    let text = "---\ninitialize:\n  stack:\n    - when: ctx.\n---\n\nbody\n";
+    let text = "---\ninitialize:\n  - when: ctx.\n---\n\nbody\n";
     with_ctx(text, true, |ctx| {
         let offset = text.find("ctx.").unwrap() + 4;
         let items = completion(ctx, offset);
@@ -439,11 +450,10 @@ fn expression_diagnostics_newly_reach_list_items() {
     let text = concat!(
         "---\n",
         "initialize:\n",
-        "  stack:\n",
-        "    - when: '1 +'\n",
-        "      action: stop\n",
-        "    - when: nope_root\n",
-        "      action: stop\n",
+        "  - when: '1 +'\n",
+        "    then: [stop]\n",
+        "  - when: nope_root\n",
+        "    then: [stop]\n",
         "---\n\nbody\n",
     );
     with_ctx(text, true, |ctx| {
@@ -457,14 +467,14 @@ fn expression_diagnostics_newly_reach_list_items() {
             .filter(|d| code(d) == crate::diagnostics::codes::code::EXPRESSION_MALFORMED)
             .collect();
         assert_eq!(malformed.len(), 1, "{diagnostics:#?}");
-        assert_eq!(malformed[0].range.start.line, 3);
+        assert_eq!(malformed[0].range.start.line, 2);
         assert_eq!(malformed[0].severity, Some(lsp_types::DiagnosticSeverity::ERROR));
         let unknown: Vec<&Diagnostic> = diagnostics
             .iter()
             .filter(|d| code(d) == crate::diagnostics::codes::code::EXPRESSION_UNDECLARED_PROPERTY)
             .collect();
         assert_eq!(unknown.len(), 1, "{diagnostics:#?}");
-        assert_eq!(unknown[0].range.start.line, 5);
+        assert_eq!(unknown[0].range.start.line, 4);
         assert!(unknown[0].message.contains("nope_root"));
         assert_eq!(unknown[0].severity, Some(lsp_types::DiagnosticSeverity::WARNING));
         // The generic format problem for the malformed value stays suppressed.

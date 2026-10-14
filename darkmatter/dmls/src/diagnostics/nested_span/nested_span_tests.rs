@@ -10,7 +10,7 @@ use darkmatter::markdown::compose::expression::lint_expression;
 use darkmatter::markdown::span::SourceSpan;
 use lsp_types::{CodeActionOrCommand, InitializeParams, Uri};
 
-use super::lifecycle::{COMMUNICATION_FIELDS, EVENT_KEYS};
+use super::lifecycle::{EVENT_KEYS, LOOP_ITERATION_KEYS, STRUCTURAL_ITEM_KEYS};
 use super::*;
 use crate::capabilities::ClientProfile;
 use crate::config::{DmlsConfig, SchemaExtensionConfig};
@@ -175,7 +175,6 @@ fn mixed_strings_and_non_lifecycle_whole_values_are_not_flagged() {
         "resides_in: \"{{ ok ? 'a {{ x }}' : 'b' }}\"\n",
         "success:\n",
         "    say: \"done {{ ok ? 'a {{ x }}' : 'b' }} now\"\n",
-        "    effect: \"{{ ok ? 'a {{ x }}' : 'b' }}\"\n",
         "loop:\n",
         "    action: \"{{ ok ? 'a {{ x }}' : 'b' }}\"\n",
         "---\n\nbody\n",
@@ -184,15 +183,14 @@ fn mixed_strings_and_non_lifecycle_whole_values_are_not_flagged() {
 }
 
 #[test]
-fn stack_operands_proxy_with_values_and_predicates_are_diagnosed() {
+fn item_operands_proxy_with_values_and_predicates_are_diagnosed() {
     let text = concat!(
         "---\n",
         "initialize:\n",
-        "    stack:\n",
-        "        - when: \"mode == 'a {{ x }}'\"\n",
-        "          action:\n",
-        "              - ensure_file: \"{{ ok ? 'a {{ x }}' : 'b' }}\"\n",
-        "              - action: proxy\n",
+        "    - when: \"mode == 'a {{ x }}'\"\n",
+        "      then:\n",
+        "          - ensure_file: \"{{ ok ? 'a {{ x }}' : 'b' }}\"\n",
+        "          - proxy:\n",
         "                target: ./next.md\n",
         "                with:\n",
         "                    review: \"{{ ok ? 'c {{ y }}' : 'd' }}\"\n",
@@ -208,10 +206,78 @@ fn stack_operands_proxy_with_values_and_predicates_are_diagnosed() {
         summary.sort();
         assert_eq!(
             summary,
-            vec![(3, "{{ x }}"), (5, "{{ x }}"), (9, "{{ y }}"), (11, "{{ w }}")],
+            vec![(2, "{{ x }}"), (4, "{{ x }}"), (8, "{{ y }}"), (10, "{{ w }}")],
             "{found:#?}"
         );
         assert!(found.iter().all(|d| d.severity == Some(DiagnosticSeverity::ERROR)));
+    });
+}
+
+/// Every new-grammar stack shape reaches the diagnostic: a root dictionary, a
+/// `then` dictionary body, an `else` list body with a nested guard, a
+/// long-form parameter, and `loop.gate` (guard and body). A long-form
+/// `no_error` flag is never a surface.
+#[test]
+fn root_dictionaries_branch_bodies_and_the_loop_gate_are_diagnosed() {
+    let text = concat!(
+        "---\n",
+        "start:\n",
+        "    say: \"{{ ok ? 'a {{ r }}' : 'b' }}\"\n",
+        "failure:\n",
+        "    - when: \"err.code == 'cap'\"\n",
+        "      then:\n",
+        "          warn: \"{{ ok ? 'a {{ t }}' : 'b' }}\"\n",
+        "      else:\n",
+        "          - when: \"mode == 'n {{ n }}'\"\n",
+        "            then:\n",
+        "                - shell:\n",
+        "                      command: \"{{ ok ? 'a {{ s }}' : 'b' }}\"\n",
+        "                      no_error: true\n",
+        "loop:\n",
+        "    while: \"fm.i < 3\"\n",
+        "    gate:\n",
+        "        - when: \"mode == 'g {{ g }}'\"\n",
+        "          then:\n",
+        "              - info: \"{{ ok ? 'a {{ i }}' : 'b' }}\"\n",
+        "---\n\nbody\n",
+    );
+    with_ctx(text, 1, |ctx| {
+        let found = nested(ctx);
+        let mut summary: Vec<(u32, &str)> =
+            found.iter().map(|d| (d.range.start.line, ranged(ctx, d))).collect();
+        summary.sort();
+        assert_eq!(
+            summary,
+            vec![
+                (2, "{{ r }}"),
+                (6, "{{ t }}"),
+                (8, "{{ n }}"),
+                (11, "{{ s }}"),
+                (16, "{{ g }}"),
+                (18, "{{ i }}"),
+            ],
+            "{found:#?}"
+        );
+    });
+}
+
+/// Loose verb keys at the loop root are a dictionary stack; the loop's
+/// iteration controls are not lifecycle surfaces.
+#[test]
+fn loose_loop_verbs_are_diagnosed_and_iteration_controls_are_not() {
+    let text = concat!(
+        "---\n",
+        "loop:\n",
+        "    while: \"fm.i < 3\"\n",
+        "    action: \"{{ ok ? 'a {{ x }}' : 'b' }}\"\n",
+        "    stderr: \"{{ ok ? 'a {{ l }}' : 'b' }}\"\n",
+        "---\n\nbody\n",
+    );
+    with_ctx(text, 1, |ctx| {
+        let found = nested(ctx);
+        let summary: Vec<(u32, &str)> =
+            found.iter().map(|d| (d.range.start.line, ranged(ctx, d))).collect();
+        assert_eq!(summary, vec![(4, "{{ l }}")], "{found:#?}");
     });
 }
 
@@ -273,19 +339,53 @@ fn lifecycle_inventory_matches_the_authored_claudine_schema() {
 
     let types = schema_mapping("claudine-types.yaml");
     let object = |name: &str| types.get(name).and_then(|value| value.as_mapping()).unwrap().clone();
-    let communication: BTreeSet<String> =
-        COMMUNICATION_FIELDS.iter().map(|field| field.to_string()).collect();
-    let mut event_fields = keys_of(&object("lifecycle-event"));
-    for structural in ["effect", "stack"] {
-        assert!(event_fields.remove(structural), "{structural}");
+    let arms = |name: &str| -> Vec<String> {
+        types
+            .get(name)
+            .and_then(|value| value.as_sequence())
+            .unwrap_or_else(|| panic!("{name} is a union"))
+            .iter()
+            .filter_map(|arm| arm.as_str().map(str::to_string))
+            .collect()
+    };
+    // An event, and each `then`/`else` body, is a list of entries or a
+    // dictionary of verbs; an entry is a bare verb or an item.
+    for (union, list, dictionary) in [
+        ("lifecycle-event", "lifecycle-entry[]@this", "lifecycle-bundle@this"),
+        ("lifecycle-branch", "lifecycle-branch-entry[](min(1))@this", "lifecycle-branch-bundle@this"),
+    ] {
+        let arms = arms(union);
+        assert_eq!(arms.len(), 2, "{union}: {arms:?}");
+        assert!(arms[0].starts_with(list), "{union}: {arms:?}");
+        assert!(arms[1].starts_with(dictionary), "{union}: {arms:?}");
     }
-    assert_eq!(event_fields, communication);
-    assert!(keys_of(&object("loop-event")).is_superset(&communication));
+    for (entry, item) in
+        [("lifecycle-entry", "lifecycle-stack-item@this"), ("lifecycle-branch-entry", "lifecycle-branch-item@this")]
+    {
+        let arms = arms(entry);
+        assert!(arms[0].starts_with("string "), "{entry}: {arms:?}");
+        assert_eq!(arms[1], item, "{entry}: {arms:?}");
+    }
+
+    let literal_keys = |name: &str| -> BTreeSet<String> {
+        keys_of(&object(name)).into_iter().filter(|key| !key.starts_with(['<', '$'])).collect()
+    };
+    let structural: BTreeSet<String> = STRUCTURAL_ITEM_KEYS.iter().map(|key| key.to_string()).collect();
+    for item in ["lifecycle-stack-item", "lifecycle-branch-item"] {
+        assert_eq!(literal_keys(item), structural, "{item}");
+        assert!(object(item).contains_key("<string>"), "{item} accepts any verb");
+    }
+    let mut loop_keys: BTreeSet<String> = LOOP_ITERATION_KEYS.iter().map(|key| key.to_string()).collect();
+    loop_keys.insert("gate".to_string());
+    assert_eq!(literal_keys("loop-event"), loop_keys);
+    assert!(object("loop-event").contains_key("<string>"), "loop accepts loose verbs");
+    assert!(object("loop-event").get("gate").and_then(|v| v.as_str()).unwrap().starts_with("lifecycle-entry[]@this"));
 
     let is_expression = |name: &str, key: &str| {
         object(name).get(key).and_then(|value| value.as_str()).is_some_and(|d| d.starts_with("expression"))
     };
     assert!(is_expression("lifecycle-stack-item", "when"));
+    assert!(is_expression("lifecycle-branch-item", "when"));
     assert!(is_expression("loop-event", "while"));
     assert!(is_expression("loop-event", "until"));
 }
@@ -293,33 +393,68 @@ fn lifecycle_inventory_matches_the_authored_claudine_schema() {
 #[test]
 fn path_matcher_classifies_representative_lifecycle_paths() {
     let single_pass = [
+        // Root dictionary.
         vec![Key("success"), Key("say")],
+        vec![Key("success"), Key("effect")],
+        vec![Key("start"), Key("shell"), Key("command")],
+        // List items: short form, argument list, long form, `set`, `with`.
+        vec![Key("initialize"), Index(0), Key("message")],
+        vec![Key("start"), Index(1), Key("ensure_file"), Index(2)],
+        vec![Key("start"), Index(1), Key("shell"), Key("command")],
+        vec![Key("success"), Index(0), Key("set"), Key("no_error")],
+        vec![Key("failure"), Index(0), Key("proxy"), Key("with"), Key("log")],
+        vec![Key("failure"), Index(0), Key("retry"), Key("with"), Key("reason")],
+        // Branch bodies: list and dictionary, nested.
+        vec![Key("initialize"), Index(0), Key("then"), Index(0), Key("message")],
+        vec![Key("failure"), Index(0), Key("else"), Index(1), Key("shell"), Key("command")],
+        vec![Key("failure"), Index(0), Key("then"), Key("warn")],
+        vec![
+            Key("failure"), Index(0), Key("else"), Index(0), Key("else"), Index(0), Key("then"), Index(0),
+            Key("stop"),
+        ],
+        // Loop: loose verbs and `gate`.
         vec![Key("loop"), Key("stdout")],
-        vec![Key("initialize"), Key("stack"), Index(0), Key("action")],
-        vec![Key("start"), Key("stack"), Index(1), Key("action"), Index(2), Key("ensure_file")],
-        vec![Key("failure"), Key("stack"), Index(0), Key("action"), Index(0), Key("with"), Key("log")],
-        vec![Key("finalize"), Key("stack"), Index(0), Key("stdout")],
+        vec![Key("loop"), Key("gate"), Index(0), Key("effect")],
+        vec![Key("loop"), Key("gate"), Index(0), Key("then"), Index(0), Key("warn")],
     ];
     for path in &single_pass {
         assert!(lifecycle::is_single_pass_value(path), "{path:?}");
+        assert!(!lifecycle::is_predicate(path), "{path:?}");
     }
     let not_single_pass = [
         vec![Key("success")],
-        vec![Key("success"), Key("effect")],
         vec![Key("resides_in")],
         vec![Key("loop"), Key("action")],
-        vec![Key("initialize"), Key("stack"), Index(0)],
-        vec![Key("initialize"), Key("stack"), Index(0), Key("when")],
-        vec![Key("initialize"), Key("stack"), Index(0), Key("no_error")],
+        vec![Key("loop"), Key("max")],
+        vec![Key("loop"), Key("gate")],
+        vec![Key("initialize"), Index(0)],
+        vec![Key("initialize"), Index(0), Key("when")],
+        vec![Key("initialize"), Index(0), Key("no_error")],
+        vec![Key("initialize"), Index(0), Key("then")],
+        vec![Key("start"), Index(0), Key("shell"), Key("no_error")],
+        vec![Key("start"), Key("no_error")],
+        vec![Key("failure"), Index(0), Key("else"), Index(0), Key("when")],
         vec![Key("meta"), Key("success"), Key("say")],
     ];
     for path in &not_single_pass {
         assert!(!lifecycle::is_single_pass_value(path), "{path:?}");
     }
-    assert!(lifecycle::is_predicate(&[Key("blocked"), Key("stack"), Index(3), Key("when")]));
-    assert!(lifecycle::is_predicate(&[Key("loop"), Key("while")]));
+    for predicate in [
+        vec![Key("blocked"), Index(3), Key("when")],
+        vec![Key("failure"), Index(0), Key("else"), Index(1), Key("when")],
+        vec![Key("failure"), Index(0), Key("then"), Index(0), Key("else"), Index(0), Key("when")],
+        vec![Key("loop"), Key("gate"), Index(0), Key("when")],
+        vec![Key("loop"), Key("gate"), Index(0), Key("then"), Index(2), Key("when")],
+        vec![Key("loop"), Key("while")],
+        vec![Key("loop"), Key("until")],
+    ] {
+        assert!(lifecycle::is_predicate(&predicate), "{predicate:?}");
+    }
     assert!(!lifecycle::is_predicate(&[Key("when")]));
     assert!(!lifecycle::is_predicate(&[Key("success"), Key("until")]));
+    // A dictionary of verbs never carries `when`.
+    assert!(!lifecycle::is_predicate(&[Key("success"), Key("when")]));
+    assert!(!lifecycle::is_predicate(&[Key("loop"), Key("when")]));
 }
 
 // ── Host globals at the Darkmatter baseline ─────────────────────────────────
@@ -344,11 +479,10 @@ fn host_globals_are_undeclared_properties_beneath_lifecycle_keys_and_elsewhere()
     let lifecycle = concat!(
         "---\n",
         "failure:\n",
-        "    stack:\n",
-        "        - when: err\n",
-        "          action: stop\n",
-        "        - when: timing\n",
-        "          action: stop\n",
+        "    - when: err\n",
+        "      then: [stop]\n",
+        "    - when: timing\n",
+        "      then: [stop]\n",
         "loop:\n",
         "    while: current\n",
         "---\n\nbody\n",

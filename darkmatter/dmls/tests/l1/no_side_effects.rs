@@ -243,7 +243,7 @@ fn expression_validation_runs_no_actions_shells_file_effects_or_lazy_providers()
          title: Passive validation\n\
          gate: current.branch == 'main' && missing_gate_fn(title)\n\
          note: $(touch {frontmatter_shell})\n\
-         start:\n  stack:\n    - when: err\n      action:\n        - shell: touch {action_shell}\n        - set_frontmatter:\n            touched: true\n\
+         start:\n  - when: err\n    then:\n      - shell: touch {action_shell}\n      - set_frontmatter:\n          touched: true\n\
          finalize:\n  say: \"{{{{ current.os }}}}\"\n\
          ---\n\n\
          {{{{ current.branch }}}} {{{{ undeclared_prop }}}} {{{{ no_such_fn(title) }}}}\n\n\
@@ -288,7 +288,7 @@ fn expression_validation_runs_no_actions_shells_file_effects_or_lazy_providers()
         assert!(unknown.iter().any(|message| message.starts_with(&format!("`{name}`"))), "{name}: {diagnostics:#?}");
     }
     // Hover on each lazy read evaluates nothing either.
-    for (line, character) in [(4u32, 8u32), (14, 14), (17, 6)] {
+    for (line, character) in [(4u32, 8u32), (13, 14), (16, 6)] {
         let response = fixture.request(
             "textDocument/hover",
             json!({ "textDocument": { "uri": doc_uri.as_str() }, "position": { "line": line, "character": character } }),

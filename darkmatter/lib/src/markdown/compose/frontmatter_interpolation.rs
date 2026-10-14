@@ -32,8 +32,8 @@
 
 use super::context::catalog::CONTEXT_VARIABLE_DESCRIPTORS;
 use super::expression::{
-    EvaluationLookup, Expr, ExpressionError, ExpressionFinder, ResolutionContext, ResolvedBinding,
-    fm_namespace, parse,
+    EvaluationLookup, Expr, ExpressionError, ExpressionFinder, HostGlobals, ResolutionContext,
+    ResolvedBinding, fm_namespace, parse,
 };
 use super::interpolation::{
     Evaluator, ExpressionFailurePolicy, LocatedInterpolationError, convert_literals,
@@ -120,6 +120,17 @@ impl FrontmatterSeedState {
     }
 }
 
+impl FrontmatterSeedState {
+    fn host_globals(&self) -> Option<&super::expression::HostGlobals> {
+        self.resolution_context.as_ref()?.host_globals.as_ref()
+    }
+
+    /// The host global `path` reads, when its root is one.
+    fn host_global(&self, path: &str) -> Option<Result<ResolvedBinding, ExpressionError>> {
+        self.host_globals()?.resolve(path)
+    }
+}
+
 impl EvaluationLookup for FrontmatterSeedState {
     fn get(&self, path: &str) -> Option<Value> {
         // The reserved lazy root, intercepted before every other surface so no
@@ -152,6 +163,11 @@ impl EvaluationLookup for FrontmatterSeedState {
             return Some(self.context.env_value());
         }
 
+        // A declared host global, ahead of any same-named frontmatter key.
+        if let Some(global) = self.host_global(path) {
+            return global.ok().and_then(ResolvedBinding::into_value);
+        }
+
         // Dotted nested path in seed data
         if let Some(dot_pos) = path.find('.') {
             let root = &path[..dot_pos];
@@ -167,6 +183,8 @@ impl EvaluationLookup for FrontmatterSeedState {
     fn resolve(&self, path: &str) -> Result<ResolvedBinding, ExpressionError> {
         let value = if let Some(resolved) = self.current.resolve(path, &self.context) {
             resolved?
+        } else if let Some(global) = self.host_global(path) {
+            return global;
         } else {
             match path.strip_prefix("ctx.") {
                 Some(ctx_key) => self
@@ -180,8 +198,15 @@ impl EvaluationLookup for FrontmatterSeedState {
     }
 
     fn format_resolved(&self, path: &str, value: &Value) -> String {
+        if self.host_global(path).is_some() {
+            return super::expression::default_format(value);
+        }
         super::context::effective_state::coerce_named_object(path, value, &self.name_coercion_keys)
             .unwrap_or_else(|| super::expression::default_format(value))
+    }
+
+    fn binding_view(&self) -> Option<&super::expression::BindingView> {
+        self.host_globals().map(super::expression::HostGlobals::view)
     }
 
     fn resolution_context(&self) -> Option<ResolutionContext> {
@@ -664,7 +689,8 @@ pub(crate) enum FrontmatterPass<'a> {
 /// resolution pass (DM1). An excluded key is neither classified as seed nor
 /// templated — its value survives raw and is invisible to other keys'
 /// resolution. A non-excluded templated key that references an excluded key
-/// is rejected during dependency analysis (DM1a).
+/// is rejected during dependency analysis (DM1a), except through a bare read
+/// of a host global the resolution context declares under the same name.
 ///
 /// `resolution_context` enables the read-side expression functions
 /// (`file_exists`, `frontmatter`, `absolute`, `relative`, …) during both
@@ -919,10 +945,13 @@ fn interpolate_frontmatter_impl(
     // (excluded) key. Such a reference would inject a raw lifecycle subtree
     // into an early-bound value and make the result depend on a binding-time
     // accident. Reject with a clear error naming both keys before resolution.
+    // A bare read of a declared host global reads the global, never the
+    // deferred key of the same name, so it is exempt.
     if !exclude_keys.is_empty() {
+        let globals = resolution_context.as_ref().and_then(|context| context.host_globals.as_ref());
         for (composed_key, original) in &authored_templates {
             if let Some(deferred_key) =
-                collect_deferred_key_references(original, exclude_keys).into_iter().next()
+                collect_deferred_key_references(original, exclude_keys, globals).into_iter().next()
             {
                 return Err(LocatedFrontmatterError::from(MarkdownError::Transform(format!(
                     "frontmatter key '{composed_key}' references deferred key \
@@ -1525,6 +1554,13 @@ fn collect_frontmatter_key_refs(value: &Value, refs: &mut Vec<String>) {
 /// Bare `fm` is a snapshot of the currently-resolved values and contributes no
 /// dependency, avoiding all-key dependencies and self-cycles.
 fn collect_variable_roots(expr: &Expr, refs: &mut Vec<String>) {
+    collect_roots(expr, refs, None);
+}
+
+/// [`collect_variable_roots`], skipping a bare read of a declared host
+/// global: it reads the global, not the same-named frontmatter key. An
+/// explicit `fm.<name>` read is still a key reference.
+fn collect_roots(expr: &Expr, refs: &mut Vec<String>, globals: Option<&HostGlobals>) {
     match expr {
         Expr::Variable(path) => {
             if path.starts_with("ctx.") || path.starts_with("env.") {
@@ -1535,6 +1571,9 @@ fn collect_variable_roots(expr: &Expr, refs: &mut Vec<String>) {
             }
             let effective = fm_namespace::strip_fm_prefix(path);
             let root = effective.split('.').next().unwrap_or(effective);
+            if effective.len() == path.len() && globals.is_some_and(|globals| globals.declares(root)) {
+                return;
+            }
             if !root.is_empty() {
                 refs.push(root.to_string());
             }
@@ -1543,45 +1582,45 @@ fn collect_variable_roots(expr: &Expr, refs: &mut Vec<String>) {
         Expr::UnaryNot(inner)
         | Expr::UnaryMinus(inner)
         | Expr::Paren(inner)
-        | Expr::MemberAccess { base: inner, .. } => collect_variable_roots(inner, refs),
+        | Expr::MemberAccess { base: inner, .. } => collect_roots(inner, refs, globals),
         Expr::Fallback { primary, fallback } => {
-            collect_variable_roots(primary, refs);
-            collect_variable_roots(fallback, refs);
+            collect_roots(primary, refs, globals);
+            collect_roots(fallback, refs, globals);
         }
         Expr::Ternary {
             condition,
             then_branch,
             else_branch,
         } => {
-            collect_variable_roots(condition, refs);
-            collect_variable_roots(then_branch, refs);
-            collect_variable_roots(else_branch, refs);
+            collect_roots(condition, refs, globals);
+            collect_roots(then_branch, refs, globals);
+            collect_roots(else_branch, refs, globals);
         }
         Expr::Comparison { left, right, .. } | Expr::Binary { left, right, .. } => {
-            collect_variable_roots(left, refs);
-            collect_variable_roots(right, refs);
+            collect_roots(left, refs, globals);
+            collect_roots(right, refs, globals);
         }
         Expr::Index { base, index } => {
             if let Some(key) = fm_namespace::literal_index_key(base, index) {
                 refs.push(key.to_string());
                 return;
             }
-            collect_variable_roots(base, refs);
-            collect_variable_roots(index, refs);
+            collect_roots(base, refs, globals);
+            collect_roots(index, refs, globals);
         }
         Expr::FunctionCall { args, .. } => {
             for arg in args {
-                collect_variable_roots(arg, refs);
+                collect_roots(arg, refs, globals);
             }
         }
         Expr::ArrayLiteral(items) => {
             for item in items {
-                collect_variable_roots(item, refs);
+                collect_roots(item, refs, globals);
             }
         }
         Expr::ObjectLiteral(entries) => {
             for (_, value) in entries {
-                collect_variable_roots(value, refs);
+                collect_roots(value, refs, globals);
             }
         }
     }
@@ -1597,9 +1636,10 @@ fn collect_variable_roots(expr: &Expr, refs: &mut Vec<String>) {
 fn collect_deferred_key_references(
     value: &Value,
     exclude_keys: &HashSet<String>,
+    globals: Option<&HostGlobals>,
 ) -> Vec<String> {
     let mut roots = Vec::new();
-    collect_variable_roots_in_value(value, &mut roots);
+    collect_variable_roots_in_value(value, &mut roots, globals);
     let mut seen = HashSet::new();
     let mut matched = Vec::new();
     for root in &roots {
@@ -1610,22 +1650,22 @@ fn collect_deferred_key_references(
     matched
 }
 
-fn collect_variable_roots_in_value(value: &Value, refs: &mut Vec<String>) {
+fn collect_variable_roots_in_value(value: &Value, refs: &mut Vec<String>, globals: Option<&HostGlobals>) {
     match value {
         Value::String(s) => {
             for loc in ExpressionFinder::find_all_plain(s) {
                 let Ok(expr) = parse(&loc.expression) else {
                     continue;
                 };
-                collect_variable_roots(&expr, refs);
+                collect_roots(&expr, refs, globals);
             }
         }
         Value::Array(arr) => arr
             .iter()
-            .for_each(|v| collect_variable_roots_in_value(v, refs)),
+            .for_each(|v| collect_variable_roots_in_value(v, refs, globals)),
         Value::Object(obj) => obj
             .values()
-            .for_each(|v| collect_variable_roots_in_value(v, refs)),
+            .for_each(|v| collect_variable_roots_in_value(v, refs, globals)),
         _ => {}
     }
 }

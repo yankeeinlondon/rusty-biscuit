@@ -88,7 +88,8 @@ impl fmt::Display for CorpusExpression {
 
 /// Frontmatter keys Claudine evaluates as Darkmatter conditions at lifecycle
 /// time, per `darkmatter/docs/schemas/claudine-types.yaml`
-/// (`lifecycle-stack-item.when`, `loop-event.while`, `loop-event.until`).
+/// (`lifecycle-stack-item.when`, `lifecycle-branch-item.when`,
+/// `loop-event.while`, `loop-event.until`).
 ///
 /// This is not schema-typed discovery: that schema declares these keys as
 /// `string`, so [`frontmatter_expression_values`] cannot see them, and
@@ -383,7 +384,12 @@ fn condition_keys_match_the_shipped_claudine_schema() {
     let source = fs::read_to_string(&path).expect("claudine-types.yaml is readable");
     let document: serde_yaml_ng::Value = serde_yaml_ng::from_str(&source).expect("claudine-types.yaml is YAML");
     let types = &document["$schema"];
-    for (type_name, key) in [("lifecycle-stack-item", "when"), ("loop-event", "while"), ("loop-event", "until")] {
+    for (type_name, key) in [
+        ("lifecycle-stack-item", "when"),
+        ("lifecycle-branch-item", "when"),
+        ("loop-event", "while"),
+        ("loop-event", "until"),
+    ] {
         let description = types[type_name][key]
             .as_str()
             .unwrap_or_else(|| panic!("claudine-types.yaml no longer declares `{type_name}.{key}`"));
@@ -432,7 +438,7 @@ fn subtraction_and_literal_dashes_never_join() {
         "false - 1",
         "-5",
         "a * -1",
-        "_loop_count - 1",
+        "_iter_count - 1",
         // The second `-` cannot continue an identifier.
         "foo--bar",
         // Dashes inside string literals are never operators.
