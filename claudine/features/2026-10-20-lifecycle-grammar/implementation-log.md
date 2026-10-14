@@ -17,32 +17,24 @@ packages:
     - dmls
 human_review: false
 message_to_agent: |-
-    Phase 3 finished Waves 4 and 5. Read the log's "## Phase 3" section;
-    its departures are binding.
+    Phase 4 finished Wave 6. Read the log's "## Phase 4" section.
 
-    - Retry overlays are live. Departure from contract 8: the overlay is
-      consumed by `materialize_harness_prompt`, not by
-      `load_overlaid_source`, because a retried attempt reads its document
-      twice (shell preflight, then materialization) and both must see it.
-    - Docs Phase 4 must update are listed under "Docs Phase 4 must update"
-      in the log (flow-control-reference `with:` section with renamed error
-      names and `retry.with`, flow-control retry parameters, composition.md
-      overlay note, lifecycle.md ~line 863, pre-flight-checks.md
-      `RemovedGrammar` on discovery).
-    - `just test-l2` still fails until `cli/tests/level2/**` is migrated
-      (Wave 6); it was not run in Phase 3.
-    - The Darkmatter schema extension (`claudine-types.yaml`) now accepts
-      the new grammar loosely below two conditional levels; DMLS checks a
-      nested `{{ }}` in `when` only in the first two levels. Docs may say
-      so; the parser remains authoritative.
-    - The opt-in `shipped_prompt_route_drift` comparisons still disagree
-      until `prompts/_implement/implement-plan.md` is migrated and hashes
-      refreshed (Wave 6, AC11).
-    - New L1 files `compose_removed_grammar.rs` and
-      `compose_retry_overlay.rs` are `cfg(unix)` (sh stubs).
-    - `claudine/docs/providers/dispatch-inventory.json` was regenerated
-      (two new test-fixture `direct-ref` sites); regenerate again if
-      Phase 4 edits `cli/src` tests that name providers.
+    - `just test-l2` passes (282/282, tmux + WezTerm). The two
+      `level2_drain_ctrl_c_kitty` tests were NOT run: on macOS they open a
+      visible Kitty window. Record them as unrun, not passed.
+    - The opt-in prompts binary (`-F prompt-tests,test-fixtures --test
+      prompts`) is 63/71. The 8 failures predate this feature: seven assert
+      `prompts/_implement/implement-plan.md` content (`epilog: null`,
+      `_finish-before-exit.md`, the final-phase warning) that the author
+      removed in commit dddf5c988 before Phase 4; the router test looks for a
+      body heading in a 20-row stderr preview (body unchanged here). Report
+      them separately in Wave 8; do not fix them under this feature.
+    - New corpus test `internal_lifecycle_corpus_parses_under_current_grammar`
+      passes; it excludes `prompts/fix.md` by name (a draft using the
+      not-yet-existing `prep`/`interview` verbs).
+    - Route hashes were refreshed and pass without the update flag (AC11).
+    - `LifecycleRequeueEnqueueFailed` (unconstructed) keeps its variant name;
+      only its message now says `defer` (planned).
 source_files_during_phase_2:
     - claudine/cli/src/commands/compose/loop_run.rs
     - claudine/cli/src/commands/compose/prep.rs
@@ -283,6 +275,92 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_4:
+    - claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
+    - claudine/cli/tests/level2/level2_ac28_lifecycle_lazy_roots.rs
+    - claudine/cli/tests/level2/level2_ac2_worktree_compose.rs
+    - claudine/cli/tests/level2/level2_file_resolution_capture.rs
+    - claudine/cli/tests/level2/level2_initialize_generated_transclusion.rs
+    - claudine/cli/tests/level2/level2_lifecycle_action_forms.rs
+    - claudine/cli/tests/level2/level2_lifecycle_control.rs
+    - claudine/cli/tests/level2/level2_lifecycle_dispatch.rs
+    - claudine/cli/tests/level2/level2_lifecycle_loop.rs
+    - claudine/cli/tests/level2/level2_sequence_task_stream_capture.rs
+    - claudine/cli/tests/level2/level2_typed_error_render_capture.rs
+    - claudine/cli/tests/prompts/shipped_prompts.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/types.rs
+    - prompts/_add/add-context-variables.md
+    - prompts/_add/add-expressions.md
+    - prompts/_clarify/findings.md
+    - prompts/_implement/implement-feature.md
+    - prompts/_implement/implement-plan.md
+    - prompts/_implement/implement-review.md
+    - prompts/_implement/implement-suggestions.md
+    - prompts/_pr/diagnose.md
+    - prompts/_pr/dirty.md
+    - prompts/_pr/fix.md
+    - prompts/_pr/open.md
+    - prompts/_pr/push.md
+    - prompts/_pr/triage.md
+    - prompts/_prompt.md
+    - prompts/_reviews/cross-platform.md
+    - prompts/_reviews/dry.md
+    - prompts/_reviews/feature-review.md
+    - prompts/clarify.md
+    - prompts/commit.md
+    - prompts/format.md
+    - prompts/implement.md
+    - prompts/merge-conflicts.md
+    - prompts/plan.md
+    - prompts/pr.md
+    - prompts/review.md
+docs_updated_during_phase_4:
+    - claudine/docs/getting-started/index.md
+    - claudine/docs/research/_TEMPLATE.md
+    - claudine/docs/research/acp/_fleet.md
+    - claudine/docs/research/agent-cli/_fleet.md
+    - claudine/docs/research/agent-logging/_fleet.md
+    - claudine/docs/research/agent-models/_fleet.md
+    - claudine/docs/research/agent-permissions/_fleet.md
+    - claudine/docs/research/hooks/_fleet.md
+    - claudine/docs/research/local_runners/_fleet.md
+    - claudine/docs/research/mcp/_fleet.md
+    - claudine/docs/research/memory/_fleet.md
+    - claudine/docs/research/model-config/_fleet.md
+    - claudine/docs/research/non-interactive-sessions/_fleet.md
+    - claudine/docs/research/plugins/_fleet.md
+    - claudine/docs/research/reasoning-level/_fleet.md
+    - claudine/docs/research/resume/_fleet.md
+    - claudine/docs/research/signals/_fleet.md
+    - claudine/docs/research/skills/_fleet.md
+    - claudine/docs/research/slash-commands/_fleet.md
+    - claudine/docs/research/steering/_fleet.md
+    - claudine/docs/research/subagents/_fleet.md
+    - claudine/docs/research/system-prompt/_fleet.md
+    - claudine/docs/research/usage/_fleet.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/flow-control/flow-control.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/looping.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/frontmatter-properties.md
+    - claudine/docs/topics/pre-flight-checks.md
+    - claudine/docs/topics/signal-handling.md
+    - claudine/docs/topics/state-management/side-effects.md
+    - claudine/lib/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/claudine/research-contracts.md
+    - .claude/skills/claudine/timeline.md
+    - .claude/skills/claudine/validations-and-handlers.md
 ---
 # Implementation Log for 2026-10-20-lifecycle-grammar (5 phases)
 
@@ -1135,3 +1213,191 @@ Selected-branch execution and ordered audio tests pass; the editor extension
 loads and accepts the new grammar; parser and editor paths agree. The AC5
 transition and AC6 CLI tests pass; no retry overlay survives past its
 transition. Runtime, parser, and editor changes compile and test together.
+
+## Phase 4
+
+Phase 4 is Wave 6: authored prompt migration, the remaining fixture and L2
+migration, and current docs and skills. Five subagents with disjoint files ran
+in parallel (root prompts + route fixture + opt-in corpus test; research
+template and fleets; `cli/tests/level2/**`; the five flow-control pages; the
+other docs, READMEs, skills, and error wording). The orchestrator integrated
+and ran the gates.
+
+### Authored prompts (AC10, AC11)
+
+- **Copied from migrated frozen copies.** `prompts/{clarify,format,implement,plan,review}.md`
+  were byte-identical to their CLI frozen copies before Phase 2 migrated those
+  copies (checked against `b3f8197e2^`), and `prompts/_reviews/cross-platform.md`
+  to its lib frozen copy (`434c91b1d^`). Each shipped prompt is now its
+  migrated frozen copy, so the frozen fixtures still match their sources.
+- **Migrated by structure:** `_add/{add-context-variables,add-expressions}`,
+  `_clarify/findings`, `_implement/{implement-plan,implement-review,implement-suggestions,implement-feature}`,
+  `_pr/{diagnose,dirty,fix,open,push,triage}`, `_prompt`, `_reviews/{dry,feature-review}`,
+  `commit`, `merge-conflicts`, `pr`. Non-mechanical decisions:
+  - Former notification fields fired before the stack, so an event that had
+    both became a list with those fields first, in their old fixed order
+    (`implement-plan.md` `start` = `[message, when…]`, `success` =
+    `[success, message, say, when…]`; `_pr/dirty.md`'s `with:` overlay of
+    `commit.md`'s `success` = `[message, proxy]`).
+  - `_reviews/dry.md`: the two complementary guards (`file_exists(file)` /
+    `!file_exists(file)`) became one `when`/`then`/`else`; nothing between them
+    can create the file.
+  - `_reviews/feature-review.md`: its `finalize` had bare `stop` lines inside
+    mappings and was invalid YAML at HEAD; they are `stop: null` inside the
+    `when` bundles. In those bundles `info` now prints before `message`
+    (canonical order).
+  - `_implement/implement-plan.md`: `_loop_is_last` → `loop.is_last` in
+    `pass_icon` and the body `::block when=`.
+  - `_prompt.md` (the prompt-writing guide): its YAML example, "two action
+    forms" bullet, and loop-value names describe the new grammar.
+  - `_implement/implement-feature.md` (a draft outside the 24-file inventory)
+    had a `- stack:` item; migrated so the internal corpus parses.
+- `darkmatter/prompts/` and `claudine/prompts/` have no lifecycle grammar.
+- **Research Markdown:** `claudine/docs/research/_TEMPLATE.md` and the 21
+  remaining `*/_fleet.md` (agent-errors was done in Phase 2) use the
+  agent-errors pattern; guards, order, and mutations unchanged. Fleets whose
+  `failure:` was a notification-only dictionary stay root dictionaries.
+  Observed, not changed: `local_runners/_fleet.md` `initialize` ends with an
+  unguarded `stderr` + `skip`, so that event always skips — before and after
+  the migration. `claudine-gen` (250/250) and `agent_errors_fleet` (2/2) pass;
+  nothing else reads fleet lifecycle structure (`just research` passes the
+  path to `claudine sequence`).
+
+### Fixtures and tests
+
+- **Route fixture (AC11):** `cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md`
+  re-derived from the migrated shipped prompt minus seven side-effect lines
+  (the `say` in `success`, the four `shell` items in the dirty-files guards,
+  the `say` and `effect` in `failure`). The previous fixture had been derived
+  from a version older than the author's `dddf5c988` and still carried the
+  `epilog` sets and log-handoff guard; re-deriving drops them. Hashes refreshed
+  with `CLAUDINE_UPDATE_SHIPPED_PROMPT_HASHES=1 cargo nextest run -p claudine-cli -F prompt-tests,test-fixtures --test prompts shipped_prompt_route_drift::`
+  and re-run without the flag: 4/4.
+- **Opt-in corpus (AC10):** new `cli/tests/prompts/shipped_prompts.rs::internal_lifecycle_corpus_parses_under_current_grammar`
+  runs `parse_lifecycle_config` on every frontmatter `.md` under root,
+  Claudine, and Darkmatter `prompts/`, the research template, and every
+  research fleet; repository reads are literals joined onto `workspace_root()`
+  inside the test. `DRAFT_LIFECYCLE_PROMPTS` excludes `prompts/fix.md` by name:
+  it is a draft written in verbs that do not exist (`prep`, `interview`) and
+  says so; migrating its grammar cannot make it parse.
+- **L2 (`cli/tests/level2/**`):** 10 files migrated. No test deleted. Renamed
+  to authored-order tests because their subject (notification fields before
+  the stack) is gone:
+  `level2_lifecycle_success_communication_fires_in_authored_order`,
+  `level2_lifecycle_blocked_communication_fires_in_authored_order`,
+  `…_success_error_downgrades_to_failure_preserving_earlier_communication`,
+  `level2_lifecycle_success_communication_fires_beside_a_side_effect`.
+  AC25 `proxy … with:` overlays that tried to install an `initialize` shell are
+  now `{initialize: [{shell: …}]}`, still refused. Expected paths in
+  `level2_typed_error_render_capture.rs` are now `initialize[*].proxy` /
+  `failure[*].proxy`. `level2_ac28_lifecycle_lazy_roots.rs` loop items moved
+  under `gate:`. Where YAML was a `\`-continued Rust string, the rewrite puts
+  one YAML line per source line (large diff in `level2_lifecycle_control.rs`).
+- **L1 residue audited, all intentional:** `loop_gate_ambient.rs` (negative
+  `RemovedGrammar` tests and the "text is data" test),
+  `prose_escape_guard.rs:7` (prose), `authored_text_rendering.rs` (`_loop_countx`
+  is an unrelated property), `error_guards/source_scan.rs` and
+  `cli/src/commands/wrap/sequence/task_run.rs` (Rust `stack` fields).
+- The default L1 test that reads the route fixture
+  (`compose_initialize_acceptance::`) passes 24/24. Dispatch inventory needed
+  no regeneration (it scans only `lib/src`/`cli/src`).
+
+### Docs and skills (AC13, AC14)
+
+- **Flow-control pages** (`lifecycle.md` largely rewritten, `flow-control.md`,
+  `flow-control-reference.md`, `looping.md`, `sequences.md`): list/dictionary
+  events, `when`/`then`/`else` to five levels, canonical order, list-local
+  directive placement, both `no_error` homes, branch validation vs selected
+  execution, a removed-spellings table, audio in list position and message
+  delivery draining, `loop.*` (with `fm.loop`, `claudine.outside-loop`, and
+  `_loop_*` as a hard error; `state.loop` and the alias promise are gone), the
+  gate on every pass, `retry.with` (a "Retry overlays" section with every
+  Phase 3 rule), the `LifecycleWith*` names, `resume` takes no `with`,
+  planned `break` with `code`, planned `defer`. A Mermaid diagram in
+  `lifecycle.md` shows branch selection, a failed guard never choosing `else`,
+  and a directive ending the event. Every `yaml`/`md` block was run through
+  `claudine compose --dry-run --claude` (private `HOME`, `PLAYA_DRY_RUN=1`,
+  private spool); only intended-negative examples fail. The executed example
+  (`loop_gate_ambient::lifecycle_reference_loop_example_runs_as_written`) and
+  Darkmatter's `current_root_documentation_contract` pass.
+- **Other pages:** `getting-started/index.md`, `composition.md` (retry overlay
+  over the retained proxy overlay), `frontmatter-properties.md` (`loop.*`
+  table, communication verbs), `pre-flight-checks.md` (`RemovedGrammar` with
+  `path: render` during discovery), `signal-handling.md` (the drop safety net
+  as built), `state-management/side-effects.md`. `claudine/lib/README.md`
+  gained a compatibility note (the README's existing convention for API
+  removals).
+- **Skills:** `SKILL.md`, `architecture.md` (new "Lifecycle grammar"
+  subsection), `cli-commands.md`, `validations-and-handlers.md`,
+  `research-contracts.md`, and one new `timeline.md` entry (existing entries
+  untouched).
+- **Drift found and corrected (code wins):**
+  - looping docs listed `state`, `state.loop`, `state.seq` as reserved `set`
+    names; `SET_ACTION_BLOCKLIST` reserves `loop`, `replace`, and the `_loop_*`
+    names;
+  - `loop:` also accepts `on_rate_limit` (row added);
+  - TTS config lives in `~/.claudine/config.json`, not `claudine.toml`;
+  - "Empty String Normalization" described deleted behavior (removed);
+  - `with:` beside a short-form directive is `LifecycleUnknownVerb`, not
+    `LifecycleStackAmbiguous`.
+- **Source wording** (`lib/src/composition/error/{mod.rs,render/lifecycle.rs}`,
+  `lifecycle/mod.rs`, `composition/types.rs`): `LifecycleDeferNotImplemented`
+  already said `defer`; the stale "requeue" text was in the
+  `LifecycleSetupPhaseRecoveryUnsupported` doc and in the unconstructed
+  `LifecycleRequeueEnqueueFailed` message, now "lifecycle `defer` …" and marked
+  planned (variant name kept). Doc comments and messages that still described
+  the `{action: verb}` form, notification properties, or "top-level fires
+  before the stack" now describe short/long form and stacks. No test asserted
+  the old texts.
+
+### Gates (macOS, this host)
+
+| Gate | Result |
+| --- | --- |
+| `just test` in `claudine/` | 8868 run, 8868 passed, 9 skipped (standing recipe skips) |
+| `just lint` in `claudine/` (incl. `lint-lifecycle-doc-facets`) | passed (linker `__eh_frame` warning is environmental) |
+| `just test-l2` in `claudine/` | claudine-cli 282/282, claudine-gen 3/3; backends tmux (260) and WezTerm (20, off-screen `biscuit-bg` workspace); 0 skips |
+| `just test` in `darkmatter/` | 9950 run, 9950 passed, 10 skipped (docs read by its contract tests) |
+| opt-in `cargo nextest run -p claudine-cli -F prompt-tests,test-fixtures --test prompts` | 71 run, 63 passed, 8 failed (pre-existing, below) |
+| L2 shipped-prompt rows with `prompt-tests` (`level2_lifecycle_shipped_implement_route_matches_direct_run`, `level2_shipped_implement_plan_*_commit_message_*`) | passed |
+
+**Not run:** the two `level2_drain_ctrl_c_kitty.rs` tests (on macOS they
+open a visible Kitty window; the no-focus rule forbids it). They are unrun,
+not passing. No other OS: Phase 4 changes Markdown, test YAML strings, docs,
+and error wording, with no `cfg`, path, or process behavior.
+
+**Pre-existing opt-in failures (not caused by this feature):** seven tests
+assert content of `prompts/_implement/implement-plan.md` that the author
+removed in `dddf5c988` before this phase (HEAD's prompt contains none of
+`epilog`, `_finish-before-exit`, "Final Phase"):
+`shipped_prompt_corpus_parses_frontmatter`, `shipped_prompts_use_mapping_only_set`,
+`shipped_implement_prompts_transclude_finish_before_exit`,
+`shipped_implement_plan_real_artifact_executes_mapping_set_before_provider_launch`,
+`shipped_implement_plan_final_phase_delivers_completion_flags`,
+`shipped_implement_plan_warns_when_final_phase_exits_without_flags`,
+`shipped_prompt_contract::shipped_implement_plan_launches_without_a_sibling_spec`.
+The eighth, `shipped_implement_router_prefers_an_unimplemented_review_over_the_completed_plan`,
+looks for the body heading "Implement Review Suggestions" in a 20-row stderr
+preview filled by the rule blocks; Phase 4 changed only that prompt's
+frontmatter, and the routing itself ran correctly. Grammar evidence in the same
+run: the new corpus test, all four route-drift guards, and all 13
+`pr_flow_rehearsal` tests pass.
+
+### Residue (AC16 pattern, current files)
+
+Remaining hits outside snapshots: docs that name the removed spellings
+(`lifecycle.md` removed-spellings table and validation row, `looping.md`,
+`frontmatter-properties.md` "Replaces `_loop_*`" notes, `pre-flight-checks.md`,
+skill `architecture.md`), negative tests (`grammar.rs`,
+`compose_removed_grammar.rs`, `removed_loop_reads.rs`, `loop_gate_ambient.rs`,
+`bindings/tests.rs`, `expression/tests.rs`), `reserved.rs`/`bindings.rs`/`parse.rs`
+retired-name constants, Rust `stack` fields, provider hook tables
+(`research/hooks/*.md`), and the out-of-scope draft `docs/schemas/partials/stack.yaml`.
+The Wave 8 audit re-takes this list.
+
+### Checkpoint
+
+Migrated artifacts parse with zero grammar errors (the opt-in corpus test);
+refreshed hashes pass without update mode; `lint-lifecycle-doc-facets` passes;
+frozen fixtures still prove their behavior (`just test` green). Wave 6 is
+complete.

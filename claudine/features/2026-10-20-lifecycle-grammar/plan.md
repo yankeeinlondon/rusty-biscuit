@@ -256,6 +256,92 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_4:
+    - claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
+    - claudine/cli/tests/level2/level2_ac28_lifecycle_lazy_roots.rs
+    - claudine/cli/tests/level2/level2_ac2_worktree_compose.rs
+    - claudine/cli/tests/level2/level2_file_resolution_capture.rs
+    - claudine/cli/tests/level2/level2_initialize_generated_transclusion.rs
+    - claudine/cli/tests/level2/level2_lifecycle_action_forms.rs
+    - claudine/cli/tests/level2/level2_lifecycle_control.rs
+    - claudine/cli/tests/level2/level2_lifecycle_dispatch.rs
+    - claudine/cli/tests/level2/level2_lifecycle_loop.rs
+    - claudine/cli/tests/level2/level2_sequence_task_stream_capture.rs
+    - claudine/cli/tests/level2/level2_typed_error_render_capture.rs
+    - claudine/cli/tests/prompts/shipped_prompts.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/types.rs
+    - prompts/_add/add-context-variables.md
+    - prompts/_add/add-expressions.md
+    - prompts/_clarify/findings.md
+    - prompts/_implement/implement-feature.md
+    - prompts/_implement/implement-plan.md
+    - prompts/_implement/implement-review.md
+    - prompts/_implement/implement-suggestions.md
+    - prompts/_pr/diagnose.md
+    - prompts/_pr/dirty.md
+    - prompts/_pr/fix.md
+    - prompts/_pr/open.md
+    - prompts/_pr/push.md
+    - prompts/_pr/triage.md
+    - prompts/_prompt.md
+    - prompts/_reviews/cross-platform.md
+    - prompts/_reviews/dry.md
+    - prompts/_reviews/feature-review.md
+    - prompts/clarify.md
+    - prompts/commit.md
+    - prompts/format.md
+    - prompts/implement.md
+    - prompts/merge-conflicts.md
+    - prompts/plan.md
+    - prompts/pr.md
+    - prompts/review.md
+docs_updated_during_phase_4:
+    - claudine/docs/getting-started/index.md
+    - claudine/docs/research/_TEMPLATE.md
+    - claudine/docs/research/acp/_fleet.md
+    - claudine/docs/research/agent-cli/_fleet.md
+    - claudine/docs/research/agent-logging/_fleet.md
+    - claudine/docs/research/agent-models/_fleet.md
+    - claudine/docs/research/agent-permissions/_fleet.md
+    - claudine/docs/research/hooks/_fleet.md
+    - claudine/docs/research/local_runners/_fleet.md
+    - claudine/docs/research/mcp/_fleet.md
+    - claudine/docs/research/memory/_fleet.md
+    - claudine/docs/research/model-config/_fleet.md
+    - claudine/docs/research/non-interactive-sessions/_fleet.md
+    - claudine/docs/research/plugins/_fleet.md
+    - claudine/docs/research/reasoning-level/_fleet.md
+    - claudine/docs/research/resume/_fleet.md
+    - claudine/docs/research/signals/_fleet.md
+    - claudine/docs/research/skills/_fleet.md
+    - claudine/docs/research/slash-commands/_fleet.md
+    - claudine/docs/research/steering/_fleet.md
+    - claudine/docs/research/subagents/_fleet.md
+    - claudine/docs/research/system-prompt/_fleet.md
+    - claudine/docs/research/usage/_fleet.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/flow-control/flow-control.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/looping.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/frontmatter-properties.md
+    - claudine/docs/topics/pre-flight-checks.md
+    - claudine/docs/topics/signal-handling.md
+    - claudine/docs/topics/state-management/side-effects.md
+    - claudine/lib/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/claudine/research-contracts.md
+    - .claude/skills/claudine/timeline.md
+    - .claude/skills/claudine/validations-and-handlers.md
 ---
 # Lifecycle Grammar Implementation Plan
 
@@ -360,15 +446,15 @@ Wave numbers are unique across the plan. A wave is a dependency step; tasks mark
 
 ### Wave 6 — Artifact migration (parallel)
 
-- [ ] **Migrate authored prompts** — **parallel**, live Markdown artifact owner
+- [x] **Migrate authored prompts** — **parallel**, live Markdown artifact owner
   - Rewrite affected root `prompts/`, `claudine/prompts/`, `darkmatter/prompts/`, research `_TEMPLATE.md`, and every research `_fleet.md` found in Wave 1. Preserve behavior, guard selection, action order, mutations, and transition intent; inspect structure rather than replacing strings blindly.
   - Convert `_prompt.md` and `_implement/implement-plan.md` loop expressions in the same pass as their lifecycle grammar. Keep internal live-prompt tests opt-in and out of default L1/CI.
-- [ ] **Migrate frozen fixtures** — **parallel**, Claudine test/fixture owner
+- [x] **Migrate frozen fixtures** — **parallel**, Claudine test/fixture owner
   - Update lib/CLI frozen prompts, `nested_span_regression/commit.md`, and the shipped implementation-route fixture, preserving each tested behavior. Migrate remaining library, CLI L1, sequence-task, and L2 authored grammar fixtures; retain negative tests for removed spellings.
   - Extend `cli/tests/prompts/shipped_prompts.rs` to parse every internal `.md` and research fleet/template; extend default frozen-artifact coverage separately. Use resolvable repository-read spellings from rust-testing and register new tests in existing consolidated targets.
   - Keep a representative hermetic CLI case recording branch-specific effects in order and proving the other branch performs no work. Use `CliProcessFixture` and existing recorder seams; real provider binaries/home/audio must remain unreachable.
   - After the authored-prompt owner finishes the source prompt and the route fixture delta is reviewed, refresh its pinned hashes from the repository root with `CLAUDINE_UPDATE_SHIPPED_PROMPT_HASHES=1 cargo nextest run -p claudine-cli -F prompt-tests,test-fixtures --test prompts shipped_prompt_route_drift::`. Rerun without the update flag to prove the final pin (AC10/AC11).
-- [ ] **Update current guidance** — **parallel**, docs/skills owner
+- [x] **Update current guidance** — **parallel**, docs/skills owner
   - Update Claudine READMEs and lifecycle, flow-control, flow-control-reference, looping, sequences, side-effects, frontmatter-properties, and getting-started pages to describe actual grammar and `loop.*`, with compact examples. Task setup/teardown remain stacks.
   - Remove looping's `state.loop` and one-release alias claims. Document canonical dictionary order, branch validation versus selected execution, both `no_error` homes, retry overlay lifetime/precedence, audio publication completion, and delivery tracking.
   - Correct planned `break` parameter documentation to include `code`, and update stale defer diagnostic wording from "requeue" while retaining its planned status. Mark all unbuilt behavior as planned; topic docs must not refer to feature/fix snapshots.
@@ -383,10 +469,10 @@ The live-prompt owner owns research/template Markdown; the docs owner owns getti
 
 ### Wave 7 — Scoped verification (parallel)
 
-- [ ] **Verify Claudine behavior** — **parallel**, Claudine validation owner
+- [x] **Verify Claudine behavior** — **parallel**, Claudine validation owner
   - Run `just test`, `just test-l2`, and `just lint` in `claudine/`, including `just lint-lifecycle-doc-facets`. Use recipe-managed L2 harnesses with no focus acquisition; record backend identities and any skips rather than counting skipped coverage as execution.
   - Confirm AC1–AC9/AC17 results, removed-diagnostic paths, branch approval and initialization shell rejection, audio isolation, message draining, and retry/resume/proxy invariants. Run required compile checks for affected declared target kinds through existing recipes/plans.
-- [ ] **Verify Darkmatter behavior** — **parallel**, Darkmatter validation owner
+- [x] **Verify Darkmatter behavior** — **parallel**, Darkmatter validation owner
   - Run `just test` and `just lint` in `darkmatter/`; the existing recipe includes DMLS. Confirm extension loading/inventory, classifier/pointer regressions, identifier behavior, and mapping corpus evidence (AC12).
   - Keep any re-bless reason and before/after diagnostic interpretation available to reviewers; missing validation cannot be accepted as a snapshot update.
 
