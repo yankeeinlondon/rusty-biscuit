@@ -153,7 +153,7 @@ fn compose_preflight_approvals_resolves_repository_sigils_from_a_nested_document
             .compose_preflight_approvals(&crate::request_support::request(options.clone()), Some(Arc::new(AllowAll)))
             .unwrap_or_else(|error| panic!("{row}: approvals failed: {error}"));
         let expected: HashSet<String> = EXPECTED_COMMANDS.iter().map(ToString::to_string).collect();
-        assert_eq!(approvals.pre_approved_commands, expected, "{row}");
+        assert_eq!(approvals.pre_approved_commands, expected.into(), "{row}");
         assert_eq!(approvals.stats.total_discovered, 3, "{row}");
     }
 }

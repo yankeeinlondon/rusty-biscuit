@@ -152,7 +152,7 @@ impl Repo {
             .map_err(|error| error.to_string())?
             .approval_set()
             .into_iter()
-            .collect();
+            .collect::<std::collections::HashSet<String>>();
         let (composed, _report) = document
             .compose_with(&crate::request_support::request(options.with_pre_approved_commands(approved)))
             .map_err(|error: MarkdownError| error.to_string())?;
@@ -429,7 +429,7 @@ fn a_transcluded_document_reads_a_result_and_shares_the_cache() {
         .with_source_file(&path)
         .with_shell_policy_root(repo.path())
         .with_shell_timeout(std::time::Duration::from_secs(60));
-    let approved = document.compose_preflight(&crate::request_support::request(options.clone())).unwrap().approval_set().into_iter().collect();
+    let approved = document.compose_preflight(&crate::request_support::request(options.clone())).unwrap().approval_set().into_iter().collect::<std::collections::HashSet<String>>();
     let (composed, _) = document.compose_with(&crate::request_support::request(options.with_pre_approved_commands(approved))).unwrap();
     assert!(composed.content().contains("clean=true"), "{}", composed.content());
     assert_eq!(repo.runs("included"), 1, "the root and the partial share one run");

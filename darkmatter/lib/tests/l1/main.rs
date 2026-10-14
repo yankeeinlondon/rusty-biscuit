@@ -147,6 +147,8 @@ mod set_overlay_integration;
 mod shell_block_integration;
 mod shell_expansion_coordinates;
 mod shell_result_values;
+mod shell_template_policy;
+mod shell_template_discovery;
 mod preflight_child_state_parity;
 mod preflight_repository_sigils;
 mod shell_probe_preflight;
