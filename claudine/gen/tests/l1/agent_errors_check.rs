@@ -392,7 +392,6 @@ fn fleet_clean_action_requires_explicit_clean_status() {
         .frontmatter()
         .as_map()
         .get("success")
-        .and_then(|value| value.get("stack"))
         .and_then(serde_json::Value::as_array)
         .expect("fleet has a success stack");
     let conditions: Vec<&str> = stack
