@@ -388,8 +388,9 @@ fn merge_overrides(
 
 /// Emit a user-visible stderr warning per dropped optional property.
 ///
-/// Schema validation silently elides optional properties whose value
-/// fails validation so the run can continue; without a CLI-level warning
+/// Schema validation silently elides optional application properties whose
+/// value fails validation so the run can continue (an invalid Claudine
+/// control fails the launch instead); without a CLI-level warning
 /// users never learn that their supplied value was removed. This
 /// surfaces each drop via [`log::warn`] (yellow, always-on) so the
 /// behavior is auditable on every run.
