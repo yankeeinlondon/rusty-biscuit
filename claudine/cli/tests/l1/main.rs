@@ -136,6 +136,7 @@ mod preflight_execution_parity;
 #[cfg(unix)]
 mod lifecycle_mixed_span_validation;
 mod lifecycle_set_shell_values;
+mod shell_missing_values;
 mod literal_glob_hint;
 #[cfg(unix)]
 mod prompt_reporting;
