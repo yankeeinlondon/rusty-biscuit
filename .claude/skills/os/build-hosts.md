@@ -163,7 +163,18 @@ error, reported as a failing leg. Narrow by test-name filter alone
 The `just` recipe re-splits its arguments, so a filterset containing spaces
 or parentheses (`-E 'binary(a) | binary(b)'`) dies with a shell syntax error
 before any host is contacted. Call `./scripts/cross-check.sh` directly for a
-filtered run; it passes the quoted filterset through intact.
+filtered run; it passes the quoted filterset through intact. On a Windows
+archive leg it still dies: the remote `_expected_manifest` and `_test`
+recipes re-split it the same way (`syntax error near unexpected token '('`,
+2026-10-13). Use a positional test-name filter there.
+
+Suites that run Cargo themselves (trybuild compile-fail, fresh-output
+compiles) are `slow_` and absent from archives, and a crate outside the
+workspace has no archive at all. Run them in native mode, where a build flag
+and the arguments go to `cargo nextest run -p <package>`:
+`./scripts/cross-check.sh --os all schematic-runtime --all-features --test l1 -E 'test(/(^|::)slow_/)'`,
+or `… schematic-schema --all-features --manifest-path schematic/schema/Cargo.toml`
+for the generated crate.
 
 Two runs from the same checkout share a clone. Each run holds that clone's
 lock (`<clone dir>/.cross-check.lock`, an atomically created directory with an

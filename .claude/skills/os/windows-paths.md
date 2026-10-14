@@ -41,6 +41,13 @@ with a path in the message. Processes and the environment are in
    raw `canonicalize`, so `md validate refs --graph mermaid` node ids and
    `md edit` output carried `\\?\C:` on Windows only (found 2026-10-02 by
    the `md` route parity matrix). Both now use `canonicalize_simplified`.
+   trybuild (1.0.122, unchanged upstream) canonicalizes each path dependency
+   this way, so on Windows its `$<DEPENDENCY>` rewrite never matches the
+   `C:/…` path rustc prints: a `.stderr` snapshot naming another crate's
+   source (`$SCHEMATIC_RUNTIME/src/…`) keeps the raw path and its line
+   numbers and mismatches there only. `$DIR` (the crate under test) is
+   unaffected. `schematic/schema/tests/compile_fail.rs` therefore leaves those
+   cases out on Windows (found 2026-10-13 on `build-win-native`).
    `reflink-copy` reports an unsupported block clone on NTFS as an HRESULT
    shaped `io::Error` (`0x80070001`, "Incorrect function"), not raw error 1.
    The worktree copy fallback recognizes that form and byte-copies instead.
