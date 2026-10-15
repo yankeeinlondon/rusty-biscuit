@@ -769,7 +769,7 @@ let api = RestApi {
             response: ApiResponse::json_type("HealthStatus"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "GetVersion".to_string(),
@@ -780,7 +780,7 @@ let api = RestApi {
             response: ApiResponse::Text,
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
     ],
     cross_origin: CrossOrigin::default(),
@@ -820,7 +820,7 @@ let api = RestApi {
             response: ApiResponse::json_type("ListUsersResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         // Get a specific user by ID (path parameter)
         Endpoint {
@@ -832,7 +832,7 @@ let api = RestApi {
             response: ApiResponse::json_type("User"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         // Create a new user (with JSON request body)
         Endpoint {
@@ -844,7 +844,7 @@ let api = RestApi {
             response: ApiResponse::json_type("User"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         // Update a user
         Endpoint {
@@ -856,7 +856,7 @@ let api = RestApi {
             response: ApiResponse::json_type("User"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         // Delete a user
         Endpoint {
@@ -868,7 +868,7 @@ let api = RestApi {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
     ],
     cross_origin: CrossOrigin::default(),
@@ -909,7 +909,7 @@ let api = RestApi {
             response: ApiResponse::json_type("FileList"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         // Upload file - multipart form-data
         Endpoint {
@@ -925,7 +925,7 @@ let api = RestApi {
             response: ApiResponse::json_type("FileMetadata"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         // Download file - returns binary data
         Endpoint {
@@ -937,7 +937,7 @@ let api = RestApi {
             response: ApiResponse::Binary,
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         // Get file metadata - returns JSON
         Endpoint {
@@ -949,7 +949,7 @@ let api = RestApi {
             response: ApiResponse::json_type("FileMetadata"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         // Delete file - returns empty
         Endpoint {
@@ -961,7 +961,7 @@ let api = RestApi {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
     ],
     cross_origin: CrossOrigin::default(),
@@ -1351,4 +1351,4 @@ for authoring, container, and module-group assembly rules.
 
 AGPL-3.0-only
 
-REST required-fact authoring is covered in [definition builders](../docs/definition-builders.md).
+REST required-fact authoring, endpoint origin policies, secret markers, parameter locations and pager adoption are covered in [definition builders](../docs/definition-builders.md).

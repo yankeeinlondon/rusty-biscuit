@@ -180,7 +180,7 @@ pub mod params {
     }
 
     #[derive(Debug, Clone)]
-    pub struct ParamDef {
+    pub struct ParamDef { rust_name: None, secret: false, pager_managed: false,
         pub name: String,
         pub required: bool,
         pub description: Option<String>,

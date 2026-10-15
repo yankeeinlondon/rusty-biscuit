@@ -824,7 +824,7 @@ Path parameters use `{param}` syntax and are automatically extracted:
 // API definition
 Endpoint {
     path: "/threads/{thread_id}/messages/{message_id}",
-    oauth_scopes: None,
+    oauth_scopes: None, cross_origin: None,
     ...
 }
 
@@ -886,7 +886,7 @@ Endpoints with request bodies get a `body` field and a `new()` constructor:
 // API definition
 Endpoint {
     request: Some(ApiRequest::json_type("CreateCompletionBody")),
-    oauth_scopes: None,
+    oauth_scopes: None, cross_origin: None,
     ...
 }
 

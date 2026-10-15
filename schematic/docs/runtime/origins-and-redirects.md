@@ -130,9 +130,9 @@ even though nothing has been sent yet:
 
 - a refusal's `TransportError` reports that endpoint's id and HTTP method,
   rather than an invented one; and
-- the answer can depend on the endpoint once API definitions can set an
-  origin policy per endpoint (**planned**); today every endpoint of an API
-  shares the API's policy.
+- the answer uses the endpoint's replacement policy when present, otherwise
+  the API policy. For example, an upload endpoint can allow an exact storage
+  origin while a sibling retains `same_origin`.
 
 A same-origin URL passes under every policy, including `deny`. A pager
 calls `check_link` with its listing request's type on every next-page link,

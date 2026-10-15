@@ -241,7 +241,7 @@ match gh.list_releases("o", "r").pager().page_limit(5).collect_all().await {
 | `RepeatedContinuation` | a continuation came back that this traversal already sent, a page made no progress, or an empty page claimed more |
 | `HttpError` | a page's response is an error status, was cut off, was refused at a redirect, failed a hook, or is malformed |
 | `DeadlineExceeded` | the shared deadline expired before a page's response head |
-| `CrossOriginRejected` | a next link points to an origin the API's policy refuses |
+| `CrossOriginRejected` | a next link points to an origin the endpoint's effective policy refuses |
 | `InvalidContinuation` | a continuation, end signal, or total was missing where required, or unusable |
 | `InvalidArgument` | a page size, start position, or page limit was refused before sending |
 | `TransportError` | any other failure before a response arrived, including a failed redirect hop |

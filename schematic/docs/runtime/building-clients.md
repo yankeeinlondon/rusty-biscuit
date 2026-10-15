@@ -213,4 +213,9 @@ let client = Client::<ExampleApi>::new(definition).build()?;
 ```
 
 `ApiDefinition::cross_origin(policy)` sets the API's own policy (default
-`same_origin`); callers can only tighten it afterward.
+`same_origin`). `ApiDefinition::endpoint_cross_origin("Upload", policy)`
+replaces it for requests whose `EndpointSpec::ENDPOINT_ID` is `Upload`,
+including redirects and followed pagination links. Generated definitions emit
+this from the endpoint builder's `cross_origin` setting. Caller policies must
+tighten the API policy and every authored endpoint policy; an incompatible
+setting fails client build. Endpoints without overrides retain the API policy.
