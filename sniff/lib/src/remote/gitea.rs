@@ -155,7 +155,7 @@ impl GiteaRemote {
         count_api_request("tree");
         let response = REPLIES.value(
             self.client
-                .get_git_tree_recursive(owner, repo, default_branch)
+                .get_git_tree(owner, repo, default_branch).recursive(true)
                 .await,
         )?;
 
@@ -163,11 +163,11 @@ impl GiteaRemote {
         if tree.truncated {
             let mut recovered = Vec::new();
             for prefix in CONTINUATION_PREFIXES {
-                let call = self.client.get_git_tree_recursive(
+                let call = self.client.get_git_tree(
                     owner,
                     repo,
                     format!("{default_branch}:{prefix}"),
-                );
+                ).recursive(true);
                 count_api_request("tree_continuation");
                 let Ok(response) = call.await else {
                     continue;

@@ -244,7 +244,8 @@ impl RemoteRepoProvider for GitLabRemote {
         count_api_request("contents");
         let file = REPLIES.value(
             self.client
-                .get_repository_file(project_path(owner, repo), path, "HEAD")
+                .get_repository_file(project_path(owner, repo), path)
+                .git_ref("HEAD".to_string())
                 .await,
         )?;
 
