@@ -1,6 +1,5 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use biscuit_terminal::discovery::detection::ImageSupport;
 use biscuit_terminal::terminal::Terminal;
@@ -25,7 +24,7 @@ fn run_pipeline(verbose: bool, perf: bool, image: ImageSupport, terminal: &Termi
         .expect("run_pipeline should succeed")
 }
 
-/// `git` calls only the graph's history read makes.
+/// History questions only the graph asks ([`worktree::questions`]).
 fn graph_calls(calls: &[Vec<String>]) -> usize {
     recorder::count_matching(calls, |args| {
         args.iter().any(|arg| arg == "--is-shallow-repository") || args.first().map(String::as_str) == Some("log")
@@ -33,7 +32,7 @@ fn graph_calls(calls: &[Vec<String>]) -> usize {
 }
 
 fn run_git(repo: &Path, args: &[&str]) {
-    let status = Command::new("git")
+    let status = worktree::git::command()
         .current_dir(repo)
         .args(args)
         .status()
@@ -258,11 +257,11 @@ fn run_pipeline_gathers_the_graph_on_a_narrow_image_terminal() {
     let _dir = DirGuard::enter(repo.path());
     let narrow = Terminal::builder().width(40).build();
 
-    recorder::start_recording();
+    worktree::questions::start_recording();
     run_pipeline(false, false, ImageSupport::Kitty, &narrow);
-    let calls = recorder::finish_recording();
+    let asked = worktree::questions::finish_recording();
 
-    assert!(graph_calls(&calls) > 0, "the graph's history is read: {calls:?}");
+    assert!(graph_calls(&asked) > 0, "the graph's history is read: {asked:?}");
 }
 
 #[test]
@@ -273,10 +272,12 @@ fn run_pipeline_without_image_support_or_verbose_gathers_no_graph() {
     let terminal = Terminal::builder().width(120).build();
 
     recorder::start_recording();
+    worktree::questions::start_recording();
     run_pipeline(false, false, ImageSupport::None, &terminal);
+    let asked = worktree::questions::finish_recording();
     let calls = recorder::finish_recording();
 
-    assert_eq!(graph_calls(&calls), 0, "got {calls:?}");
+    assert_eq!(graph_calls(&asked), 0, "got {asked:?}");
     let merge_bases = recorder::count_matching(&calls, |args| args.first().map(String::as_str) == Some("merge-base"));
     assert_eq!(merge_bases, 0, "got {calls:?}");
 }
@@ -296,9 +297,11 @@ fn perf_subprocess_counts_meet_sla() {
     let _ = list_worktrees().expect("list_worktrees should succeed");
 
     recorder::start_recording();
+    worktree::questions::start_recording();
     let t0 = Instant::now();
     let _ = list_worktrees();
     let list_elapsed = t0.elapsed();
+    let list_asked = worktree::questions::finish_recording();
     let list_calls = recorder::finish_recording();
 
     let count = |calls: &[Vec<String>], command: &str| {
@@ -306,7 +309,8 @@ fn perf_subprocess_counts_meet_sla() {
     };
     // The default branch is read in-process, never through `symbolic-ref`.
     assert_eq!(count(&list_calls, "symbolic-ref"), 0, "got {list_calls:?}");
-    assert_eq!(count(&list_calls, "for-each-ref"), 1, "got {list_calls:?}");
+    assert_eq!(count(&list_asked, "for-each-ref"), 1, "got {list_asked:?}");
+    assert_eq!(count(&list_calls, "for-each-ref"), 0, "the refs are read in-process, got {list_calls:?}");
     eprintln!("list_worktrees: {list_elapsed:.2?}, {} git calls", list_calls.len());
 
     // Base view from the main checkout: one shallow check; per unmerged
@@ -314,14 +318,17 @@ fn perf_subprocess_counts_meet_sla() {
     // default one) and one merge base; one log for the default lane plus one
     // per branch. Each branch lane's boundary is classified too, which costs
     // one more `--is-ancestor` and one first-parent chain (`rev-list`) when
-    // the boundary is an ordinary fork.
+    // the boundary is an ordinary fork. Every one is answered in-process.
     let parsed = parse_worktree_state().expect("parse");
     let input = worktree::graph::GatherInput::from_list(&parsed, parsed.refs());
     recorder::start_recording();
+    worktree::questions::start_recording();
     let t0 = Instant::now();
     let (graph, verbose) = worktree::graph::gather(&input, true, false);
     let base_elapsed = t0.elapsed();
-    let base_calls = recorder::finish_recording();
+    let base_calls = worktree::questions::finish_recording();
+    let base_processes = recorder::finish_recording();
+    assert_eq!(base_processes, Vec::<Vec<String>>::new());
 
     let graph = graph.expect("base view");
     assert!(verbose.is_none());
@@ -331,7 +338,7 @@ fn perf_subprocess_counts_meet_sla() {
     assert_eq!(count(&base_calls, "merge-base") - is_ancestor, graph.lines.len(), "got {base_calls:?}");
     assert_eq!(count(&base_calls, "rev-list"), graph.lines.len(), "got {base_calls:?}");
     assert_eq!(count(&base_calls, "log"), 1 + graph.lines.len(), "got {base_calls:?}");
-    eprintln!("base view gather: {base_elapsed:.2?}, {} git calls", base_calls.len());
+    eprintln!("base view gather: {base_elapsed:.2?}, {} history questions", base_calls.len());
 }
 
 /// The library's remote stage against a real repository and stores, with a counting stub
@@ -575,9 +582,14 @@ mod gather {
         }
     }
 
+    /// Copies `from` into `to`, leaving out `git init`'s inert sample hooks:
+    /// on Windows each copied file costs milliseconds.
     fn copy_tree(from: &Path, to: &Path) {
         for entry in std::fs::read_dir(from).expect("read template") {
             let entry = entry.expect("template entry");
+            if entry.file_name().to_string_lossy().ends_with(".sample") {
+                continue;
+            }
             let target = to.join(entry.file_name());
             if entry.file_type().expect("file type").is_dir() {
                 std::fs::create_dir(&target).expect("create dir");
@@ -826,44 +838,79 @@ mod gather {
     }
 
     /// Every projection of request evidence goes through the one identity
-    /// guard: each shows its evidence while `origin` is unchanged, and none
-    /// does once `origin` was replaced or removed during the wait. The
-    /// caption then reads as a check that could not be made.
-    #[test]
-    #[serial_test::serial]
-    fn a_replaced_or_removed_origin_suppresses_every_request_notice() {
+    /// guard: the projection labeled `label` shows its evidence while
+    /// `origin` is unchanged, and none once `origin` was replaced or removed
+    /// during the wait. The caption then reads as a check that could not be
+    /// made.
+    fn assert_an_origin_change_suppresses(label: &str) {
         const PROVIDER_ORIGIN: &str = "https://github.com/owner/repo.git";
+        let (projection, shape, shows) =
+            projections().into_iter().find(|(projection, _, _)| *projection == label).expect("a listed projection");
         // Every case starts from its own copy of this repository.
         let template = Fixture::new();
         run_git(template.main(), &["remote", "set-url", "origin", PROVIDER_ORIGIN]);
-        for (projection, shape, shows) in projections() {
-            for change in [None, Some(OriginChange::Replaced(ELSEWHERE)), Some(OriginChange::Removed)] {
-                let fixture = Fixture::copied_from(template.main());
-                fixture.worker(|worker| {
-                    worker.origin = PROVIDER_ORIGIN.into();
-                    worker.changes_origin = change;
-                    shape(worker);
-                });
+        for change in [None, Some(OriginChange::Replaced(ELSEWHERE)), Some(OriginChange::Removed)] {
+            let fixture = Fixture::copied_from(template.main());
+            fixture.worker(|worker| {
+                worker.origin = PROVIDER_ORIGIN.into();
+                worker.changes_origin = change;
+                shape(worker);
+            });
 
-                let answers = fixture.gather();
+            let answers = fixture.gather();
 
-                assert!(answers.waited.is_some(), "{projection}, {change:?}: launched and waited for");
-                if change.is_none() {
-                    assert!(!answers.origin_changed, "{projection}");
-                    assert!(shows(&answers), "{projection}: the control shows its evidence");
-                    continue;
-                }
-                assert!(answers.origin_changed, "{projection}, {change:?}");
-                assert!(!shows(&answers), "{projection}, {change:?}");
-                assert_eq!(request_notices(&answers), RequestNotices::default(), "{projection}, {change:?}");
-                assert_eq!(answers.prs, PrListing::default(), "{projection}, {change:?}: no badges");
-                assert_eq!(
-                    caption_status(&answers, || LAST),
-                    Some(RemoteStatus::CheckFailed { reason: CheckFailure::Other, last: LAST }),
-                    "{projection}, {change:?}: the caption says nothing the old check found"
-                );
+            assert!(answers.waited.is_some(), "{projection}, {change:?}: launched and waited for");
+            if change.is_none() {
+                assert!(!answers.origin_changed, "{projection}");
+                assert!(shows(&answers), "{projection}: the control shows its evidence");
+                continue;
             }
+            assert!(answers.origin_changed, "{projection}, {change:?}");
+            assert!(!shows(&answers), "{projection}, {change:?}");
+            assert_eq!(request_notices(&answers), RequestNotices::default(), "{projection}, {change:?}");
+            assert_eq!(answers.prs, PrListing::default(), "{projection}, {change:?}: no badges");
+            assert_eq!(
+                caption_status(&answers, || LAST),
+                Some(RemoteStatus::CheckFailed { reason: CheckFailure::Other, last: LAST }),
+                "{projection}, {change:?}: the caption says nothing the old check found"
+            );
         }
+    }
+
+    /// One `#[test]` per projection, so the three listings each makes spread
+    /// over the runner's cores.
+    macro_rules! origin_change_tests {
+        ($($test:ident => $label:literal),* $(,)?) => {
+            $(
+                #[test]
+                #[serial_test::serial]
+                fn $test() {
+                    assert_an_origin_change_suppresses($label);
+                }
+            )*
+            const ORIGIN_CHANGE_TESTS: &[&str] = &[$($label),*];
+        };
+    }
+
+    origin_change_tests! {
+        a_replaced_or_removed_origin_suppresses_the_caption_head_status => "caption head status",
+        a_replaced_or_removed_origin_suppresses_a_rejected_key_warning => "head warning: rejected key",
+        a_replaced_or_removed_origin_suppresses_an_insufficient_key_warning => "head warning: insufficient key",
+        a_replaced_or_removed_origin_suppresses_a_keyed_rate_limit_warning => "head warning: keyed rate limit",
+        a_replaced_or_removed_origin_suppresses_an_anonymous_rate_limit_warning => "head warning: anonymous rate limit",
+        a_replaced_or_removed_origin_suppresses_a_repository_not_visible_warning => "head warning: repository not visible",
+        a_replaced_or_removed_origin_suppresses_the_pr_warning => "PR warning",
+        a_replaced_or_removed_origin_suppresses_the_pr_item_and_badges => "PR item and badges",
+        a_replaced_or_removed_origin_suppresses_the_head_keyless_notice => "keyless notice: head",
+        a_replaced_or_removed_origin_suppresses_the_pr_keyless_notice => "keyless notice: PR",
+        a_replaced_or_removed_origin_suppresses_the_closing_fallback_notice => "closing fallback notice",
+    }
+
+    /// Every projection has its own test above.
+    #[test]
+    fn every_request_evidence_projection_has_an_origin_change_test() {
+        let labels: Vec<&str> = projections().into_iter().map(|(label, _, _)| label).collect();
+        assert_eq!(labels, ORIGIN_CHANGE_TESTS);
     }
 
     #[test]
@@ -1253,5 +1300,22 @@ mod observations {
         assert_eq!(notice(note(ApiCondition::NotFoundOrNotPermitted, Some("GITHUB_TOKEN"), true)), None);
         assert_eq!(notice(None), None, "an ignored or unsupported remote asks no API");
         assert_eq!(fallback_notice(GITHUB, None), None);
+    }
+}
+
+/// What a release build's listing runs with: the real worker launch and the
+/// real waits (3 s ordinary, and the forced one). Functional tests shorten
+/// the ordinary wait through [`crate::env::TEST_WAIT_BUDGET_VAR`], which only
+/// a debug build reads; without it a debug build waits the same.
+#[test]
+fn a_listing_launches_the_real_worker_and_waits_the_real_budgets() {
+    let production = super::PRODUCTION_SEAMS;
+    assert!(std::ptr::fn_addr_eq(production.launch, super::super::refresh_worker::launch as super::WorkerLaunch));
+    assert_eq!(production.wait_budget, std::time::Duration::from_secs(3));
+    assert_eq!(production.wait_budget, super::ORDINARY_BUDGET);
+    assert_eq!(production.forced_budget, super::FORCED_BUDGET);
+    if std::env::var_os(crate::env::TEST_WAIT_BUDGET_VAR).is_none() {
+        let seams = super::production_seams();
+        assert_eq!((seams.wait_budget, seams.forced_budget), (super::ORDINARY_BUDGET, super::FORCED_BUDGET));
     }
 }

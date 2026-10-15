@@ -1406,6 +1406,35 @@ fn an_empty_standalone_list_is_still_serialized() {
     assert_eq!(json["standalone_lockfiles"], serde_json::json!([]));
 }
 
+/// `(fixture, authority, lockfile, file, anchor, [replacement, ...])`.
+type ShapeRow = (
+    &'static str,
+    MonorepoStandard,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static [&'static str],
+);
+
+const UV_MEMBERS: &str = r#"members = ["packages/alpha", "packages/beta", ".tools/hidden"]"#;
+const PNPM_PACKAGES: &str = "  - \"packages/*\"\n  - \".tools/hidden\"";
+const CARGO_MEMBERS: &str = r#"members = ["crates/alpha", "crates/beta", ".tools/hidden"]"#;
+const JSON_WORKSPACES_OPEN: &str = "\"workspaces\": [";
+// Each JSON replacement parks the original array under an unread key so
+// the document stays valid.
+const JSON_WORKSPACES_SHAPES: &[&str] = &[
+    "\"workspaces\": null, \"unread\": [",
+    "\"workspaces\": 123, \"unread\": [",
+    "\"workspaces\": \"packages/*\", \"unread\": [",
+    "\"workspaces\": {\"packages\": 123}, \"unread\": [",
+    "\"workspaces\": {\"packages\": null}, \"unread\": [",
+    "\"workspaces\": [123], \"unread\": [",
+    "\"workspaces\": [null], \"unread\": [",
+];
+const JSON_FIRST_PATTERN: &str = "\"packages/*\",";
+const BUN_ALPHA_RECORD: &str = "\"packages/alpha\": {\n      \"name\": \"alpha\",\n      \"version\": \"1.0.0\",\n      \"dependencies\": {\n        \"@fixture/beta\": \"workspace:*\",\n      },\n    },";
+const JSON_ELEMENT_SHAPES: &[&str] = &["123,", "null,", "{},"];
+
 /// The input-robustness matrix, walked through the public result: every
 /// load-bearing membership field, on the manifest side and the lockfile side,
 /// under each shape a permissive reader would coerce (explicit null, wrong
@@ -1413,40 +1442,13 @@ fn an_empty_standalone_list_is_still_serialized() {
 /// element). No cell may corroborate: the layer survives, its status is
 /// `unverifiable` or `unreadable`, and nothing gains lockfile provenance.
 ///
-/// One row per format keeps the sweep in one place; the hand-written cases
-/// above are the review-by-review history of the same property.
-#[test]
-fn no_membership_field_shape_corroborates_when_it_cannot_be_understood() {
-    // (fixture, authority, lockfile, file, anchor, [replacement, ...])
-    type Cell = (
-        &'static str,
-        MonorepoStandard,
-        &'static str,
-        &'static str,
-        &'static str,
-        &'static [&'static str],
-    );
+/// Each row (one fixture, file, and anchor) is its own test, so the rows
+/// spread over the runner's cores; run serially they took 4.4 s on native
+/// Windows. The hand-written cases above are the review-by-review history of
+/// the same property.
+const MEMBERSHIP_SHAPE_ROWS: &[ShapeRow] = {
     use MonorepoStandard::*;
-    const UV_MEMBERS: &str = r#"members = ["packages/alpha", "packages/beta", ".tools/hidden"]"#;
-    const PNPM_PACKAGES: &str = "  - \"packages/*\"\n  - \".tools/hidden\"";
-    const CARGO_MEMBERS: &str = r#"members = ["crates/alpha", "crates/beta", ".tools/hidden"]"#;
-    const JSON_WORKSPACES_OPEN: &str = "\"workspaces\": [";
-    // Each JSON replacement parks the original array under an unread key so
-    // the document stays valid.
-    const JSON_WORKSPACES_SHAPES: &[&str] = &[
-        "\"workspaces\": null, \"unread\": [",
-        "\"workspaces\": 123, \"unread\": [",
-        "\"workspaces\": \"packages/*\", \"unread\": [",
-        "\"workspaces\": {\"packages\": 123}, \"unread\": [",
-        "\"workspaces\": {\"packages\": null}, \"unread\": [",
-        "\"workspaces\": [123], \"unread\": [",
-        "\"workspaces\": [null], \"unread\": [",
-    ];
-    const JSON_FIRST_PATTERN: &str = "\"packages/*\",";
-    const BUN_ALPHA_RECORD: &str = "\"packages/alpha\": {\n      \"name\": \"alpha\",\n      \"version\": \"1.0.0\",\n      \"dependencies\": {\n        \"@fixture/beta\": \"workspace:*\",\n      },\n    },";
-    const JSON_ELEMENT_SHAPES: &[&str] = &["123,", "null,", "{},"];
-
-    let cells: &[Cell] = &[
+    &[
         // ---- manifest side ------------------------------------------------
         (
             "uv-0.9.5/workspace",
@@ -1710,107 +1712,105 @@ fn no_membership_field_shape_corroborates_when_it_cannot_be_understood() {
                 "importers:\n  123: {}\n",
             ],
         ),
-    ];
+    ]
+};
 
-    // Control: every unedited fixture corroborates, so each edit below is
-    // known to remove a positive result rather than a neutral one.
-    let mut controlled = std::collections::BTreeSet::new();
-    for &(fixture, authority, _, _, _, _) in cells {
-        if !controlled.insert(fixture) {
-            continue;
-        }
-        let (_dir, root) = copied(fixture);
-        let (repo, _) = measured(&root, &RepoRequest::full());
-        let status = layer_lockfile(&repo, authority, fixture).status;
-        let positive = matches!(
-            status,
-            LockfileStatus::Match | LockfileStatus::MembersPresent
-        );
-        assert!(positive, "{fixture} control: {status:?}");
+// Cells the membership-shape matrix found open when it was written (2026-09-27). Each is a
+// recorded gap, not an accepted behavior: the cell must keep failing until
+// its fix removes it from this list, so the list can only shrink.
+// `(file, replacement)` identifies the cell across fixtures.
+const KNOWN_GAPS: &[(&str, &str)] = &[
+    // Manifest side: an explicit null member field reads as "no declaration",
+    // so the workspace is not detected at all (no repository result).
+    ("pnpm-workspace.yaml", "  null"),
+    ("package.json", "\"workspaces\": null, \"unread\": ["),
+    (
+        "package.json",
+        "\"workspaces\": {\"packages\": null}, \"unread\": [",
+    ),
+    ("rush.json", "\"projects\": null, \"unread\": ["),
+    // Yarn: an integer `resolution` is dropped, so the member goes missing
+    // and the lockfile reports `mismatch`.
+    ("yarn.lock", "resolution: 123"),
+    // Bun: a workspace record of the wrong type is accepted by key alone
+    // and reports an exact `match` that upgrades provenance.
+    ("bun.lock", "\"packages/alpha\": null,"),
+    ("bun.lock", "\"packages/alpha\": 123,"),
+    ("bun.lock", "\"packages/alpha\": [],"),
+];
+
+/// Why one edited cell is not an honest non-corroboration, or empty.
+fn cell_failures(
+    root: &Path,
+    authority: MonorepoStandard,
+    lockfile: &str,
+    label: &str,
+) -> Vec<String> {
+    let repo = match detect_repo_with_request(root, &RepoRequest::full()) {
+        Ok(Some(repo)) => repo,
+        Ok(None) => return vec![format!("{label}: no repository result")],
+        Err(error) => return vec![format!("{label}: detection failed: {error}")],
+    };
+    let Some(layer) = repo
+        .monorepo_layers
+        .iter()
+        .find(|layer| layer.authority == authority)
+    else {
+        return vec![format!("{label}: the layer disappeared")];
+    };
+    let observation = &layer.lockfile;
+    let understood = matches!(
+        observation.status,
+        LockfileStatus::Unverifiable | LockfileStatus::Unreadable
+    );
+    if !understood {
+        return vec![format!("{label}: corroborated as {observation:?}")];
     }
-
-    // Cells this matrix found open when it was written (2026-09-27). Each is a
-    // recorded gap, not an accepted behavior: the cell must keep failing until
-    // its fix removes it from this list, so the list can only shrink.
-    // `(file, replacement)` identifies the cell across fixtures.
-    const KNOWN_GAPS: &[(&str, &str)] = &[
-        // Manifest side: an explicit null member field reads as "no declaration",
-        // so the workspace is not detected at all (no repository result).
-        ("pnpm-workspace.yaml", "  null"),
-        ("package.json", "\"workspaces\": null, \"unread\": ["),
-        (
-            "package.json",
-            "\"workspaces\": {\"packages\": null}, \"unread\": [",
-        ),
-        ("rush.json", "\"projects\": null, \"unread\": ["),
-        // Yarn: an integer `resolution` is dropped, so the member goes missing
-        // and the lockfile reports `mismatch`.
-        ("yarn.lock", "resolution: 123"),
-        // Bun: a workspace record of the wrong type is accepted by key alone
-        // and reports an exact `match` that upgrades provenance.
-        ("bun.lock", "\"packages/alpha\": null,"),
-        ("bun.lock", "\"packages/alpha\": 123,"),
-        ("bun.lock", "\"packages/alpha\": [],"),
-    ];
-
-    /// Why one edited cell is not an honest non-corroboration, or empty.
-    fn cell_failures(
-        root: &Path,
-        authority: MonorepoStandard,
-        lockfile: &str,
-        label: &str,
-    ) -> Vec<String> {
-        let repo = match detect_repo_with_request(root, &RepoRequest::full()) {
-            Ok(Some(repo)) => repo,
-            Ok(None) => return vec![format!("{label}: no repository result")],
-            Err(error) => return vec![format!("{label}: detection failed: {error}")],
-        };
-        let Some(layer) = repo
-            .monorepo_layers
-            .iter()
-            .find(|layer| layer.authority == authority)
-        else {
-            return vec![format!("{label}: the layer disappeared")];
-        };
-        let observation = &layer.lockfile;
-        let understood = matches!(
-            observation.status,
-            LockfileStatus::Unverifiable | LockfileStatus::Unreadable
-        );
-        if !understood {
-            return vec![format!("{label}: corroborated as {observation:?}")];
-        }
-        let mut failures = Vec::new();
-        if observation.paths != vec![lockfile.to_owned()] {
-            failures.push(format!("{label}: paths {:?}", observation.paths));
-        }
-        if layer.provenance == PackageProvenance::Lockfile {
-            failures.push(format!("{label}: layer provenance upgraded"));
-        }
-        for package in repo.packages.as_deref().unwrap_or(&[]) {
-            if package.provenance == PackageProvenance::Lockfile {
-                failures.push(format!(
-                    "{label}: {} provenance upgraded",
-                    package.path.display()
-                ));
-            }
-        }
-        failures
+    let mut failures = Vec::new();
+    if observation.paths != vec![lockfile.to_owned()] {
+        failures.push(format!("{label}: paths {:?}", observation.paths));
     }
+    if layer.provenance == PackageProvenance::Lockfile {
+        failures.push(format!("{label}: layer provenance upgraded"));
+    }
+    for package in repo.packages.as_deref().unwrap_or(&[]) {
+        if package.provenance == PackageProvenance::Lockfile {
+            failures.push(format!(
+                "{label}: {} provenance upgraded",
+                package.path.display()
+            ));
+        }
+    }
+    failures
+}
+
+/// One membership-shape row: its unedited fixture must corroborate (the
+/// control), and every replacement must then fail to.
+fn assert_membership_shape_row(index: usize) {
+    let (fixture, authority, lockfile, file, anchor, shapes) = MEMBERSHIP_SHAPE_ROWS[index];
+
+    // Control: the unedited fixture corroborates, so each edit below is known
+    // to remove a positive result rather than a neutral one.
+    let (_dir, root) = copied(fixture);
+    let (repo, _) = measured(&root, &RepoRequest::full());
+    let status = layer_lockfile(&repo, authority, fixture).status;
+    let positive = matches!(
+        status,
+        LockfileStatus::Match | LockfileStatus::MembersPresent
+    );
+    assert!(positive, "{fixture} control: {status:?}");
 
     let mut failures = Vec::new();
     let mut closed_gaps = Vec::new();
-    for &(fixture, authority, lockfile, file, anchor, shapes) in cells {
-        for &shape in shapes {
-            let label = format!("{fixture} {file}: {anchor:?} -> {shape:?}");
-            let (_dir, root) = copied(fixture);
-            edit(&root, file, anchor, shape);
-            let cell = cell_failures(&root, authority, lockfile, &label);
-            match (KNOWN_GAPS.contains(&(file, shape)), cell.is_empty()) {
-                (false, false) => failures.extend(cell),
-                (true, true) => closed_gaps.push(label),
-                _ => {}
-            }
+    for &shape in shapes {
+        let label = format!("{fixture} {file}: {anchor:?} -> {shape:?}");
+        let (_dir, root) = copied(fixture);
+        edit(&root, file, anchor, shape);
+        let cell = cell_failures(&root, authority, lockfile, &label);
+        match (KNOWN_GAPS.contains(&(file, shape)), cell.is_empty()) {
+            (false, false) => failures.extend(cell),
+            (true, true) => closed_gaps.push(label),
+            _ => {}
         }
     }
     assert!(
@@ -1825,4 +1825,48 @@ fn no_membership_field_shape_corroborates_when_it_cannot_be_understood() {
         closed_gaps.len(),
         closed_gaps.join("\n  ")
     );
+}
+
+macro_rules! membership_shape_row_tests {
+    ($($test:ident => $index:literal),* $(,)?) => {
+        mod no_membership_field_shape_corroborates_when_it_cannot_be_understood {
+            $(#[test] fn $test() { super::assert_membership_shape_row($index); })*
+
+            /// A row added to `MEMBERSHIP_SHAPE_ROWS` without a test here
+            /// would never run.
+            #[test]
+            fn every_row_has_a_test() {
+                let listed: Vec<usize> = vec![$($index),*];
+                let rows: Vec<usize> = (0..super::MEMBERSHIP_SHAPE_ROWS.len()).collect();
+                assert_eq!(listed, rows);
+            }
+        }
+    };
+}
+
+membership_shape_row_tests! {
+    uv_manifest_members => 0,
+    pnpm_manifest_packages => 1,
+    npm_manifest_workspaces_field => 2,
+    npm_manifest_workspaces_element => 3,
+    yarn_manifest_workspaces_field => 4,
+    yarn_manifest_workspaces_element => 5,
+    bun_manifest_workspaces_field => 6,
+    bun_manifest_workspaces_element => 7,
+    cargo_manifest_members => 8,
+    cargo_manifest_exclude => 9,
+    rush_manifest_projects => 10,
+    rush_manifest_project_folder => 11,
+    uv_lockfile_manifest_members => 12,
+    pnpm_lockfile_importers => 13,
+    npm_lockfile_workspaces_field => 14,
+    npm_lockfile_workspaces_element => 15,
+    npm_lockfile_resolved => 16,
+    npm_lockfile_link => 17,
+    yarn_lockfile_resolution => 18,
+    bun_lockfile_workspaces => 19,
+    bun_lockfile_alpha_record => 20,
+    cargo_lockfile_name => 21,
+    cargo_lockfile_version => 22,
+    rush_lockfile_importers => 23,
 }

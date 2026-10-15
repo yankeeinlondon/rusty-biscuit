@@ -311,13 +311,19 @@ the waits in unit tests. Stub launchers write the real stores and a receipt,
 publishing through the real `refresh`. There is still **no live-head seam in
 the foreground**.
 
-The binary's only seam is `WT_TEST_WAIT_BUDGET_MS`
-(`env::TEST_WAIT_BUDGET_VAR`, parsed by `env::test_wait_budget`), which
-`list::production_seams` puts into `ListSeams::wait_budget`. It is compiled
-only under `cfg(debug_assertions)`: the `dev`/`test` profiles local nextest
-and CI's archives use. Release builds never read it, and it never touches
-`forced_budget`. A malformed value panics rather than silently waiting 3 s.
-Usage rules: [testing.md](testing.md#shortening-a-held-listings-wait).
+The binary has two seams, both compiled only under `cfg(debug_assertions)`
+(the `dev`/`test` profiles local nextest and CI's archives use; release
+builds never read them), and both panic on a malformed value rather than
+silently using the real one:
+
+- `WT_TEST_WAIT_BUDGET_MS` (`env::TEST_WAIT_BUDGET_VAR`, parsed by
+  `env::test_wait_budget`), which `list::production_seams` puts into
+  `ListSeams::wait_budget`. It never touches `forced_budget`. Usage rules:
+  [testing.md](testing.md#shortening-a-held-listings-wait).
+- `WT_TEST_REFRESH_DEADLINE_MS` (`env::TEST_REFRESH_DEADLINE_VAR`, read by
+  `refresh_worker::worker_source`), which replaces the worker's PR request
+  deadline (`REFRESH_DEADLINE`, 10 s). Only raised, never shortened:
+  [testing.md](testing.md#holding-the-workers-request).
 
 ## Tests and performance gates
 

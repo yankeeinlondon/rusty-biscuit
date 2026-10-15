@@ -1,12 +1,14 @@
-//! Native Windows backend: the modules each process has loaded, with process
+//! Native Windows backend: file-side handle owners and loaded modules, with process
 //! identity read through a process handle the backend keeps open.
 //!
 //! The classification logic is generic over [`Source`], so tests can script
 //! denials, exits, and undersized buffers on any host; the FFI source
 //! ([`ffi::Win32`]) exists on Windows only. A module is observed by path
-//! only, so the query looks its path up to decide whether it is in scope.
+//! only, so the backend looks each in-scope path up as it reads it and keeps
+//! that match with the evidence; a module the budget stopped before its
+//! lookup is a coverage gap, never evidence.
 //!
-//! Other processes' file handles are not inspected: reading the identity of
+//! Foreign file handles are never duplicated: reading the identity of
 //! a duplicated handle can block for as long as its owner has synchronous
 //! I/O pending on it, and no call cancels that wait. A working directory and
 //! a `ReadDirectoryChangesW` subscription cannot be told apart from other
@@ -17,7 +19,7 @@ use super::backend::{
     ProcessCandidate, ProcessDetails, RawEvidence, Tally, UsageBackend,
 };
 use super::budget::Budget;
-use super::matching::{self, ObservedObject};
+use super::matching::ObservedObject;
 use super::report::{EvidenceKind, LimitationExample, LimitationKind, Limitations, Mechanism};
 use crate::performance::{self, counters};
 use chrono::{DateTime, Utc};
@@ -32,6 +34,8 @@ pub(crate) const WORKING_DIRECTORIES_UNSUPPORTED: &str =
      another process's memory";
 pub(crate) const DIRECTORY_CHANGE_SUBSCRIPTIONS_UNSUPPORTED: &str =
     "handle ownership does not identify a ReadDirectoryChangesW subscription";
+
+const BUDGET_EXPIRED: &str = "the budget expired while a process's modules were being read";
 
 /// Module-list capacity for the first read.
 pub(crate) const DEFAULT_MODULE_CAPACITY: usize = 256;
@@ -75,6 +79,9 @@ pub(crate) trait Source {
     /// An open process handle. While it is open the PID cannot be reused.
     type Process;
 
+    /// Optional file-side reader; scripted module-only sources need none.
+    fn path_reader(&self) -> Option<super::win32_paths::PathReader> { None }
+
     /// Every PID on the host. `Err` names why the list could not be read.
     fn pids(&mut self) -> Result<Vec<u32>, String>;
     fn open(&mut self, pid: u32) -> Result<Opened<Self::Process>, Fault>;
@@ -84,6 +91,13 @@ pub(crate) trait Source {
     /// the list was read.
     fn modules(&mut self, process: &Self::Process, capacity: usize) -> Result<(Vec<Module>, usize), Fault>;
     fn module_path(&mut self, process: &Self::Process, module: Module) -> Result<PathBuf, Fault>;
+    /// The path of every module in the process's loader list, read in one
+    /// pass and keyed by module: the strings [`Source::module_path`] reads
+    /// with one pass per module. A module missing here is read through
+    /// [`Source::module_path`]; `None` reads every module that way.
+    fn loader_paths(&mut self, _process: &Self::Process) -> Option<HashMap<Module, PathBuf>> {
+        None
+    }
     /// Image path and account SID, read through the handle.
     fn details(&mut self, process: &Self::Process) -> Result<ProcessDetails, String>;
 }
@@ -96,10 +110,11 @@ struct Held<H> {
 
 pub(crate) struct ModuleBackend<S: Source> {
     source: S,
-    /// Handles for processes whose inspection has not yet shown they hold
-    /// nothing in scope. The rest stay open until the query returns, so
+    /// Handles for enumerated processes and confirmed path holders. Those
+    /// with evidence stay open until the query returns, so
     /// enrichment reads the same lifetime.
     held: HashMap<u32, Held<S::Process>>,
+    path_holders: std::collections::HashSet<u32>,
 }
 
 impl<S: Source> ModuleBackend<S> {
@@ -107,6 +122,7 @@ impl<S: Source> ModuleBackend<S> {
         Self {
             source,
             held: HashMap::new(),
+            path_holders: std::collections::HashSet::new(),
         }
     }
 }
@@ -133,7 +149,11 @@ impl<S: Source> UsageBackend for ModuleBackend<S> {
     fn mechanisms(&self) -> Vec<MechanismSupport> {
         use Mechanism::*;
         vec![
-            MechanismSupport::unsupported(OpenHandles, OPEN_HANDLES_UNSUPPORTED),
+            if self.source.path_reader().is_some() {
+                MechanismSupport::supported(OpenHandles)
+            } else {
+                MechanismSupport::unsupported(OpenHandles, OPEN_HANDLES_UNSUPPORTED)
+            },
             MechanismSupport::supported(LoadedModules),
             MechanismSupport::unsupported(WorkingDirectories, WORKING_DIRECTORIES_UNSUPPORTED),
             MechanismSupport::unsupported(
@@ -231,17 +251,97 @@ impl<S: Source> UsageBackend for ModuleBackend<S> {
                 self.inspect_modules(&held.process, context, &mut modules);
                 // A process holding nothing in scope needs no enrichment, so
                 // its handle closes now rather than when the query returns.
-                if !modules.evidence.is_empty() {
+                if !modules.evidence.is_empty() || self.path_holders.contains(&pid) {
                     self.held.insert(pid, held);
                 }
             }
             Some(_) => {
-                self.held.remove(&pid);
+                if !self.path_holders.contains(&pid) { self.held.remove(&pid); }
                 modules.whole = Some(InspectionResult::Denied);
             }
             None => modules.whole = Some(InspectionResult::Failed("the process handle was not kept".to_string())),
         }
         vec![modules.finish()]
+    }
+
+    fn inspect_paths(
+        &mut self,
+        context: &InspectionContext<'_>,
+        candidates: &[ProcessCandidate<Self::Payload>],
+    ) -> Option<(Vec<super::process::Observation>, super::report::Coverage)> {
+        let reader = self.source.path_reader()?;
+        let (mut observations, mut coverage) = super::win32_paths::scan(context, &reader);
+        let mut uncertain = Vec::new();
+        for observation in &mut observations {
+            if let Some(candidate) = candidates.iter().find(|c| c.pid == observation.pid)
+                && let Some(held) = self.held.get(&observation.pid)
+                && !self.source.exited(&held.process)
+            {
+                observation.creation_token = candidate.creation_token;
+                observation.retained_handle = candidate.retained_handle;
+                observation.details = candidate.details.clone();
+                self.path_holders.insert(observation.pid);
+            } else if !context.budget.expired()
+                && let Ok(opened) = self.source.open(observation.pid)
+            {
+                // A PID first seen after enumeration needs a second file-side
+                // observation while its new process handle is held; otherwise
+                // its creation time might describe a successor.
+                let entry = context.index.entries.iter().find(|entry| observation.evidence.iter()
+                    .any(|e| e.observed_path.as_ref().is_some_and(|p| p.as_os_str() == entry.path.as_os_str())));
+                if let Some(entry) = entry
+                    && let Ok((identity, pids)) = reader(entry, context.budget)
+                    && identity == entry.identity && pids.contains(&observation.pid)
+                    && !self.source.exited(&opened.process)
+                {
+                    observation.creation_token = Some(opened.creation_time);
+                    observation.retained_handle = true;
+                    observation.details = ProcessDetails {
+                        name: opened.image.as_deref().and_then(|p| p.file_name()).map(ToOwned::to_owned),
+                        executable: opened.image, user: None,
+                        start_time: filetime_to_utc(opened.creation_time),
+                    };
+                    // Only the confirmed path belongs to this acquisition.
+                    let (confirmed, unconfirmed): (Vec<_>, Vec<_>) = observation.evidence.drain(..)
+                        .partition(|e| e.observed_path.as_ref()
+                            .is_some_and(|p| p.as_os_str() == entry.path.as_os_str()));
+                    observation.evidence = confirmed;
+                    if !unconfirmed.is_empty() {
+                        uncertain.push(super::process::Observation {
+                            pid: observation.pid, creation_token: None, retained_handle: false,
+                            details: ProcessDetails::default(), evidence: unconfirmed,
+                        });
+                    }
+                    self.held.insert(observation.pid, Held {
+                        process: opened.process, can_read_modules: opened.can_read_modules,
+                    });
+                    self.path_holders.insert(observation.pid);
+                }
+            }
+            if observation.creation_token.is_none() {
+                coverage.status = super::CoverageStatus::Partial;
+                coverage.limitations.push(super::Limitation {
+                    kind: LimitationKind::IdentityUncertain,
+                    message: "a handle owner's process lifetime could not be associated reliably".to_string(),
+                    count: 1, examples: vec![LimitationExample::pid(observation.pid)],
+                });
+            }
+        }
+        if !uncertain.is_empty() {
+            coverage.status = super::CoverageStatus::Partial;
+            coverage.limitations.push(super::Limitation {
+                kind: LimitationKind::IdentityUncertain,
+                message: "some earlier paths could not be associated with a newly opened holder's lifetime".to_string(),
+                count: uncertain.len() as u64, examples: Vec::new(),
+            });
+            observations.extend(uncertain);
+        }
+        let mut limitations = Limitations::default();
+        for limitation in coverage.limitations.drain(..) {
+            limitations.merge(limitation);
+        }
+        coverage.limitations = limitations.into_vec();
+        Some((observations, coverage))
     }
 
     /// Reads through the held handle, so it names the inspected lifetime:
@@ -295,17 +395,17 @@ impl<S: Source> ModuleBackend<S> {
             }
             Err(fault) => return whole(tally, fault),
         };
-        let spellings = context.root.spellings();
+        let loader_paths = self.source.loader_paths(process);
         for module in modules {
             if context.budget.expired() {
-                return tally.problem(
-                    LimitationKind::BudgetExhausted,
-                    "the budget expired while a process's modules were being read",
-                    None,
-                );
+                return tally.problem(LimitationKind::BudgetExhausted, BUDGET_EXPIRED, None);
             }
             performance::increment_counter(counters::QUERY_MODULE_INSPECTIONS, 1);
-            let path = match self.source.module_path(process, module) {
+            let read = match loader_paths.as_ref().and_then(|paths| paths.get(&module)) {
+                Some(path) => Ok(path.clone()),
+                None => self.source.module_path(process, module),
+            };
+            let path = match read {
                 Ok(path) => path,
                 // Unloaded since the listing: no longer usage.
                 Err(Fault::Gone) => continue,
@@ -331,22 +431,27 @@ impl<S: Source> ModuleBackend<S> {
                 }
             };
             tally.successes += 1;
-            // A text pre-filter only: the query's identity lookup decides, so
-            // each module is looked up at most once.
-            if !spellings.iter().any(|root| matching::may_contain(root, &path)) {
+            let object = ObservedObject {
+                identity: None,
+                path: Some(path),
+                deleted: false,
+            };
+            // Validated now, while the budget remains: the query makes no
+            // lookup of its own, so a module kept unvalidated would be lost.
+            let Some(found) = context.match_object(&object) else {
+                if context.budget.exhausted() {
+                    return tally.problem(LimitationKind::BudgetExhausted, BUDGET_EXPIRED, None);
+                }
                 continue;
-            }
+            };
             tally.evidence.push(RawEvidence {
                 kind: EvidenceKind::LoadedModule,
-                object: ObservedObject {
-                    identity: None,
-                    path: Some(path),
-                    deleted: false,
-                },
+                object,
                 descriptor: None,
                 watch: None,
                 access: None,
                 event_only: None,
+                matched: Some(found),
             });
         }
     }
@@ -374,6 +479,10 @@ pub(crate) mod ffi {
     use windows::Win32::System::ProcessStatus::{
         EnumProcessModulesEx, EnumProcesses, GetModuleFileNameExW, LIST_MODULES_ALL,
     };
+    use windows::Wdk::System::Threading::{NtQueryInformationProcess, ProcessBasicInformation};
+    use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
+    use windows::Win32::System::Threading::{PEB, PEB_LDR_DATA, PROCESS_BASIC_INFORMATION};
+    use windows::Win32::System::WindowsProgramming::LDR_DATA_TABLE_ENTRY;
     use windows::Win32::System::Threading::{
         GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_ACCESS_RIGHTS,
         PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
@@ -385,6 +494,98 @@ pub(crate) mod ffi {
     const MAX_PATH_UNITS: usize = 32_768;
 
     pub(crate) struct Win32;
+
+
+    /// `T` read whole from `address` in `process`.
+    fn read<T: Copy + Default>(process: HANDLE, address: usize) -> Option<T> {
+        let mut value = T::default();
+        let mut read = 0usize;
+        // SAFETY: `value` is a plain `repr(C)` struct of the size passed.
+        unsafe {
+            ReadProcessMemory(
+                process,
+                address as *const core::ffi::c_void,
+                (&raw mut value).cast(),
+                size_of::<T>(),
+                Some(&mut read),
+            )
+        }
+        .ok()?;
+        (read == size_of::<T>()).then_some(value)
+    }
+
+    /// The `FullDllName` of every entry in `process`'s loader list, by
+    /// `DllBase`: what `GetModuleFileNameExW` returns for that module, which
+    /// walks the same list from its head for every single module (about
+    /// 130 µs each on Windows; most of a usage query). Reads only the
+    /// `winternl.h` fields (`PEB.Ldr`, `PEB_LDR_DATA.InMemoryOrderModuleList`,
+    /// `LDR_DATA_TABLE_ENTRY`'s `InMemoryOrderLinks`, `DllBase`, and
+    /// `FullDllName`). `None` on any failed read: a process still starting,
+    /// one whose list changes during the walk, or one this build cannot read.
+    /// A 32-bit (WOW64) process's own modules are not in this list; the
+    /// caller reads those one at a time.
+    #[cfg(target_pointer_width = "64")]
+    fn loader_paths(process: HANDLE) -> Option<std::collections::HashMap<Module, PathBuf>> {
+        let mut basic = PROCESS_BASIC_INFORMATION::default();
+        let mut length = 0u32;
+        // SAFETY: `basic` is the documented output of this class, of the size passed.
+        let status = unsafe {
+            NtQueryInformationProcess(
+                process,
+                ProcessBasicInformation,
+                (&raw mut basic).cast(),
+                size_of::<PROCESS_BASIC_INFORMATION>() as u32,
+                &mut length,
+            )
+        };
+        if status.is_err() || basic.PebBaseAddress.is_null() {
+            return None;
+        }
+        let peb: PEB = read(process, basic.PebBaseAddress as usize)?;
+        if peb.Ldr.is_null() {
+            return None;
+        }
+        let loader: PEB_LDR_DATA = read(process, peb.Ldr as usize)?;
+        let head = peb.Ldr as usize + std::mem::offset_of!(PEB_LDR_DATA, InMemoryOrderModuleList);
+        let mut link = loader.InMemoryOrderModuleList.Flink as usize;
+        let mut paths = std::collections::HashMap::new();
+        while link != head {
+            // A list that does not return to its head is changing under us.
+            if paths.len() > super::MAX_MODULE_CAPACITY {
+                return None;
+            }
+            let entry: LDR_DATA_TABLE_ENTRY =
+                read(process, link.checked_sub(std::mem::offset_of!(LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks))?)?;
+            let name = entry.FullDllName;
+            let units = usize::from(name.Length) / 2;
+            if !name.Buffer.is_null() && units > 0 {
+                let mut buffer = vec![0u16; units];
+                let mut read = 0usize;
+                // SAFETY: `buffer` holds `units` UTF-16 units, the size passed.
+                unsafe {
+                    ReadProcessMemory(
+                        process,
+                        name.Buffer.0 as *const core::ffi::c_void,
+                        buffer.as_mut_ptr().cast(),
+                        units * 2,
+                        Some(&mut read),
+                    )
+                }
+                .ok()?;
+                if read != units * 2 {
+                    return None;
+                }
+                paths.insert(Module(entry.DllBase as usize), PathBuf::from(OsString::from_wide(&buffer)));
+            }
+            link = entry.InMemoryOrderLinks.Flink as usize;
+        }
+        Some(paths)
+    }
+
+    #[cfg(not(target_pointer_width = "64"))]
+    fn loader_paths(_process: HANDLE) -> Option<std::collections::HashMap<Module, PathBuf>> {
+        None
+    }
 
     /// Closes the handle when the backend drops it.
     pub(crate) struct ProcessHandle(HANDLE);
@@ -459,6 +660,10 @@ pub(crate) mod ffi {
     impl Source for Win32 {
         type Process = ProcessHandle;
 
+        fn path_reader(&self) -> Option<super::super::win32_paths::PathReader> {
+            Some(std::sync::Arc::new(super::super::win32_paths::ffi::holders))
+        }
+
         fn pids(&mut self) -> Result<Vec<u32>, String> {
             let mut capacity = 1024usize;
             loop {
@@ -529,6 +734,10 @@ pub(crate) mod ffi {
                 user: Some(user),
                 start_time: creation_time(process.0).ok().and_then(super::filetime_to_utc),
             })
+        }
+
+        fn loader_paths(&mut self, process: &ProcessHandle) -> Option<std::collections::HashMap<Module, PathBuf>> {
+            loader_paths(process.0)
         }
 
         fn module_path(&mut self, process: &ProcessHandle, module: Module) -> Result<PathBuf, Fault> {

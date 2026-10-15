@@ -35,8 +35,13 @@ flowchart TD
 ```
 
 - `parse_worktree_state` reads `worktree list`, the default branch, one
-  `for-each-ref refs/heads refs/remotes` (`listing::RefSnapshot`, which wraps
-  `RefTips` with success and `read_at`), and the fork-origin store.
+  ref read (`listing::RefSnapshot`, which wraps `RefTips` with success and
+  `read_at`), and the fork-origin store. `RefTips::read_in` reads refs
+  in-process (`for_each_ref_in_process`, gix) and runs `for-each-ref
+  refs/heads refs/remotes` only when gix cannot; either way it is the
+  `for-each-ref` question in `crate::questions`, so `fail_matching` still
+  fails it and tests count it there (`ref_tips_read_in_process_match_git_for_each_ref`
+  is the parity test).
 - The library gathers have **no persistent side effects**:
   `gather_dirtiness`, `WorktreeList::gather_ref_facts` (caption, target via
   `default_target::choose_default_target` with ancestry taken from the cached
@@ -178,9 +183,11 @@ Pure over `TableFacts`; snapshot tests in `cli/tests/list_table.rs`.
   only from the reflog). `pr_outcome`, `observed_pr_failure`, and
   `observed_keyless` take `&Observed`, so they cannot be called around the
   guard; a new projection must too. Proven by
-  `list::tests::gather::a_replaced_or_removed_origin_suppresses_every_request_notice`
-  (each projection × unchanged/replaced/removed) and, through the binary,
-  `list_prs::a_changed_origin_drops_the_old_head_checks_*`.
+  `list::tests::gather::a_replaced_or_removed_origin_suppresses_*` (one test
+  per projection, each unchanged/replaced/removed; a new projection needs a
+  row in `origin_change_tests!`, which `every_request_evidence_projection_has_an_origin_change_test`
+  enforces) and, through the binary,
+  `list_prs::a_{replaced,removed}_origin_drops_the_old_head_checks_*`.
 - `list::credential_line` (§5) and `list::fallback_notice` (§8) read only this
   run's followed attempt's `ApiNote` and this run's PR failure
   (`list::observed_pr_failure`: the receipt's, in every mode), with names from

@@ -1,0 +1,18 @@
+---
+source: worktree/cli/tests/remove_usage_refusal.rs
+expression: "rendered.join(\"\\n\\n\")"
+---
+Nothing was removed. wt could not confirm the checkout of fix-path-spelling right before removing it: it disappeared after it was checked.
+  Run wt remove fix/path-spelling again.
+
+Nothing was removed. wt could not confirm the checkout of fix-path-spelling right before removing it: its path is now a fifo rather than a directory.
+  Run wt remove fix/path-spelling again.
+
+Nothing was removed. wt could not confirm the checkout of fix-path-spelling right before removing it: the check ran out of its 2000 ms before it could identify the checkout.
+  Run wt remove fix/path-spelling again.
+
+Nothing was removed. wt could not confirm the checkout of fix-path-spelling right before removing it: its identity could not be read (permission <denied>).
+  Run wt remove fix/path-spelling again.
+
+Nothing was removed. wt could not confirm the checkout of fix-path-spelling right before removing it: the usage check was misconfigured (zero deadline).
+  Run wt remove fix/path-spelling again.

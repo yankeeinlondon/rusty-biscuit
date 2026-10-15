@@ -2697,10 +2697,15 @@ mod tests {
         #[test]
         fn relative_base_with_unreadable_cwd_fails() {
             let original = std::env::current_dir().unwrap();
-            let gone = tempfile::TempDir::new().unwrap();
-            let gone_path = gone.path().to_path_buf();
+            // The removed directory sits inside a private parent: on macOS,
+            // `getcwd` for a removed directory searches its parent's entries,
+            // and directly under the shared temporary root that search took
+            // about 9 s per call; inside an empty parent it takes microseconds.
+            let parent = tempfile::TempDir::new().unwrap();
+            let gone_path = parent.path().join("gone");
+            std::fs::create_dir(&gone_path).unwrap();
             std::env::set_current_dir(&gone_path).unwrap();
-            gone.close().unwrap();
+            std::fs::remove_dir(&gone_path).unwrap();
             let outcome =
                 resolve_files_link_root(&SniffResult::default(), Some(std::path::Path::new("repo")));
             std::env::set_current_dir(&original).unwrap();

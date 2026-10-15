@@ -376,6 +376,7 @@ type RunRepository = (Arc<RepositoryEntry>, Arc<VolatileEvidence>);
 #[derive(Debug, Default)]
 struct VolatileEvidence {
     git: OnceLock<Result<Option<GitInfo>, Arc<sniff::SniffError>>>,
+    merge_conflicts: OnceLock<Result<Option<Vec<PathBuf>>, Arc<sniff::SniffError>>>,
     file_changes: OnceLock<Result<Option<Vec<FileChange>>, Arc<sniff::SniffError>>>,
     /// `Ok(None)` when the repository has no root to walk history from.
     recent_commits: OnceLock<Result<Option<RecentCommits>, Arc<sniff::SniffError>>>,
@@ -1439,6 +1440,22 @@ impl InvocationContext {
             if needs_repository || requirements.contains(ContextGroup::Git) {
                 evidence = evidence.with_git(git_info.clone());
             }
+            // `ctx.merge_conflicts` reads the index, never `git_info`, whose
+            // summary request carries no per-file changes.
+            if requirements.contains(ContextGroup::Git)
+                && let Ok(conflicts) = volatile
+                    .merge_conflicts
+                    .get_or_init(|| {
+                        observed_git = true;
+                        repository
+                            .observation
+                            .detect_merge_conflicts()
+                            .map_err(Arc::new)
+                    })
+                    .as_ref()
+            {
+                evidence = evidence.with_merge_conflicts(conflicts.clone().unwrap_or_default());
+            }
             if needs_repository && !matches!(repository.topology.get(), Some(Err(_))) {
                 evidence = evidence.with_repository(
                     repository_root.map(Path::to_path_buf),
@@ -1688,12 +1705,20 @@ impl InvocationContext {
                 if repository.failure().is_some() {
                     return None;
                 }
-                evidence.with_git(
-                    repository
-                        .observation
-                        .detect_git(&launch_git_request())
-                        .ok()?,
-                )
+                evidence
+                    .with_git(
+                        repository
+                            .observation
+                            .detect_git(&launch_git_request())
+                            .ok()?,
+                    )
+                    .with_merge_conflicts(
+                        repository
+                            .observation
+                            .detect_merge_conflicts()
+                            .ok()?
+                            .unwrap_or_default(),
+                    )
             }
             ContextGroup::FileChanges => {
                 if repository.failure().is_some() {

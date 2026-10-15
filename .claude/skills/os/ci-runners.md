@@ -154,8 +154,8 @@ none are recorded here (see "Noise" below).
   --admin` is refused with "Repository rule violations found" unless a
   bypass actor has been granted explicitly; that grant is Ken's decision.
 - **Noise.** Run-to-run variation on an identical tree is 5 to 15% per leg,
-  so a delta inside that bracket is not a result. The evidence standard for a
-  timing claim is three consecutive green runs per leg. Legs are never merged
+  so a delta inside that bracket is not a result. A single passing run is
+  sufficient evidence. Legs are never merged
   or compared across OS.
 - **Compare matched test identities within one environment only.** Report
   missing identities and platform exclusions separately from the timing

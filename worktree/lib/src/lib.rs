@@ -16,6 +16,7 @@ pub mod list;
 pub mod listing;
 pub mod live_remote;
 pub mod pull_requests;
+pub mod questions;
 pub mod remote_head;
 pub mod remote_update;
 pub mod remove;

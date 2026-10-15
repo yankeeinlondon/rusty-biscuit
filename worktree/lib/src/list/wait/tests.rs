@@ -1234,7 +1234,6 @@ fn a_finished_heads_phase_gives_way_to_updating_while_prs_are_pending_on_every_r
 /// `origin` the store binds to, a store seeded before launch, and launch
 /// stubs that act as a holder finishing before our worker's receipt.
 mod stored_prs {
-    use std::process::Command;
 
     use crate::pull_requests::{
         FetchedPrs, OpenPrSource, OpenPullRequest, PrRequestError, RefreshOutcome, origin_digest, refresh,
@@ -1262,7 +1261,7 @@ mod stored_prs {
         let root = dir.path().join("repo");
         std::fs::create_dir_all(&root).expect("repo dir");
         for args in [&["init", "-q"][..], &["remote", "add", "origin", ORIGIN]] {
-            let status = Command::new("git").arg("-C").arg(&root).args(args).status().expect("git runs");
+            let status = crate::git::command().arg("-C").arg(&root).args(args).status().expect("git runs");
             assert!(status.success(), "git {args:?}");
         }
         let store = dir.path().join("cache").join("abc.prs.json");
@@ -1544,6 +1543,15 @@ mod receipt_matrix {
     }
 
     impl JsonEdit {
+        /// The receipt field the edit changes, or `append` for trailing
+        /// content: how the matrix is split into tests.
+        pub(super) fn group(&self) -> &str {
+            match self {
+                Self::Dup(pointer) | Self::Set(pointer, _) => pointer,
+                Self::Append(_) => "append",
+            }
+        }
+
         pub(super) fn apply(&self, written: &Value) -> Vec<u8> {
             let mut document = written.clone();
             match self {
@@ -1656,13 +1664,13 @@ mod receipt_matrix {
     }
 }
 
-/// Every cell of the receipt matrix, for each failure that carries fields,
-/// through the public wait over real files: a rejected receipt keeps the
-/// finished head, is a generic failure that never names credentials, and ends
-/// with the worker, inside the budget; a valid edit keeps the receipt's own
-/// failure.
-#[test]
-fn every_malformed_receipt_through_the_wait_keeps_the_head_and_is_a_generic_failure() {
+/// The cells of the receipt matrix in `group` ([`receipt_matrix::JsonEdit::group`],
+/// or `control` for the unedited receipt), for each failure that carries
+/// fields, through the public wait over real files: a rejected receipt keeps
+/// the finished head, is a generic failure that never names credentials, and
+/// ends with the worker, inside the budget; a valid edit keeps the receipt's
+/// own failure.
+fn assert_receipt_group_is_carried_through_the_wait(group: &str) {
     use std::rc::Rc;
 
     use crate::remote_head::write_receipt;
@@ -1671,7 +1679,9 @@ fn every_malformed_receipt_through_the_wait_keeps_the_head_and_is_a_generic_fail
     let mut walked = 0;
     for failure in receipt_matrix::field_bearing_failures() {
         let control = Some(failure.clone());
-        let cells = std::iter::once((None, control)).chain(receipt_matrix::cells(&failure).into_iter().map(|(edit, want)| (Some(edit), want)));
+        let cells = std::iter::once((None, control))
+            .chain(receipt_matrix::cells(&failure).into_iter().map(|(edit, want)| (Some(edit), want)))
+            .filter(|(edit, _)| edit.as_ref().map_or("control", receipt_matrix::JsonEdit::group) == group);
         for (edit, want) in cells {
             let edit = Rc::new(edit);
             let label = Rc::new(RefCell::new(String::from("control")));
@@ -1699,7 +1709,60 @@ fn every_malformed_receipt_through_the_wait_keeps_the_head_and_is_a_generic_fail
             walked += 1;
         }
     }
+    assert!(walked > 0, "no cell is in {group}");
     assert!(wrong.is_empty(), "{} of {walked} receipts were not carried through the wait:\n{}", wrong.len(), wrong.join("\n"));
+}
+
+/// One test per receipt field the matrix edits, so the cells (each a real
+/// wait over real files, ~20 ms on Windows) spread over the runner's cores.
+macro_rules! receipt_matrix_tests {
+    ($($test:ident => $group:literal),* $(,)?) => {
+        $(
+            #[test]
+            fn $test() {
+                assert_receipt_group_is_carried_through_the_wait($group);
+            }
+        )*
+        const RECEIPT_MATRIX_GROUPS: &[&str] = &[$($group),*];
+    };
+}
+
+receipt_matrix_tests! {
+    an_unedited_receipt_through_the_wait_keeps_its_failure => "control",
+    every_malformed_format_version_through_the_wait_is_a_generic_failure => "/format_version",
+    every_malformed_attempt_id_through_the_wait_is_a_generic_failure => "/attempt_id",
+    every_malformed_origin_digest_through_the_wait_is_a_generic_failure => "/origin_digest",
+    every_malformed_branch_through_the_wait_is_a_generic_failure => "/branch",
+    every_malformed_finished_at_through_the_wait_is_a_generic_failure => "/finished_at",
+    every_malformed_head_through_the_wait_is_a_generic_failure => "/head",
+    every_malformed_prs_through_the_wait_is_a_generic_failure => "/prs",
+    every_malformed_prs_kind_through_the_wait_is_a_generic_failure => "/prs/kind",
+    every_malformed_prs_failure_through_the_wait_is_a_generic_failure => "/prs/failure",
+    every_malformed_failure_kind_through_the_wait_is_a_generic_failure => "/prs/failure/kind",
+    every_failure_key_through_the_wait_keeps_or_rejects_the_receipt => "/prs/failure/key",
+    every_failure_authenticated_through_the_wait_keeps_or_rejects_the_receipt => "/prs/failure/authenticated",
+    an_extra_top_level_field_through_the_wait_keeps_the_failure => "/extra",
+    an_extra_failure_field_through_the_wait_keeps_the_failure => "/prs/failure/extra",
+    trailing_content_through_the_wait_is_a_generic_failure => "append",
+}
+
+/// Every cell of the receipt matrix belongs to a group with a test above, so
+/// a cell added later is never left untested.
+#[test]
+fn every_receipt_matrix_cell_has_a_test_through_the_wait() {
+    let mut groups: Vec<String> = vec!["control".to_string()];
+    for failure in receipt_matrix::field_bearing_failures() {
+        for (edit, _) in receipt_matrix::cells(&failure) {
+            let group = edit.group().to_string();
+            if !groups.contains(&group) {
+                groups.push(group);
+            }
+        }
+    }
+    groups.sort();
+    let mut listed = RECEIPT_MATRIX_GROUPS.to_vec();
+    listed.sort_unstable();
+    assert_eq!(groups, listed);
 }
 
 /// Two overlapping forced runs over real stores: run A's worker holds the
@@ -2009,7 +2072,7 @@ fn a_receipt_written_after_an_early_success_is_left_for_the_stale_sweep() {
 
 #[test]
 fn a_launched_process_reports_its_exit() {
-    let child = std::process::Command::new("git")
+    let child = crate::git::command()
         .arg("--version")
         .stdout(std::process::Stdio::null())
         .spawn()

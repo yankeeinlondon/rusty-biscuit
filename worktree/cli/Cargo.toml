@@ -22,6 +22,8 @@ biscuit-terminal = { path = "../../biscuit-terminal/lib", features = ["image"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4", features = ["unstable-dynamic"] }
+# Ctrl-C and SIGTERM/SIGHUP during `wt remove`'s destructive steps.
+ctrlc = { version = "3.4", features = ["termination"] }
 dirs = "6"
 inquire = "0.9"
 sniff = { path = "../../sniff/lib" }

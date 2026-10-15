@@ -1549,12 +1549,59 @@ mod tests {
         }
     }
 
+    /// Repository-level discovery over a small temporary Git workspace,
+    /// entered from its `sniff/lib` member.
+    ///
+    /// Not the ambient monorepo: reading and hashing every Markdown file in it
+    /// took 3.7–5.3 s per test on native Windows.
     mod integration {
         use super::*;
+        use std::fs;
+        use tempfile::TempDir;
+
+        fn write(path: &Path, contents: &str) {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, contents).unwrap();
+        }
+
+        /// A Git workspace with two Cargo members and Markdown at the root, in
+        /// a member, and outside any member.
+        fn workspace_repo() -> TempDir {
+            let tmp = TempDir::new().unwrap();
+            let root = tmp.path();
+            git2::Repository::init(root).unwrap();
+            write(
+                &root.join("Cargo.toml"),
+                "[workspace]\nmembers = [\"sniff/lib\", \"tools/other\"]\n",
+            );
+            write(
+                &root.join("sniff/lib/Cargo.toml"),
+                "[package]\nname = \"sniff\"\nversion = \"0.1.0\"\n",
+            );
+            write(
+                &root.join("tools/other/Cargo.toml"),
+                "[package]\nname = \"other\"\nversion = \"0.1.0\"\n",
+            );
+            write(&root.join("README.md"), "# Root\n");
+            write(
+                &root.join("docs/guide.md"),
+                "---\ntitle: Guide\n---\n# Guide\n",
+            );
+            write(&root.join("sniff/lib/README.md"), "# Sniff\n");
+            write(&root.join("sniff/lib/docs/topic.md"), "# Topic\n");
+            write(&root.join("tools/other/README.md"), "# Other\n");
+            tmp
+        }
+
+        /// The directory the tests enter from: a member, not the root.
+        fn member_dir(repo: &TempDir) -> PathBuf {
+            repo.path().join("sniff/lib")
+        }
 
         #[test]
         fn packages_detected_in_workspace() {
-            let repo = RepoDocuments::new(Path::new(".")).unwrap();
+            let fixture = workspace_repo();
+            let repo = RepoDocuments::new(&member_dir(&fixture)).unwrap();
             assert!(
                 !repo.packages.is_empty(),
                 "Should detect workspace packages. repo_root: {:?}",
@@ -1564,7 +1611,8 @@ mod tests {
 
         #[test]
         fn documents_have_correct_packages() {
-            let repo = RepoDocuments::new(Path::new(".")).unwrap();
+            let fixture = workspace_repo();
+            let repo = RepoDocuments::new(&member_dir(&fixture)).unwrap();
             let docs = repo.documents();
 
             // Files inside a specific package member should be assigned
@@ -1572,6 +1620,7 @@ mod tests {
                 .iter()
                 .filter(|d| d.relative.starts_with("sniff/lib/"))
                 .collect();
+            assert_eq!(sniff_lib_docs.len(), 2, "docs were {docs:?}");
             for doc in &sniff_lib_docs {
                 assert!(
                     doc.package.is_some(),
@@ -1590,18 +1639,21 @@ mod tests {
 
         #[test]
         fn repo_documents_from_current_dir() {
-            // This test runs within the rusty-biscuit repo
-            let repo = RepoDocuments::new(Path::new("."));
-            assert!(repo.is_ok(), "Should detect git repo from current dir");
+            let fixture = workspace_repo();
+            let repo = RepoDocuments::new(&member_dir(&fixture));
+            assert!(repo.is_ok(), "Should detect git repo from a member dir");
             let repo = repo.unwrap();
             let docs = repo.documents();
-            assert!(!docs.is_empty(), "Should find markdown documents in repo");
+            assert_eq!(docs.len(), 5, "every Markdown file in the repo: {docs:?}");
         }
 
         #[test]
         fn all_docs_have_relative_paths() {
-            let repo = RepoDocuments::new(Path::new(".")).unwrap();
-            for doc in repo.documents() {
+            let fixture = workspace_repo();
+            let repo = RepoDocuments::new(&member_dir(&fixture)).unwrap();
+            let docs = repo.documents();
+            assert!(!docs.is_empty());
+            for doc in docs {
                 assert!(
                     !doc.relative.starts_with('/'),
                     "Relative path should not start with /: {}",
@@ -1612,8 +1664,11 @@ mod tests {
 
         #[test]
         fn all_docs_have_content_hash() {
-            let repo = RepoDocuments::new(Path::new(".")).unwrap();
-            for doc in repo.documents() {
+            let fixture = workspace_repo();
+            let repo = RepoDocuments::new(&member_dir(&fixture)).unwrap();
+            let docs = repo.documents();
+            assert!(!docs.is_empty());
+            for doc in docs {
                 assert!(
                     !doc.content_hash.is_empty(),
                     "Content hash should not be empty for: {}",
@@ -1624,7 +1679,8 @@ mod tests {
 
         #[test]
         fn detect_docs_returns_some_in_repo() {
-            let docs = detect_docs(Path::new("."));
+            let fixture = workspace_repo();
+            let docs = detect_docs(&member_dir(&fixture));
             assert!(
                 docs.is_some(),
                 "detect_docs should return Some in a git repo"

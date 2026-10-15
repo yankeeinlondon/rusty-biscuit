@@ -1,6 +1,6 @@
 //! `wt list`'s update flow against real git (spec acceptance 4): a local bare
-//! `origin`, a `pusher` clone standing in for everyone else, and the listed
-//! clone with one linked worktree.
+//! `origin` that everyone else's commits land in, and the listed clone with
+//! one linked worktree.
 //!
 //! Every listing launches the worker and waits up to 3 s for its attempt, so
 //! a variance is fetched before the listing gathers its refs. Some tests run

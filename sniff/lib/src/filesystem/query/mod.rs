@@ -31,6 +31,8 @@ mod tree;
 // build; the Win32 calls themselves are Windows-only.
 #[cfg(any(windows, test))]
 mod win32;
+#[cfg(any(windows, test))]
+mod win32_paths;
 
 #[cfg(test)]
 mod tests;
@@ -115,6 +117,9 @@ struct Tally {
     succeeded: u64,
     partial: u64,
     omitted: u64,
+    /// Inspected processes for which the budget expired before this
+    /// mechanism started.
+    not_attempted: u64,
     limitations: Limitations,
 }
 
@@ -148,6 +153,7 @@ pub(crate) fn run<B: UsageBackend>(
             succeeded: 0,
             partial: 0,
             omitted: 0,
+            not_attempted: 0,
             limitations: Limitations::default(),
         })
         .collect();
@@ -164,14 +170,33 @@ pub(crate) fn run<B: UsageBackend>(
         root: &root,
         index: &tree.index,
     };
+    let mut retained_by_lifetime = std::collections::HashMap::new();
+    let path_inspection = backend.inspect_paths(&context, &candidates);
+    let path_coverage = path_inspection.map(|(path_observations, coverage)| {
+        for observation in &path_observations {
+            let count = observation.evidence.len() as u64;
+            retained_total += count;
+            if let Some(token) = observation.creation_token {
+                *retained_by_lifetime.entry((observation.pid, token)).or_insert(0) += count;
+            }
+        }
+        observations.extend(path_observations);
+        coverage
+    });
     for (position, candidate) in candidates.iter().enumerate() {
         if budget.expired() {
             skipped = (candidates.len() - position) as u64;
             break;
         }
         performance::increment_counter(counters::QUERY_PROCESS_INSPECTIONS, 1);
-        let evidence = inspect(backend, candidate, &context, &mut tallies, &mut retained_total);
+        let retained_for_process = candidate.creation_token
+            .and_then(|token| retained_by_lifetime.get(&(candidate.pid, token)).copied())
+            .unwrap_or(0);
+        let evidence = inspect(backend, candidate, &context, &mut tallies, &mut retained_total, retained_for_process);
         if !evidence.is_empty() {
+            if let Some(token) = candidate.creation_token {
+                *retained_by_lifetime.entry((candidate.pid, token)).or_insert(0) += evidence.len() as u64;
+            }
             observations.push(Observation {
                 pid: candidate.pid,
                 creation_token: candidate.creation_token,
@@ -223,7 +248,23 @@ pub(crate) fn run<B: UsageBackend>(
     let mut coverage = vec![enumeration_coverage];
     coverage.extend(tree.coverage);
     for tally in tallies {
-        coverage.push(finish(tally, scope, &not_started, skipped, &gaps));
+        if path_coverage.as_ref().is_some_and(|c| c.mechanism == tally.support.mechanism) {
+            let mut paths = path_coverage.clone().expect("path coverage");
+            paths.scope = scope;
+            if paths.status != CoverageStatus::NotAttempted && (gaps.tree || gaps.root.is_some()) {
+                if paths.status == CoverageStatus::Complete {
+                    paths.status = CoverageStatus::Partial;
+                }
+                paths.limitations.push(Limitation {
+                    kind: LimitationKind::PrerequisiteIncomplete,
+                    message: "tree collection or root verification was incomplete".to_string(),
+                    count: 1, examples: Vec::new(),
+                });
+            }
+            coverage.push(paths);
+        } else {
+            coverage.push(finish(tally, scope, &not_started, skipped, &gaps));
+        }
     }
 
     let outcome = report::outcome(&coverage, &processes);
@@ -326,6 +367,7 @@ fn inspect<B: UsageBackend>(
     context: &InspectionContext<'_>,
     tallies: &mut [Tally],
     retained_total: &mut u64,
+    retained_for_process: u64,
 ) -> Vec<Evidence> {
     let mut evidence = Vec::new();
     for inspection in backend.inspect(candidate, context) {
@@ -334,9 +376,13 @@ fn inspect<B: UsageBackend>(
         }) else {
             continue;
         };
-        tally.attempted += 1;
         let example = LimitationExample::pid(candidate.pid);
         match inspection.result {
+            // Carries no evidence or limitations.
+            InspectionResult::NotAttempted => {
+                tally.not_attempted += 1;
+                continue;
+            }
             InspectionResult::Complete => tally.succeeded += 1,
             InspectionResult::Partial => {
                 tally.succeeded += 1;
@@ -361,14 +407,28 @@ fn inspect<B: UsageBackend>(
                 Some(example.with_detail(detail)),
             ),
         }
+        tally.attempted += 1;
         for limitation in inspection.limitations {
             tally.limitations.merge(limitation);
         }
-        for raw in inspection.evidence {
-            let Some(found) = context.match_object(&raw.object) else {
-                continue;
+        for mut raw in inspection.evidence {
+            debug_assert!(
+                raw.matched.is_some() || raw.object.identity.is_some(),
+                "a backend must validate a path-only observation while its budget remains"
+            );
+            // Never a path lookup here: the budget may have expired since the
+            // backend read this, and a refused lookup would discard it.
+            let found = match raw.matched.take() {
+                Some(found) => found,
+                None if raw.object.identity.is_some() => {
+                    match context.match_object(&raw.object) {
+                        Some(found) => found,
+                        None => continue,
+                    }
+                }
+                None => continue,
             };
-            if evidence.len() as u64 >= MAX_EVIDENCE_PER_PROCESS
+            if evidence.len() as u64 + retained_for_process >= MAX_EVIDENCE_PER_PROCESS
                 || *retained_total >= MAX_EVIDENCE_TOTAL
             {
                 tally.omitted += 1;
@@ -412,6 +472,7 @@ fn finish(
         succeeded,
         partial,
         omitted,
+        not_attempted,
         mut limitations,
     } = tally;
     let mut coverage = Coverage {
@@ -443,9 +504,18 @@ fn finish(
     }
     coverage.attempted = Some(attempted);
     coverage.succeeded = Some(succeeded);
-    if attempted == 0 && skipped > 0 {
+    if not_attempted > 0 {
+        limitations.record(
+            LimitationKind::BudgetExhausted,
+            "the budget expired before this mechanism was started for some processes",
+            not_attempted,
+            None,
+        );
+    }
+    if attempted == 0 && (skipped > 0 || not_attempted > 0) {
         coverage.status = CoverageStatus::NotAttempted;
         coverage.reason = Some("the budget expired before inspection started".to_string());
+        coverage.limitations = limitations.into_vec();
         return coverage;
     }
     if skipped > 0 {

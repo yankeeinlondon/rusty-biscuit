@@ -16,10 +16,9 @@
 //! The held-directory case (acceptance criterion 3, Windows) runs `wt remove`
 //! from the base repo while a separate windowless `ping` stands in the
 //! worktree. `--force-worktree` approves the dirty and ignored files and the
-//! branch is Safe, so only the lock check can stop the removal: the console
-//! must show the in-use refusal with exit 4, and every file, the registration,
-//! and the branch must survive. Without that check `git worktree remove`
-//! deletes the files before it fails.
+//! branch is Safe, so only the usage check can stop the removal: the console
+//! must show the usage refusal with exit 3, and every file, the registration,
+//! and the branch must survive.
 #![cfg(windows)]
 
 use std::fs;
@@ -470,7 +469,7 @@ fn level2_powershell_launched_inside_a_subdirectory_lands_in_the_fork_parent() {
 }
 
 #[test]
-fn level2_powershell_refuses_a_worktree_another_program_holds_with_exit_4_and_nothing_removed() {
+fn level2_powershell_refuses_a_worktree_another_program_holds_with_exit_3_and_nothing_removed() {
     require_level!(Level::L2, powershell_available(), "ConPTY (Windows PowerShell)");
     let scene = Scene::new();
     let wt = scene.add_worktree("feat/x", "feat-x");
@@ -488,9 +487,9 @@ fn level2_powershell_refuses_a_worktree_another_program_holds_with_exit_4_and_no
     let screen = &outcome.screen;
     let text = unwrapped(screen);
 
-    assert_eq!(outcome.code, 4, "{screen}");
-    assert!(text.contains("Error: the folder"), "{screen}");
-    assert!(text.contains("feat-x is in use by another program"), "{screen}");
+    assert_eq!(outcome.code, 3, "{screen}");
+    assert!(text.contains("Removal paused: another process is using feat-x."), "{screen}");
+    assert!(text.contains("PING.EXE"), "{screen}");
     assert!(!text.contains("Discard"), "--force-worktree skips the question:\n{screen}");
     assert!(!text.contains("Removed"), "{screen}");
     // The checkout follows the host's `core.autocrlf`.

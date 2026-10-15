@@ -1,7 +1,7 @@
 use sniff::filesystem::ProgrammingLanguage;
 use sniff::os::NtpStatus;
-use sniff::request::DetectionPlan;
-use sniff::{SniffConfig, detect, detect_with_config};
+use sniff::request::{DetectionPlan, HardwareRequest, NetworkRequest};
+use sniff::{SniffConfig, detect_with_config};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -11,11 +11,16 @@ mod fixtures;
 
 #[test]
 fn test_detect_returns_hardware_info() {
-    // OS + hardware only; the full convenience detect() path is exercised by
+    // OS + CPU/memory only; `detect()`'s full default configuration
+    // (storage, GPU, and CoreAudio enumeration included) is exercised by
     // test_detect_completes_in_reasonable_time.
-    let result =
-        sniff::detect_with_plan(DetectionPlan::new().without_network().without_filesystem())
-            .unwrap();
+    let result = sniff::detect_with_plan(
+        DetectionPlan::new()
+            .hardware(HardwareRequest::summary())
+            .without_network()
+            .without_filesystem(),
+    )
+    .unwrap();
     let os = result.os.expect("os should be present");
     assert!(!os.name.is_empty());
     let hardware = result.hardware.expect("hardware should be present");
@@ -73,8 +78,13 @@ fn test_detect_cargo_workspace() {
 #[test]
 fn test_detect_completes_in_reasonable_time() {
     // NFR-1: Fast path detection should complete in <300ms
+    //
+    // `detect()`'s defaults, anchored in a small repository rather than the
+    // process directory: from there the filesystem domain walks this whole
+    // monorepo, which took 5.4 s on native Windows with a cold file cache.
+    let (_dir, path) = fixtures::create_test_git_repo();
     let start = Instant::now();
-    let _ = detect();
+    let _ = detect_with_config(SniffConfig::default().base_dir(path));
     let elapsed = start.elapsed();
     let max_millis = if std::env::var("BISCUIT_CI_ENVIRONMENT").as_deref() == Ok("wsl2-ubuntu") {
         60_000
@@ -126,8 +136,11 @@ fn test_performance_is_opt_in() {
 
 #[test]
 fn test_performance_report_is_serialized_when_requested() {
+    // CPU/memory only: the report's shape does not depend on the slow
+    // hardware subsections (CoreAudio, storage, GPU).
     let result = sniff::detect_with_plan(
         DetectionPlan::new()
+            .hardware(HardwareRequest::summary())
             .without_network()
             .without_filesystem()
             .performance(true),
@@ -1642,6 +1655,20 @@ fn test_degenerate_rush_workspace_is_not_a_monorepo() {
 // rather than using substring matching, because nested data (e.g. Cargo feature
 // names like "network") can produce false positives with contains().
 
+/// The plan `detect_with_config(config)` runs, with every domain the config
+/// keeps lowered to its cheap tier: hardware to CPU/memory, network to local
+/// interfaces. A skipped domain stays `None`.
+fn cheap_tiers(config: SniffConfig) -> DetectionPlan {
+    let mut plan = DetectionPlan::from(config);
+    if plan.hardware.is_some() {
+        plan = plan.hardware(HardwareRequest::summary());
+    }
+    if plan.network.is_some() {
+        plan = plan.network(NetworkRequest::interfaces_only());
+    }
+    plan
+}
+
 /// Helper: parse SniffResult JSON and return the top-level key set.
 fn top_level_keys(result: &sniff::SniffResult) -> std::collections::HashSet<String> {
     let json = serde_json::to_string(result).unwrap();
@@ -1654,7 +1681,10 @@ fn test_skip_hardware_json_omits_hardware_key() {
     // Regression test: JSON should NOT contain "hardware" key when skipped.
     // Also skip filesystem (not asserted here) to avoid a monorepo scan.
     let config = SniffConfig::new().skip_hardware().skip_filesystem();
-    let result = detect_with_config(config).unwrap();
+    // The config's skip flags decide which keys exist; the kept domains run
+    // at their cheap tiers (no CoreAudio enumeration, no WAN IP request),
+    // which serialize under the same keys.
+    let result = sniff::detect_with_plan(cheap_tiers(config)).unwrap();
     let keys = top_level_keys(&result);
     assert!(
         !keys.contains("hardware"),
@@ -1668,7 +1698,10 @@ fn test_skip_network_json_omits_network_key() {
     // Regression test: JSON should NOT contain "network" key when skipped.
     // Also skip filesystem (not asserted here) to avoid a monorepo scan.
     let config = SniffConfig::new().skip_network().skip_filesystem();
-    let result = detect_with_config(config).unwrap();
+    // The config's skip flags decide which keys exist; the kept domains run
+    // at their cheap tiers (no CoreAudio enumeration, no WAN IP request),
+    // which serialize under the same keys.
+    let result = sniff::detect_with_plan(cheap_tiers(config)).unwrap();
     let keys = top_level_keys(&result);
     assert!(
         !keys.contains("network"),
@@ -1685,7 +1718,10 @@ fn test_skip_filesystem_json_omits_filesystem_key() {
     // Regression test: JSON should NOT contain "filesystem" key when skipped.
     // Also skip network (not asserted here) to keep the test cheap.
     let config = SniffConfig::new().skip_filesystem().skip_network();
-    let result = detect_with_config(config).unwrap();
+    // The config's skip flags decide which keys exist; the kept domains run
+    // at their cheap tiers (no CoreAudio enumeration, no WAN IP request),
+    // which serialize under the same keys.
+    let result = sniff::detect_with_plan(cheap_tiers(config)).unwrap();
     let keys = top_level_keys(&result);
     assert!(
         !keys.contains("filesystem"),
@@ -1701,7 +1737,10 @@ fn test_skip_filesystem_json_omits_filesystem_key() {
 fn test_hardware_only_json_contains_only_hardware() {
     // Regression test: When only hardware is requested, JSON should contain ONLY hardware
     let config = SniffConfig::new().skip_network().skip_filesystem();
-    let result = detect_with_config(config).unwrap();
+    // The config's skip flags decide which keys exist; the kept domains run
+    // at their cheap tiers (no CoreAudio enumeration, no WAN IP request),
+    // which serialize under the same keys.
+    let result = sniff::detect_with_plan(cheap_tiers(config)).unwrap();
     let keys = top_level_keys(&result);
     assert!(
         keys.contains("hardware"),
@@ -1722,7 +1761,10 @@ fn test_partial_result_deserialization_roundtrip() {
     // Regression test: Partial results should deserialize correctly.
     // Skip filesystem too (not asserted here) to avoid a monorepo scan.
     let config = SniffConfig::new().skip_hardware().skip_filesystem();
-    let result = detect_with_config(config).unwrap();
+    // The config's skip flags decide which keys exist; the kept domains run
+    // at their cheap tiers (no CoreAudio enumeration, no WAN IP request),
+    // which serialize under the same keys.
+    let result = sniff::detect_with_plan(cheap_tiers(config)).unwrap();
     let json = serde_json::to_string(&result).unwrap();
     let parsed: sniff::SniffResult = serde_json::from_str(&json).unwrap();
     assert!(
@@ -2029,6 +2071,7 @@ fn test_network_has_ip_addresses_field() {
         DetectionPlan::new()
             .without_os()
             .without_hardware()
+            .network(NetworkRequest::interfaces_only())
             .without_filesystem(),
     )
     .unwrap();
@@ -2070,6 +2113,7 @@ fn test_network_ip_addresses_json_structure() {
         DetectionPlan::new()
             .without_os()
             .without_hardware()
+            .network(NetworkRequest::interfaces_only())
             .without_filesystem(),
     )
     .unwrap();
@@ -2139,13 +2183,19 @@ fn test_network_ip_addresses_json_structure() {
 /// Tests that ip_addresses roundtrip through JSON correctly.
 #[test]
 fn test_network_ip_addresses_roundtrip() {
-    let result = sniff::detect_with_plan(
+    let mut result = sniff::detect_with_plan(
         DetectionPlan::new()
             .without_os()
             .without_hardware()
+            .network(NetworkRequest::interfaces_only())
             .without_filesystem(),
     )
     .unwrap();
+    // Local interfaces are observed live; the WAN address is set rather than
+    // fetched (an HTTP request), so its roundtrip always covers a value.
+    if let Some(network) = result.network.as_mut() {
+        network.wan_ip_address = Some("203.0.113.7".to_string());
+    }
     let json = serde_json::to_string(&result).expect("SniffResult should serialize");
     let parsed: sniff::SniffResult = serde_json::from_str(&json).expect("JSON should deserialize");
 
@@ -2550,6 +2600,7 @@ fn test_network_primary_interface_is_populated() {
         DetectionPlan::new()
             .without_os()
             .without_hardware()
+            .network(NetworkRequest::interfaces_only())
             .without_filesystem(),
     )
     .unwrap();

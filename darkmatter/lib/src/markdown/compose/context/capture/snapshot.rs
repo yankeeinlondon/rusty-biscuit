@@ -65,6 +65,7 @@ pub struct ContextCaptureEvidence {
     environment: HashMap<String, String>,
     invocation_cwd: EvidenceSlot<Option<PathBuf>>,
     git: EvidenceSlot<Option<GitInfo>>,
+    merge_conflicts: EvidenceSlot<Vec<PathBuf>>,
     repository: EvidenceSlot<RepositoryEvidence>,
     file_changes: EvidenceSlot<Vec<FileChange>>,
     languages: EvidenceSlot<Option<LanguageBreakdown>>,
@@ -85,6 +86,7 @@ impl ContextCaptureEvidence {
             environment,
             invocation_cwd: EvidenceSlot::Missing,
             git: EvidenceSlot::Missing,
+            merge_conflicts: EvidenceSlot::Missing,
             repository: EvidenceSlot::Missing,
             file_changes: EvidenceSlot::Missing,
             languages: EvidenceSlot::Missing,
@@ -108,6 +110,17 @@ impl ContextCaptureEvidence {
     /// Supplies Git identity/status evidence or an observed non-repository.
     pub fn with_git(mut self, git: Option<GitInfo>) -> Self {
         self.git = EvidenceSlot::Supplied(git);
+        self
+    }
+
+    /// Supplies the repository-relative paths left unmerged in the index.
+    ///
+    /// `ctx.merge_conflicts` reads only this; it is never derived from
+    /// [`GitInfo::file_changes`] or [`Self::with_file_changes`], which a
+    /// producer may legitimately leave empty. Required with the Git group
+    /// whenever [`Self::with_git`] supplied a repository.
+    pub fn with_merge_conflicts(mut self, conflicts: Vec<PathBuf>) -> Self {
+        self.merge_conflicts = EvidenceSlot::Supplied(conflicts);
         self
     }
 
@@ -791,6 +804,12 @@ impl ContextCapture {
         require(needs_document && evidence.git.is_missing(), "document.repository");
 
         let git_info = evidence.git.as_ref().and_then(Option::as_ref);
+        require(
+            groups.contains(&ContextGroup::Git)
+                && git_info.is_some()
+                && evidence.merge_conflicts.is_missing(),
+            "git.merge_conflicts",
+        );
         let invocation_cwd = evidence
             .invocation_cwd
             .as_ref()
@@ -815,15 +834,10 @@ impl ContextCapture {
             .cloned()
             .unwrap_or_default();
         let merge_conflicts = evidence
-            .file_changes
+            .merge_conflicts
             .as_ref()
-            .map(Vec::as_slice)
-            .or_else(|| git_info.map(|info| info.file_changes.as_slice()))
-            .unwrap_or_default()
-            .iter()
-            .filter(|change| change.status == FileStatus::Conflicted)
-            .map(|change| change.path.clone())
-            .collect();
+            .cloned()
+            .unwrap_or_default();
         let git_worktree = git_info.and_then(|info| info.current_worktree.clone());
         let (current_package, current_package_area) =
             current_package_context(base_dir, repo_info.as_ref());

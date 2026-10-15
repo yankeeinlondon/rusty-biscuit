@@ -37,6 +37,15 @@ impl Inventory {
         !self.dirty.is_empty() || !self.included.needs_consent.is_empty()
     }
 
+    /// The paths whose content consent covers, relative to the checkout:
+    /// every dirty entry, and every selected included file that needs
+    /// consent. The deletion inventory hashes the files at and below them.
+    pub fn consent_sensitive_paths(&self) -> Vec<PathBuf> {
+        let dirty = self.dirty.iter().map(|entry| entry.path.clone());
+        let included = self.included.selected.iter().filter(|(_, mark)| mark.needs_consent()).map(|(path, _)| path.clone());
+        dirty.chain(included).collect()
+    }
+
     pub fn has_source(&self) -> bool {
         self.dirty.iter().any(|entry| entry.is_source)
     }
@@ -127,7 +136,7 @@ impl Inventory {
         }
         // The whole index rather than a pathspec of the dirty paths, which
         // pathspec magic and command-line length limits make fragile.
-        let index = git_from_bytes(base, worktree, &["ls-files", "--stage", "-z"], None)?;
+        let index = crate::git::staged_entries_from(base, worktree)?;
         record.field(b"index").field(&index);
         Ok(record.digest())
     }
@@ -364,6 +373,11 @@ mod tests {
         ignored.sort();
         // A directory pattern lists `target/` once; `**/build/*` lists children.
         assert_eq!(ignored, [".env", "build/CACHE", "build/out/", "target/"]);
+
+        // The deletion inventory hashes the dirty paths, never ignored ones.
+        let mut sensitive: Vec<_> = inventory.consent_sensitive_paths().iter().map(|p| p.to_string_lossy().into_owned()).collect();
+        sensitive.sort();
+        assert_eq!(sensitive, ["README.md", "new/deep/file.txt", "staged.rs"]);
     }
 
     #[test]

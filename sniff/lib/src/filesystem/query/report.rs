@@ -133,7 +133,8 @@ pub struct Evidence {
     /// none is preferred.
     pub matched_paths: Vec<NativeString>,
     /// The spelling the backend reported, which may be an alias outside the
-    /// tree or descriptive text such as an unlinked file's name.
+    /// tree or descriptive text such as an unlinked file's name. Windows file-side
+    /// evidence reports the queried path; the holder's own spelling is unavailable.
     #[serde(deserialize_with = "nullable")]
     pub observed_path: Option<NativeString>,
     pub match_basis: MatchBasis,
@@ -241,8 +242,8 @@ pub struct Coverage {
     pub mechanism: Mechanism,
     pub scope: CoverageScope,
     pub status: CoverageStatus,
-    /// Inspections attempted (processes for usage mechanisms, entries for the
-    /// tree), or `null` when not observable.
+    /// Inspections attempted: processes for per-process mechanisms, paths for
+    /// Windows open handles and tree identity; `null` when not observable.
     #[serde(deserialize_with = "nullable")]
     pub attempted: Option<u64>,
     #[serde(deserialize_with = "nullable")]
@@ -267,6 +268,8 @@ pub struct Truncation {
 #[serde(rename_all = "snake_case")]
 pub enum LimitationKind {
     PermissionDenied,
+    /// Windows cannot open a delete-pending path to query its holders.
+    DeletePending,
     ProcessDisappeared,
     /// Name, executable, or user could not be read or verified.
     IdentityUnavailable,

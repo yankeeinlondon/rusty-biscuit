@@ -97,23 +97,20 @@ code touches the network.
 - Git runs through `git::git_from(base, dir, ..)` (`git -C`, cwd = base). `run`
   calls `set_current_dir(base)` right after resolving the target, so neither
   `wt` nor a git child holds the worktree on Windows.
-- `remove::remove_worktree` first runs `check_no_processes`
-  (`sniff::os::processes_working_in`: processes whose current directory is in
-  the worktree, the caller and its ancestors excluded) on every OS, then on
-  Windows `check_not_in_use` (rename to a sibling and back, which also catches
-  open files). Either is `WorktreeError::DirectoryInUse { path, processes }`
-  (`processes` empty for the probe), exit 4, with no override flag. `run` also
-  checks before the report so nothing is asked and then refused.
-- On macOS and Linux git deletes under a writer's feet; its recursive delete
-  stops at the first failure yet has already unregistered the worktree.
-  `finish_unregistered` retries `remove_dir_all` three times, else
-  `WorktreeError::FolderNotFullyRemoved` (exit 1, branch and origin untouched).
+- A checkout that exists is removed by `remove::lifecycle` after the
+  questions ([lifecycle.md](lifecycle.md) has the order and the CLI wiring).
+  Usage is checked there, once, right before the move; nothing checks it
+  before the report. The old `remove_worktree`/`check_no_processes`/
+  `check_not_in_use` (Windows rename probe)/`finish_unregistered` path and
+  the `DirectoryInUse`, `FolderNotFullyRemoved`, `LockProbeRenameBack`, and
+  `NotARealDirectory` errors are gone.
 
 ## Concurrent writers during removal
 
 A GitNexus watcher can recreate `.gitnexus/` while Git deletes the checkout.
-Git then fails with `Directory not empty` after unregistering the worktree; the
-CLI stops before deleting the branch. Observed on macOS with a recipe-started
+Git then failed with `Directory not empty` after unregistering the worktree
+(the behavior before the removal lifecycle); the CLI stopped before deleting
+the branch. Observed on macOS with a recipe-started
 `gitnexus analyze <target> --watch`: only regenerated index files remained.
 The registry sweep in `just gitnexus` runs on its next invocation, so it does
 not prevent this race. Stop the target's verified watcher process group before
@@ -162,6 +159,38 @@ Observed with Git 2.56 on macOS. These describe Git, not `wt`:
   inside it). A Git command that succeeds there does not prove the worktree is
   healthy.
 
+Checked 2026-10-11 with Git 2.47.3, 2.53.0, and 2.56.0 (spike S3 of
+`2026-10-05-graceful-file-contention`; its script is in that fix's
+`spikes/`):
+
+- **`git worktree move` replaces an existing empty directory.** It accepts
+  an empty directory as a destination (as `worktree add` does), turns a
+  directory destination into `<dir>/<name>`, and renames over it. It refuses
+  only a file or a non-empty directory. It cannot serve as a
+  no-replacement move.
+- A move rewrites exactly the admin `gitdir` and the checkout's `.git` file.
+  It writes the `.git` file in the *invoking* config's link format, so a
+  relative-link record can come out absolute.
+- With relative links (Git ≥ 2.48, `extensions.relativeWorktrees`), the
+  admin `gitdir` is relative to the admin directory itself
+  (`../../../../<checkout>/.git` from `<common>/worktrees/<id>/`), and the
+  `.git` file is relative to the checkout. After a native rename to a
+  same-depth sibling, rewriting only the admin `gitdir` restores the record.
+  An off-by-one `..` makes the record `prunable`. Git 2.47 ignores
+  `worktree.useRelativePaths`.
+- A lock survives a native rename (the `locked` file stays in the admin
+  directory). `move` and `move -f` refuse a locked worktree.
+- Worktrees containing submodules: `move` and plain `remove` refuse, but
+  `remove --force` deletes them. The submodule's git directory lives in
+  `<common>/worktrees/<id>/modules/<name>`.
+- A split index's `sharedindex.<oid>` files live in the per-worktree admin
+  directory, not the common directory.
+- A plain `git worktree remove` of a checkout holding only its `.git` file
+  **refuses**, because the deleted tracked files count as modifications. A
+  plain remove of the **absent** directory is record-only. A directory
+  recreated at the recorded path without a `.git` file is refused
+  ("validation failed").
+
 ## Preparing a target Git can't read (`remove::prepare`)
 
 `prepare(base, entry, &repair::Git)` classifies the entry afresh and returns
@@ -174,15 +203,18 @@ must call it before any inventory.
   every entry and returns `Other(OtherCondition::Link)` for a link even when
   Git reads through it. That one check is what `prepare`, both handoff runs,
   and `wt list` rely on. Repair adds `Postcondition::NotADirectory` (every
-  Git-side postcondition resolves links and passes), and `remove_worktree`
-  refuses with `WorktreeError::NotARealDirectory` (exit 3) unless the path is
-  a real directory immediately before Git runs. Only the final component
+  Git-side postcondition resolves links and passes), and the lifecycle's
+  `plan_move` refuses (`MoveRefusal::NotARealDirectory`, exit 3) unless the
+  path is a real directory immediately before the move. Only the final component
   counts: an ancestor alias such as macOS `/tmp` stays healthy. Tests make
   the link with `replace_with_link` (a junction on Windows, which needs no
   privilege).
 
-- **Association** (`admin_entry::admin_entry_for`): the common dir comes from
-  `rev-parse --path-format=absolute --git-common-dir`. Every directory under
+- **Association** (`admin_entry::admin_entry_for`): the common dir is
+  `admin_entry::common_git_dir`, read in-process (`git_metadata::common_dir`,
+  symlinks resolved as `rev-parse --path-format=absolute --git-common-dir`
+  does; native separators on Windows) with that command as the fallback.
+  Every directory under
   `worktrees/` is read, and an unreadable or linked record refuses the whole
   association. Exactly one record must match. Compare the **checkout
   directories** (`canonical_worktree_path`, which canonicalizes the longest
@@ -218,7 +250,7 @@ must call it before any inventory.
   only thing standing between consent and discarding staged work written after
   the report; `--force-worktree` approves the reported state, never a newer
   one. Then it runs plain `git worktree remove <path>`
-  with no `--force` and no `check_not_in_use`, and deletes the copy record
+  with no `--force`, and deletes the copy record
   only after Git succeeds. Branch steps stay with the caller.
 - Git receives paths as `OsStr` (`git::git_from_output`), never through a
   lossy `String`.
@@ -232,9 +264,13 @@ must call it before any inventory.
 - `Facts` carries the `CheckoutState`. For `Missing`, `inventory` stays empty
   and is never read: `situation()`, the report (`report::missing_markup`), the
   discard question, and `refusal_markup` all branch on `facts.missing()`
-  first. A missing target never hands off, and `execute` runs
-  `remove_missing_record` instead of `remove_worktree`.
-- `remove_local_branch(base, branch, expected_tip)` refuses with
+  first. A missing target never hands off, never queries Sniff, and
+  `execute` runs `remove_missing_record` (`execute_record_only`) instead of
+  the lifecycle. A pending removal whose quarantine is gone but still
+  registered also prepares as `Missing`, but goes through `resume` with a
+  `RecordApproval`.
+- `remove_local_branch(base, branch, expected_tip)` (called by the lifecycle,
+  or by `execute_record_only`) refuses with
   `WorktreeError::BranchMoved` (exit 1, after the worktree is gone) when the
   tip is no longer `Facts::head`, the tip the tier and any approval were
   decided on.
@@ -324,6 +360,179 @@ delete prints no "(N lost)" suffix.
   still uses.
 - The safety tiers' `origin/*` live checks still use `origin`, matching the
   fetch that made those refs.
+
+## Recovery store (`remove::recovery`) and typed outcomes (`remove::outcome`)
+
+The durable state of the contention-aware removal (`2026-10-05-graceful-file-contention`).
+The module docs of `recovery` state the crash guarantees; the facts below are
+the ones that cost time.
+
+- **Layout:** `<common-git-dir>/wt-removal/<operation-id>/` holds
+  `record.json`, `journal.jsonl`, and `report.json`; `wt-removal/locks/` holds
+  one `fs4` lock file per worktree record (key: BLAKE3 of the admin directory
+  name, 32 hex). A lock file is never deleted; only a held lock is an active
+  operation.
+- **An operation directory appears atomically.** `RecoveryStore::begin` builds
+  it as `.<id>.tmp`, flushes, and renames it. `pending()` skips any name that
+  is not an operation ID, so a staging directory a crash left is not a record.
+- **Trap (Windows): the journal is closed before that rename** and reopened for
+  appending afterwards (`JournalWriter::after_header`). Windows refuses to
+  rename a directory with an open file anywhere inside it (spike S1).
+- **Trap (macOS): std's `sync_all`/`sync_data` issue `F_FULLFSYNC`, ~25 ms a
+  call.** `storage::flush` uses plain `fsync` on Apple platforms; the store
+  claims process-crash durability, not power loss. With std's call, each
+  recovery test took 0.3–4 s; with `fsync`, ~30 ms.
+- **`begin` refuses while any record is unreadable,** not only one for the same
+  worktree: an unreadable record could describe it.
+- **Strict reading:** `record::parse` reads `record_version` through
+  `strict_json::members` first (an unknown version is `UnsupportedVersion`, not
+  `Malformed`), then the typed struct. Every field is required, with no
+  `Option` and no `serde(default)`. A detached checkout is the enum value
+  `"detached"`, not a null branch. Sniff's internally tagged `FileIdentity`
+  refuses an integer `kind` and a repeated inner key (both are matrix cells).
+- **Journal (version 2):** line 2 is the operation-start `DeletionInventory`,
+  written by `begin` in the staging directory, so an operation always has
+  one. A batch may only plan inventory entries, with the same kind; the
+  reader refuses anything else. The size limit counts batch lines only (the
+  inventory is as large as the checkout).
+- **Journal:** an intent is refused (`LimitReached`, nothing written) unless the
+  worst-case results line for the batch would still fit, so a confirmation is
+  never lost to the size limit. An unterminated last line is a torn write and is
+  ignored. An intent without results replays its absent entries as `Uncertain`
+  and its present ones as `Planned`.
+- **Robustness matrices** for both formats are in `recovery/store/tests.rs`.
+  They edit a fixture the store itself wrote and assert through
+  `RecoveryStore::recover`. A cell rewrites its file with `fs::write`, not
+  `write_durable`, to skip the flush.
+- `OperationReport` is written, never read back by `wt`. Its lists are capped
+  (`MAX_REPORTED_ACTIVITY`, `MAX_REPORTED_RETAINED`, `MAX_REPORTED_DELETED`)
+  with exact omitted counts. `OperationReport::record_deletion` adds
+  `ReportNote::ConcurrentWriteLimit` once anything was deleted.
+  The journal is never truncated. The exit-code mapping is not in `outcome`;
+  the lifecycle owns it, because exits 4 and cancel-0 are not operation
+  outcomes.
+
+## Usage check (`remove::usage`)
+
+The decisive check before the move: `check_usage(source, checkout, own)`
+queries once through a `UsageSource` (`SniffUsage` uses Sniff's default
+options; tests inject reports) and `assess` applies the policy. The one
+exception is a second query when only Windows Search held files
+([lifecycle.md](lifecycle.md#order-do-not-reorder)). Any evidence
+left after exclusion is `UsageRefusal::InUse`; any `PathUsageError` is
+`UsageRefusal::Unverified`. Both are exit 3. No match clears, whatever the
+coverage, and `UsageClearance` keeps the whole report.
+
+- **Sniff does not drop the caller's own evidence.** Only Windows open handles
+  are excluded, by the kernel. A watcher that `wt` itself opens would refuse
+  its own removal unless it is registered in `OwnedHandles` before the query.
+- **Exclusion is by `(EvidenceKind, descriptor)` under `wt`'s PID, never by
+  PID alone.** A record with `identity_uncertain`, or any record when
+  this PID's certain records disagree on their creation token, is never
+  excluded. Evidence without a descriptor, such as a loaded module when `wt`
+  runs from inside the checkout, always refuses.
+- **The CLI renderer** is `cli/src/commands/remove/usage.rs` (`refusal_markup`,
+  `usage_refusal`, `coverage_note`). Its snapshots are in
+  `cli/tests/remove_usage_refusal.rs`. Until `run` calls it, its module
+  declaration carries `#[allow(dead_code)]`, because the `wt` binary target
+  compiles it unused. Remove the attribute when wiring the call.
+- **Cost:** the real-query test (two queries of a small temp tree) takes
+  about 0.5 s on macOS and about 2 s on native Windows, where Sniff opens each
+  path to ask for its holders.
+
+## No-replacement move (`remove::quarantine::rename`)
+
+`rename_no_replace(from, to)` is the only move the quarantine may use:
+`renameat2(RENAME_NOREPLACE)` (raw syscall) on Linux, `renamex_np(RENAME_EXCL)`
+on macOS, and `SetFileInformationByHandle(FileRenameInfo)` with
+`ReplaceIfExists = FALSE` after a `DELETE` open on Windows. Failures carry a
+`RenameFailure`; match on it, never on the message. `identity(path)` reads the
+no-follow identity in Sniff's `FileIdentity` encoding (the Windows file ID is
+`u128::from_le_bytes`), so it compares equal to identities in a Sniff report
+or a recovery record.
+
+- **Never `std::fs::rename`, and never `git worktree move`, for the
+  quarantine.** Both replace an existing empty directory.
+- **Windows 5/32 depends on the stage.** From the `DELETE` open it is
+  `Permission`; from the rename after a successful open it is `Sharing`
+  (something in the tree is open, or is a process's working directory). An
+  ACL denial at the rename stage is indistinguishable and is reported as
+  `Sharing`; nothing moved either way.
+- **`EINVAL` is `Unsupported`** (WSL drvfs rejects `RENAME_NOREPLACE` for every
+  move), as are `ENOSYS` and `ENOTSUP`. `EEXIST` is still `Collision` there, so
+  a collision never proves the flag is supported.
+- **Unix in-use trees move freely**; only Windows blocks the move.
+- Tests for codes a host cannot produce (drvfs, another volume, a denied open)
+  go through `classify(Stage, &io::Error)`, which is `pub(crate)`.
+
+## Quarantine move with Git association (`remove::quarantine::association`)
+
+`naming::quarantine_path(original, operation)` gives
+`<parent>/.wt-remove-<ascii-slug>-<first 16 hex of the operation id>`.
+`plan_move` checks and fixes it; `move_to_quarantine(base, &plan,
+activity_observed)` re-runs every check, renames, rewrites the admin `gitdir`,
+and verifies with a fresh `git worktree list`. The lifecycle writes the
+recovery record between the two calls ([lifecycle.md](lifecycle.md)).
+
+- **Only the admin `gitdir` is rewritten, byte for byte except the checkout's
+  name** (`rewrite_back_reference`): absolute or relative, separators, and
+  line ending are kept, so Git's own spelling (`C:/…` on Windows) survives.
+  A record that does not end in `<sep><name><sep>.git` refuses. The file is
+  replaced by temp + rename and keeps its permissions (not the store's 0600).
+- **The `.git` file is never touched.** It must be absolute, or relative with
+  only leading `..` steps; `../x/../…` resolves through the checkout's own
+  name and breaks after the move, so it refuses. Lexical comparison would
+  accept it — do not "simplify" to that.
+- **Refusals match Git's `validate_no_submodules`:** an admin `modules`
+  entry, or a `160000` gitlink in the worktree's index (read with
+  `GIT_INDEX_FILE`, from the base). Any entry named `locked` in the admin
+  directory refuses; the lock is never removed.
+- **Rollback** happens only when the moved directory still has the planned
+  identity, `activity_observed()` is false, and nothing is at the original
+  path. It moves back with `rename_no_replace` (never over a recreated
+  original), restores the exact `gitdir` bytes, and re-verifies. Otherwise
+  `MoveError::Stranded` carries an observed `MoveState`.
+- **Exit classes (`MoveError::class`):** `Refused` (3); rename `Sharing` and
+  `Unsupported` → `BlockedByEnvironment` (4); every other rename failure, a
+  rollback, and a stranded move → `Failed`. `nothing_changed()` is true for
+  all but `Stranded`.
+- **Test seam:** `move_with(.., &Faults)` fails or replaces the `gitdir`
+  write and runs a hook after the rename. The relative-format test skips on
+  Git < 2.48 (build-linux has 2.47.3).
+- **macOS test trap:** a `TestRepo` path is `/var/…` while Git's listing (and
+  so `plan.original`) is `/private/var/…`; compare with `same_location` or
+  with `plan.original`, never with the path `add_worktree` returned.
+
+## Activity observer, deletion inventory, and checked deletion
+
+See [observation.md](observation.md). The final unregister
+(`quarantine::unregister::unregister_quarantine`) drains once more, confirms
+both paths are empty, lists the worktrees once (the quarantine exactly once,
+`Missing`), releases the admin watch, and calls
+`missing::remove_listed_record` with the `missing::IndexBinding` taken by
+`bind_index` before the move: the association, recorded HEAD, absence, and
+both index digests are checked once, against that binding, right before
+`git worktree remove` (a mismatch is `UnregisterError::IndexChanged`). It
+used to `inspect_missing` first and then `remove_missing_record`, reading
+every fact twice in a row. That deletes the copy record keyed by the
+quarantine path, not the original's; the lifecycle removes the original's
+copy record.
+
+**Git processes.** A clean removal starts 10 (18 before 2026-10-13, 36
+before 2026-10-12): see
+`worktree/docs/performance-testing.md#git-processes` for what each one is
+and the two tests that pin them. The tips `wt remove` compares
+(`remove::branch_tip`, `missing::recorded_head`, `default_target`), origin's
+URL (`remote::origin_url`), and `branch.<name>.*` are read in-process and
+fresh on every call, so a recheck still sees a concurrent change; Git runs
+only when that read cannot answer (a missing branch keeps Git's own error).
+The CLI lists the worktrees once to find `base` and resolve the name
+(`lifecycle::resolve_target_in`), in both runs of a handoff. Every other
+listing and index read in the lifecycle is a deliberate re-read; do not
+merge one into another without the spec's say-so. The listings and
+`ls-files --stage -z` reads are answered in-process at their steps
+(`git::worktree_list_from`, `git::staged_entries_*`); the `--debug` index
+bindings and a listing of a `prunable` entry still run Git.
 
 ## Tests
 

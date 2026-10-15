@@ -129,13 +129,22 @@ so the `fdinfo` matrix runs on every Unix host, while live controlled children
 `libproc` calls: a scripted source runs its classification tests on every
 Unix host, and only `macos::ffi` and `macos_tests::live` are macOS-only.
 The Windows backend (`filesystem/query/win32.rs`, module `win32` so it does not
-shadow the `windows` crate) reports `loaded_modules` only: modules are
-path-only observations, so its scripted-`Source` tests run on every host,
+shadow the `windows` crate) reports `open_handles` through a file-side scan and `loaded_modules`: modules are
+path-only observations (read in one pass over each process's loader list,
+`Source::loader_paths`, falling back to `GetModuleFileNameExW` per module;
+never by the kernel's mapped-file name, which names a hard-linked image by
+whichever link was mapped first), so its scripted-`Source` tests run on every host,
 and only `win32::ffi`, `win32_tests::spellings`, and `win32_tests::live` are
 Windows-only. It keeps each process handle from enumeration through
 enrichment (closing it early when nothing is in scope) and reads `details`
-through it, never by PID. `open_handles` is `unsupported` on Windows: reading
-another process's handle identity can hang (see the `os` skill).
+through it, never by PID. The `win32_paths` module reuses regular-file/directory entries from the one tree
+walk, queries file-side holders on at most eight scoped, joined workers, and
+propagates the request performance collector. `open_handles` coverage counts
+paths; `path_holder_inspections` counts scheduled path probes. No foreign
+handle is duplicated. Previously enumerated holders retain their process
+handles; a newly opened holder must be confirmed by another file-side query.
+Unconfirmed evidence stays identity-uncertain. Delete-pending paths are gaps;
+cwd and subscription mechanisms stay unsupported (see the `os` skill).
 Every backend shares the per-mechanism `Tally` in `backend.rs`. Contract:
 `sniff/docs/topics/filesystem-query.md`.
 

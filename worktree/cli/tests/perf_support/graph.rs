@@ -283,7 +283,7 @@ impl History {
         for (branch, tip) in branches {
             stream.push_str(&format!("reset refs/heads/{branch}\nfrom :{}\n\n", tip + 1));
         }
-        let mut child = Command::new("git")
+        let mut child = worktree::git::command()
             .current_dir(repo)
             .args(["fast-import", "--quiet"])
             .stdin(Stdio::piped())
@@ -300,7 +300,7 @@ impl History {
 }
 
 fn git(dir: &Path, args: &[&str]) {
-    let status = Command::new("git")
+    let status = worktree::git::command()
         .current_dir(dir)
         .args(args)
         .status()
@@ -309,7 +309,7 @@ fn git(dir: &Path, args: &[&str]) {
 }
 
 fn git_output(dir: &Path, args: &[&str]) -> String {
-    let output = Command::new("git").current_dir(dir).args(args).output().expect("git should be installed");
+    let output = worktree::git::command().current_dir(dir).args(args).output().expect("git should be installed");
     assert!(output.status.success(), "git {args:?} failed in {dir:?}");
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }

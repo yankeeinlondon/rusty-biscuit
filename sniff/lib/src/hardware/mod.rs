@@ -413,7 +413,10 @@ mod tests {
 
     #[test]
     fn test_detect_hardware_with_request_respects_flags() {
-        let with_all = HardwareRequest::full();
+        // Full minus audio: CoreAudio enumeration costs a test process about
+        // a second, and contends with every other one in the suite; the full
+        // path with audio is test_detect_hardware_full_includes_gpu_on_macos.
+        let with_all = HardwareRequest::full().include_audio(false);
         let with_none = HardwareRequest::summary();
 
         let all = detect_hardware_with_request(&with_all).unwrap();
@@ -426,9 +429,11 @@ mod tests {
         assert!(none.gpu.is_empty());
         assert!(none.audio_devices.is_empty());
 
-        // Full may have storage, GPU, audio (platform-dependent)
+        // Full may have storage and GPU (platform-dependent); the excluded
+        // audio section stays empty.
         assert!(all.cpu.logical_cores > 0);
         assert!(all.memory.total_bytes > 0);
+        assert!(all.audio_devices.is_empty());
     }
 
     #[test]

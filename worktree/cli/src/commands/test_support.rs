@@ -58,10 +58,9 @@ fn quoted(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::process::Command;
 
     fn get(repo: &Path, key: &str) -> String {
-        let output = Command::new("git").current_dir(repo).args(["config", "--get", key]).output().expect("git runs");
+        let output = worktree::git::command().current_dir(repo).args(["config", "--get", key]).output().expect("git runs");
         assert!(output.status.success(), "{key}: {output:?}");
         String::from_utf8_lossy(&output.stdout).trim_end_matches(['\r', '\n']).to_string()
     }
@@ -69,7 +68,7 @@ mod tests {
     #[test]
     fn written_settings_read_back_as_git_config_would_set_them() {
         let dir = tempfile::tempdir().unwrap();
-        let status = Command::new("git").current_dir(dir.path()).args(["init", "-q"]).status().unwrap();
+        let status = worktree::git::command().current_dir(dir.path()).args(["init", "-q"]).status().unwrap();
         assert!(status.success());
         let path = r#"C:\Users\a "b"\origin.git"#;
 

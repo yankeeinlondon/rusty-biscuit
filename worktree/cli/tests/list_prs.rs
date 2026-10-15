@@ -118,7 +118,7 @@ const HEAD_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 /// A fixture whose stored answer (PR #99 on `divergent-0`) is 12 minutes old,
 /// bound to [`FakeGitea::ORIGIN`].
 fn stale_gitea_fixture() -> (MixedFixture, Vec<u8>) {
-    let fixture = MixedFixture::new().with_gitea_origin();
+    let fixture = MixedFixture::small().with_gitea_origin();
     fixture.seed_pr_store(Duration::from_secs(12 * 60 + 5), 99, "divergent-0");
     seed_fresh_head(&fixture);
     let stored = fs::read(fixture.pr_store()).expect("seeded store");
@@ -145,7 +145,7 @@ fn assert_no_pr_item_or_hint(stderr: &str) {
 #[test]
 #[serial]
 fn a_fresh_pr_store_is_asked_again_and_a_failed_request_keeps_its_badges() {
-    let fixture = MixedFixture::new().with_github_origin();
+    let fixture = MixedFixture::small().with_github_origin();
     fixture.seed_pr_store(Duration::from_secs(10), 99, "divergent-0");
     seed_fresh_head(&fixture);
     let proxy = ProxyStub::hanging();
@@ -167,7 +167,7 @@ fn a_fresh_pr_store_is_asked_again_and_a_failed_request_keeps_its_badges() {
 #[test]
 #[serial]
 fn a_stale_store_shows_its_badges_and_its_workers_failed_request_stores_nothing() {
-    let fixture = MixedFixture::new().with_github_origin();
+    let fixture = MixedFixture::small().with_github_origin();
     fixture.seed_pr_store(Duration::from_secs(12 * 60 + 5), 99, "divergent-0");
     seed_fresh_head(&fixture);
     let stored = fs::read(fixture.pr_store()).expect("seeded store");
@@ -196,10 +196,10 @@ fn a_stale_store_shows_its_badges_and_its_workers_failed_request_stores_nothing(
 #[test]
 #[serial]
 fn a_changed_origin_hides_the_stored_badges_and_its_worker_stores_nothing() {
-    let fixture = MixedFixture::new().with_github_origin();
+    let fixture = MixedFixture::small().with_github_origin();
     fixture.seed_pr_store(Duration::from_secs(12 * 60 + 5), 99, "divergent-0");
     let stored = fs::read(fixture.pr_store()).expect("seeded store");
-    let status = std::process::Command::new("git")
+    let status = worktree::git::command()
         .current_dir(fixture.main())
         .args(["remote", "set-url", "origin", "https://github.com/someone-else/repo.git"])
         .status()
@@ -223,7 +223,7 @@ fn a_changed_origin_hides_the_stored_badges_and_its_worker_stores_nothing() {
 #[test]
 #[serial]
 fn the_worker_command_prints_nothing_and_ignores_anything_but_a_main_checkout() {
-    let fixture = MixedFixture::new().with_github_origin();
+    let fixture = MixedFixture::small().with_github_origin();
     fixture.seed_pr_store(Duration::from_secs(12 * 60 + 5), 99, "divergent-0");
     fixture.seed_remote_head_store(Duration::from_secs(12 * 60 + 5), Some(HEAD_SHA));
     let stored = fs::read(fixture.pr_store()).expect("seeded store");
@@ -280,7 +280,7 @@ fn the_worker_command_is_hidden_from_help_and_completion() {
 #[test]
 #[serial]
 fn with_the_network_down_the_table_shows_without_badges_and_nothing_is_stored() {
-    let fixture = MixedFixture::new().with_github_origin();
+    let fixture = MixedFixture::small().with_github_origin();
     seed_fresh_head(&fixture);
     let proxy = ProxyStub::refusing();
 
@@ -426,29 +426,49 @@ fn a_killed_worker_releases_its_lock_and_a_later_worker_refreshes() {
     assert!(!stderr.contains("PRs as of"), "{stderr}");
 }
 
+/// The refusals [`assert_a_refused_refresh_keeps_the_stored_answer`] is run
+/// with, one test each (test-speed.md, pattern 2).
+const REFUSED_REFRESH_STATUSES: [u16; 2] = [500, 401];
+
+/// A worker whose PR request is answered `status`, then a listing whose own
+/// worker is answered the same, leave the stored answer as it was.
+fn assert_a_refused_refresh_keeps_the_stored_answer(status: u16) {
+    let (fixture, seeded) = stale_gitea_fixture();
+    let gitea = FakeGitea::new(GiteaReply::Status(status));
+    let _reaper = WorkerReaper::new(&fixture, &gitea);
+
+    assert!(KillOnDrop::spawn(fixture.refresh_worker_via_gitea(&gitea)).wait().success());
+
+    assert!(gitea.requests() >= 1, "HTTP {status}: the worker asked");
+    assert_eq!(stored(&fixture), seeded, "HTTP {status} is never stored, not even as no PRs");
+    let (_, stderr) = list_with(fixture.wt_command_via_gitea(&gitea));
+    assert!(row(&stderr, "divergent-0").contains("PR #99"), "HTTP {status}:\n{stderr}");
+    // That listing's own worker failed the same way, inside its wait.
+    assert!(stderr.contains("PRs as of 12 min ago (couldn't refresh)"), "HTTP {status}:\n{stderr}");
+    assert!(!collapsed(&stderr).contains("running this command again"), "HTTP {status}:\n{stderr}");
+    // Without a key, the PR half's 401 names no condition a key would
+    // fix (the head half's 404 still asks for one).
+    assert!(!stderr.contains("didn't accept"), "HTTP {status}:\n{stderr}");
+    assert_eq!(stored(&fixture), seeded, "HTTP {status}: still nothing stored");
+}
+
 #[test]
 #[serial]
-fn a_failed_or_unauthorized_refresh_keeps_the_stored_answer() {
-    let (fixture, seeded) = stale_gitea_fixture();
+fn a_failed_refresh_keeps_the_stored_answer() {
+    assert_a_refused_refresh_keeps_the_stored_answer(REFUSED_REFRESH_STATUSES[0]);
+}
 
-    for status in [500, 401] {
-        let gitea = FakeGitea::new(GiteaReply::Status(status));
-        let _reaper = WorkerReaper::new(&fixture, &gitea);
+#[test]
+#[serial]
+fn an_unauthorized_refresh_keeps_the_stored_answer() {
+    assert_a_refused_refresh_keeps_the_stored_answer(REFUSED_REFRESH_STATUSES[1]);
+}
 
-        assert!(KillOnDrop::spawn(fixture.refresh_worker_via_gitea(&gitea)).wait().success());
-
-        assert!(gitea.requests() >= 1, "HTTP {status}: the worker asked");
-        assert_eq!(stored(&fixture), seeded, "HTTP {status} is never stored, not even as no PRs");
-        let (_, stderr) = list_with(fixture.wt_command_via_gitea(&gitea));
-        assert!(row(&stderr, "divergent-0").contains("PR #99"), "HTTP {status}:\n{stderr}");
-        // That listing's own worker failed the same way, inside its wait.
-        assert!(stderr.contains("PRs as of 12 min ago (couldn't refresh)"), "HTTP {status}:\n{stderr}");
-        assert!(!collapsed(&stderr).contains("running this command again"), "HTTP {status}:\n{stderr}");
-        // Without a key, the PR half's 401 names no condition a key would
-        // fix (the head half's 404 still asks for one).
-        assert!(!stderr.contains("didn't accept"), "HTTP {status}:\n{stderr}");
-        assert_eq!(stored(&fixture), seeded, "HTTP {status}: still nothing stored");
-    }
+/// One test per entry of [`REFUSED_REFRESH_STATUSES`], so a status added
+/// there fails here until it has its own test above.
+#[test]
+fn every_refused_refresh_status_has_a_test() {
+    assert_eq!(REFUSED_REFRESH_STATUSES, [500, 401]);
 }
 
 #[test]
@@ -461,7 +481,7 @@ fn an_origin_change_during_a_workers_request_discards_its_answer() {
 
     let mut worker = KillOnDrop::spawn(fixture.refresh_worker_via_gitea(&gitea));
     assert!(gitea.wait_for_waiting(1, WORKER_WAIT), "the worker made its request");
-    let status = Command::new("git")
+    let status = worktree::git::command()
         .current_dir(fixture.main())
         .args(["remote", "set-url", "origin", "http://gitea.test/o/other.git"])
         .status()
@@ -483,7 +503,7 @@ fn an_origin_change_during_a_workers_request_discards_its_answer() {
 #[test]
 #[serial]
 fn an_origin_change_during_the_wait_shows_no_badges_from_the_old_origin() {
-    let fixture = MixedFixture::new().with_gitea_origin();
+    let fixture = MixedFixture::small().with_gitea_origin();
     seed_fresh_head(&fixture);
     let gitea = FakeGitea::new(GiteaReply::Open(vec![(7, "divergent-1")]));
     let _reaper = WorkerReaper::new(&fixture, &gitea);
@@ -499,7 +519,7 @@ fn an_origin_change_during_the_wait_shows_no_badges_from_the_old_origin() {
     const NEW_ORIGIN: &str = "http://gitea.example.invalid/o/other.git";
     let main = fixture.main().to_path_buf();
     gitea.before_reply(move || {
-        let status = Command::new("git")
+        let status = worktree::git::command()
             .current_dir(&main)
             .args(["remote", "set-url", "origin", NEW_ORIGIN])
             .status()
@@ -526,10 +546,10 @@ fn an_origin_change_during_the_wait_shows_no_badges_from_the_old_origin() {
 #[serial]
 fn a_held_live_head_check_holds_the_listing_only_until_its_deadline() {
     let origin = HoldingOrigin::new();
-    let fixture = MixedFixture::new().with_origin(&origin.url());
+    let fixture = MixedFixture::main_only().with_origin(&origin.url());
     let _reaper = WorkerReaper::new(&fixture, &origin);
     fixture.seed_empty_pr_store(Duration::ZERO);
-    let status = Command::new("git")
+    let status = worktree::git::command()
         .current_dir(fixture.main())
         .args(["update-ref", "refs/remotes/origin/main", "main"])
         .status()
@@ -569,7 +589,7 @@ fn a_held_live_head_check_holds_the_listing_only_until_its_deadline() {
 #[test]
 #[serial]
 fn two_sequential_listings_each_make_one_pr_query_and_show_the_answer_they_waited_for() {
-    let fixture = MixedFixture::new().with_gitea_origin();
+    let fixture = MixedFixture::small().with_gitea_origin();
     fixture.seed_pr_store(Duration::from_secs(10), 99, "divergent-0");
     seed_fresh_head(&fixture);
     let gitea = FakeGitea::new(GiteaReply::Status(503));
@@ -592,7 +612,7 @@ fn two_sequential_listings_each_make_one_pr_query_and_show_the_answer_they_waite
 #[test]
 #[serial]
 fn a_failed_refresh_with_nothing_stored_says_it_couldnt_get_open_prs() {
-    let fixture = MixedFixture::new().with_gitea_origin();
+    let fixture = MixedFixture::small().with_gitea_origin();
     seed_fresh_head(&fixture);
     let gitea = FakeGitea::new(GiteaReply::Status(500));
     let _reaper = WorkerReaper::new(&fixture, &gitea);
@@ -608,10 +628,14 @@ fn a_failed_refresh_with_nothing_stored_says_it_couldnt_get_open_prs() {
     assert!(!fixture.pr_store().exists(), "a failure is never stored as no PRs");
 }
 
+/// The ordinary wait [`a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint`]
+/// runs with.
+const HELD_BUDGET: Duration = Duration::from_millis(2500);
+
 #[test]
 #[serial]
 fn a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint() {
-    let fixture = MixedFixture::new().with_gitea_origin();
+    let fixture = MixedFixture::main_only().with_gitea_origin();
     seed_fresh_head(&fixture);
     let gitea = FakeGitea::new(GiteaReply::Status(503));
     gitea.hold();
@@ -619,10 +643,15 @@ fn a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint()
 
     // The budget's expiry is proven with a scripted clock (`list::wait::
     // tests::the_budget_ends_the_wait_with_the_head_finished_and_the_pr_half_
-    // running`) and its real bound by `perf_pr_request.rs`. This listing
-    // keeps the real 3 s wait: the head half must finish inside it, and one
-    // functional test should run the budget a release build uses.
-    let (_, stderr) = list_with(fixture.wt_command_via_gitea(&gitea));
+    // running`), its real bound by `perf_pr_request.rs`, and the release
+    // wiring by `commands::list::tests::a_listing_launches_the_real_worker_
+    // and_waits_the_real_budgets`. This listing waits 2.5 s of the real 3 s
+    // (test-speed.md, pattern 3): long enough for the head half, which
+    // answers at once, to finish inside it under a loaded runner, and the
+    // hint below is the evidence the budget, not an answer, ended the wait.
+    let mut command = fixture.wt_command_via_gitea(&gitea);
+    command.env(worktree_cli::env::TEST_WAIT_BUDGET_VAR, HELD_BUDGET.as_millis().to_string());
+    let (_, stderr) = list_with(command);
 
     assert!(gitea.wait_for_waiting(1, Duration::ZERO), "the PR request is still held");
     let text = collapsed(&stderr);
@@ -656,7 +685,7 @@ fn an_empty_answer_clears_the_stored_badges_and_shows_no_item() {
 #[test]
 #[serial]
 fn without_an_origin_nothing_is_asked_and_no_pr_item_or_hint_shows() {
-    let fixture = MixedFixture::new();
+    let fixture = MixedFixture::small();
     let proxy = ProxyStub::closing_after(Duration::ZERO);
 
     let (_, stderr) = list(&fixture, &proxy);
@@ -670,10 +699,10 @@ fn without_an_origin_nothing_is_asked_and_no_pr_item_or_hint_shows() {
 
 #[test]
 #[serial]
-fn local_path_and_unsupported_origins_keep_the_head_check_and_show_no_pr_badges_or_item() {
+fn an_unsupported_origin_keeps_the_head_check_and_shows_no_pr_badges_or_item() {
     // A host no provider recognizes: its stored answer (left from when it
     // was supported, say) is not shown, and the head check still runs.
-    let unsupported = MixedFixture::new().with_origin("https://git.example.invalid/o/r.git");
+    let unsupported = MixedFixture::small().with_origin("https://git.example.invalid/o/r.git");
     unsupported.seed_pr_store(Duration::from_secs(12 * 60 + 5), 99, "divergent-0");
     let seeded = stored(&unsupported);
     let proxy = ProxyStub::closing_after(Duration::ZERO);
@@ -688,9 +717,14 @@ fn local_path_and_unsupported_origins_keep_the_head_check_and_show_no_pr_badges_
     let attempt = read_store(&unsupported.remote_head_store()).attempt.expect("the head check ran");
     // Git's HTTPS transport is refused here, so the check fails; it ran.
     assert_eq!(attempt.outcome, Some(Outcome::CheckFailed { reason: CheckFailure::Other }), "{attempt:?}");
+}
 
-    // A local path: the head check answers through Git.
-    let local = MixedFixture::new().with_local_origin();
+#[test]
+#[serial]
+fn a_local_path_origin_keeps_the_head_check_and_shows_no_pr_badges_or_item() {
+    // A local path: the head check answers through Git, and nothing is
+    // stored to badge any row.
+    let local = MixedFixture::main_only().with_local_origin();
     let (_, stderr) = list_with(local.wt_command_direct());
     assert!(local.wait_until_unlocked(WORKER_WAIT, || {}), "the worker finished");
 
@@ -734,7 +768,7 @@ fn a_rejected_key_on_the_pr_request_shows_the_credentials_line_in_an_ordinary_li
 
     let main = fixture.main().to_path_buf();
     gitea.before_reply(move || {
-        let status = Command::new("git")
+        let status = worktree::git::command()
             .current_dir(&main)
             .args(["remote", "set-url", "origin", "http://gitea.example.invalid/o/other.git"])
             .status()
@@ -773,7 +807,7 @@ fn a_rejected_key_on_the_head_check_outranks_the_pr_requests_rate_limit() {
 #[test]
 #[serial]
 fn a_pr_failure_never_blocks_a_permitted_fast_forward() {
-    let fixture = MixedFixture::new().with_gitea_origin();
+    let fixture = MixedFixture::main_only().with_gitea_origin();
     let gitea = FakeGitea::new(GiteaReply::Status(500));
     let _reaper = WorkerReaper::new(&fixture, &gitea);
     let pushed = fixture.serve_gitea_origin_one_commit_ahead(&gitea);
@@ -783,7 +817,7 @@ fn a_pr_failure_never_blocks_a_permitted_fast_forward() {
     assert!(output.status.success(), "{stderr}");
     assert!(wait_for_refresh_workers(fixture.main(), 0, WORKER_WAIT).is_empty(), "the worker finished");
 
-    let main = Command::new("git").current_dir(fixture.main()).args(["rev-parse", "main"]).output().expect("git");
+    let main = worktree::git::command().current_dir(fixture.main()).args(["rev-parse", "main"]).output().expect("git");
     assert_eq!(String::from_utf8_lossy(&main.stdout).trim(), pushed, "main moved to the fetched tip:\n{stderr}");
     let text = collapsed(&stderr);
     assert!(text.contains("main is in sync with origin/main (updated from origin just now)"), "{stderr}");
@@ -850,7 +884,7 @@ fn a_failed_assertion_while_a_pr_request_is_held_still_reaps_the_worker_before_t
 #[serial]
 fn a_failed_assertion_while_a_live_head_check_is_held_still_frees_both_locks() {
     let origin = HoldingOrigin::new();
-    let fixture = MixedFixture::new().with_origin(&origin.url());
+    let fixture = MixedFixture::main_only().with_origin(&origin.url());
     fixture.seed_empty_pr_store(Duration::ZERO);
     let mut workers = Vec::new();
     let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -917,7 +951,7 @@ fn keyless_lines(stderr: &str) -> usize {
 #[test]
 #[serial]
 fn an_anonymous_pr_answer_with_a_failed_head_check_shows_the_keyless_notice() {
-    let fixture = MixedFixture::new().with_gitea_origin();
+    let fixture = MixedFixture::main_only().with_gitea_origin();
     let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
     gitea.answer_branch_heads_with(500);
     let _reaper = WorkerReaper::new(&fixture, &gitea);
@@ -932,7 +966,7 @@ fn an_anonymous_pr_answer_with_a_failed_head_check_shows_the_keyless_notice() {
 #[test]
 #[serial]
 fn an_anonymous_head_answer_with_a_failed_pr_request_shows_the_keyless_notice_through_the_fetch() {
-    let fixture = MixedFixture::new().with_gitea_origin();
+    let fixture = MixedFixture::main_only().with_gitea_origin();
     let gitea = FakeGitea::new(GiteaReply::Status(500));
     let _reaper = WorkerReaper::new(&fixture, &gitea);
     let pushed = fixture.serve_gitea_origin_one_commit_ahead(&gitea);
@@ -952,7 +986,7 @@ fn an_anonymous_head_answer_with_a_failed_pr_request_shows_the_keyless_notice_th
 #[serial]
 fn two_anonymous_answers_show_exactly_one_keyless_line_and_a_key_shows_none() {
     const SECRET: &str = "gitea-secret-token-value";
-    let fixture = MixedFixture::new().with_gitea_origin();
+    let fixture = MixedFixture::main_only().with_gitea_origin();
     let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
     let _reaper = WorkerReaper::new(&fixture, &gitea);
     let pushed = fixture.serve_gitea_origin_one_commit_ahead(&gitea);
@@ -986,7 +1020,7 @@ fn two_anonymous_answers_show_exactly_one_keyless_line_and_a_key_shows_none() {
 #[test]
 #[serial]
 fn the_keyless_notice_coexists_with_the_closing_fallback_notice() {
-    let fixture = MixedFixture::new().with_gitea_origin();
+    let fixture = MixedFixture::main_only().with_gitea_origin();
     let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
     gitea.answer_branch_heads_with(401);
     let _reaper = WorkerReaper::new(&fixture, &gitea);
@@ -1007,7 +1041,7 @@ fn the_keyless_notice_coexists_with_the_closing_fallback_notice() {
 #[test]
 #[serial]
 fn stored_anonymous_evidence_from_an_earlier_listing_never_gives_the_notice() {
-    let fixture = MixedFixture::new().with_gitea_origin();
+    let fixture = MixedFixture::main_only().with_gitea_origin();
     let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
     let _reaper = WorkerReaper::new(&fixture, &gitea);
     let pushed = fixture.serve_gitea_origin_one_commit_ahead(&gitea);
@@ -1096,7 +1130,7 @@ fn change_origin_at_checkpoint(fixture: &MixedFixture, gitea: &FakeGitea, change
             OriginChange::Removed => &["remote", "remove", "origin"],
         };
         if !args.is_empty() {
-            let status = Command::new("git").current_dir(&main).args(args).status().expect("git");
+            let status = worktree::git::command().current_dir(&main).args(args).status().expect("git");
             assert!(status.success(), "{change:?}");
         }
         flag.store(true, Ordering::SeqCst);
@@ -1117,11 +1151,12 @@ fn listing_with_origin_change(fixture: &MixedFixture, gitea: &FakeGitea, mut com
     stderr
 }
 
-#[test]
-#[serial]
-fn a_changed_origin_drops_the_old_head_checks_credentials_warning() {
+/// A listing whose `origin` was changed at the checkpoint (after a control
+/// listing on the same fixture showed the warning) shows no credentials
+/// warning from the old origin's head check.
+fn assert_a_changed_origin_drops_the_old_head_checks_credentials_warning(change: OriginChange) {
     const WARNING: &str = "Gitea didn't accept GITEA_TOKEN";
-    let fixture = MixedFixture::new().with_gitea_origin();
+    let fixture = MixedFixture::main_only().with_gitea_origin();
     let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
     gitea.answer_branch_heads_with(401);
     let _reaper = WorkerReaper::new(&fixture, &gitea);
@@ -1135,24 +1170,32 @@ fn a_changed_origin_drops_the_old_head_checks_credentials_warning() {
     let stderr = listing_with_origin_change(&fixture, &gitea, command(), OriginChange::Unchanged);
     assert!(collapsed(&stderr).contains(WARNING), "{stderr}");
 
-    for change in [OriginChange::Replaced, OriginChange::Removed] {
-        let branch_requests = gitea.branch_requests();
-        let stderr = listing_with_origin_change(&fixture, &gitea, command(), change);
-        assert!(gitea.branch_requests() > branch_requests, "{change:?}: this listing checked the head again");
-        let text = collapsed(&stderr);
-        assert!(!text.contains(WARNING), "{change:?}: the old origin's warning is shown:\n{stderr}");
-        assert!(!text.contains("rate limited") && !text.contains("answered without"), "{change:?}:\n{stderr}");
-        if let OriginChange::Replaced = change {
-            run_git_in(fixture.main(), &["remote", "set-url", "origin", FakeGitea::ORIGIN]);
-        }
-    }
+    let branch_requests = gitea.branch_requests();
+    let stderr = listing_with_origin_change(&fixture, &gitea, command(), change);
+    assert!(gitea.branch_requests() > branch_requests, "{change:?}: this listing checked the head again");
+    let text = collapsed(&stderr);
+    assert!(!text.contains(WARNING), "{change:?}: the old origin's warning is shown:\n{stderr}");
+    assert!(!text.contains("rate limited") && !text.contains("answered without"), "{change:?}:\n{stderr}");
 }
 
 #[test]
 #[serial]
-fn a_changed_origin_drops_the_old_head_checks_fallback_notice_and_caption() {
+fn a_replaced_origin_drops_the_old_head_checks_credentials_warning() {
+    assert_a_changed_origin_drops_the_old_head_checks_credentials_warning(OriginChange::Replaced);
+}
+
+#[test]
+#[serial]
+fn a_removed_origin_drops_the_old_head_checks_credentials_warning() {
+    assert_a_changed_origin_drops_the_old_head_checks_credentials_warning(OriginChange::Removed);
+}
+
+/// A listing whose `origin` was changed at the checkpoint (after a control
+/// listing on the same fixture showed the fallback notice and the fetch)
+/// shows neither the old check's notice nor its caption.
+fn assert_a_changed_origin_drops_the_old_head_checks_fallback_notice_and_caption(change: OriginChange) {
     const FALLBACK: &str = "Git checked origin using `ls-remote`";
-    let fixture = MixedFixture::new().with_gitea_origin();
+    let fixture = MixedFixture::main_only().with_gitea_origin();
     let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
     gitea.answer_branch_heads_with(401);
     let _reaper = WorkerReaper::new(&fixture, &gitea);
@@ -1166,22 +1209,107 @@ fn a_changed_origin_drops_the_old_head_checks_fallback_notice_and_caption() {
     assert!(text.contains(FALLBACK), "{stderr}");
     assert!(text.contains("(updated from origin just now)"), "{stderr}");
 
-    for change in [OriginChange::Replaced, OriginChange::Removed] {
-        let git_requests = gitea.git_requests();
-        let stderr = listing_with_origin_change(&fixture, &gitea, fixture.wt_command_via_gitea_git(&gitea), change);
-        assert!(gitea.git_requests() > git_requests, "{change:?}: this listing's ls-remote answered again");
-        let text = collapsed(&stderr);
-        assert!(!text.contains(FALLBACK), "{change:?}: the old origin's fallback notice is shown:\n{stderr}");
-        assert!(!text.contains("answered without"), "{change:?}:\n{stderr}");
-        assert!(!text.contains("origin just now"), "{change:?}: the caption reports the old check:\n{stderr}");
-        assert!(text.contains("couldn't check origin;"), "{change:?}: the caption reads as a check not made:\n{stderr}");
-        if let OriginChange::Replaced = change {
-            run_git_in(fixture.main(), &["remote", "set-url", "origin", FakeGitea::ORIGIN]);
-        }
-    }
+    let git_requests = gitea.git_requests();
+    let stderr = listing_with_origin_change(&fixture, &gitea, fixture.wt_command_via_gitea_git(&gitea), change);
+    assert!(gitea.git_requests() > git_requests, "{change:?}: this listing's ls-remote answered again");
+    let text = collapsed(&stderr);
+    assert!(!text.contains(FALLBACK), "{change:?}: the old origin's fallback notice is shown:\n{stderr}");
+    assert!(!text.contains("answered without"), "{change:?}:\n{stderr}");
+    assert!(!text.contains("origin just now"), "{change:?}: the caption reports the old check:\n{stderr}");
+    assert!(text.contains("couldn't check origin;"), "{change:?}: the caption reads as a check not made:\n{stderr}");
 }
 
-fn run_git_in(repo: &std::path::Path, args: &[&str]) {
-    let status = Command::new("git").current_dir(repo).args(args).status().expect("git");
-    assert!(status.success(), "git {args:?}");
+#[test]
+#[serial]
+fn a_replaced_origin_drops_the_old_head_checks_fallback_notice_and_caption() {
+    assert_a_changed_origin_drops_the_old_head_checks_fallback_notice_and_caption(OriginChange::Replaced);
+}
+
+#[test]
+#[serial]
+fn a_removed_origin_drops_the_old_head_checks_fallback_notice_and_caption() {
+    assert_a_changed_origin_drops_the_old_head_checks_fallback_notice_and_caption(OriginChange::Removed);
+}
+
+/// The exhaustive match fails to compile when an [`OriginChange`] gains a
+/// variant without its two tests above (the unchanged one is each test's
+/// control).
+#[test]
+fn every_origin_change_has_its_notice_tests() {
+    let tests_of = |change: OriginChange| -> Vec<fn()> {
+        match change {
+            OriginChange::Unchanged => Vec::new(),
+            OriginChange::Replaced => vec![
+                a_replaced_origin_drops_the_old_head_checks_credentials_warning,
+                a_replaced_origin_drops_the_old_head_checks_fallback_notice_and_caption,
+            ],
+            OriginChange::Removed => vec![
+                a_removed_origin_drops_the_old_head_checks_credentials_warning,
+                a_removed_origin_drops_the_old_head_checks_fallback_notice_and_caption,
+            ],
+        }
+    };
+    let count: usize = [OriginChange::Unchanged, OriginChange::Replaced, OriginChange::Removed].map(|change| tests_of(change).len()).iter().sum();
+    assert_eq!(count, 4);
+}
+
+
+/// [`perf_support::ls_refs_answer`], the stand-in's own `ls-refs`, answers
+/// byte for byte what `git upload-pack` answers the same request, and
+/// leaves to Git what it cannot read (a tag, or a fetch).
+#[test]
+fn the_stand_ins_ls_refs_answer_is_git_upload_packs() {
+    let fixture = MixedFixture::small();
+    let bare = fixture.home().join("served.git");
+    let git = |dir: &std::path::Path, args: &[&str]| {
+        let output = worktree::git::command().current_dir(dir).args(args).output().expect("git runs");
+        assert!(output.status.success(), "git {args:?}: {output:?}");
+    };
+    git(fixture.main(), &["clone", "--bare", "--quiet", ".", bare.to_str().unwrap()]);
+    // A loose ref beside the packed ones, overriding one of them.
+    let tip = fs::read_to_string(bare.join("packed-refs")).unwrap();
+    let divergent = tip.lines().find_map(|line| line.strip_suffix(" refs/heads/divergent-0")).unwrap().to_string();
+    fs::write(bare.join("refs").join("heads").join("main"), format!("{divergent}\n")).unwrap();
+    fs::write(bare.join("refs").join("heads").join("loose-only"), format!("{divergent}\n")).unwrap();
+
+    let pkt = |line: &str| format!("{:04x}{line}", line.len() + 4);
+    let request = |arguments: &[&str]| {
+        let mut body = pkt("command=ls-refs\n") + &pkt("agent=git/2.50.0\n") + &pkt("object-format=sha1\n") + "0001";
+        for argument in arguments {
+            body.push_str(&pkt(&format!("{argument}\n")));
+        }
+        body + "0000"
+    };
+    let upload_pack = |body: &str| {
+        let mut child = worktree::git::command()
+            .args(["upload-pack", "--stateless-rpc", bare.to_str().unwrap()])
+            .env("GIT_PROTOCOL", "version=2")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("upload-pack runs");
+        std::io::Write::write_all(&mut child.stdin.take().unwrap(), body.as_bytes()).unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        output.stdout
+    };
+    for arguments in [
+        &["peel", "symrefs", "unborn", "ref-prefix refs/heads/main"][..],
+        &["symrefs", "ref-prefix HEAD", "ref-prefix refs/heads/"],
+        &["peel", "symrefs"],
+        &[],
+        &["ref-prefix refs/heads/divergent-", "ref-prefix refs/heads/loose-only"],
+    ] {
+        let body = request(arguments);
+        assert_eq!(
+            perf_support::ls_refs_answer(&bare, body.as_bytes()).map(String::from_utf8),
+            Some(Ok(String::from_utf8(upload_pack(&body)).unwrap())),
+            "{arguments:?}"
+        );
+    }
+
+    let fetch = pkt("command=fetch\n") + &pkt("object-format=sha1\n") + "0001" + &pkt("done\n") + "0000";
+    assert_eq!(perf_support::ls_refs_answer(&bare, fetch.as_bytes()), None, "a fetch is Git's");
+    git(&bare, &["-c", "user.name=T", "-c", "user.email=t@example.com", "-c", "tag.gpgSign=false", "tag", "-a", "-m", "annotated", "v1", "main"]);
+    assert_eq!(perf_support::ls_refs_answer(&bare, request(&["peel"]).as_bytes()), None, "a tag is Git's");
 }
