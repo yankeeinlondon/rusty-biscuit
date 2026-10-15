@@ -224,7 +224,7 @@ that literal prefix. Adjacent holes such as `{{ x }}{{ y }}` stay in one word.
 Only a bare top-level property (`out` or `fm.out`) gets its declaration from
 the effective schema of the document that owns the command. Named declarations
 resolve there, including in a transcluded child with its own schema. Other
-expressions (`env.OUT`, `last(outputs)`, `out || 'dist'`), undeclared properties,
+expressions (`env.OUT`, `last(seq.outputs)`, `out || 'dist'`), undeclared properties,
 and schemas without a SimplifiedSchema projection use a broad `string` hole.
 
 | Rule hole | Candidate declaration | Covered? |
@@ -465,9 +465,9 @@ A host that places commands where their values may change before they run (a seq
 
 ```md
 ---
-latest: "{{ last(outputs) }}"
+latest: "{{ last(seq.outputs) }}"
 ---
-::shell just test {{ last(outputs) }} --package {{ pkg }}   <!-- template only; `pkg` must be present -->
+::shell just test {{ last(seq.outputs) }} --package {{ pkg }}   <!-- template only; `pkg` must be present -->
 ::shell just clean {{ latest }}                              <!-- template only, through `latest` -->
 ```
 

@@ -1,12 +1,12 @@
 ---
 sequence: "@biscuit-tui/components.yaml"
 success:
-    message: "✅ the **{{state.name}}** component has been documented in **biscuit-tui**"
+    message: "✅ the component documentation sequence completed in **biscuit-tui**"
 failure:
-    message: "❌ the **{{state.name}}** component documentation failed to complete in **biscuit-tui**"
+    message: "❌ the component documentation sequence failed in **biscuit-tui**"
 ---
 
-You are responsible for documenting the "{{state.name}}" component defined in the `biscuit-tui` library. 
+You are responsible for documenting the "{{seq.name}}" component defined in the `biscuit-tui` library.
 
 The documentation should include:
 
@@ -19,4 +19,4 @@ The documentation should include:
 - add 3-4 suggestions on how this component could be enhanced functionally
 
 
-Save this document to "biscuit-tui/docs/components/{{state.name}}"
+Save this document to "biscuit-tui/docs/components/{{seq.name}}"

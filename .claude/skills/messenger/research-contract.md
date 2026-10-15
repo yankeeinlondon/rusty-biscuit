@@ -86,8 +86,8 @@ Platform research is becoming typed, reviewed metadata (feature
   RUN_ID` marks it `interrupted` explicitly, never silently.
 - Put validation and the delta inside the sequence (they are `shell:` steps),
   so the runner's elapsed-time cap covers them.
-- The budget ledger (`claudine budget`, `sequence --budget-ledger`) was
-  removed 2026-10. Ledger-era records with status `exhausted` stay readable,
+- The former budget ledger workflow was removed 2026-10. Ledger-era records
+  with status `exhausted` stay readable,
   resumable like `interrupted`, never promotable, never shown successful; a
   leftover `budget.json` beside a record is ignored (reported as a note by
   `runs`) and never deleted.
@@ -148,18 +148,18 @@ Platform research is becoming typed, reviewed metadata (feature
   promotion passes all five run IDs to one `promote`. One run alone is refused
   (`GenerateError::Refused` with `missing`) and nothing is written.
 - **Recovery**: `prepare --resume` reruns from the first incomplete stage
-  (reconcile when validation failed), at most twice, with the same ledger. It
-  refuses an exhausted, suspended, interrupted, or active ledger until the
-  operator acts in Claudine.
-- **Effective status** (`state::apply_ledger`, applied by `runs`, selection,
-  `check-run`, `resume`, `promote`, and `reject`): an `active` run takes the
-  ledger's resting state. `exhausted` → exhausted, `interrupted` →
-  interrupted, and `stopped` → `failed` **only when the ledger's `runs`
-  exceeds `RunRecord::ledger_runs`**, the count recorded at prepare/resume. A
-  sequence that stopped before `check-run` decided (a failed step, Ctrl+C, or
-  `AgentResolutionFailed`) is resumable or rejectable, not stuck `active`. A
-  prepared run the runner never launched stays `active`: `messenger research
-  run RUN_ID` is still the way forward.
+  (reconcile when validation failed), at most twice, preserving the run's
+  invocation count. Only failed, interrupted, or legacy exhausted records
+  resume; another open or unreadable run for the platform blocks resumption.
+  Resume resets the attempt to unlaunched `active` and clears its
+  previous runner observation.
+- **Recorded status**: the Messenger runner rereads `run.json` after the
+  sequence settles, preserving statuses decided by `check-run`. Exit `130`
+  records `interrupted`; another nonzero exit or spawn failure changes an
+  undecided `active` run to `failed`. Exit `0` records `finished` without
+  making incomplete research successful. A launched `active` record whose
+  runner died needs explicit stale-run recovery; an unlaunched prepared run
+  is started with `messenger research run RUN_ID`.
 - **Recipes** (`messenger/justfile`): `research-validate|generate|check|
   report|runs|cleanup` wrap the offline commands; `research-publish NAME
   RUN…` is `promote --approved-by`. `research-refresh SECONDS INVOCATIONS
