@@ -62,6 +62,7 @@ skills_files_updated_during_phase_1:
   - .claude/skills/schematic-define/SKILL.md
   - .claude/skills/schematic-define/schematic/SKILL.md
 packages:
+  - schematic-runtime
   - schematic-define
   - schematic-gen
   - schematic-definitions
@@ -122,6 +123,105 @@ docs_created_during_phase_3:
   - schematic/docs/definition-builders.md
 skills_files_updated_during_phase_3:
   - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+source_files_during_phase_4:
+  - schematic/define/src/builders.rs
+  - schematic/define/src/cross_origin.rs
+  - schematic/define/src/lib.rs
+  - schematic/define/src/oauth.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/parameters.rs
+  - schematic/define/src/openapi/import/mappings/mod.rs
+  - schematic/define/src/openapi/import/mappings/parameters.rs
+  - schematic/define/src/pagination.rs
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/pagination/validate.rs
+  - schematic/define/src/params/mod.rs
+  - schematic/define/src/params/param_def.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/types.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/cross_origin_policy.rs
+  - schematic/define/tests/definition_forms.rs
+  - schematic/define/tests/definition_serde.rs
+  - schematic/define/tests/endpoint_literal_surface.rs
+  - schematic/define/tests/pagination_support/mod.rs
+  - schematic/definitions/src/anthropic/mod.rs
+  - schematic/definitions/src/artificial_analysis/mod.rs
+  - schematic/definitions/src/bitbucket/mod.rs
+  - schematic/definitions/src/elevenlabs/endpoints/history.rs
+  - schematic/definitions/src/elevenlabs/endpoints/sound_generation.rs
+  - schematic/definitions/src/elevenlabs/endpoints/speech.rs
+  - schematic/definitions/src/elevenlabs/endpoints/voices.rs
+  - schematic/definitions/src/elevenlabs/endpoints/workspace.rs
+  - schematic/definitions/src/emqx/endpoints/auth_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/banned_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/client_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/messaging_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/monitoring_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/rules_endpoints.rs
+  - schematic/definitions/src/emqx/mod.rs
+  - schematic/definitions/src/eversolo/mod.rs
+  - schematic/definitions/src/gitea/mod.rs
+  - schematic/definitions/src/github/mod.rs
+  - schematic/definitions/src/gitlab/endpoints/branches.rs
+  - schematic/definitions/src/gitlab/endpoints/issues.rs
+  - schematic/definitions/src/gitlab/endpoints/merge_requests.rs
+  - schematic/definitions/src/gitlab/endpoints/pipelines.rs
+  - schematic/definitions/src/gitlab/endpoints/projects.rs
+  - schematic/definitions/src/gitlab/endpoints/releases.rs
+  - schematic/definitions/src/huggingface/mod.rs
+  - schematic/definitions/src/lmstudio/mod.rs
+  - schematic/definitions/src/ollama/mod.rs
+  - schematic/definitions/src/openai/mod.rs
+  - schematic/definitions/src/registry/mod.rs
+  - schematic/definitions/src/samsung_smart_tv/mod.rs
+  - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+  - schematic/gen/src/codegen/api_struct/helpers.rs
+  - schematic/gen/src/codegen/api_struct/tests.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/endpoint_methods/names.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/pagination/tests.rs
+  - schematic/gen/src/codegen/request_enum.rs
+  - schematic/gen/src/codegen/request_structs/body.rs
+  - schematic/gen/src/codegen/request_structs/mod.rs
+  - schematic/gen/src/codegen/request_structs/named_params.rs
+  - schematic/gen/src/codegen/request_structs/path_params.rs
+  - schematic/gen/src/codegen/request_structs/query_params.rs
+  - schematic/gen/src/codegen/request_structs/shared.rs
+  - schematic/gen/src/codegen/request_structs/single.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/collection.rs
+  - schematic/gen/src/export/postman/tests.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/pagination_validation.rs
+  - schematic/gen/tests/l1/partial_generation.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/postman_golden.rs
+  - schematic/gen/tests/l1/query_param_detection.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/runtime/src/client.rs
+  - schematic/runtime/src/origin.rs
+  - schematic/runtime/tests/l1/pager_surface.rs
+  - schematic/runtime/tests/l1/redirects.rs
+docs_updated_during_phase_4:
+  - schematic/define/README.md
+  - schematic/docs/definition-builders.md
+  - schematic/docs/pagination.md
+  - schematic/docs/runtime/building-clients.md
+  - schematic/docs/runtime/origins-and-redirects.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
   - .claude/skills/schematic-define/schematic/SKILL.md
 ---
 
@@ -401,3 +501,51 @@ No Linux/native Windows/WSL2 run was added: changes are portable Rust type/schem
 **Phase 3 implementation complete, ready for review.** Plan/log frontmatter lists the complete source, docs and skills inventories; accumulated packages remain schematic-define, schematic-gen and schematic-definitions. Spec frontmatter has human_review false and a fresh Phase 4 handoff. Current behavior is recorded in the new definition-builders topic, linked from README/typed registration, with dependency records and both Schematic skills updated.
 
 Providers, production import emitter, WebSocket definitions, committed generated Rust/OpenAPI/Postman artifacts, request defaults, runtime ABI 4, legacy pagination contracts and prior-phase work are preserved. Literal prohibition, provider/emitter migration and definition-side runtime/query forms remain later-phase work. No feature lifecycle move, cargo fmt, staging or commits occurred. All delegated tasks returned in this turn, and all final verification processes finished; nothing is left waiting.
+
+## Phase 4
+
+### Behavior-to-test map before implementation
+
+| Changed behavior | Concrete coverage | Boundary / fidelity / tier |
+| --- | --- | --- |
+| Endpoint origin replacement, invalid origins, caller tightening | definition_forms policy matrix; generated fixture with two loopback origins and sibling refusal | authoring F1 L1; generated compiler/runtime/HTTP F2 L1 |
+| Request-id normalization, secret sugar, explicit auth policy | definition_forms metadata validation plus generator emission assertions and generated fixture | authoring F1 L1; generated consumer F2 L1 |
+| Explicit parameter locations, wire ref / Rust git_ref, optional beta/recursive | definition_forms stored location tests; generator tests and generated wire fixture | F1 L1; Rust/compiler/HTTP F2 L1 |
+| Serialized pager marker, matched control, required default, unmatched rejection | definition_forms adoption matrix, two JSON read/write/read cycles and public API build | definition transfer / resolved strategy F2 L1 |
+| GET body rejection, retained path-query warning | definition_forms all request families and methods, existing shipped baseline and diagnostic corpus | F1 L1 plus passive shipped corpus F2 L1 |
+
+The phase writes definition data and adds builder APIs, not a configuration reader; the configuration robustness matrix does not apply. Existing plain Serde compatibility remains, and marker transfer is tested through downstream API assembly. Existing artifact_drift, definition_baseline and normal generated fixture paths cover shipped artifacts. Provider migrations, OAuth scope removal and the hard path-query switch remain in their scheduled later phases. Wave 8 explicitly permits bounded parallel work; generator/runtime emission and generated fixture tests have separate ownership and are collected before closure. All work is non-interactive.
+
+### Definition forms and compatibility
+
+Added serializable endpoint origin replacement plus per-parameter Rust alias, secret and pager-adoption flags. All unused additions omit from JSON. The mechanical source-literal additions are necessary while providers and importer remain on the legacy model; no provider endpoint or parameter behavior was migrated. The generator's literal emitter must carry these fields until its scheduled builder conversion. The existing path-query severity constant already provides the hard-error switch; it stays Warning.
+
+`ParamDef::new` defaults to optional; query/header_param/cookie state location, and path placeholders/body methods retain their existing locations. API request-id and secret-header sugar normalize lowercase and validate HTTP token syntax. `auth_policy` was already wired by Phase 3 and is retained with its generated-execution coverage. API build reuses resolved pagination validation; markers without matching location/name/control fail, including unpaginated endpoints. Required adopted inputs use the existing PagerManagedRequiredWithoutDefault. GET rejects all five body forms at endpoint build; destination API build catches transferred bodies with API/endpoint/GET context. Endpoint build reports the existing `<endpoint>` placeholder because no destination API exists yet. HEAD remains allowed, a deliberate preservation of existing behavior.
+
+The initial targeted definition run passed 8/8; expanded tests additionally cover forged transferred GET bodies, all unmatched marker locations and invalid Rust aliases. JSON read/write/read is repeated twice and destination build rechecks downstream fields. Existing defaults are compatibility semantics, not silent conversion of required collections. No configuration reader was introduced.
+
+The first broad attempt found one compact Endpoint literal lacking its new field; corrected it. The initial linter caught new implementation ordering, collapsible conditions and a first-diagnostic loop; corrected them without formatting. Temporary mechanical edits to extension-only OAuth fields and function return signatures were identified and corrected before verification. These are development failures to rerun, not accepted gaps.
+
+### Runtime wiring and targeted evidence
+
+The generated definition emits per-endpoint policies through additive `ApiDefinition::endpoint_cross_origin(id, policy)`. Runtime selects the effective policy by EndpointSpec::ENDPOINT_ID for first-hop preparation, redirects and check_link, so pagination's absolute follow-up requests use the same replacement. Caller settings validate against the default and every endpoint policy and can only tighten. No runtime ABI bump or redaction implementation was introduced. Parameter secret wire names are unioned into existing SecretNames metadata, including adopted parameters (the original definition, not the pager-filtered request view, supplies metadata).
+
+Rust aliases are separate from wire names through request fields, constructors, setters, default initialization, parameter encoding, generated call names and collision validation. Explicit aliases preserve spelling; inferred names retain existing sanitation. Exports keep the wire name. Empty allow-origin lists emit a typed empty vector so generated Rust has no unconstrained generic element type. Existing Some(AuthPolicy) emission/execution tests remain active.
+
+The JSON matrix adds explicit definition-transfer reader coverage beyond the initial writer-focused assessment: all four new load-bearing fields (`cross_origin`, `rust_name`, `secret`, `pager_managed`) have documented absent/null/wrong-type/element/empty/duplicate/trailing outcomes. The positive control is real builder-produced serialized data with a required adopted limit and sent default. Every edit reaches public API assembly, not just a deserializer return. Optional absence/null is explicitly defined as no policy/alias; absent Boolean flags mean false and null fails. Read/write/read is repeated in the other transfer tests.
+
+The first completed ordinary gate ran 2,199/2,304 tests before stopping on the OpenAI source reproduction check (2,198 passed, one failed; 105 not run, 12 excluded). The mechanical inline additions compiled but differed from the emitter's own exact source layout. Ran the existing `just import-openai` invocation to reproduce the model's new fields; it still reports 265 endpoints, 1,394 models, three existing warnings and no errors. No endpoint merge, parameter move, schema choice or provider behavior change occurred. OpenAI types.rs stayed byte-identical. The artifact tests already passed against historical generated Rust/OpenAPI/Postman. This run's two preexisting whole-corpus generator tests were flagged slow under concurrent compile/lint load; the final gate will run after targeted compiler work settles.
+
+### Requirement-to-test mapping and exact targets
+
+All new ordinary tests are compiled by auto-discovered define integration targets or the generator/runtime's existing declared L1 targets. The generated child names are checked against REQUEST_SIDE_TESTS, preventing silent orphaning. `just check-tier-coverage schematic` reports zero stranded tests. No new tier marker, feature gate, timeout, retry, ignore or test dependency was added.
+
+- R14, F1 authoring and F2 runtime/HTTP L1: `definition_forms::{locations_markers_and_policy_survive_repeated_transfer, metadata_normalizes_header_names_and_rejects_invalid_origins_and_names}`; `redirects::{endpoint_origin_replacement_controls_redirects_links_and_caller_tightening, endpoint_origin_replacement_validates_exact_origins}`; `pager_surface::endpoint_origin_override_reaches_followed_page_and_caller_can_tighten_it`; child tests `endpoint_origin_override_allows_redirects_and_caller_can_tighten_it` and `endpoint_origin_override_governs_followed_pagination_links`. Parent second-origin recordings are exactly `/page-allowed` and `/redirect-allowed`; siblings and tightened callers add no requests. Negative link assertions name CrossOriginRejected.
+- R15/R16, F1 emission and F2 generated runtime L1: `codegen::api_struct::tests::endpoint_origin_replacement_and_parameter_secrets_use_runtime_metadata`, `definition_gen::tests::emits_endpoint_policy_and_serializable_parameter_markers`, plus existing `an_explicit_policy_wins_over_the_legacy_strategy`, `the_translated_policy_is_emitted_in_runtime_terms` and generated `request_id_secret_names_and_cross_origin_policy_come_from_the_definition`. Parameter secret markers now drive that generated fixture's existing metadata checks; predecessor redaction logic is unchanged.
+- R29/R31, F1 syntax and F2 compiler/HTTP L1: `codegen::request_structs::tests::explicit_rust_parameter_name_preserves_wire_query_and_ordinary_setters`, `validation::tests::rust_parameter_aliases_are_validated_and_collide_by_rust_name_only`, generated `optional_query_alias_and_booleans_encode_once_under_wire_names`. Exact values `feature/x y+z` and `feature/a b%&=ü` retain the wire name ref with Rust git_ref, absent optionals, beta/recursive true and false, one encoding pass, and decoded query checks. Existing required-adopted default/caller replacement and credential repeated-key conflict tests remain.
+- R30, F2 definition transfer/resolver L1: `definition_forms::{pager_marker_requires_matching_strategy_and_authored_required_default, unmatched_markers_and_invalid_aliases_cannot_hide_inputs, json_definition_forms_matrix_reaches_public_assembly}`. Covers optional/required × matched/unmatched × absent/present sent default, all three declared locations, no resolved strategy, malformed aliases and two read/write/read cycles. The matrix's public positive control proves all four new fields load-bearing; empty wrong whole shapes and empty valid allow-lists stay distinct.
+- R31, F1 authoring and transferred-definition boundary L1: `definition_forms::{every_get_body_family_is_rejected_and_post_is_accepted, transferred_get_body_reports_destination_api_endpoint_and_method}`. JSON/text/binary/multipart/urlencoded GET failures, corresponding POST successes, preserved HEAD behavior, API/endpoint/method diagnostics.
+- R27 replaced only its obsolete half: `cross_origin_policy::endpoints_support_cross_origin_override_and_no_graphql_export` retains the no-GraphQL assertion.
+- R24, passive shipped corpus and normal real-artifact path F2 L1: existing definition_baseline/artifact_drift/import_overlay and fresh-output guards compare all shipped historical definition data, ordered schemas, generated Rust/OpenAPI/Postman and exact re-imported OpenAI source. The existing `slow_fixture_apis_compile_and_send_offline` owns the new generated child tests (31 child tests, final targeted run passed). Existing shipped-API compiler guard remains selected by `just test`.
+
+Targeted generator/runtime task reports seven passing tests; the separate generated fixture reports three passing parent/coverage guards, including all 31 child tests. Its intermediate wrong PagerError import was corrected to the public pager module path and the final exact-source rerun passed. The doctest gate exposed a missed ParamDef doc literal; updated it and the other live README/import/skill literal examples with the new required source fields. No cargo formatter ran.

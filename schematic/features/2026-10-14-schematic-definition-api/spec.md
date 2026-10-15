@@ -34,27 +34,25 @@ related: []
 next_spec: 2026-10-15-schematic-definition-vocabulary
 human_review: false
 message_to_agent: |-
-  Phase 3 adds required-fact builders in schematic/define/src/builders.rs; read
-  schematic/docs/definition-builders.md. Endpoint JSON methods take &mut context;
-  construct endpoints before RestApi::builder borrows &context. Errors remain fallible.
-  Typed Schema now carries optional descriptor evidence, omitted from legacy JSON.
-  API build validates complete destination wrapper/name/path identity, including JSON
-  form fields, missing descriptor evidence, and lowered-path agreement. The destination must register the complete
-  wrapper, not only the leaf; no process-local identity is serialized. Typed OpenAPI
-  export uses descriptor wire schemas; legacy paths are unchanged. Root typed Vec
-  keeps GET list inference; Option/nominal/non-GET boundaries remain unchanged.
-  Auth is exactly one declaration, with coherent env names; conflicting env_mapping
-  fails in either order. Explicit AuthPolicy stays authoritative. All 20 meaningful
-  public Defaults were retained in an audited allow-list; Endpoint/RestApi/builders
-  have none. ErrorSet only supports none. FormField::json_desc authors typed metadata.
-  Named generator fixtures use builders plus explicit stored-field mutations for
-  intentionally invalid/legacy schema cases; no public string builder escape hatch.
-  Providers, production importer emitter and external literal legality remain for
-  later phases. Phase 4 should add definition-side runtime/query forms without losing
-  optional schema descriptor evidence. Keep ABI 4, pagination contracts, committed
-  artifact baselines and import reproduction. Ollama progress models still need their
-  JsonSchema derive at provider migration. Existing isolated compiler guards cover
-  required-fact failures with exact diagnostic codes; no new slow suite was introduced.
+  Phase 4 adds Endpoint.cross_origin and ParamDef.rust_name/secret/pager_managed.
+  All unused fields omit from serialized definitions; legacy source literals now
+  explicitly initialize these fields. Continue migrating them to builders in the
+  scheduled phases. Endpoint cross_origin replaces the API policy for redirects
+  and followed pager links. Generated ApiDefinition.endpoint_cross_origin stores
+  it by endpoint ID; caller policies must tighten every applicable policy.
+  ParamDef::new(wire, type) is optional by default; required/describes/rust_name/
+  secret/pager_managed author metadata. Endpoint query/header_param/cookie state
+  locations; constant header(name,value) remains. rust_name affects Rust only.
+  API request_id_header and secret_header normalize lowercase and validate names;
+  default_pagination feeds existing resolution. API build invokes the existing
+  pagination validator; unmatched managed markers fail, required managed inputs
+  retain PagerManagedRequiredWithoutDefault. GET bodies fail endpoint build and
+  destination API build; HEAD is unchanged. See docs/definition-builders.md.
+  The definition emitter carries new fields but remains literal-based until
+  Phase 5. Path-query severity remains Warning until all Phase 6 migrations.
+  Provider definitions changed only for new field initialization, with historical
+  JSON and generated artifacts retained. Keep schema descriptor evidence and
+  ABI 4; do not drop aliases or secret/adoption metadata during emitter migration.
 ---
 
 # Schematic definition API: builders and typed registration

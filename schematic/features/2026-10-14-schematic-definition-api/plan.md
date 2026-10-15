@@ -1,7 +1,7 @@
 ---
 total_phases: 8
 created: 2026-10-11
-phase: 3
+phase: 4
 agent: codex/gpt-6.1-sol
 yolo: "true"
 source_files_during_phase_1:
@@ -63,6 +63,7 @@ skills_files_updated_during_phase_1:
   - .claude/skills/schematic-define/SKILL.md
   - .claude/skills/schematic-define/schematic/SKILL.md
 packages:
+  - schematic-runtime
   - schematic-define
   - schematic-gen
   - schematic-definitions
@@ -123,6 +124,105 @@ docs_created_during_phase_3:
   - schematic/docs/definition-builders.md
 skills_files_updated_during_phase_3:
   - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+source_files_during_phase_4:
+  - schematic/define/src/builders.rs
+  - schematic/define/src/cross_origin.rs
+  - schematic/define/src/lib.rs
+  - schematic/define/src/oauth.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/parameters.rs
+  - schematic/define/src/openapi/import/mappings/mod.rs
+  - schematic/define/src/openapi/import/mappings/parameters.rs
+  - schematic/define/src/pagination.rs
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/pagination/validate.rs
+  - schematic/define/src/params/mod.rs
+  - schematic/define/src/params/param_def.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/types.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/cross_origin_policy.rs
+  - schematic/define/tests/definition_forms.rs
+  - schematic/define/tests/definition_serde.rs
+  - schematic/define/tests/endpoint_literal_surface.rs
+  - schematic/define/tests/pagination_support/mod.rs
+  - schematic/definitions/src/anthropic/mod.rs
+  - schematic/definitions/src/artificial_analysis/mod.rs
+  - schematic/definitions/src/bitbucket/mod.rs
+  - schematic/definitions/src/elevenlabs/endpoints/history.rs
+  - schematic/definitions/src/elevenlabs/endpoints/sound_generation.rs
+  - schematic/definitions/src/elevenlabs/endpoints/speech.rs
+  - schematic/definitions/src/elevenlabs/endpoints/voices.rs
+  - schematic/definitions/src/elevenlabs/endpoints/workspace.rs
+  - schematic/definitions/src/emqx/endpoints/auth_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/banned_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/client_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/messaging_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/monitoring_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/rules_endpoints.rs
+  - schematic/definitions/src/emqx/mod.rs
+  - schematic/definitions/src/eversolo/mod.rs
+  - schematic/definitions/src/gitea/mod.rs
+  - schematic/definitions/src/github/mod.rs
+  - schematic/definitions/src/gitlab/endpoints/branches.rs
+  - schematic/definitions/src/gitlab/endpoints/issues.rs
+  - schematic/definitions/src/gitlab/endpoints/merge_requests.rs
+  - schematic/definitions/src/gitlab/endpoints/pipelines.rs
+  - schematic/definitions/src/gitlab/endpoints/projects.rs
+  - schematic/definitions/src/gitlab/endpoints/releases.rs
+  - schematic/definitions/src/huggingface/mod.rs
+  - schematic/definitions/src/lmstudio/mod.rs
+  - schematic/definitions/src/ollama/mod.rs
+  - schematic/definitions/src/openai/mod.rs
+  - schematic/definitions/src/registry/mod.rs
+  - schematic/definitions/src/samsung_smart_tv/mod.rs
+  - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+  - schematic/gen/src/codegen/api_struct/helpers.rs
+  - schematic/gen/src/codegen/api_struct/tests.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/endpoint_methods/names.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/pagination/tests.rs
+  - schematic/gen/src/codegen/request_enum.rs
+  - schematic/gen/src/codegen/request_structs/body.rs
+  - schematic/gen/src/codegen/request_structs/mod.rs
+  - schematic/gen/src/codegen/request_structs/named_params.rs
+  - schematic/gen/src/codegen/request_structs/path_params.rs
+  - schematic/gen/src/codegen/request_structs/query_params.rs
+  - schematic/gen/src/codegen/request_structs/shared.rs
+  - schematic/gen/src/codegen/request_structs/single.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/collection.rs
+  - schematic/gen/src/export/postman/tests.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/pagination_validation.rs
+  - schematic/gen/tests/l1/partial_generation.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/postman_golden.rs
+  - schematic/gen/tests/l1/query_param_detection.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/runtime/src/client.rs
+  - schematic/runtime/src/origin.rs
+  - schematic/runtime/tests/l1/pager_surface.rs
+  - schematic/runtime/tests/l1/redirects.rs
+docs_updated_during_phase_4:
+  - schematic/define/README.md
+  - schematic/docs/definition-builders.md
+  - schematic/docs/pagination.md
+  - schematic/docs/runtime/building-clients.md
+  - schematic/docs/runtime/origins-and-redirects.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
   - .claude/skills/schematic-define/schematic/SKILL.md
 ---
 
@@ -261,11 +361,11 @@ Phase gate: R8–R13 pass on new fixtures, all old providers remain baseline-equ
 
 ### Wave 8 — Definition Forms and Runtime Wiring (Parallel)
 
-- [ ] **Add Definition Forms**
+- [x] **Add Definition Forms**
   - Own schematic-define changes for endpoint CrossOrigin replacement, request-id/secret sugar, auth_policy, pager-managed markers, parameter locations with the GET-body rejection, and narrow wire-name/Rust-name mapping (R14–R16, R29–R31).
   - Store adoption markers as serializable definition data. Reject unmatched adoption and managed required inputs lacking the pagination-authored default. Reject a request body on an endpoint built with `Endpoint::get` with API, endpoint, and method context; location never enters endpoint identity. Reuse the resolved-strategy validator and PagerManagedRequiredWithoutDefault diagnostic.
   - Retain a path-query warning for existing providers; prepare the hard-error path but enable it only with completion of all nine migrations in Phase 6.
-- [ ] **Wire Runtime Emission**
+- [x] **Wire Runtime Emission**
   - Own generator/runtime changes consuming those agreed fields. Apply endpoint policy to redirects and followed links, and emit request-id/secret markers in the predecessor's runtime form without new redaction logic.
   - Preserve GitLab's git_ref Rust name for wire name ref. Optional `recursive`/`beta` parameters added by the merges are ordinary query inputs with setters, emitted through the normal encoder and exported like any other query parameter.
 
