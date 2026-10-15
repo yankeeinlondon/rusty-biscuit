@@ -1,0 +1,243 @@
+{
+  "definition": {
+    "auth": {
+      "ApiKey": {
+        "header": "X-Api-Key",
+        "value_prefix": null
+      }
+    },
+    "auth_policy": null,
+    "base_url": "https://api.anthropic.com/v1",
+    "cross_origin": "SameOrigin",
+    "default_pagination": null,
+    "description": "Anthropic Messages API for Claude AI interactions and agent tool use",
+    "docs_url": "https://docs.anthropic.com/en/api/messages",
+    "endpoints": [
+      {
+        "description": "Create a message with optional tool use for agent interactions",
+        "headers": [],
+        "id": "CreateMessage",
+        "method": "POST",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/messages",
+        "request": {
+          "Json": {
+            "module_path": null,
+            "type_name": "CreateMessageBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "MessageResponse"
+          }
+        }
+      },
+      {
+        "description": "Count tokens in a message before sending",
+        "headers": [],
+        "id": "CountTokens",
+        "method": "POST",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/messages/count_tokens",
+        "request": {
+          "Json": {
+            "module_path": null,
+            "type_name": "CountTokensBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "CountTokensResponse"
+          }
+        }
+      },
+      {
+        "description": "List available Claude models",
+        "headers": [],
+        "id": "ListModels",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/models",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "ListModelsResponse"
+          }
+        }
+      },
+      {
+        "description": "Get information about a specific model",
+        "headers": [],
+        "id": "RetrieveModel",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/models/{model_id}",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "ModelInfo"
+          }
+        }
+      }
+    ],
+    "env_auth": [
+      "ANTHROPIC_API_KEY"
+    ],
+    "env_mapping": {
+      "api_key": {
+        "header": "X-Api-Key",
+        "names": {
+          "names": [
+            "ANTHROPIC_API_KEY"
+          ]
+        }
+      },
+      "basic_pass": null,
+      "basic_user": null,
+      "bearer_token": null
+    },
+    "env_username": null,
+    "headers": [
+      [
+        "anthropic-version",
+        "2023-06-01"
+      ]
+    ],
+    "module_path": null,
+    "name": "Anthropic",
+    "pagination_exceptions": [
+      {
+        "collection": {
+          "alternates": [],
+          "item_type": "ModelInfo",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "data"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
+        "endpoint": "ListModels"
+      }
+    ],
+    "request_id_header": null,
+    "request_suffix": null,
+    "secret_names": [],
+    "version": null
+  },
+  "fingerprints": {
+    "api_metadata": "a694f2a26e23e4d870d0ffce9b689e1db2c475f5c35b73493778741bd13bef54",
+    "endpoints": [
+      {
+        "blake3": "0b1be39d80073c3c3cfde9d0d6e0f56bcdcb8038a0a80e1138348f2461491534",
+        "id": "CreateMessage"
+      },
+      {
+        "blake3": "bdb59d9ceadf8bc481ccd7513c4ee986d51adedde439388e3ff434d830d5f00c",
+        "id": "CountTokens"
+      },
+      {
+        "blake3": "d9195c3b547b5b5c76480cb607d197c377677d30672599893e2ccb147ef4bf6e",
+        "id": "ListModels"
+      },
+      {
+        "blake3": "02f9c8b114aaee2ee3c174402aea2ade9c7638e5874be6c03c7e0587d099a4e2",
+        "id": "RetrieveModel"
+      }
+    ]
+  },
+  "pagination": [
+    {
+      "caller_knobs": [],
+      "endpoint": "CreateMessage",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "CountTokens",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListModels",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "ModelInfo",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "data"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "Exception"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "RetrieveModel",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    }
+  ],
+  "registry": [
+    {
+      "blake3": "3c47b53110d7c516e5d963de228281f9fa27194e0ff5af841e657d644578dad6",
+      "name": "CreateMessageBody"
+    },
+    {
+      "blake3": "d46e1bdae06fc263e11c7ce95646e57aaf97ed5a64ee952ae8931157d2180f75",
+      "name": "CountTokensBody"
+    },
+    {
+      "blake3": "b47cb9ca0390931be6787d78de90e1556cac6edb0564c6d10d6906f6b395b08d",
+      "name": "MessageResponse"
+    },
+    {
+      "blake3": "f27c46394bac302398b15b664e142e44096fd8b953ac2bd1955900a2dff95e95",
+      "name": "CountTokensResponse"
+    },
+    {
+      "blake3": "9448e61c091e49fe094746cbd41d47b3d7e0d1e6653cb2a15e0544e623f776f3",
+      "name": "ListModelsResponse"
+    },
+    {
+      "blake3": "c71d2cb935216a3951289ba0fdf3fa1fb928d25cf2e638e8451a14f9a9bb4527",
+      "name": "ModelInfo"
+    },
+    {
+      "blake3": "1e8e4c5de2b1e2ff89718d8b8c8f60e195ba32c6d02d9a899474ab911302a328",
+      "name": "Message"
+    },
+    {
+      "blake3": "467beb91e1c19af99bb97288f48c2d48bc757571eebc78416ac1febe25679aff",
+      "name": "ContentBlock"
+    },
+    {
+      "blake3": "f55f4fd6e6d550760103eec1d484ac9515cc98e08f9a68aca36c5ac87435284e",
+      "name": "Tool"
+    }
+  ]
+}

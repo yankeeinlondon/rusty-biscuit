@@ -1,0 +1,1704 @@
+{
+  "definition": {
+    "auth": {
+      "ApiKey": {
+        "header": "Authorization",
+        "value_prefix": "token "
+      }
+    },
+    "auth_policy": null,
+    "base_url": "https://gitea.example.com/api/v1",
+    "cross_origin": "SameOrigin",
+    "default_pagination": {
+      "constants": [],
+      "follow_up": null,
+      "kind": {
+        "base": "one_based",
+        "kind": "page_number",
+        "more": {
+          "rel": "next",
+          "signal": "link_rel"
+        },
+        "page": {
+          "in": "query",
+          "name": "page"
+        },
+        "size": {
+          "adjustable": false,
+          "max": 50,
+          "min": 1,
+          "param": {
+            "in": "query",
+            "name": "limit"
+          },
+          "sent_default": null,
+          "server_default": 30
+        }
+      },
+      "partition": null,
+      "session": null,
+      "terminal_values": [],
+      "total": {
+        "at": "X-Total-Count",
+        "from": "header"
+      }
+    },
+    "description": "Gitea REST API v1.25+ for repository, PR, issue, and release workflows",
+    "docs_url": "https://docs.gitea.com/api/1.25/",
+    "endpoints": [
+      {
+        "description": "Get repository metadata including default branch",
+        "headers": [],
+        "id": "GetRepository",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/repos/{owner}/{repo}",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "RepositoryInfo"
+          }
+        }
+      },
+      {
+        "description": "Get a Git tree (non-recursive, single level)",
+        "headers": [],
+        "id": "GetGitTree",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/repos/{owner}/{repo}/git/trees/{sha}",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "GitTreeResponse"
+          }
+        }
+      },
+      {
+        "description": "Get a Git tree recursively (may be paginated for large repos)",
+        "headers": [],
+        "id": "GetGitTreeRecursive",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/repos/{owner}/{repo}/git/trees/{sha}?recursive=true",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "GitTreeResponse"
+          }
+        }
+      },
+      {
+        "description": "Get raw file content from repository",
+        "headers": [],
+        "id": "GetRepositoryContentRaw",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/repos/{owner}/{repo}/raw/{+filepath}",
+        "request": null,
+        "response": "Text"
+      },
+      {
+        "description": "List pull requests with metadata",
+        "headers": [],
+        "id": "ListPullRequests",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": {
+          "cookie": [],
+          "header": [],
+          "pagination": {
+            "PageNumber": {
+              "default_per_page": 50,
+              "max_per_page": 100,
+              "page_param": "page",
+              "per_page_param": "limit"
+            }
+          },
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "limit",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Filter by PR state",
+              "explode": false,
+              "name": "state",
+              "param_type": {
+                "Enum": [
+                  "open",
+                  "closed",
+                  "all"
+                ]
+              },
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Sort order for results",
+              "explode": false,
+              "name": "sort",
+              "param_type": {
+                "Enum": [
+                  "oldest",
+                  "recentupdate",
+                  "leastupdate",
+                  "mostcomment",
+                  "leastcomment",
+                  "priority"
+                ]
+              },
+              "required": false,
+              "style": "Form"
+            }
+          ],
+          "response_pagination": null
+        },
+        "path": "/repos/{owner}/{repo}/pulls",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "Vec<PullRequestSummary>"
+          }
+        }
+      },
+      {
+        "description": "List files changed in a pull request",
+        "headers": [],
+        "id": "ListPullRequestFiles",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": {
+          "cookie": [],
+          "header": [],
+          "pagination": {
+            "PageNumber": {
+              "default_per_page": 50,
+              "max_per_page": 100,
+              "page_param": "page",
+              "per_page_param": "limit"
+            }
+          },
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "limit",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            }
+          ],
+          "response_pagination": null
+        },
+        "path": "/repos/{owner}/{repo}/pulls/{index}/files",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "Vec<PullRequestFile>"
+          }
+        }
+      },
+      {
+        "description": "List issues (use type=issues to exclude PRs)",
+        "headers": [],
+        "id": "ListIssues",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": {
+          "cookie": [],
+          "header": [],
+          "pagination": {
+            "PageNumber": {
+              "default_per_page": 50,
+              "max_per_page": 100,
+              "page_param": "page",
+              "per_page_param": "limit"
+            }
+          },
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "limit",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Filter by issue state",
+              "explode": false,
+              "name": "state",
+              "param_type": {
+                "Enum": [
+                  "open",
+                  "closed",
+                  "all"
+                ]
+              },
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Filter by type (issues, pulls, or all)",
+              "explode": false,
+              "name": "issue_type",
+              "param_type": {
+                "Enum": [
+                  "issues",
+                  "pulls",
+                  "all"
+                ]
+              },
+              "required": false,
+              "style": "Form"
+            }
+          ],
+          "response_pagination": null
+        },
+        "path": "/repos/{owner}/{repo}/issues",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "Vec<IssueSummary>"
+          }
+        }
+      },
+      {
+        "description": "Get a single issue by index",
+        "headers": [],
+        "id": "GetIssue",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/repos/{owner}/{repo}/issues/{index}",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "IssueSummary"
+          }
+        }
+      },
+      {
+        "description": "List comments on an issue",
+        "headers": [],
+        "id": "ListIssueComments",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": {
+          "cookie": [],
+          "header": [],
+          "pagination": {
+            "PageNumber": {
+              "default_per_page": 50,
+              "max_per_page": 100,
+              "page_param": "page",
+              "per_page_param": "limit"
+            }
+          },
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "limit",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            }
+          ],
+          "response_pagination": null
+        },
+        "path": "/repos/{owner}/{repo}/issues/{index}/comments",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "Vec<IssueComment>"
+          }
+        }
+      },
+      {
+        "description": "List timeline events for an issue",
+        "headers": [],
+        "id": "ListIssueTimeline",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": {
+          "cookie": [],
+          "header": [],
+          "pagination": {
+            "PageNumber": {
+              "default_per_page": 50,
+              "max_per_page": 100,
+              "page_param": "page",
+              "per_page_param": "limit"
+            }
+          },
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "limit",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            }
+          ],
+          "response_pagination": null
+        },
+        "path": "/repos/{owner}/{repo}/issues/{index}/timeline",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "Vec<TimelineEvent>"
+          }
+        }
+      },
+      {
+        "description": "List repository tags",
+        "headers": [],
+        "id": "ListTags",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": {
+          "cookie": [],
+          "header": [],
+          "pagination": {
+            "PageNumber": {
+              "default_per_page": 50,
+              "max_per_page": 100,
+              "page_param": "page",
+              "per_page_param": "limit"
+            }
+          },
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "limit",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            }
+          ],
+          "response_pagination": null
+        },
+        "path": "/repos/{owner}/{repo}/tags",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "Vec<RepoTag>"
+          }
+        }
+      },
+      {
+        "description": "List releases (linked to tags via tag_name)",
+        "headers": [],
+        "id": "ListReleases",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": {
+          "cookie": [],
+          "header": [],
+          "pagination": {
+            "PageNumber": {
+              "default_per_page": 50,
+              "max_per_page": 100,
+              "page_param": "page",
+              "per_page_param": "limit"
+            }
+          },
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "limit",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Include draft releases",
+              "explode": false,
+              "name": "draft",
+              "param_type": "Boolean",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Include pre-releases",
+              "explode": false,
+              "name": "pre_release",
+              "param_type": "Boolean",
+              "required": false,
+              "style": "Form"
+            }
+          ],
+          "response_pagination": null
+        },
+        "path": "/repos/{owner}/{repo}/releases",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "Vec<Release>"
+          }
+        }
+      },
+      {
+        "description": "Get a branch (commit.id is the branch head commit)",
+        "headers": [],
+        "id": "GetBranch",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/repos/{owner}/{repo}/branches/{branch}",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "Branch"
+          }
+        }
+      },
+      {
+        "description": "Get tag reference (returns array; check object.type: 'commit' vs 'tag')",
+        "headers": [],
+        "id": "GetTagReference",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/repos/{owner}/{repo}/git/refs/{git_ref}",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "Vec<GitRef>"
+          }
+        }
+      },
+      {
+        "description": "Get annotated tag object details (message, tagger)",
+        "headers": [],
+        "id": "GetAnnotatedTag",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/repos/{owner}/{repo}/git/tags/{sha}",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "AnnotatedTagObject"
+          }
+        }
+      },
+      {
+        "description": "List repositories for an organization",
+        "headers": [],
+        "id": "ListOrgRepos",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": {
+          "cookie": [],
+          "header": [],
+          "pagination": {
+            "PageNumber": {
+              "default_per_page": 50,
+              "max_per_page": 100,
+              "page_param": "page",
+              "per_page_param": "limit"
+            }
+          },
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "limit",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            }
+          ],
+          "response_pagination": null
+        },
+        "path": "/orgs/{org}/repos",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "Vec<RepositoryInfo>"
+          }
+        }
+      }
+    ],
+    "env_auth": [
+      "GITEA_TOKEN"
+    ],
+    "env_mapping": null,
+    "env_username": null,
+    "headers": [
+      [
+        "Accept",
+        "application/json"
+      ]
+    ],
+    "module_path": "gitea",
+    "name": "Gitea",
+    "pagination_exceptions": [
+      {
+        "collection": {
+          "alternates": [],
+          "item_type": "GitTreeEntry",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "tree"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
+        "endpoint": "GetGitTree"
+      },
+      {
+        "collection": {
+          "alternates": [],
+          "item_type": "GitTreeEntry",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "tree"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
+        "endpoint": "GetGitTreeRecursive"
+      },
+      {
+        "collection": {
+          "alternates": [],
+          "item_type": null,
+          "items": {
+            "projection": [],
+            "record": [
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
+        "endpoint": "GetTagReference"
+      }
+    ],
+    "request_id_header": null,
+    "request_suffix": null,
+    "secret_names": [],
+    "version": null
+  },
+  "fingerprints": {
+    "api_metadata": "158f790339445d406ac5e3957f7fcf396721db92e9b8963de7f66d9a33314271",
+    "endpoints": [
+      {
+        "blake3": "1cb507b25e95f0ee298cbd1ab33cc27d76168753eba0fdd055504f863d600caa",
+        "id": "GetRepository"
+      },
+      {
+        "blake3": "4d53f3cbbc84603d7a62445a07d745244c08096a98823a6d6b8df5c3695760f9",
+        "id": "GetGitTree"
+      },
+      {
+        "blake3": "2bc085eaf9d3ae347db4d528d5f4da321f73b8ebead023c3e4c443f6bc2d615f",
+        "id": "GetGitTreeRecursive"
+      },
+      {
+        "blake3": "3e5f846e008cf7f5e627b32b8b27609b0c742484c38c40a62ebeae7d645700b6",
+        "id": "GetRepositoryContentRaw"
+      },
+      {
+        "blake3": "4176e3e46c46eb41d178ad4d037f9325e3a61b0d94d8c9946f1062d8d4e6e3d2",
+        "id": "ListPullRequests"
+      },
+      {
+        "blake3": "0d48d129a3d228a27bc13df3a039db21b3806d9229e98b32be95298a99c86a77",
+        "id": "ListPullRequestFiles"
+      },
+      {
+        "blake3": "2bc0de3809b0bd603e419d21c37430c42362b36fcd7a7b5b758ea351c3dff255",
+        "id": "ListIssues"
+      },
+      {
+        "blake3": "be70b41eb8578965fb98551539c977c9f39577d1ad2cf3f6ee01ad4f401e4366",
+        "id": "GetIssue"
+      },
+      {
+        "blake3": "26d4c38c0166a7d5079491c25b497e988fe138092464336a9d92052b05cbf3b3",
+        "id": "ListIssueComments"
+      },
+      {
+        "blake3": "c56fde3460ae001c4eee250038305257c05a858f5c2666af272600a1a8707d4d",
+        "id": "ListIssueTimeline"
+      },
+      {
+        "blake3": "cf6772bbdbafd8a721223f166f60aa54f77a9ac20bef31d87b7c7670275f40f0",
+        "id": "ListTags"
+      },
+      {
+        "blake3": "259da2c0be4a6999bceb7ab9082203c20c5cef9253f004e17013ca1066013d57",
+        "id": "ListReleases"
+      },
+      {
+        "blake3": "5426745f16c017a46a2453306b4b3de842effa83f441f5a7061c20a83f7c1cfc",
+        "id": "GetBranch"
+      },
+      {
+        "blake3": "c07d156dd7c2ed9d0846af186265bef935265740b80bb6d337629aeb3a25f800",
+        "id": "GetTagReference"
+      },
+      {
+        "blake3": "9bc1704ac3c4ba859f1172f45e6a4aeff44b39c7d276c8e995187d93d366f421",
+        "id": "GetAnnotatedTag"
+      },
+      {
+        "blake3": "409e49e0819c1e210c683f845db417b19897784bffeb284678654f6180aed21b",
+        "id": "ListOrgRepos"
+      }
+    ]
+  },
+  "pagination": [
+    {
+      "caller_knobs": [],
+      "endpoint": "GetRepository",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetGitTree",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "GitTreeEntry",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "tree"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "Exception"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetGitTreeRecursive",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "GitTreeEntry",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "tree"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "Exception"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetRepositoryContentRaw",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 50,
+            "min": 1,
+            "param": "limit",
+            "server_default": 30
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListPullRequests",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "limit"
+          },
+          "location": "Query",
+          "name": "limit",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "PullRequestSummary",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "rel": "next",
+                "signal": "link_rel"
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 50,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "limit"
+                },
+                "sent_default": null,
+                "server_default": 30
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total-Count",
+              "from": "header"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 50,
+            "min": 1,
+            "param": "limit",
+            "server_default": 30
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListPullRequestFiles",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "limit"
+          },
+          "location": "Query",
+          "name": "limit",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "PullRequestFile",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "rel": "next",
+                "signal": "link_rel"
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 50,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "limit"
+                },
+                "sent_default": null,
+                "server_default": 30
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total-Count",
+              "from": "header"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 50,
+            "min": 1,
+            "param": "limit",
+            "server_default": 30
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListIssues",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "limit"
+          },
+          "location": "Query",
+          "name": "limit",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "IssueSummary",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "rel": "next",
+                "signal": "link_rel"
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 50,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "limit"
+                },
+                "sent_default": null,
+                "server_default": 30
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total-Count",
+              "from": "header"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetIssue",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 50,
+            "min": 1,
+            "param": "limit",
+            "server_default": 30
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListIssueComments",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "limit"
+          },
+          "location": "Query",
+          "name": "limit",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "IssueComment",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "rel": "next",
+                "signal": "link_rel"
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 50,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "limit"
+                },
+                "sent_default": null,
+                "server_default": 30
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total-Count",
+              "from": "header"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 50,
+            "min": 1,
+            "param": "limit",
+            "server_default": 30
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListIssueTimeline",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "limit"
+          },
+          "location": "Query",
+          "name": "limit",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "TimelineEvent",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "rel": "next",
+                "signal": "link_rel"
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 50,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "limit"
+                },
+                "sent_default": null,
+                "server_default": 30
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total-Count",
+              "from": "header"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 50,
+            "min": 1,
+            "param": "limit",
+            "server_default": 30
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListTags",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "limit"
+          },
+          "location": "Query",
+          "name": "limit",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "RepoTag",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "rel": "next",
+                "signal": "link_rel"
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 50,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "limit"
+                },
+                "sent_default": null,
+                "server_default": 30
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total-Count",
+              "from": "header"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 50,
+            "min": 1,
+            "param": "limit",
+            "server_default": 30
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListReleases",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "limit"
+          },
+          "location": "Query",
+          "name": "limit",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "Release",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "rel": "next",
+                "signal": "link_rel"
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 50,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "limit"
+                },
+                "sent_default": null,
+                "server_default": 30
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total-Count",
+              "from": "header"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetBranch",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetTagReference",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "GitRef",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "Exception"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetAnnotatedTag",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "one_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 50,
+            "min": 1,
+            "param": "limit",
+            "server_default": 30
+          }
+        },
+        "Next",
+        "Total"
+      ],
+      "endpoint": "ListOrgRepos",
+      "param_adoptions": [
+        {
+          "has_sent_default": true,
+          "input": {
+            "in": "query",
+            "name": "page"
+          },
+          "location": "Query",
+          "name": "page",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "Page"
+        },
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "limit"
+          },
+          "location": "Query",
+          "name": "limit",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "RepositoryInfo",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "one_based",
+              "kind": "page_number",
+              "more": {
+                "rel": "next",
+                "signal": "link_rel"
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 50,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "limit"
+                },
+                "sent_default": null,
+                "server_default": 30
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": "X-Total-Count",
+              "from": "header"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "registry": [
+    {
+      "blake3": "4a6e9f8ba884f1cc6998caa807dff2f5318c880b4a494c63dfd623003c6a3202",
+      "name": "RepositoryInfo"
+    },
+    {
+      "blake3": "61605cd5e2bece1f016587121e8099b578b093d898e651f58caee0ac342638e4",
+      "name": "GitTreeResponse"
+    },
+    {
+      "blake3": "ac2f7150c83fe1cb649e8107d3a69983d4ac9222bfad93a0d7630cc58d6331d8",
+      "name": "PullRequestSummary"
+    },
+    {
+      "blake3": "baec913ba4754e64c2eb41072accd85eebb25ce435f86301e6935754bcbc77ca",
+      "name": "Vec<PullRequestSummary>"
+    },
+    {
+      "blake3": "15136f695f87086224e100a3ab1096ad35bd752b145bdc3e8d6148f3550bc5dc",
+      "name": "PullRequestFile"
+    },
+    {
+      "blake3": "a967d61e790a2829f400c78054c7290e4fec8799c68aab2ed9fcfcb423fdfa77",
+      "name": "Vec<PullRequestFile>"
+    },
+    {
+      "blake3": "e58b6a189cd056083fe0dca37a5c83736c365ba533262c87c522aa9bd7794fde",
+      "name": "IssueSummary"
+    },
+    {
+      "blake3": "d78dfd85ad3945fc677583065bfc2f85fa3361dceaede52599bc6c35a02f771e",
+      "name": "Vec<IssueSummary>"
+    },
+    {
+      "blake3": "e3e62e42dba0fb9491769e83c0e78d307e2e326414ff2fdc1bde6864bae5a605",
+      "name": "IssueComment"
+    },
+    {
+      "blake3": "c0925cc91eb8eb60138129e09abd6ca7deeba8220ff93f92a0504e9ca95c6a9a",
+      "name": "Vec<IssueComment>"
+    },
+    {
+      "blake3": "a0dbc29707365a424612b51317083ee2aa19a7ff38d306a2ec9b708d0a19c73d",
+      "name": "TimelineEvent"
+    },
+    {
+      "blake3": "c8fa99ea146d185f6f31143593ac44fa3a4dc6ff02fc6bdad39f29ca78e06fd1",
+      "name": "Vec<TimelineEvent>"
+    },
+    {
+      "blake3": "80c0c5ba13d1ca765f54216a3e6b7849cfc6a800ef7cf0d91b6acb0ef3840486",
+      "name": "Label"
+    },
+    {
+      "blake3": "653c20ae9b992baf6451a6a78d8a24aa575014645995b1484d59af1ea75c3892",
+      "name": "RepoTag"
+    },
+    {
+      "blake3": "68d638f281eb474837a2cae80f0df3b9657ad7ba2d1bbba9ebd0925e7a7e9217",
+      "name": "Vec<RepoTag>"
+    },
+    {
+      "blake3": "f71b1fe53bfe08e6c8ced4d923bf3b796b7ddfcb1ce23045bdadff6fceb19ab2",
+      "name": "Release"
+    },
+    {
+      "blake3": "4839d926ce187161560b5cee32d3e6e9b4324828be2cbb8dab00c95c256c5aac",
+      "name": "Vec<Release>"
+    },
+    {
+      "blake3": "6cbbb8ff4fb45255f82f85e4a7eb373a39f81ae427732b6fd6b9809e4e8501b3",
+      "name": "Branch"
+    },
+    {
+      "blake3": "988e10947a4bd9d952e41dba1a37f1b11eaf3501f2557d13e7c71e7c92e7f699",
+      "name": "GitRef"
+    },
+    {
+      "blake3": "1e5a1bedc69eb1fea6f69f422dfb2ba5e6d826fd3178920ef4f809f6c07ca300",
+      "name": "Vec<GitRef>"
+    },
+    {
+      "blake3": "ac5e4245656bb9927926f255136a40268b71e9d5cf5b1e954a2bd9eafe09db99",
+      "name": "AnnotatedTagObject"
+    },
+    {
+      "blake3": "c135a2545b49ef70ae5c8ba622361583677e4b9f5524903b8df25f276a16e1f8",
+      "name": "Vec<RepositoryInfo>"
+    }
+  ]
+}

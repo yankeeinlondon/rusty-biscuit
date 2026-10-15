@@ -11771,6 +11771,7 @@ name = "schematic-gen"
 version = "0.1.0"
 dependencies = [
  "biscuit-file",
+ "biscuit-hash",
  "biscuit-test-harness",
  "clap 4.6.1",
  "colored",

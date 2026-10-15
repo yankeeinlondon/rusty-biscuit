@@ -1,0 +1,207 @@
+{
+  "definition": {
+    "auth": "None",
+    "auth_policy": null,
+    "base_url": "http://192.168.1.1:8001",
+    "cross_origin": "SameOrigin",
+    "default_pagination": null,
+    "description": "Samsung Smart TV LAN API (S95C-focused modern Tizen subset)",
+    "docs_url": "https://developer.samsung.com/smarttv/develop/extension-libraries/smart-view-sdk/receiver-apps/debugging.html",
+    "endpoints": [
+      {
+        "description": "Canonical Smart View info endpoint for modern Samsung TVs. Returns device identity, model, firmware, and network details. Payload fields vary by model and firmware revision; unknown fields are preserved via flattened extras. For high-frequency polling, prefer conditional requests or payload diffing to reduce repeated owned-string allocations when firmware does not support ETag-style cache validation.",
+        "headers": [],
+        "id": "GetDeviceInfo",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/api/v2/",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "SamsungDeviceInfoResponse"
+          }
+        }
+      },
+      {
+        "description": "Debug/developer-facing log endpoint. May require developer mode enabled on the TV and can return non-success status when disabled.",
+        "headers": [],
+        "id": "GetServerLogs",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/logs/",
+        "request": null,
+        "response": "Text"
+      },
+      {
+        "description": "Launch a Samsung application by its package ID. Firmware-dependent support; use when the Samsung app ID is known. Recommended runtime strategy: attempt this endpoint first, fall back to LaunchApplicationByName.",
+        "headers": [],
+        "id": "LaunchApplicationById",
+        "method": "POST",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/api/v2/applications/{app_id}",
+        "request": null,
+        "response": "Empty"
+      },
+      {
+        "description": "Launch a Samsung application by name. Compatibility fallback for firmware that does not honor /api/v2/applications/{id}.",
+        "headers": [],
+        "id": "LaunchApplicationByName",
+        "method": "POST",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/ws/apps/{app_name}",
+        "request": null,
+        "response": "Empty"
+      },
+      {
+        "description": "Get the running status and metadata of a specific application. Returns visibility, running state, version, and name.",
+        "headers": [],
+        "id": "GetAppStatus",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/api/v2/applications/{app_id}",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "SamsungAppStatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Close a running application by its ID. Sends a DELETE to the application endpoint, which requests the TV terminate the app.",
+        "headers": [],
+        "id": "CloseApp",
+        "method": "DELETE",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/api/v2/applications/{app_id}",
+        "request": null,
+        "response": "Empty"
+      },
+      {
+        "description": "Install (or reinstall) an application by its ID. The TV downloads and installs the app from the Samsung app store.",
+        "headers": [],
+        "id": "InstallApp",
+        "method": "PUT",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/api/v2/applications/{app_id}",
+        "request": null,
+        "response": "Empty"
+      }
+    ],
+    "env_auth": [],
+    "env_mapping": {
+      "api_key": null,
+      "basic_pass": null,
+      "basic_user": null,
+      "bearer_token": null
+    },
+    "env_username": null,
+    "headers": [],
+    "module_path": "samsung_smart_tv",
+    "name": "SamsungSmartTv",
+    "pagination_exceptions": [],
+    "request_id_header": null,
+    "request_suffix": null,
+    "secret_names": [],
+    "version": null
+  },
+  "fingerprints": {
+    "api_metadata": "49dee3da4dbe24e6626f9eabc866570d0a5d110b07ebd481b4c040f6421dcef6",
+    "endpoints": [
+      {
+        "blake3": "8917a76562a54d49429ee55d157c0d040712c382d93cb520f7717c8625938cac",
+        "id": "GetDeviceInfo"
+      },
+      {
+        "blake3": "277952b76e327d24257793b0cf99ed35fe942a33923edb619f980d4c46ff8670",
+        "id": "GetServerLogs"
+      },
+      {
+        "blake3": "4cc61a5baa81dda6863b801c35bb730d3983341db9327c170a07879fa78067d8",
+        "id": "LaunchApplicationById"
+      },
+      {
+        "blake3": "81ee43b9498e07ee00c0b74e9066d28dda7463ef49294f5db305890d18336940",
+        "id": "LaunchApplicationByName"
+      },
+      {
+        "blake3": "388b382e4218a40529452573efbd8d3107263fe643eaee6eadd92eb3c80bc0dd",
+        "id": "GetAppStatus"
+      },
+      {
+        "blake3": "526b915779cd1f704b51e80e715750875cb9628f60661742147be5edfbaa2162",
+        "id": "CloseApp"
+      },
+      {
+        "blake3": "d46d462c7b58c72305102bab48cb7f72131c3ef802ca54916ec7d623fe10c441",
+        "id": "InstallApp"
+      }
+    ]
+  },
+  "pagination": [
+    {
+      "caller_knobs": [],
+      "endpoint": "GetDeviceInfo",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetServerLogs",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "LaunchApplicationById",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "LaunchApplicationByName",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetAppStatus",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "CloseApp",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "InstallApp",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    }
+  ],
+  "registry": [
+    {
+      "blake3": "f510708ed273984502889a81bc69a2c5e48bf4518800b89f5b1d537747ffd1e5",
+      "name": "SamsungDeviceInfoResponse"
+    },
+    {
+      "blake3": "e145244638ed2187bdd089dccc648f8975de3f314cb26f741673ba2ae2aafefe",
+      "name": "SamsungDeviceInfo"
+    },
+    {
+      "blake3": "2488cdc04c0168c6651fff7a06b7aa6a6aa0489b54f3276982a6330a2114e451",
+      "name": "SamsungAppStatusResponse"
+    }
+  ]
+}

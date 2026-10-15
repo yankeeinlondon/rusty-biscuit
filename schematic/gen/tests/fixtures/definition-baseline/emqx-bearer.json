@@ -1,0 +1,1454 @@
+{
+  "definition": {
+    "auth": {
+      "BearerToken": {
+        "header": null
+      }
+    },
+    "auth_policy": null,
+    "base_url": "http://localhost:18083/api/v5",
+    "cross_origin": "SameOrigin",
+    "default_pagination": null,
+    "description": "EMQX Broker REST API with Bearer Token authentication (JWT)",
+    "docs_url": "https://docs.emqx.com/en/emqx/latest/admin/api.html",
+    "endpoints": [
+      {
+        "description": "Authenticate with username/password and receive a JWT token",
+        "headers": [],
+        "id": "Login",
+        "method": "POST",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/login",
+        "request": {
+          "Json": {
+            "module_path": null,
+            "type_name": "LoginBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "LoginResponse"
+          }
+        }
+      },
+      {
+        "description": "Invalidate the current bearer token",
+        "headers": [],
+        "id": "Logout",
+        "method": "POST",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/logout",
+        "request": null,
+        "response": "Empty"
+      },
+      {
+        "description": "List all nodes in the EMQX cluster",
+        "headers": [],
+        "id": "ListNodes",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/nodes",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "ListNodesResponse"
+          }
+        }
+      },
+      {
+        "description": "Get detailed information about a specific node",
+        "headers": [],
+        "id": "GetNode",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/nodes/{node}",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "NodeInfo"
+          }
+        }
+      },
+      {
+        "description": "Get cluster status and node membership",
+        "headers": [],
+        "id": "GetCluster",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/cluster",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "ClusterStatus"
+          }
+        }
+      },
+      {
+        "description": "List all configured listeners",
+        "headers": [],
+        "id": "ListListeners",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/listeners",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "ListListenersResponse"
+          }
+        }
+      },
+      {
+        "description": "Get details of a specific listener",
+        "headers": [],
+        "id": "GetListener",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/listeners/{id}",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "ListenerInfo"
+          }
+        }
+      },
+      {
+        "description": "Get broker metrics for all nodes",
+        "headers": [],
+        "id": "ListMetrics",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/metrics",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "ListMetricsResponse"
+          }
+        }
+      },
+      {
+        "description": "Get broker statistics for all nodes",
+        "headers": [],
+        "id": "ListStats",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/stats",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "ListStatsResponse"
+          }
+        }
+      },
+      {
+        "description": "Get metrics in Prometheus format",
+        "headers": [],
+        "id": "GetPrometheus",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/prometheus/stats",
+        "request": null,
+        "response": "Text"
+      },
+      {
+        "description": "List active alarms",
+        "headers": [],
+        "id": "ListAlarms",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/alarms",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "ListAlarmsResponse"
+          }
+        }
+      },
+      {
+        "description": "List connected MQTT clients with pagination",
+        "headers": [],
+        "id": "ListClients",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/clients",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "ListClientsResponse"
+          }
+        }
+      },
+      {
+        "description": "Get detailed information about a specific client",
+        "headers": [],
+        "id": "GetClient",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/clients/{clientid}",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "ClientInfo"
+          }
+        }
+      },
+      {
+        "description": "Forcefully disconnect a client from the broker",
+        "headers": [],
+        "id": "DisconnectClient",
+        "method": "DELETE",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/clients/{clientid}",
+        "request": null,
+        "response": "Empty"
+      },
+      {
+        "description": "Create a subscription for a connected client",
+        "headers": [],
+        "id": "SubscribeClient",
+        "method": "POST",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/clients/{clientid}/subscribe",
+        "request": {
+          "Json": {
+            "module_path": null,
+            "type_name": "SubscribeBody"
+          }
+        },
+        "response": "Empty"
+      },
+      {
+        "description": "Remove a subscription from a connected client",
+        "headers": [],
+        "id": "UnsubscribeClient",
+        "method": "POST",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/clients/{clientid}/unsubscribe",
+        "request": {
+          "Json": {
+            "module_path": null,
+            "type_name": "SubscribeBody"
+          }
+        },
+        "response": "Empty"
+      },
+      {
+        "description": "List all subscriptions across the cluster",
+        "headers": [],
+        "id": "ListSubscriptions",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/subscriptions",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "ListSubscriptionsResponse"
+          }
+        }
+      },
+      {
+        "description": "Publish an MQTT message to a topic",
+        "headers": [],
+        "id": "Publish",
+        "method": "POST",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/publish",
+        "request": {
+          "Json": {
+            "module_path": null,
+            "type_name": "PublishBody"
+          }
+        },
+        "response": "Empty"
+      },
+      {
+        "description": "Publish multiple MQTT messages in a single request",
+        "headers": [],
+        "id": "PublishBulk",
+        "method": "POST",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/publish/bulk",
+        "request": {
+          "Json": {
+            "module_path": null,
+            "type_name": "PublishBatchBody"
+          }
+        },
+        "response": "Empty"
+      },
+      {
+        "description": "List active topics in the broker",
+        "headers": [],
+        "id": "ListTopics",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/topics",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "ListTopicsResponse"
+          }
+        }
+      },
+      {
+        "description": "List retained messages with pagination",
+        "headers": [],
+        "id": "ListRetained",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/retainer/messages",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "ListRetainedResponse"
+          }
+        }
+      },
+      {
+        "description": "Get a specific retained message by topic",
+        "headers": [],
+        "id": "GetRetained",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/retainer/messages/{topic}",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "RetainedMessage"
+          }
+        }
+      },
+      {
+        "description": "Delete a retained message",
+        "headers": [],
+        "id": "DeleteRetained",
+        "method": "DELETE",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/retainer/messages/{topic}",
+        "request": null,
+        "response": "Empty"
+      },
+      {
+        "description": "List all rules in the rules engine",
+        "headers": [],
+        "id": "ListRules",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/rules",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "ListRulesResponse"
+          }
+        }
+      },
+      {
+        "description": "Create a new rule in the rules engine",
+        "headers": [],
+        "id": "CreateRule",
+        "method": "POST",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/rules",
+        "request": {
+          "Json": {
+            "module_path": null,
+            "type_name": "CreateRuleBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "RuleInfo"
+          }
+        }
+      },
+      {
+        "description": "Get details of a specific rule",
+        "headers": [],
+        "id": "GetRule",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/rules/{id}",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "RuleInfo"
+          }
+        }
+      },
+      {
+        "description": "Update an existing rule",
+        "headers": [],
+        "id": "UpdateRule",
+        "method": "PUT",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/rules/{id}",
+        "request": {
+          "Json": {
+            "module_path": null,
+            "type_name": "CreateRuleBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "RuleInfo"
+          }
+        }
+      },
+      {
+        "description": "Delete a rule from the rules engine",
+        "headers": [],
+        "id": "DeleteRule",
+        "method": "DELETE",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/rules/{id}",
+        "request": null,
+        "response": "Empty"
+      },
+      {
+        "description": "Test a rule with sample data",
+        "headers": [],
+        "id": "TestRule",
+        "method": "POST",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/rules/{id}/test",
+        "request": {
+          "Json": {
+            "module_path": null,
+            "type_name": "TestRuleBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "TestRuleResponse"
+          }
+        }
+      },
+      {
+        "description": "List all configured authentication providers",
+        "headers": [],
+        "id": "ListAuthenticators",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/authentication",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "ListAuthenticatorsResponse"
+          }
+        }
+      },
+      {
+        "description": "Get details of a specific authenticator",
+        "headers": [],
+        "id": "GetAuthenticator",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/authentication/{id}",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "AuthenticatorInfo"
+          }
+        }
+      },
+      {
+        "description": "List users in a built-in database authenticator",
+        "headers": [],
+        "id": "ListAuthUsers",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/authentication/{id}/users",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "Vec<AuthUser>"
+          }
+        }
+      },
+      {
+        "description": "Create a new user in a built-in database authenticator",
+        "headers": [],
+        "id": "CreateAuthUser",
+        "method": "POST",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/authentication/{id}/users",
+        "request": {
+          "Json": {
+            "module_path": null,
+            "type_name": "CreateAuthUserBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "AuthUser"
+          }
+        }
+      },
+      {
+        "description": "Delete a user from a built-in database authenticator",
+        "headers": [],
+        "id": "DeleteAuthUser",
+        "method": "DELETE",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/authentication/{id}/users/{user_id}",
+        "request": null,
+        "response": "Empty"
+      },
+      {
+        "description": "List all authorization sources",
+        "headers": [],
+        "id": "ListAuthzSources",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/authorization/sources",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "ListAuthzSourcesResponse"
+          }
+        }
+      },
+      {
+        "description": "List all banned clients, usernames, and hosts",
+        "headers": [],
+        "id": "ListBanned",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/banned",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "ListBannedResponse"
+          }
+        }
+      },
+      {
+        "description": "Ban a client, username, or host",
+        "headers": [],
+        "id": "CreateBan",
+        "method": "POST",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/banned",
+        "request": {
+          "Json": {
+            "module_path": null,
+            "type_name": "CreateBanBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "BanInfo"
+          }
+        }
+      },
+      {
+        "description": "Remove a ban by type (clientid, username, peerhost) and value",
+        "headers": [],
+        "id": "DeleteBan",
+        "method": "DELETE",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/banned/{ban_type}/{who}",
+        "request": null,
+        "response": "Empty"
+      }
+    ],
+    "env_auth": [
+      "EMQX_TOKEN"
+    ],
+    "env_mapping": {
+      "api_key": null,
+      "basic_pass": null,
+      "basic_user": null,
+      "bearer_token": {
+        "names": [
+          "EMQX_TOKEN"
+        ]
+      }
+    },
+    "env_username": null,
+    "headers": [],
+    "module_path": "emqx",
+    "name": "EmqxBearer",
+    "pagination_exceptions": [
+      {
+        "collection": {
+          "alternates": [],
+          "item_type": "AlarmInfo",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "data"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
+        "endpoint": "ListAlarms"
+      },
+      {
+        "collection": {
+          "alternates": [],
+          "item_type": "ClientInfo",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "data"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
+        "endpoint": "ListClients"
+      },
+      {
+        "collection": {
+          "alternates": [],
+          "item_type": "SubscriptionInfo",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "data"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
+        "endpoint": "ListSubscriptions"
+      },
+      {
+        "collection": {
+          "alternates": [],
+          "item_type": "TopicInfo",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "data"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
+        "endpoint": "ListTopics"
+      },
+      {
+        "collection": {
+          "alternates": [],
+          "item_type": "RetainedMessage",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "data"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
+        "endpoint": "ListRetained"
+      },
+      {
+        "collection": {
+          "alternates": [],
+          "item_type": "RuleInfo",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "data"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
+        "endpoint": "ListRules"
+      },
+      {
+        "collection": {
+          "alternates": [],
+          "item_type": "BanInfo",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "data"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
+        "endpoint": "ListBanned"
+      }
+    ],
+    "request_id_header": null,
+    "request_suffix": "BearerRequest",
+    "secret_names": [],
+    "version": null
+  },
+  "fingerprints": {
+    "api_metadata": "0687f02431c0c680304d8af28d257dfe6839f353637d18c4de14a41c977034a1",
+    "endpoints": [
+      {
+        "blake3": "22cdf563ac2eb1b0b00abd3d50430d75df4847c3dc46e6de721cf7722fd1a969",
+        "id": "Login"
+      },
+      {
+        "blake3": "3d126feb9f4db34df60a74900e8627dfd6ff0b2feb2f05987230a6e535d5b465",
+        "id": "Logout"
+      },
+      {
+        "blake3": "59d6604d9d525d491cb801c31e82e97a6287f8af15051da5555b97f738f81547",
+        "id": "ListNodes"
+      },
+      {
+        "blake3": "9cfef30ad74a2be99d15538e5b3b23176d66217e0c20fad6e3e08bb22d680352",
+        "id": "GetNode"
+      },
+      {
+        "blake3": "f2ff8de7472064cbfcd820d0c33c9895a7ce4a606122b352650c8a2c08cbdde1",
+        "id": "GetCluster"
+      },
+      {
+        "blake3": "d418512c5164e8f99624064e3c8d555df20287898e4ec655d2c7fb1a503db401",
+        "id": "ListListeners"
+      },
+      {
+        "blake3": "8d4984b72ff969159fedc9ee902768c23251491d74195c2a82afd37b689abfd5",
+        "id": "GetListener"
+      },
+      {
+        "blake3": "35efc0f759153a831b1c8b991dc29d3c4231c73ee5e65f1b706e82a64e654eb2",
+        "id": "ListMetrics"
+      },
+      {
+        "blake3": "72eb59bf6542425afa273deca7c55441832dd0a71cb5de96f24e48760bc881df",
+        "id": "ListStats"
+      },
+      {
+        "blake3": "fea1b8052e9967d28cb28087a0e04cfbbb44c94352d07b3b08ba2b37b8b204db",
+        "id": "GetPrometheus"
+      },
+      {
+        "blake3": "5d58c45fc9be541f63d693a7a1279ea34ea2db340366efee755c4b5a1c1f8431",
+        "id": "ListAlarms"
+      },
+      {
+        "blake3": "d40a4c9843ac452f420a88866bed0fa08b14747b764114c75d5ba3ffa74d5b17",
+        "id": "ListClients"
+      },
+      {
+        "blake3": "f3b32c9e220691aba134061061567649b7aa0a2a52f1ad258d5aaa68bcc30638",
+        "id": "GetClient"
+      },
+      {
+        "blake3": "8097f15bd8ce357c1fc513736787dd4d32112ff0acdd8904d1fc7a0440e59056",
+        "id": "DisconnectClient"
+      },
+      {
+        "blake3": "9178bc3fb6972972a49dbc9745ce4bd7f7c4d15ee8d38abe0b20c5098fb25832",
+        "id": "SubscribeClient"
+      },
+      {
+        "blake3": "ca32e1d87dd28d88d4ac93d7e2748ec179a0efa97d4624e4d93d0154a5049832",
+        "id": "UnsubscribeClient"
+      },
+      {
+        "blake3": "c471dc1fd9fff17e58144583555356e9e6d0d7ee05caae898b1b0be3756fef36",
+        "id": "ListSubscriptions"
+      },
+      {
+        "blake3": "8400f9d2caabd058571f0efbb1176d7ca98a58ac7b682b32974dab9af828fe0b",
+        "id": "Publish"
+      },
+      {
+        "blake3": "cbe059476bde1995f030559ac9d8b1a03a13a7dadf3ebacb12356ae3df9a2b39",
+        "id": "PublishBulk"
+      },
+      {
+        "blake3": "33fa4c9c673d564458c415daaa8798cd1d68220d87440fc19a2cbf72bddc1127",
+        "id": "ListTopics"
+      },
+      {
+        "blake3": "6e307b7694a77b2729b6d00287e035a0c1f7d4d83ec76a64876e3cb7f35a1255",
+        "id": "ListRetained"
+      },
+      {
+        "blake3": "41cc5d3ced0b889a8a74e7b1ae372ca2454b5dcb62b7d6e22d928c8b0bc4ccc8",
+        "id": "GetRetained"
+      },
+      {
+        "blake3": "e36c2c39bf21895f2b886dbe3f314e619e130e9ce2ce1ff26095479273ea6aa4",
+        "id": "DeleteRetained"
+      },
+      {
+        "blake3": "3e770fef93c2f4423e83d7abdf59070b39ba6752f92e83a44120503d6be3b5e3",
+        "id": "ListRules"
+      },
+      {
+        "blake3": "2b8bbffd1264975f17dbe5a1f6eeef2f3c27ac00923ca53e2ea21d2550d9b733",
+        "id": "CreateRule"
+      },
+      {
+        "blake3": "32649d8dde92db0c36be6e503cf7a552b4db78684ed94b4f213541aaf972caae",
+        "id": "GetRule"
+      },
+      {
+        "blake3": "c2370df4a225898623916d3450fee300c5fe86a31d2e9249592fe38f42b40a99",
+        "id": "UpdateRule"
+      },
+      {
+        "blake3": "06a44391f445fb8f1418fefb205873c4419b51f99a847727652030976f9c3faa",
+        "id": "DeleteRule"
+      },
+      {
+        "blake3": "cb387b5782c7fe8db849e38d5801ce65181555365bf4919521ff096c4d087513",
+        "id": "TestRule"
+      },
+      {
+        "blake3": "ee2a0d2ae2fd41a94a4f10e661be7c9f5ac05a78863b34b6fb4b536a62b64d60",
+        "id": "ListAuthenticators"
+      },
+      {
+        "blake3": "4e109cf75f56b6b562107c1fde884cdfacaf60c4989b2791e03ed42d25b6cc04",
+        "id": "GetAuthenticator"
+      },
+      {
+        "blake3": "e47ed2c08322f6f85bff2c0dc437cbb753e6a9aabba10bbf91c3f810e9ed8626",
+        "id": "ListAuthUsers"
+      },
+      {
+        "blake3": "6033aaa0ab90121b2c2036d7cea6a6533560f07beef18d23d3d61fbec97f1632",
+        "id": "CreateAuthUser"
+      },
+      {
+        "blake3": "a9df220e61a02639a1e4d2c31dff706b7ce204d3a5f9df382a57d72c0873fa9d",
+        "id": "DeleteAuthUser"
+      },
+      {
+        "blake3": "b18a1c87929bcd5b42c2e9ef9a23075ab5054e6c948566edcd0b70efe387f55b",
+        "id": "ListAuthzSources"
+      },
+      {
+        "blake3": "0e95121fbf60237a9488537ab34e1245d147ab9aefd38be001bf42316e6b914e",
+        "id": "ListBanned"
+      },
+      {
+        "blake3": "e8690778fbdf4c98a65e54f6ba8f3c8ec023c456f77115f225c6243213054896",
+        "id": "CreateBan"
+      },
+      {
+        "blake3": "f87a47927b547e4eb0c6e5af9684b369b619980e546bfacbdf45c234bf5580de",
+        "id": "DeleteBan"
+      }
+    ]
+  },
+  "pagination": [
+    {
+      "caller_knobs": [],
+      "endpoint": "Login",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "Logout",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListNodes",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetNode",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetCluster",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListListeners",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetListener",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListMetrics",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListStats",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetPrometheus",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListAlarms",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "AlarmInfo",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "data"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "Exception"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListClients",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "ClientInfo",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "data"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "Exception"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetClient",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "DisconnectClient",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "SubscribeClient",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "UnsubscribeClient",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListSubscriptions",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "SubscriptionInfo",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "data"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "Exception"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "Publish",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "PublishBulk",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListTopics",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "TopicInfo",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "data"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "Exception"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListRetained",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "RetainedMessage",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "data"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "Exception"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetRetained",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "DeleteRetained",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListRules",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "RuleInfo",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "data"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "Exception"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "CreateRule",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetRule",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "UpdateRule",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "DeleteRule",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "TestRule",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListAuthenticators",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetAuthenticator",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListAuthUsers",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "AuthUser",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "Unauthored"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "CreateAuthUser",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "DeleteAuthUser",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListAuthzSources",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListBanned",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "BanInfo",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "data"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "Exception"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "CreateBan",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "DeleteBan",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    }
+  ],
+  "registry": [
+    {
+      "blake3": "a687d04f5944d0aea8b250d27ffc41e6981ac5bd684b9a670fcedb613f2a0a28",
+      "name": "LoginBody"
+    },
+    {
+      "blake3": "e71b67f3650aa880b34cf923e3244541bcaf672cf9542394ed8052b9d1cbc48e",
+      "name": "LoginResponse"
+    },
+    {
+      "blake3": "e05c5d22347b05f3dc9cd17396d2cbf400327fcd78a188ca7556d111f2784690",
+      "name": "SubscribeBody"
+    },
+    {
+      "blake3": "bfd7a712e4bbb9a323e58477b97a1b44c3d36aabebc5af126d20c04d945db813",
+      "name": "PublishBody"
+    },
+    {
+      "blake3": "f1cf2f5f40910dd0f0bcd64ff9adf620f982980c8a179f38370f098194dfe1ba",
+      "name": "PublishBatchBody"
+    },
+    {
+      "blake3": "04e6041eb904254cae0149ef4d8237208f7a710d92c5568bfc4fbd9d8001b56b",
+      "name": "CreateRuleBody"
+    },
+    {
+      "blake3": "b09151b1e18e0c72bfb0c092e0a8d941f0571b688dc8e1aae32d8313bca855c5",
+      "name": "TestRuleBody"
+    },
+    {
+      "blake3": "b3d962cba8a1509f3e8e1356f7889e583cd93c80c420e0ce5857ce9f5343427d",
+      "name": "CreateAuthUserBody"
+    },
+    {
+      "blake3": "4b1588afc23ed59680070ec5443094a806570100dcd2231d960dc6f165adb707",
+      "name": "CreateBanBody"
+    },
+    {
+      "blake3": "0eb53ef90a5128c91097aa5cb359e1815d9661a730e3e699f1ba0de2ee12b7a9",
+      "name": "NodeInfo"
+    },
+    {
+      "blake3": "c1bb1d15ebe87fe1f191759b3549851c9c01a506f6301b68e54b08e373854c51",
+      "name": "ListNodesResponse"
+    },
+    {
+      "blake3": "8d9471b1b0d0963403cc9be6b45ecf35e3500e56ca0a496f31a73e910d8f6e93",
+      "name": "ClusterStatus"
+    },
+    {
+      "blake3": "316b6ad5f1bc1d730cef2c074efa05f566978ef75e42ae924c898339c98d518f",
+      "name": "ClientInfo"
+    },
+    {
+      "blake3": "b071c9e2b4f214b44f3789c68fc0a7c411735549d435e42b717ed480a4b14a62",
+      "name": "ListClientsResponse"
+    },
+    {
+      "blake3": "f10af209d12a0e011f08b4aa52acf89275c905818fd348c31bf70dbec613a299",
+      "name": "SubscriptionInfo"
+    },
+    {
+      "blake3": "b2d7e77e7a78f724a4681e0e8abec352e2094cfac640bdeee24ae06ee5230700",
+      "name": "ListSubscriptionsResponse"
+    },
+    {
+      "blake3": "edcbb3170e882d71f0b518328b19e196de2095ec0c7c282e01b3bd28ca82333f",
+      "name": "RuleInfo"
+    },
+    {
+      "blake3": "08256db4f91372fa078dbc34b0fa0ff7d99d1a522a464e0e102723ca8576e96d",
+      "name": "RuleAction"
+    },
+    {
+      "blake3": "edd6f8aa98ac2a7773493a14ed03184cf7f47d1f3c0a3e9b8afc26062763ac57",
+      "name": "ListRulesResponse"
+    },
+    {
+      "blake3": "e269b29e2f397d32339444d4bd50ba0e2de91b946b7529dbf4d8a6a5e45fa7c1",
+      "name": "TestRuleResponse"
+    },
+    {
+      "blake3": "291dcf4b02bf96fa35dc6724bd33302eaa227ef5d34b4ae33137c5e66fb5cd54",
+      "name": "AuthUser"
+    },
+    {
+      "blake3": "f05019d5f58a7ef8be43c2cefeae54f8ecb92791a87ba8ca2b2940230df11b8b",
+      "name": "Vec<AuthUser>"
+    },
+    {
+      "blake3": "2591898eeec1430af063d65bc78f13be7bd8d7ba3c5dac4b2e490e39728d7878",
+      "name": "AuthenticatorInfo"
+    },
+    {
+      "blake3": "d7d6300684986e69aca6b7b525617bfc5dc563ca952e05b54091621c5ff5cf43",
+      "name": "ListAuthenticatorsResponse"
+    },
+    {
+      "blake3": "81c03e6868c251f745cbebc34eff797f705f99bbb10eff2b6502e0496973a33e",
+      "name": "AuthzSourceInfo"
+    },
+    {
+      "blake3": "2e3c76a604e9ef50814b8f7dcb859a9cb54d9f68dcccc7dd9887ddd394e08561",
+      "name": "ListAuthzSourcesResponse"
+    },
+    {
+      "blake3": "6ef4187a15d1a14428626ca8ca5f206a7fba231c705aabebf899aa724f6200ce",
+      "name": "ListenerInfo"
+    },
+    {
+      "blake3": "9676a9654edae7a3003635455eb5e5ae0d41a8c3484f8f87071eb431f5639d2f",
+      "name": "ListListenersResponse"
+    },
+    {
+      "blake3": "86cc72a31cf2407f1f3d19c2ea808f8c4539a096efe192051ea094f8ae03977b",
+      "name": "MetricsInfo"
+    },
+    {
+      "blake3": "625833825c1274e6f51939a8559ae97c5d7575bb188bac59ae260c3364020efe",
+      "name": "ListMetricsResponse"
+    },
+    {
+      "blake3": "fa127dcd33d60ae07471e687044b2b44303afda0a6f26f8049b5d8d69d577c79",
+      "name": "StatsInfo"
+    },
+    {
+      "blake3": "ba1d853659c6c76191110fa0b3321a7666fc3296ce5294cf0b43794e46f7e633",
+      "name": "ListStatsResponse"
+    },
+    {
+      "blake3": "f833bc3e9978724d7f84905b91e5b9a4186286ce597552fe863dc2d458320b06",
+      "name": "TopicInfo"
+    },
+    {
+      "blake3": "d2e3fd50bc7c7fdb3da43c266fad6e7f89806db2f4da7f1ab9889074942a8721",
+      "name": "ListTopicsResponse"
+    },
+    {
+      "blake3": "19f7c7b87077ef761073b830a10c67e21c9761d72b0c18cdc77ad7fa5463c800",
+      "name": "RetainedMessage"
+    },
+    {
+      "blake3": "d389f2a9fd81f80cab0b42bd26267e851170fbb642abfd375343064250576145",
+      "name": "ListRetainedResponse"
+    },
+    {
+      "blake3": "373a61cfb7c00a04810786202cccdbd1266029ede2d2ea12373ae9bbff3eff7b",
+      "name": "AlarmInfo"
+    },
+    {
+      "blake3": "77639319d2dc291104851bf2d35b8a4c6eb7c3a69fb2179ebbcd3005b2c9419b",
+      "name": "ListAlarmsResponse"
+    },
+    {
+      "blake3": "9ffd5551b873eb69f92236f545ad507700652e8fbbc61615aca8c8186242480e",
+      "name": "BanInfo"
+    },
+    {
+      "blake3": "787319ac2508d222cc8405bfc9279ced6ae82a0984f2e94ddbaf10ac47f89a65",
+      "name": "ListBannedResponse"
+    },
+    {
+      "blake3": "2dec872ee47e92710e84ca4010de52507ca8ebfdfd1c513787997c4ab35576df",
+      "name": "PaginationMeta"
+    }
+  ]
+}

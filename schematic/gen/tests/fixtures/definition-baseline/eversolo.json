@@ -1,0 +1,885 @@
+{
+  "definition": {
+    "auth": "None",
+    "auth_policy": null,
+    "base_url": "http://192.168.1.1:9529",
+    "cross_origin": "SameOrigin",
+    "default_pagination": null,
+    "description": "Eversolo DMP-A8 local-network HTTP control API (Zidoo lineage)",
+    "docs_url": "https://eversolo.com/Support/developer/",
+    "endpoints": [
+      {
+        "description": "Get device model, firmware, and network information",
+        "headers": [],
+        "id": "DeviceGetModel",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/ZidooControlCenter/getModel",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "GetModelResponse"
+          }
+        }
+      },
+      {
+        "description": "Send a remote control key command to the device",
+        "headers": [],
+        "id": "RemoteSendKey",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": {
+          "cookie": [],
+          "header": [],
+          "pagination": null,
+          "query": [
+            {
+              "description": "Remote key constant (e.g., Key.VolumeUp, Key.MediaPlay, Key.PowerOff)",
+              "explode": false,
+              "name": "key",
+              "param_type": "String",
+              "required": true,
+              "style": "Form"
+            }
+          ],
+          "response_pagination": null
+        },
+        "path": "/ZidooControlCenter/RemoteControl/sendkey",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Send text input to the device",
+        "headers": [],
+        "id": "RemoteInputText",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": {
+          "cookie": [],
+          "header": [],
+          "pagination": null,
+          "query": [
+            {
+              "description": "Text string to input",
+              "explode": false,
+              "name": "text",
+              "param_type": "String",
+              "required": true,
+              "style": "Form"
+            }
+          ],
+          "response_pagination": null
+        },
+        "path": "/ZidooControlCenter/RemoteControl/inputtext",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Get current playback state, track info, and volume",
+        "headers": [],
+        "id": "MusicGetState",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/ZidooMusicControl/v2/getState",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "GetStateResponse"
+          }
+        }
+      },
+      {
+        "description": "Toggle play/pause on the current track",
+        "headers": [],
+        "id": "MusicPlayOrPause",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/ZidooMusicControl/v2/playOrPause",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Skip to the next track",
+        "headers": [],
+        "id": "MusicPlayNext",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/ZidooMusicControl/v2/playNext",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Go back to the previous track",
+        "headers": [],
+        "id": "MusicPlayLast",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/ZidooMusicControl/v2/playLast",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Seek to a position in the current track",
+        "headers": [],
+        "id": "MusicSeekTo",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": {
+          "cookie": [],
+          "header": [],
+          "pagination": null,
+          "query": [
+            {
+              "description": "Target position in milliseconds",
+              "explode": false,
+              "name": "time",
+              "param_type": "Integer",
+              "required": true,
+              "style": "Form"
+            }
+          ],
+          "response_pagination": null
+        },
+        "path": "/ZidooMusicControl/v2/seekTo",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "List available audio inputs and outputs",
+        "headers": [],
+        "id": "MusicGetInputOutputList",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/ZidooMusicControl/v2/getInputAndOutputList",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "InputOutputListResponse"
+          }
+        }
+      },
+      {
+        "description": "Set the active audio input",
+        "headers": [],
+        "id": "MusicSetInput",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": {
+          "cookie": [],
+          "header": [],
+          "pagination": null,
+          "query": [
+            {
+              "description": "Input tag from getInputAndOutputList",
+              "explode": false,
+              "name": "tag",
+              "param_type": "String",
+              "required": true,
+              "style": "Form"
+            }
+          ],
+          "response_pagination": null
+        },
+        "path": "/ZidooMusicControl/v2/setInputList",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "InputOutputListResponse"
+          }
+        }
+      },
+      {
+        "description": "Set the active audio output",
+        "headers": [],
+        "id": "MusicSetOutput",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": {
+          "cookie": [],
+          "header": [],
+          "pagination": null,
+          "query": [
+            {
+              "description": "Output tag from getInputAndOutputList",
+              "explode": false,
+              "name": "tag",
+              "param_type": "String",
+              "required": true,
+              "style": "Form"
+            }
+          ],
+          "response_pagination": null
+        },
+        "path": "/ZidooMusicControl/v2/setOutInputList",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "InputOutputListResponse"
+          }
+        }
+      },
+      {
+        "description": "Set the absolute volume level",
+        "headers": [],
+        "id": "MusicSetVolume",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": {
+          "cookie": [],
+          "header": [],
+          "pagination": null,
+          "query": [
+            {
+              "description": "Volume level (0 to maxVolume)",
+              "explode": false,
+              "name": "volume",
+              "param_type": "Integer",
+              "required": true,
+              "style": "Form"
+            }
+          ],
+          "response_pagination": null
+        },
+        "path": "/ZidooMusicControl/v2/setDevicesVolume",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Set or clear mute state",
+        "headers": [],
+        "id": "MusicSetMute",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": {
+          "cookie": [],
+          "header": [],
+          "pagination": null,
+          "query": [
+            {
+              "description": "Mute state: 0 = unmuted, 1 = muted",
+              "explode": false,
+              "name": "isMute",
+              "param_type": "Integer",
+              "required": true,
+              "style": "Form"
+            }
+          ],
+          "response_pagination": null
+        },
+        "path": "/ZidooMusicControl/v2/setMuteVolume",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Get available power options (shutdown, reboot, etc.)",
+        "headers": [],
+        "id": "PowerGetOptions",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/ZidooMusicControl/v2/getPowerOption",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "PowerOptionsResponse"
+          }
+        }
+      },
+      {
+        "description": "Execute a power action (poweroff, reboot, screen, timeshutdown)",
+        "headers": [],
+        "id": "PowerSetOption",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": {
+          "cookie": [],
+          "header": [],
+          "pagination": null,
+          "query": [
+            {
+              "description": "Power option tag (poweroff, reboot, screen, timeshutdown)",
+              "explode": false,
+              "name": "tag",
+              "param_type": "String",
+              "required": true,
+              "style": "Form"
+            }
+          ],
+          "response_pagination": null
+        },
+        "path": "/ZidooMusicControl/v2/setPowerOption",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Get current screen brightness level (community-discovered)",
+        "headers": [],
+        "id": "SystemGetScreenBrightness",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/SystemSettings/displaySettings/getScreenBrightness",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "BrightnessResponse"
+          }
+        }
+      },
+      {
+        "description": "Set screen brightness level (community-discovered)",
+        "headers": [],
+        "id": "SystemSetScreenBrightness",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": {
+          "cookie": [],
+          "header": [],
+          "pagination": null,
+          "query": [
+            {
+              "description": "Brightness level index",
+              "explode": false,
+              "name": "index",
+              "param_type": "Integer",
+              "required": true,
+              "style": "Form"
+            }
+          ],
+          "response_pagination": null
+        },
+        "path": "/SystemSettings/displaySettings/setScreenBrightness",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Get current knob LED brightness level (community-discovered)",
+        "headers": [],
+        "id": "SystemGetKnobBrightness",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/SystemSettings/displaySettings/getKnobBrightness",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "BrightnessResponse"
+          }
+        }
+      },
+      {
+        "description": "Set knob LED brightness level (community-discovered)",
+        "headers": [],
+        "id": "SystemSetKnobBrightness",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": {
+          "cookie": [],
+          "header": [],
+          "pagination": null,
+          "query": [
+            {
+              "description": "Brightness level index",
+              "explode": false,
+              "name": "index",
+              "param_type": "Integer",
+              "required": true,
+              "style": "Form"
+            }
+          ],
+          "response_pagination": null
+        },
+        "path": "/SystemSettings/displaySettings/setKnobBrightness",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "List available VU meter display modes (community-discovered)",
+        "headers": [],
+        "id": "SystemGetVuModeList",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/SystemSettings/displaySettings/getVUModeList",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "DisplayModeListResponse"
+          }
+        }
+      },
+      {
+        "description": "Set the VU meter display mode (community-discovered)",
+        "headers": [],
+        "id": "SystemSetVuMode",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": {
+          "cookie": [],
+          "header": [],
+          "pagination": null,
+          "query": [
+            {
+              "description": "VU mode index from getVUModeList",
+              "explode": false,
+              "name": "index",
+              "param_type": "Integer",
+              "required": true,
+              "style": "Form"
+            }
+          ],
+          "response_pagination": null
+        },
+        "path": "/SystemSettings/displaySettings/setVUMode",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "List available spectrum display modes (community-discovered)",
+        "headers": [],
+        "id": "SystemGetSpectrumModeList",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/SystemSettings/displaySettings/getSpPlayModeList",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "DisplayModeListResponse"
+          }
+        }
+      },
+      {
+        "description": "Set the spectrum display mode (community-discovered)",
+        "headers": [],
+        "id": "SystemSetSpectrumMode",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": {
+          "cookie": [],
+          "header": [],
+          "pagination": null,
+          "query": [
+            {
+              "description": "Spectrum mode index from getSpPlayModeList",
+              "explode": false,
+              "name": "index",
+              "param_type": "Integer",
+              "required": true,
+              "style": "Form"
+            }
+          ],
+          "response_pagination": null
+        },
+        "path": "/SystemSettings/displaySettings/setSpPlayModeList",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Toggle VU display open/close (community-discovered)",
+        "headers": [],
+        "id": "SystemChangeVuDisplay",
+        "method": "GET",
+        "oauth_scopes": null,
+        "params": {
+          "cookie": [],
+          "header": [],
+          "pagination": null,
+          "query": [
+            {
+              "description": "Display open type",
+              "explode": false,
+              "name": "openType",
+              "param_type": "Integer",
+              "required": true,
+              "style": "Form"
+            }
+          ],
+          "response_pagination": null
+        },
+        "path": "/ZidooMusicControl/v2/changVUDisplay",
+        "request": null,
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "StatusResponse"
+          }
+        }
+      }
+    ],
+    "env_auth": [],
+    "env_mapping": {
+      "api_key": null,
+      "basic_pass": null,
+      "basic_user": null,
+      "bearer_token": null
+    },
+    "env_username": null,
+    "headers": [],
+    "module_path": "eversolo",
+    "name": "Eversolo",
+    "pagination_exceptions": [],
+    "request_id_header": null,
+    "request_suffix": null,
+    "secret_names": [],
+    "version": null
+  },
+  "fingerprints": {
+    "api_metadata": "87c9cb0dffde935b643d28625395043970710b7522097f4776ae4916a330a504",
+    "endpoints": [
+      {
+        "blake3": "1a0e635191b8b0d249e6a2ac8a46bc0703b6692cb89dda8ec5c47be975f86d93",
+        "id": "DeviceGetModel"
+      },
+      {
+        "blake3": "2190feaf80221d9c3d911280761a0faf221a5766e00c55326058e390599e8593",
+        "id": "RemoteSendKey"
+      },
+      {
+        "blake3": "0c8a4690fa8386cea3b4ca4e76f6f69187437f4d2751cc30412dacf27330d5cc",
+        "id": "RemoteInputText"
+      },
+      {
+        "blake3": "5ec5d16c192b9d001c0c7da027ae1f176307e5ce5eaa28382b1e0a83d4b3b5c5",
+        "id": "MusicGetState"
+      },
+      {
+        "blake3": "29c09498a4a92940cf637f68cc7c5cb56cd47fd9b561774f59844575d03f9c6e",
+        "id": "MusicPlayOrPause"
+      },
+      {
+        "blake3": "569ea7a337cedb5b8b7930ead3ec377ae7bdf06feec8397b1d80d859b5df43b1",
+        "id": "MusicPlayNext"
+      },
+      {
+        "blake3": "531258a76e065900718d71636fa2c160ffc7e72897bc5933acea79d645437824",
+        "id": "MusicPlayLast"
+      },
+      {
+        "blake3": "71e2d257b7185544d4e33b18b28d6ff899bd030b5c5bc3c393021fdc26bdd319",
+        "id": "MusicSeekTo"
+      },
+      {
+        "blake3": "9b09d295148af7d2c7c4b5d7609d2816552dc552a3da012e889d3547fe62a0e7",
+        "id": "MusicGetInputOutputList"
+      },
+      {
+        "blake3": "91ae1deec93a9355b4aa132ac5587ae17f4935b413d9e7ec12af7ca3ab373491",
+        "id": "MusicSetInput"
+      },
+      {
+        "blake3": "bfe18f464bb3e98b408ab507e980e86745d2bbd41f9f3c57866f6161f3cca768",
+        "id": "MusicSetOutput"
+      },
+      {
+        "blake3": "1eaf321c697991f5dc9c435f7f6a571450e5778802dca3e0de0c401594945ab0",
+        "id": "MusicSetVolume"
+      },
+      {
+        "blake3": "6d1c9a76d7a9fc62cfa1fb5c45f9b8b0fd12e34297e38a573b4fdcc32635d0cc",
+        "id": "MusicSetMute"
+      },
+      {
+        "blake3": "f896456ad5ad5e60ecea298aadd0acbe5dc7f901454f014b7494e4eada9657cc",
+        "id": "PowerGetOptions"
+      },
+      {
+        "blake3": "88a0eada149eb12aa0ffc42e729b7b43cb312dd2261ec01e7220e0e53fc7ad07",
+        "id": "PowerSetOption"
+      },
+      {
+        "blake3": "3e0953e4a2b05ef44100cf37f9ec851c8d9123caf663b3d40890c4ee9ad2ebb4",
+        "id": "SystemGetScreenBrightness"
+      },
+      {
+        "blake3": "068ca9fcf83e2e72daa222cfa0b3bff722fc746d490c946ab24f1ec43056e105",
+        "id": "SystemSetScreenBrightness"
+      },
+      {
+        "blake3": "bbe8762df3c66f40300d7c21eaeb7afc41a74998f8a556fd5e3570ca52725138",
+        "id": "SystemGetKnobBrightness"
+      },
+      {
+        "blake3": "135825866004183c54d50971bc874b4f98465ef44dd26364ce2d9d2ab59e7b10",
+        "id": "SystemSetKnobBrightness"
+      },
+      {
+        "blake3": "893264b34d7d21993ee55aedb73b5a1911d93840eefc98d4445ec077b093483e",
+        "id": "SystemGetVuModeList"
+      },
+      {
+        "blake3": "05d8b46c68423b75804d900c39d296dd70b81d071b722443df3646272a9ef161",
+        "id": "SystemSetVuMode"
+      },
+      {
+        "blake3": "5701555be14b0033c2e285fe94459a2ce79fcdc4e04b8f9af6784bb4e216e0e5",
+        "id": "SystemGetSpectrumModeList"
+      },
+      {
+        "blake3": "29ff6bde39a32ea543f90610fc65810f02ee6f18fd6fc1bef0a423284cd44cc0",
+        "id": "SystemSetSpectrumMode"
+      },
+      {
+        "blake3": "38777bbd13923ac5b434226e0e53fa615ac1add946e0e21710967ef36035fa35",
+        "id": "SystemChangeVuDisplay"
+      }
+    ]
+  },
+  "pagination": [
+    {
+      "caller_knobs": [],
+      "endpoint": "DeviceGetModel",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "RemoteSendKey",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "RemoteInputText",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "MusicGetState",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "MusicPlayOrPause",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "MusicPlayNext",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "MusicPlayLast",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "MusicSeekTo",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "MusicGetInputOutputList",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "MusicSetInput",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "MusicSetOutput",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "MusicSetVolume",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "MusicSetMute",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "PowerGetOptions",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "PowerSetOption",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "SystemGetScreenBrightness",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "SystemSetScreenBrightness",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "SystemGetKnobBrightness",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "SystemSetKnobBrightness",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "SystemGetVuModeList",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "SystemSetVuMode",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "SystemGetSpectrumModeList",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "SystemSetSpectrumMode",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "SystemChangeVuDisplay",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    }
+  ],
+  "registry": [
+    {
+      "blake3": "4a01635cebde258d560f713b56aaf0307d79153c19c01dcc09987be2159eaf80",
+      "name": "StatusResponse"
+    },
+    {
+      "blake3": "2d47ba0c6895da9fe9159587b8bb9859b5527c994c1a82be92937b113fead8b3",
+      "name": "GetModelResponse"
+    },
+    {
+      "blake3": "ed01e089b91d8423393c47dbf5aff86c02d5f89d63f50eca2f65a98d5f8a9ab1",
+      "name": "GetStateResponse"
+    },
+    {
+      "blake3": "f561b05361aa25880ac36fa244a01003e118d40e9b54f252bf6ebef74623250b",
+      "name": "InputOutputListResponse"
+    },
+    {
+      "blake3": "29a6b6948e4f598e96666f4f95fb14eb631ebe185c6869216a624b8d413beea5",
+      "name": "PowerOptionsResponse"
+    },
+    {
+      "blake3": "7382eb93afc15cf7d37db53c5cd1e4f8b55a5169e73875a904114e1d664db217",
+      "name": "BrightnessResponse"
+    },
+    {
+      "blake3": "40a05ac317fdcf80cd72b0fd3124ed3761e938d4ff2d0c8f2f5bc1875f5db5c3",
+      "name": "DisplayModeListResponse"
+    }
+  ]
+}

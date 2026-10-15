@@ -175,6 +175,11 @@ check-drift:
     @echo ""
     @cargo nextest run -p schematic-gen --test l1 --no-tests=fail -E 'test(/^artifact_drift::/) | test(=fresh_output_compile::slow_real_apis_compile_offline)'
 
+# Compare historical definitions and regenerate all artifacts in temporary directories.
+# This recipe never captures or updates a baseline or committed output.
+migration-check:
+    @cargo nextest run -p schematic-gen --test l1 --no-tests=fail -E 'test(/^definition_baseline::/) | test(/^artifact_drift::/)'
+
 # run clippy on schematic packages
 lint:
     @just _lint schematic-define

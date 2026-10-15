@@ -1,9 +1,10 @@
 //! Artifact drift detection tests.
 //!
-//! These tests verify that committed OpenAPI and Postman artifacts match
+//! These tests verify that committed Rust, OpenAPI, and Postman artifacts match
 //! what the generator would produce. They iterate every module reported by
 //! [`apis_by_module`] and compare the in-memory regeneration against the
-//! files committed under `schematic/openapi/` and `schematic/postman/`, and
+//! files committed under `schematic/schema/`, `schematic/openapi/`, and
+//! `schematic/postman/`, and
 //! scan the committed OpenAPI corpus for `operationId` integrity.
 //!
 //! Run with:
@@ -17,15 +18,18 @@
 //! invoked — so the entire suite completes in a few seconds for ~16
 //! modules.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use schematic_define::openapi::ExportOptions;
 use schematic_definitions::apis_by_module;
 use schematic_definitions::registry::get_registries_for_module;
 use schematic_gen::export::openapi::{operation_id_diagnostics, write_openapi_grouped};
 use schematic_gen::export::postman::{write_postman, write_postman_grouped};
+use schematic_gen::pipeline::{
+    BatchScope, GenerateOpts, OpenApiFormat, generate_batch, resolve_all_apis,
+};
 
 /// Returns the absolute path to the `schematic/` package area, anchored on
 /// the gen crate's manifest directory so the tests work regardless of the
@@ -325,5 +329,78 @@ fn committed_openapi_filenames_match_modules() {
          Missing (should be present): {missing:?}\n\
          Unexpected (should be removed): {unexpected:?}\n\
          Run `just -f schematic/justfile generate` to reconcile.",
+    );
+}
+
+fn source_files(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+    fn collect(root: &Path, dir: &Path, files: &mut BTreeMap<PathBuf, Vec<u8>>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if entry.file_type().unwrap().is_dir() {
+                collect(root, &path, files);
+            } else {
+                assert!(
+                    entry.file_type().unwrap().is_file(),
+                    "unexpected source entry: {}",
+                    path.display(),
+                );
+                files.insert(
+                    path.strip_prefix(root).unwrap().to_path_buf(),
+                    fs::read(&path).unwrap(),
+                );
+            }
+        }
+    }
+    let mut files = BTreeMap::new();
+    collect(root, root, &mut files);
+    files
+}
+
+#[test]
+fn generated_rust_artifacts_are_up_to_date() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let output = temp_dir.path().join("schema/src");
+    let output_text = output.to_str().unwrap();
+    let opts = GenerateOpts {
+        output: output_text,
+        dry_run: false,
+        verbose: 0,
+        openapi_out: None,
+        openapi_format: OpenApiFormat::Json,
+        openapi_version: None,
+        postman_out: None,
+        no_openapi: true,
+        no_postman: true,
+    };
+    generate_batch(
+        &resolve_all_apis(),
+        &BatchScope::Complete,
+        &opts,
+        &get_registries_for_module,
+    )
+    .into_result()
+    .unwrap();
+
+    let committed = schematic_root().join("schema/src");
+    let expected = source_files(&committed);
+    let generated = source_files(&output);
+    assert!(!expected.is_empty(), "committed Rust source tree is empty");
+    assert_eq!(
+        generated.keys().collect::<Vec<_>>(),
+        expected.keys().collect::<Vec<_>>(),
+        "Rust artifact file-set drift; run `just -f schematic/justfile generate`",
+    );
+    for (path, bytes) in &generated {
+        assert!(
+            bytes == &expected[path],
+            "Rust artifact byte drift in {}; run `just -f schematic/justfile generate`",
+            path.display(),
+        );
+    }
+    assert!(
+        fs::read(output.parent().unwrap().join("Cargo.toml")).unwrap()
+            == fs::read(schematic_root().join("schema/Cargo.toml")).unwrap(),
+        "Rust manifest byte drift; run `just -f schematic/justfile generate`",
     );
 }

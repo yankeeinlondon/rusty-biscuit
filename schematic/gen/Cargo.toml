@@ -36,6 +36,7 @@ biscuit-test-harness = { path = "../../biscuit-test-harness", optional = true }
 test-toolkit = { path = "../../tools/test-toolkit", optional = true }
 
 [dev-dependencies]
+biscuit-hash = { path = "../../biscuit-hash/lib", default-features = false, features = ["blake3"] }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 tempfile = "3.15"
 jsonschema = { version = "0.55", default-features = false }

@@ -1,0 +1,135 @@
+{
+  "definition": {
+    "auth": {
+      "ApiKey": {
+        "header": "x-api-key",
+        "value_prefix": null
+      }
+    },
+    "auth_policy": null,
+    "base_url": "https://artificialanalysis.ai/api/v2",
+    "cross_origin": "SameOrigin",
+    "default_pagination": null,
+    "description": "Artificial Analysis CritPt benchmark: submit code-generation results for evaluation. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/.",
+    "docs_url": "https://artificialanalysis.ai/api-reference",
+    "endpoints": [
+      {
+        "description": "Submit a batch of code-generation submissions for evaluation against the CritPt benchmark.",
+        "headers": [],
+        "id": "EvaluateCritPt",
+        "method": "POST",
+        "oauth_scopes": null,
+        "params": null,
+        "path": "/critpt/evaluate",
+        "request": {
+          "Json": {
+            "module_path": null,
+            "type_name": "CritPtEvaluateBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "module_path": null,
+            "type_name": "CritPtEvaluateResponse"
+          }
+        }
+      }
+    ],
+    "env_auth": [
+      "ARTIFICIAL_ANALYSIS_API_KEY"
+    ],
+    "env_mapping": {
+      "api_key": {
+        "header": "x-api-key",
+        "names": {
+          "names": [
+            "ARTIFICIAL_ANALYSIS_API_KEY"
+          ]
+        }
+      },
+      "basic_pass": null,
+      "basic_user": null,
+      "bearer_token": null
+    },
+    "env_username": null,
+    "headers": [],
+    "module_path": "artificial_analysis",
+    "name": "ArtificialAnalysisCritPt",
+    "pagination_exceptions": [],
+    "request_id_header": null,
+    "request_suffix": null,
+    "secret_names": [],
+    "version": null
+  },
+  "fingerprints": {
+    "api_metadata": "220fd4ce98f491870955d55ddbdff20fc3e6669ab5f68c0c72f591503f32145d",
+    "endpoints": [
+      {
+        "blake3": "fbfeca4ef39e6d3614043a4eefcae3e0bc1fd324177ec34290bf3bd475d2df02",
+        "id": "EvaluateCritPt"
+      }
+    ]
+  },
+  "pagination": [
+    {
+      "caller_knobs": [],
+      "endpoint": "EvaluateCritPt",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    }
+  ],
+  "registry": [
+    {
+      "blake3": "ceb462d91f8cedf2e187546a61f770b122f6d83b675781bc46cd9255a917f4a6",
+      "name": "ModelCreator"
+    },
+    {
+      "blake3": "841385ee2100ecbc3c3deaa1048be607c82abb9bbea541605e202eabdc077762",
+      "name": "CategoryBreakdown"
+    },
+    {
+      "blake3": "c98584c4af490b5ca5040b85691cd2a8e1af9400b20769845cd5667754f25247",
+      "name": "LlmEvaluations"
+    },
+    {
+      "blake3": "659cca9b650e0e4b2859a1c27ecd1fd63f950e5c0b0c72bbb76009f0986500ed",
+      "name": "LlmPricing"
+    },
+    {
+      "blake3": "5314c32300175de78a7a098b96f5a0ecb41dd7e4c2deb90eae97593e8093509e",
+      "name": "LlmModel"
+    },
+    {
+      "blake3": "31b7208172549d7142d80279ab504d39bfdbceecdbb875f4a7f250a49cf42cf7",
+      "name": "PromptOptions"
+    },
+    {
+      "blake3": "ea13f8e6f19849d27159dabe5004202dc30ded4dabf170fdb0037ea095e5d6e6",
+      "name": "LlmModelsResponse"
+    },
+    {
+      "blake3": "a7ea9c6645ded29c4a514025e13aa5c326df20ea5ab623eca8b88121d51461f6",
+      "name": "MediaModel"
+    },
+    {
+      "blake3": "cc4b1528cb9ddf1ddd05e142a502f7b19e3918e0b8d801dab5256fdce5bb569b",
+      "name": "MediaModelsResponse"
+    },
+    {
+      "blake3": "5d09091b726dfa6f61acce39e7807746248c9f9fdad935e9f3f91b6783e4a097",
+      "name": "CritPtMessage"
+    },
+    {
+      "blake3": "2a83956c21f89264c31b6db3b4685aec3ed15a4551d293167678b49176bf0f9e",
+      "name": "CritPtSubmission"
+    },
+    {
+      "blake3": "66fc9d7c9c7928a3ea47388860e99968a9815247adbd675a61fbcb5762d5556d",
+      "name": "CritPtEvaluateBody"
+    },
+    {
+      "blake3": "927598ccf488398fea67d59b23d1b816ab025ee44f8534afce79c3d370632a75",
+      "name": "CritPtEvaluateResponse"
+    }
+  ]
+}

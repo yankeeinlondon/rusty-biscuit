@@ -10,6 +10,7 @@
 mod common;
 
 mod artifact_drift;
+mod definition_baseline;
 mod e2e_generation;
 mod fresh_output_compile;
 mod http_client;
