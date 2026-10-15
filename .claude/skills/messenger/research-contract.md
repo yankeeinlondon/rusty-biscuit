@@ -61,35 +61,47 @@ Platform research is becoming typed, reviewed metadata (feature
   `cli/tests/research_cli.rs` (real binary). Baseline fixture:
   `lib/tests/fixtures/research/lifecycle/fleet/`.
 
-## Refresh budget (Claudine)
+## Refresh runner and fleet lock
 
-- A platform refresh is one `claudine sequence --budget-ledger <ledger>` run.
-  Messenger cannot link Claudine (`claudine` depends on `messenger`), so it uses
-  the CLI only: `claudine budget init <ledger> --run-id --platform
-  --max-seconds --max-invocations [--exclusive-lock ../../fleet.lock]` (both
-  limits required, no defaults), then `show --json` / `suspend` / `resume` /
-  `grant`. Contract: [`claudine/docs/cli/budget.md`](../../../claudine/docs/cli/budget.md).
-- Put every charged activity inside the sequence (validation and delta as
-  `shell:` steps). Time outside a budgeted Claudine run is not observable.
-- A successful run ends `suspended` ("awaiting human review"). Exit `76` means
-  exhausted: the ledger keeps the incomplete `stage`, and this is never a
-  finished or unknown result. Exit `77` means blocked: suspended, interrupted,
-  or the fleet lock is held. A killed runner leaves `active`, and the next
-  command recovers it to `interrupted`.
-- The ledger does not persist sequence progress. A restarted sequence re-runs
-  from step 1 and consumes more allowance. Resuming a candidate mid-run is
-  Messenger's job (Phase 6).
+- A platform refresh is one `claudine sequence --yolo <run>/run.md` execution,
+  run by the Messenger-owned runner (`messenger research run RUN_ID`; library
+  `research::refresh::runner`). The runner takes the OS-backed fleet lock
+  (`messenger/.research-state/runs/fleet.lock`, std `File::try_lock` through
+  `publish::fsutil::PublicationLock`) for the whole execution — one research
+  run at a time — marks the record `launched`, runs the sequence from the
+  repository root, and records what it observed: `finished` (exit `0`, the
+  status the run's `check-run` steps decided stays), `interrupted` (Ctrl-C,
+  exit `130` → the run rests `interrupted`), or `stopped` (any other exit or a
+  spawn failure → an undecided run rests `failed` with the exit named). The
+  run's `RunLimits` elapsed-time cap is enforced here. Every prepared prompt
+  reserves an invocation through its `start` shell hook (`research admit-agent`);
+  `RunRecord.invocations` persists across resumptions. The preparation lock
+  serializes admission updates, and refusal prevents the provider launch.
+  Missing counts in ledger-era records mean zero; malformed present counts
+  are errors. The runner installs hooks on legacy prepared prompts too.
+- Cleanup, promotion, and stale-run recovery are refused
+  (`RefreshError::RunnerLive`) while a runner holds the fleet lock. The OS
+  releases the lock when the holder dies, so a crashed runner leaves a
+  launched `active` record that `runs` reports as stale; `cleanup --recover
+  RUN_ID` marks it `interrupted` explicitly, never silently.
+- Put validation and the delta inside the sequence (they are `shell:` steps),
+  so the runner's elapsed-time cap covers them.
+- The budget ledger (`claudine budget`, `sequence --budget-ledger`) was
+  removed 2026-10. Ledger-era records with status `exhausted` stay readable,
+  resumable like `interrupted`, never promotable, never shown successful; a
+  leftover `budget.json` beside a record is ignored (reported as a note by
+  `runs`) and never deleted.
 
 ## Refresh and review (`research::refresh`)
 
-- **Commands**: `prepare` (selection + limits + run dir + printed Claudine
-  commands; `--dry-run`, `--resume RUN_ID`), `check-run RUN_ID [--through
-  validation|review]` (the sequence's `shell:` steps), `runs`, `promote
-  RUN_ID… --approved-by NAME | --renewal`, `reject`, `cleanup [--apply]`.
-  Messenger never spawns Claudine; `prepare` prints `claudine budget init …`
-  and `claudine sequence --yolo --budget-ledger …`.
+- **Commands**: `prepare` (selection + limits + run dir; `--dry-run`,
+  `--resume RUN_ID`), `run RUN_ID` (the fleet-locked runner), `check-run
+  RUN_ID [--through validation|review]` (the sequence's `shell:` steps),
+  `runs`, `promote RUN_ID… --approved-by NAME | --renewal`, `reject`,
+  `cleanup [--apply|--recover RUN_ID]`. `prepare` prints `messenger research
+  run RUN_ID`; the runner spawns `claudine sequence --yolo …/run.md`.
 - **Run layout** `messenger/.research-state/runs/<platform>/<run_id>/`:
-  `run.json`, `budget.json` (Claudine's), `run.md`, `inputs/{discovery,
+  `run.json`, `run.md`, `inputs/{discovery,
   reconcile,sources,review}/`, `outputs/{discovery.md, suggested-sources.json,
   source-proposal.json, evidence-review.json}`, `candidate/<platform>.md` (with
   schema copies so `md schema validate` works there), `source-checks.json`,
@@ -146,27 +158,27 @@ Platform research is becoming typed, reviewed metadata (feature
   exceeds `RunRecord::ledger_runs`**, the count recorded at prepare/resume. A
   sequence that stopped before `check-run` decided (a failed step, Ctrl+C, or
   `AgentResolutionFailed`) is resumable or rejectable, not stuck `active`. A
-  ledger still `stopped`/`initialized` (never launched, or Claudine rejected
-  the arguments before opening a run) leaves the run `active`: its printed
-  `claudine sequence` command is still the way forward.
+  prepared run the runner never launched stays `active`: `messenger research
+  run RUN_ID` is still the way forward.
 - **Recipes** (`messenger/justfile`): `research-validate|generate|check|
   report|runs|cleanup` wrap the offline commands; `research-publish NAME
   RUN…` is `promote --approved-by`. `research-refresh SECONDS INVOCATIONS
   [prepare args] [-- sequence args]` builds both CLIs, puts the target's
   `debug/` first on PATH (via `cygpath -u` on Git Bash), runs `prepare
-  --json` from the repository root, then each run's `budget init` and
-  `sequence` in turn. It continues past a failed platform and exits 1 at
+  --json` from the repository root, then each run's `messenger research run`
+  in turn. It continues past a failed platform and exits 1 at
   the end. Needs `jq`; bash 3.2-safe (no `mapfile`). Workflow docs:
   `messenger/docs/user-guide.md#provider-research`.
 - **Launching a live run** (checked 2026-09-18 on the shipped roster):
   - Put this worktree's `target/debug` first on PATH. An older installed
-    `claudine` has no `budget` subcommand, and the `shell:` steps call
-    `messenger research check-run`.
+    `claudine` may lack the current sequence behavior, and the `shell:` steps
+    call `messenger research check-run`.
   - `run.md` has no `agent` hint. With no terminal, `claudine sequence` fails
     with `AgentResolutionFailed` before the first step. With a terminal, it
-    opens a picker, and that wait is charged to the budget. Pass a provider
-    flag (for example `--claude`) to the printed sequence command, or after
-    `--` to `just research-refresh`.
+    opens a picker, and that wait runs under the runner's elapsed-time cap.
+    Pass a provider flag (for example `--claude`) after `--` to
+    `just research-refresh` or to `messenger research run RUN_ID -- --claude`;
+    the runner appends it to the sequence command.
   - `sequence --dry-run` still runs the `shell:` steps. `check-run` then marks
     the run `failed` because it has no outputs. Rehearse only in a throwaway
     Git repository holding a copy of `messenger/docs`, never on a real run.
