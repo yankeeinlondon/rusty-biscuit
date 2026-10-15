@@ -215,14 +215,116 @@ source_files_during_phase_4:
 docs_updated_during_phase_4:
   - schematic/define/README.md
   - schematic/docs/definition-builders.md
+  - schematic/docs/io/import-openapi.md
   - schematic/docs/pagination.md
   - schematic/docs/runtime/building-clients.md
   - schematic/docs/runtime/origins-and-redirects.md
   - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
   - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+  - schematic/gen/README.md
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
   - .claude/skills/schematic-define/schematic/SKILL.md
+source_files_during_phase_5:
+  - schematic/define/src/builders.rs
+  - schematic/define/src/lib.rs
+  - schematic/define/src/oauth.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/import.rs
+  - schematic/define/src/openapi/import/builder.rs
+  - schematic/define/src/openapi/import/mappings/mod.rs
+  - schematic/define/src/openapi/import/query_paths.rs
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/pagination/validate.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/types.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/cross_origin_policy.rs
+  - schematic/define/tests/endpoint_pagination.rs
+  - schematic/define/tests/import_normalization.rs
+  - schematic/define/tests/pagination_support/mod.rs
+  - schematic/definitions/src/anthropic/mod.rs
+  - schematic/definitions/src/artificial_analysis/mod.rs
+  - schematic/definitions/src/bitbucket/mod.rs
+  - schematic/definitions/src/elevenlabs/endpoints/history.rs
+  - schematic/definitions/src/elevenlabs/endpoints/sound_generation.rs
+  - schematic/definitions/src/elevenlabs/endpoints/speech.rs
+  - schematic/definitions/src/elevenlabs/endpoints/voices.rs
+  - schematic/definitions/src/elevenlabs/endpoints/workspace.rs
+  - schematic/definitions/src/emqx/endpoints/auth_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/banned_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/client_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/messaging_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/monitoring_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/rules_endpoints.rs
+  - schematic/definitions/src/emqx/mod.rs
+  - schematic/definitions/src/eversolo/mod.rs
+  - schematic/definitions/src/gitea/mod.rs
+  - schematic/definitions/src/github/mod.rs
+  - schematic/definitions/src/gitlab/endpoints/branches.rs
+  - schematic/definitions/src/gitlab/endpoints/issues.rs
+  - schematic/definitions/src/gitlab/endpoints/merge_requests.rs
+  - schematic/definitions/src/gitlab/endpoints/pipelines.rs
+  - schematic/definitions/src/gitlab/endpoints/projects.rs
+  - schematic/definitions/src/gitlab/endpoints/releases.rs
+  - schematic/definitions/src/huggingface/mod.rs
+  - schematic/definitions/src/lmstudio/mod.rs
+  - schematic/definitions/src/ollama/mod.rs
+  - schematic/definitions/src/openai/mod.rs
+  - schematic/definitions/src/openai/types.rs
+  - schematic/definitions/src/openai_pagination.rs
+  - schematic/definitions/src/registry/mod.rs
+  - schematic/definitions/src/samsung_smart_tv/mod.rs
+  - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+  - schematic/definitions/tests/pagination_coverage/main.rs
+  - schematic/definitions/tests/pagination_coverage/openai.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/pagination/tests.rs
+  - schematic/gen/src/codegen/request_enum.rs
+  - schematic/gen/src/codegen/request_structs/mod.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/collection.rs
+  - schematic/gen/src/export/postman/tests.rs
+  - schematic/gen/src/import_pipeline.rs
+  - schematic/gen/src/model_gen.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/tests/common/fresh_output.rs
+  - schematic/gen/tests/fixtures/wire_baseline/query_request_lines.txt
+  - schematic/gen/tests/l1/definition_baseline.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/import_overlay.rs
+  - schematic/gen/tests/l1/openapi_import_test.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/pagination_validation.rs
+  - schematic/gen/tests/l1/partial_generation.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/postman_golden.rs
+  - schematic/gen/tests/l1/query_param_detection.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/openapi/openai.json
+  - schematic/postman/openai.postman_collection.json
+  - schematic/schema/src/openai/mod.rs
+  - schematic/schema/src/openai/requests.rs
+docs_updated_during_phase_5:
+  - schematic/definitions/README.md
+  - schematic/docs/definition-builders.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/pagination.md
+  - schematic/docs/typed-registration.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - .claude/skills/schematic-define/schematic/definitions.md
 ---
 
 # Implementation Log for 2026-10-14-schematic-definition-api (8 phases)
@@ -549,3 +651,120 @@ All new ordinary tests are compiled by auto-discovered define integration target
 - R24, passive shipped corpus and normal real-artifact path F2 L1: existing definition_baseline/artifact_drift/import_overlay and fresh-output guards compare all shipped historical definition data, ordered schemas, generated Rust/OpenAPI/Postman and exact re-imported OpenAI source. The existing `slow_fixture_apis_compile_and_send_offline` owns the new generated child tests (31 child tests, final targeted run passed). Existing shipped-API compiler guard remains selected by `just test`.
 
 Targeted generator/runtime task reports seven passing tests; the separate generated fixture reports three passing parent/coverage guards, including all 31 child tests. Its intermediate wrong PagerError import was corrected to the public pager module path and the final exact-source rerun passed. The doctest gate exposed a missed ParamDef doc literal; updated it and the other live README/import/skill literal examples with the new required source fields. No cargo formatter ran.
+
+### Workspace observation
+
+During final metadata collection the index changed externally: Phase 4 files became staged even though this implementation issued no git add, git stage, git commit or index mutation command. HEAD remained unchanged. Left that index state untouched and collected the complete source inventory with `git diff HEAD --name-only` so external staging cannot erase the inventory. Final log/plan edits remain ordinary working-tree edits. This observation does not affect source bytes or verification.
+
+### Final ordinary gate and performance resolution
+
+All three Phase 4 plan tasks are checked as their evidence completed; later-phase tasks remain pending. The final ordinary area run passed **2,305/2,305** in **5.436 s**, with **no SLOW tests**. Its seven new define tests include final explicit downstream assertions for the adopted query name/location and exposed PageSize caller knob, in addition to API success. The seven earlier slow reports were concurrent verification build pressure, not a new production bottleneck; running without competing verification builds resolved them without changing tests, omitting cases, changing tiers or adding timeouts. The initial full area run had already passed all six generated-crate guards and the runtime compile-fail guard; the final complete recipe is finishing those guards again on final source.
+
+`just doctest` now passes **270 tests**: define 174 ordinary plus 11 compile-fail, definitions 63, generator 18, OAuth 3 and runtime 1. The two preexisting ignored WebSocket module examples remain ignored. The stale validation example was corrected to build valid facts before explicitly corrupting stored API data; this documents the actual strict builder behavior rather than weakening code to satisfy the old example. No implementation behavior changed for that correction.
+
+### Final verification ledger
+
+- Final `just -f schematic/justfile test`: **2,305/2,305 ordinary L1 tests passed**, **no SLOW ordinary tests**, 5.436 s; **6/6 generated-crate guards passed**, 22.677 s; **1/1 runtime compile-fail guard passed**, 1.173 s. The generated fixture compiled and sent all 31 child tests in 5.684 s. ABI guard, exact compiler misuse diagnostics, real shipped APIs, negative compiler control and query-wire baseline all pass. Existing compiler guards necessarily invoke Cargo and retain their established separate recipe; no new slow suite was added.
+- The artifact tests pass without baseline exemptions: OpenAI exact re-import 1.788 s; complete generated Rust drift 2.430 s; no-runtime-duplication source corpus 2.577 s. Historical JSON and ordered-registry tests pass. Committed schema/OpenAPI/Postman artifact files and OpenAI types.rs are unchanged.
+- `just doctest`: **270 passed**, two preexisting ignored WebSocket module examples (`core_ws`, `integration_ws`). All documentation compile/runtime failures found during this phase were fixed and rerun successfully.
+- Explicit strict-completeness nextest selection: **2/2 passed**, 0.117 s each. Their preexisting `real_` names exclude them from the ordinary L1 filter, so they were executed directly.
+- The ordinary suite's 12 exclusions are six generator compiler guards and one runtime compiler guard subsequently run by `just test`, two strict-completeness cases explicitly run above, and three preexisting ignored generator tests (`e2e_generation::{generated_code_compiles, generated_code_passes_clippy, multiple_apis_compile}`). Their existing reason is expensive nested Cargo/clippy; active isolated compiler guards cover generated code. No new ignored test or unreported exclusion was introduced. The dedicated guard selections' 233/342 filtered tests and strict selection's 237 filters are ordinary scope selection, not failures.
+- `just check-tier-coverage schematic`: **zero stranded tests**. Test placement and CI-visible repository reads remain intact.
+- Shipped frozen definition inventory confirms **18 APIs, 547 endpoints, zero GET request bodies and the same nine query-bearing paths** (Gitea GetGitTreeRecursive, GitLab GetRepositoryFile and seven OpenAI Beta response endpoints). This is the passive real-artifact corpus covered by the baseline tests; no hard path-query error was enabled prematurely.
+- No Linux/native Windows/WSL2 run was required for this change: portable Rust definition data, URL/header validation and runtime policy selection introduce no OS conditionals, path comparisons or terminal/browser behavior. Cross-platform CI scope is unchanged. No live provider request, focus change or terminal/browser window occurred. L2 adds no relevant boundary coverage here.
+
+The initial compiler/lint failures, OpenAI reproduction mismatch, missed doc literal, stale validation doctest and generated-child import error were corrected. No failing test is accepted. Full passing evidence is on macOS; no entire-monorepo run was attempted.
+
+### Closing state
+
+**Phase 4 implementation complete, ready for review.** Final `just lint` passed all five schematic packages after the final source/test edits. Plan/log frontmatter inventories are verified against all 87 changed source files, 10 updated documentation files, no created documentation files and one updated skill file; packages accumulate schematic-define, schematic-gen, schematic-definitions and schematic-runtime. Each required key occurs once. Spec keeps human_review false with a current next-phase handoff. `git diff HEAD --check` passes, including externally staged content.
+
+All three Phase 4 tasks are checked; later-phase migration and shared import matrix tasks remain scheduled. No cargo fmt, commit, staging command, lifecycle move, new dependency, runtime ABI change or artifact baseline exemption occurred. The external index change is documented above and was left untouched. All delegated tasks returned and all final verification processes completed; nothing is waiting.
+
+## Phase 5
+
+### Behavior-to-test map before implementation
+
+| Requirement / behavior | Concrete test coverage | Boundary, fidelity, tier |
+| --- | --- | --- |
+| R22 typed fallible emitted builders, ordered nominal registration and generic overlay | definition_gen tests; import_overlay repeated imports and compiled/evaluated small emitted fixture | Source/compiler/crate boundary F2 L1 through established compiler guard |
+| R29 shared path normalization, constant and placeholder controls, twin reconciliation, invalid input | Public OpenApiImport JSON/YAML matrix and nine original path fixtures; shipped seven-pair schema gate | Deserialization/definition F2 L1 |
+| R31 imported GET request bodies fail with endpoint context | Public import negative fixture | Import/validation F2 L1 |
+| R19/R22 OpenAI context assembly and overlay retention | Exact reimport, pagination_coverage, unknown overlay endpoint rejection | Shipped artifact/import/registry F2 L1 |
+| R10/R24 preserve order, component schemas, pagination and wire URLs except seven explained merges | Historical definition baseline with exact explained transformations, artifact_drift, fresh-output generated compiler/runtime guard | Shipped artifacts and generated consumers F2 L1 |
+
+The plan permits bounded delegation; shared importer normalization and its input matrix have isolated define source/test ownership. Emitter, OpenAI assembly, artifact integration, docs and closure remain with the coordinator. All work is non-interactive; delegated results will be collected before closure. Existing staged and unstaged earlier-phase files are preserved. A start-of-phase byte copy is retained outside the repository to inventory only this phase.
+
+### Builder emitter and schema gate checkpoint
+
+The targeted emitter regression failed against the old literal form before implementation, then all 30 emitter/model-generation tests passed. Emission now uses typed request/response/form registrations and fallible Endpoint/RestApi builders; `module_group()` produces API and ordered schemas from one context, with existing infallible catalog wrappers. Generic overlays run after builder validation, and their files remain outside output ownership. Empty typed vectors avoid inference failures. Source-level tests formerly requiring literal tails were replaced with builder/overlay contracts rather than retaining obsolete expectations.
+
+Nominal generated declarations implement Registration beside the declaration; true aliases reuse the underlying registration. This exposes historical alias components that were previously registered as independent names for Vec, String, bool and serde_json::Value; their exact inventory and downstream differences will be recorded at the artifact checkpoint. No provider-specific emitter branch or manual OpenAI transform was introduced. The shared import schema gate passed all seven shipped beta pairs before the normal `just import-openai` regeneration was started. Phase 1 and Phase 4 already proved byte reproduction by the unchanged emitter on the then-current source.
+
+Endpoint Collection support is additive for this phase: explicit endpoint pagination takes precedence, while the legacy table remains available for the remaining providers until Phase 6. The historical Exception origin is retained as an interim compatibility representation. OpenAI's overlay assigns endpoint collections and rejects unknown IDs.
+
+Intermediate compile runs overlapped structural edits and briefly reported a missing Endpoint field despite source presence. A direct all-features check and a fresh target selection passed; kache doctor reported healthy wiring. No cache purge, Cargo clean, wrapper change or formatting was used. The importer matrices exposed two test assumptions during its full define run; they are being fixed, not accepted as gaps.
+
+### Seven beta pairs and historical accounting
+
+The pre-regeneration gate resolves references and flattens compositions before comparing both sides. The beta/candidate type is selected on both equal and superset outcomes:
+
+| Removed endpoint | Surviving endpoint | Path | Request gate | Response gate |
+| --- | --- | --- | --- | --- |
+| BetaCreateResponse | CreateResponse | /responses | superset | superset |
+| BetaGetResponse | GetResponse | /responses/{response_id} | equal (no body) | superset |
+| BetaDeleteResponse | DeleteResponse | /responses/{response_id} | equal (no body) | equal |
+| BetaCancelResponse | CancelResponse | /responses/{response_id}/cancel | equal (no body) | superset |
+| BetaCompactconversation | Compactconversation | /responses/compact | superset | superset |
+| BetaListInputItems | ListInputItems | /responses/{response_id}/input_items | equal (no body) | superset |
+| BetaGetinputtokencounts | Getinputtokencounts | /responses/input_tokens | superset | equal |
+
+Each survivor's omitted beta control uses its ordinary path with no beta pair; beta=true uses the same method/path plus ?beta=true, reproducing the removed endpoint URL. False is an ordinary caller value, not a fixed-value endpoint selector. The generated wire guard now records all seven methods/paths with omitted, true and false controls and checks dependent RequestParts. Generated Rust changes remove seven request/call/client-method families, add beta setters to survivors and select compatible beta body/success types. OpenAPI and Postman remove seven query-bearing paths/operation IDs, add optional Boolean beta query parameters and select the same beta schemas. Existing beta header parameters and compatible declared query fields are retained.
+
+Historical registry comparison preserves every remaining nominal name, schema fingerprint and registration order. The following 21 old alias entries now reuse underlying typed registration and stay inline under R3/R6 (the comparison pins this exact list): ChatCompletionMessageToolCalls, ChunkingStrategyRequestParam, ComputerActionList, CreateEvalItem, EvalGraderLabelModel, EvalGraderPython, EvalGraderScoreModel, EvalGraderStringCheck, EvalGraderTextSimilarity, EvalItemContentArray, EvalItemContentText, FineTuneChatCompletionRequestAssistantMessage, InputMessageContentList, Item, ParallelToolCalls, ToolsArray, TranscriptionChunkingStrategy, BetaItem, BetaComputerActionList, BetaInputMessageContentList, BetaToolsArray. This includes primitive/Value aliases as required by the same no-invented-component rule, not just Vec aliases. All 1,394 generated declarations remain; the registry contains 1,373 nominal components. Definitions retain 258 of the original 265 endpoint IDs in order, dropping exactly the seven rows above. Explicit endpoint collections replace OpenAI's exception rows; ListInputItems uses BetaItemResource, and every other pagination resolution must compare exactly.
+
+The first integrated compiler attempt exposed a large debug stack frame. Per-endpoint helper functions alone were insufficient; bounded batches of 32 typed registrations also proved necessary. With both changes the historical test runs on nextest's default stack (0.772s), rather than aborting. No stack-size override was added. Its only remaining semantic discrepancy was the unrelated CreateRealtimeCall multipart body: round-tripping every path through a sorted Value changed fallback media ordering. That discrepancy is being corrected in the shared normalizer and will not be exempted. The initial isolated importer fixture also exposed missing serde_json in its stand-in manifest, now corrected. These are development failures to rerun.
+
+### Matrix, execution coverage and integration corrections
+
+The JSON and YAML import matrices independently start from the shipped `/responses/{response_id}/input_items?beta=true` operation. The plan now records every consumed field: paths, parameters, parameter name/location, required, schema/schema.type, and GET requestBody. Native versus quoted YAML type names agree; quoted Boolean required values fail. Absent parameter collections explicitly mean zero declarations; null rejects. Unconstrained schema objects/types produce Json only where explicitly defined. Duplicate authored keys are detected before map collection, and trailing content rejects. GET body presence, including null, fails with API/endpoint/GET context. Empty foundation metadata imports remain supported, but the public run_import invocation rejects both JSON and YAML APIs with no usable endpoints before writing.
+
+Exact tests: import_normalization::{json_import_normalization_matrix, yaml_import_normalization_matrix, query_expressions_reject_ambiguity_and_get_bodies, placeholder_moves_to_query_and_preserves_rust_name, twins_merge_only_with_compatible_schemas_and_parameters, shipped_openai_query_schema_gate_and_reimports, flattened_schema_gate_selects_superset_and_blocks_incompatible_twins, declaration_duplicates_null_operations_and_query_conflicts_are_rejected, shipped_unfolded_circle_import_corpus, gitea_recursive_twin_becomes_optional_caller_control, schema_gate_rejects_new_restrictions, referenced_query_declarations_require_resolvable_parameter_objects}. Final delegated targeted evidence: 12/12 passed, 2.323s total, including the actual shipped multipart/media-order regression. Its full define run before that final correction passed 686/686; its final define all-features library Clippy passed.
+
+Endpoint tests: endpoint_pagination::{endpoint_collection_precedes_legacy_row_and_preserves_inheritance, endpoint_collection_and_strategy_errors_reach_api_build, endpoint_collection_serde_optional_shape_and_repeated_round_trip, endpoint_explicit_collection_drives_public_pager_knobs}; overlay negative: openai_pagination::tests::overlay_rejects_unknown_endpoint_id. Optional endpoint Collection defines absent/null as no assignment, rejects scalar/mixed-array/all-malformed-array/empty-object representations, duplicate keys and trailing data. Two round trips re-enter public API build and verify item type and resolved unpaginated state. These are ordinary auto-discovered L1 tests; endpoint builder/transfer tests are F1, with shipped definition consumers and generated execution providing F2. Shipped provider documents supply F3 evidence of their recorded input format, without live network calls.
+
+Integration tests in the declared generator l1 target cover typed emission, query/cookie/OAuth authentication retention, API runtime/parameter forms, generic overlays remaining byte-identical outside importer ownership, normal empty-import errors, and exact OpenAI reimports. The new slow_imported_builders_compile_and_match_public_import uses the established offline FreshCrate harness and live test-fresh-output recipe. It compiles/evaluates the normal petstore import output, compares public API data after the documented typed-evidence lowering and checks registry order/completeness and the generated client call. Its initial expected registry spelling was corrected to the importer's existing deconflicted CreatePetRequest2. Added stand-in dependencies support the generated model implementations; shipped manifests/dependencies are unchanged.
+
+The ordinary full area run first stopped after 1,145/2,320 tests (1,143 passed, two failed) on the registry's legacy rule that skipped fully qualified schema names. The new typed wrapper regression exposed that rule, and completeness now follows descriptor wire-schema component references rather than skipping typed paths. The existing incomplete-registry regression remains active. The first area lint found redundant Ok(builder.build()?) in emitted endpoint helpers; emission now returns builder.build() directly. Regenerated definition source carries that fix. Neither failure is accepted; final gates must pass below. No formatting, signature bypass, timeout extension or ignored test was added.
+
+### Final review of generated documentation and test expectations
+
+The next ordinary run exposed the aggregate pagination-count assertion still counting the removed BetaListInputItems pager. OpenAI now has 57 pagers and the shipped total is 93; exhaustive per-endpoint resolution already passed. The importer request-id assertion still expected a literal field and now checks the equivalent builder setter. The output-warning corpus now derives counts from its exact two remaining query-bearing provider rows (Gitea/GitLab), rather than retaining independent nine/27 constants. These are changed migration expectations, not removed coverage. The following ordinary run passed all 2,320 tests, including historical OpenAI, registry order/fingerprints, exact reimport and artifact drift.
+
+That run reported ten ordinary tests above five seconds under concurrent verification load, so it is not the final performance evidence. The final ordinary gate will run with four nextest workers, matching the repository's stated 2–4-core runner capacity, after source/artifact edits settle. This changes concurrency only: no test, case, tier, retry or timeout is removed or changed.
+
+Review of generated public examples found a new typed-path interaction: a fully qualified body type had been placed inside a grouped schematic_schema import, producing invalid Rust examples (the historical text fence hid it from rustdoc). Added codegen::request_structs::tests::qualified_and_container_body_examples_are_valid_rust first; it failed on the exact emitted ::schematic_definitions::openai::BetaCreateResponse input. The fix imports the request alone and declares a typed default body for fully qualified nominal/Value/container paths. The targeted test passes and the affected OpenAI client artifacts are regenerated. Legacy provider examples are preserved. This is part of the migration's documentation correctness, not an unrelated format cleanup.
+
+### Final test and artifact evidence
+
+Final required test invocation: `NEXTEST_TEST_THREADS=4 just -f schematic/justfile test` passed **2,321/2,321 ordinary tests**, **zero SLOW ordinary tests**, in **17.578s**. All **7/7** generated-crate guards passed in **34.154s**, including the new compiled/evaluated importer output, all 18 shipped APIs, real-client wire capture, misuse diagnostics, ABI rejection, and compiler negative control. The runtime compile-fail guard passed **1/1** in **2.517s**. Compiler guards retain their established separate recipe and time budget because they invoke nested Cargo; no ordinary behavioral test was moved there to hide slowness.
+
+The wire fixture's initial child compilation lacked imports for the six newly exercised request types; those imports are fixed, and the final guard passes all 21 added ordinary/true/false endpoint URL recordings plus the existing reserved/Unicode/empty/repeated query cases. The historical wire row for ListInputItems keeps the same decoded query and URL meaning, with beta moved after its declared include input; this is the sole changed historical row. Gitea and GitLab retain their pre-migration wire bytes. Both initial omitted imports and the earlier literal/count assertion failures were corrected and rerun; no failure is accepted.
+
+Historical OpenAI comparison passes with the exact seven merges, endpoint collection relocation, BetaItemResource item type, typed-evidence lowering and exact 21 inline alias removals. It still compares every remaining nominal registry name/schema fingerprint/order and every other definition/pagination field. All other 17 historical definition baselines pass unchanged. Current generated Rust file-set/bytes/manifest, OpenAPI and Postman drift tests pass with no artifact exemptions. Exact vendored OpenAI reimport passes (both mod.rs and types.rs; two imports are byte-identical). Vendored source bytes are unchanged. No OpenAI-specific emitter branch or recorded provider transform was needed.
+
+`just check-tier-coverage schematic` reports **zero stranded tests**. New define tests are auto-discovered, openapi-gated tests use CI's declared all-features setting, and the new compiler test belongs to the existing declared generator l1 binary with the live test-fresh-output recipe. Repository source literals remain in tests or the established visible fixture paths.
+
+### Final verification ledger and closing state
+
+- `just -f schematic/justfile lint`: **passed all five packages**, with warnings denied. This recipe runs Clippy and did not invoke cargo fmt.
+- `just -f schematic/justfile doctest`: **270 passed**, zero failures; two preexisting ignored WebSocket module examples remain (`unfolded_circle::core_ws`, `unfolded_circle::integration_ws`).
+- Explicit strict-completeness nextest selection: **2/2 passed** (0.428s and 4.040s). Their existing real_ names exclude them from the ordinary L1 filter, so they were executed directly.
+- The ordinary gate's **13 exclusions** are seven generator compiler guards and one runtime compiler guard subsequently executed by just test, those two strict-completeness cases explicitly executed above, and three preexisting ignored expensive generator tests (`e2e_generation::{generated_code_compiles, generated_code_passes_clippy, multiple_apis_compile}`). Active isolated compiler guards cover current generated output. No new ignore or skipped case was added. The compiler selections' 234/342 filters and strict selection's 239 filters are ordinary scope selection.
+- No final test or lint failure remains. The initial regression failures, multipart ordering defect, debug-stack overflow, incomplete typed-reference checking, obsolete count/literal expectations, redundant emitted Ok/question-mark lint and omitted wire-child imports were corrected and rerun successfully. Four-worker ordinary execution resolved the measured load concern without changing test cases or deadlines.
+- Current emitted changes are confined to `schematic/definitions/src/openai/mod.rs` (typed builders, ordered assembly, seven merges), `schematic/definitions/src/openai/types.rs` (nominal Registration implementations alongside unchanged model declarations), `schematic/schema/src/openai/mod.rs` (258-endpoint overview), `schematic/schema/src/openai/requests.rs` (typed paths, surviving beta request/call/method forms, valid qualified-body examples), `schematic/openapi/openai.json` (merged operations, optional beta inputs, compatible schemas and inline alias removals), and `schematic/postman/openai.postman_collection.json` (merged operations and caller beta inputs). Every other generated module/export/manifest stays byte-identical. Historical fixtures remain unchanged.
+- Evidence is local macOS. Linux, native Windows and WSL2 were not separately executed: this phase changes portable Rust data, Serde/import normalization, builder emission and hermetic compile/loopback fixtures, with no OS conditional or path-comparison changes. CI coverage remains unchanged. No terminal/browser/device resource is needed, and no focus-changing test or live provider request ran.
+
+**Phase 5 implementation complete, ready for review.** All three Phase 5 plan tasks and the shared input-matrix task are checked; later-phase tasks remain pending. Required plan/log frontmatter inventories contain **84 source/artifact files, eight updated documentation files, no created documentation files and three updated skill files**. The complete file inventory is the frontmatter source_files_during_phase_5 list above; most non-OpenAI provider/test edits only initialize the additive Endpoint.pagination field while their migration remains scheduled. Accumulated packages retain schematic-define, schematic-definitions, schematic-gen and schematic-runtime. Spec frontmatter has human_review false and a fresh Phase 6 handoff. Metadata keys are unique.
+
+No feature lifecycle move, cargo fmt, staging command or commit occurred. Earlier staged/unstaged work was preserved. All delegated tasks and verification processes finished in this turn; nothing is left waiting.

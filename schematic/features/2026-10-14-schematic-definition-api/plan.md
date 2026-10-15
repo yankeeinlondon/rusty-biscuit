@@ -1,7 +1,7 @@
 ---
 total_phases: 8
 created: 2026-10-11
-phase: 4
+phase: 5
 agent: codex/gpt-6.1-sol
 yolo: "true"
 source_files_during_phase_1:
@@ -216,14 +216,116 @@ source_files_during_phase_4:
 docs_updated_during_phase_4:
   - schematic/define/README.md
   - schematic/docs/definition-builders.md
+  - schematic/docs/io/import-openapi.md
   - schematic/docs/pagination.md
   - schematic/docs/runtime/building-clients.md
   - schematic/docs/runtime/origins-and-redirects.md
   - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
   - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+  - schematic/gen/README.md
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
   - .claude/skills/schematic-define/schematic/SKILL.md
+source_files_during_phase_5:
+  - schematic/define/src/builders.rs
+  - schematic/define/src/lib.rs
+  - schematic/define/src/oauth.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/import.rs
+  - schematic/define/src/openapi/import/builder.rs
+  - schematic/define/src/openapi/import/mappings/mod.rs
+  - schematic/define/src/openapi/import/query_paths.rs
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/pagination/validate.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/types.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/cross_origin_policy.rs
+  - schematic/define/tests/endpoint_pagination.rs
+  - schematic/define/tests/import_normalization.rs
+  - schematic/define/tests/pagination_support/mod.rs
+  - schematic/definitions/src/anthropic/mod.rs
+  - schematic/definitions/src/artificial_analysis/mod.rs
+  - schematic/definitions/src/bitbucket/mod.rs
+  - schematic/definitions/src/elevenlabs/endpoints/history.rs
+  - schematic/definitions/src/elevenlabs/endpoints/sound_generation.rs
+  - schematic/definitions/src/elevenlabs/endpoints/speech.rs
+  - schematic/definitions/src/elevenlabs/endpoints/voices.rs
+  - schematic/definitions/src/elevenlabs/endpoints/workspace.rs
+  - schematic/definitions/src/emqx/endpoints/auth_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/banned_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/client_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/messaging_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/monitoring_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/rules_endpoints.rs
+  - schematic/definitions/src/emqx/mod.rs
+  - schematic/definitions/src/eversolo/mod.rs
+  - schematic/definitions/src/gitea/mod.rs
+  - schematic/definitions/src/github/mod.rs
+  - schematic/definitions/src/gitlab/endpoints/branches.rs
+  - schematic/definitions/src/gitlab/endpoints/issues.rs
+  - schematic/definitions/src/gitlab/endpoints/merge_requests.rs
+  - schematic/definitions/src/gitlab/endpoints/pipelines.rs
+  - schematic/definitions/src/gitlab/endpoints/projects.rs
+  - schematic/definitions/src/gitlab/endpoints/releases.rs
+  - schematic/definitions/src/huggingface/mod.rs
+  - schematic/definitions/src/lmstudio/mod.rs
+  - schematic/definitions/src/ollama/mod.rs
+  - schematic/definitions/src/openai/mod.rs
+  - schematic/definitions/src/openai/types.rs
+  - schematic/definitions/src/openai_pagination.rs
+  - schematic/definitions/src/registry/mod.rs
+  - schematic/definitions/src/samsung_smart_tv/mod.rs
+  - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+  - schematic/definitions/tests/pagination_coverage/main.rs
+  - schematic/definitions/tests/pagination_coverage/openai.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/pagination/tests.rs
+  - schematic/gen/src/codegen/request_enum.rs
+  - schematic/gen/src/codegen/request_structs/mod.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/collection.rs
+  - schematic/gen/src/export/postman/tests.rs
+  - schematic/gen/src/import_pipeline.rs
+  - schematic/gen/src/model_gen.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/tests/common/fresh_output.rs
+  - schematic/gen/tests/fixtures/wire_baseline/query_request_lines.txt
+  - schematic/gen/tests/l1/definition_baseline.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/import_overlay.rs
+  - schematic/gen/tests/l1/openapi_import_test.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/pagination_validation.rs
+  - schematic/gen/tests/l1/partial_generation.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/postman_golden.rs
+  - schematic/gen/tests/l1/query_param_detection.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/openapi/openai.json
+  - schematic/postman/openai.postman_collection.json
+  - schematic/schema/src/openai/mod.rs
+  - schematic/schema/src/openai/requests.rs
+docs_updated_during_phase_5:
+  - schematic/definitions/README.md
+  - schematic/docs/definition-builders.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/pagination.md
+  - schematic/docs/typed-registration.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - .claude/skills/schematic-define/schematic/definitions.md
 ---
 
 # Schematic definition API implementation plan
@@ -373,7 +475,7 @@ Checkpoint: integrate the two branches only after agreeing on field signatures. 
 
 ### Wave 9 — Verify Public Behavior (Sequential)
 
-- [ ] **Verify Behavior**
+- [x] **Verify Behavior**
   - Use two local origins in the predecessor's L1 harness: an endpoint allow_origins override reaches the second origin; a sibling under same_origin refuses it and the second origin records zero requests for that sibling. Cover invalid exact origins and caller tightening.
   - Assert request-id normalization/header validity and secret-marker emission, without duplicating predecessor redaction tests. Cover Some(AuthPolicy) through generated execution/emission.
   - Assert default/caller query composition, encoding once, repeated-key conflicts, serialized markers, matched pager control, required-managed rejection, and GET-body rejection through public results. Old providers still match baselines.
@@ -384,18 +486,18 @@ Phase gate: R14–R15 and new R29–R31 fixtures pass, output-specific validatio
 
 ### Wave 10 — Repeatable Builder Imports (Sequential)
 
-- [ ] **Convert Emitter**
+- [x] **Convert Emitter**
   - Change definition_gen.rs to emit fallible builders, nominal registration support selected by the spike, explicit typed registrations in preserved order, and the generic overlay call. The importer may use crate-internal construction without public Default.
   - Normalize imported query-bearing paths in the shared import route before builder construction. Constants and supported placeholders become caller query inputs; a constant-suffixed path whose base route has a twin merges into that twin (R29). Report a request body on an imported GET operation (R31). Reject malformed/ambiguous expressions with endpoint context. Keep the vendored OpenAI source unchanged.
   - Implement a tested recorded transform only where reproduction established its necessity. Keep handwritten overlay files outside the emitter's output ownership; no OpenAI-specific emitter branch.
-- [ ] **Convert OpenAI**
+- [x] **Convert OpenAI**
   - Before regenerating, run the R29 schema gate on each of the seven beta pairs: compare flattened request and response JSON schemas; use the beta type where it is a superset (log equal cases); for any pair where neither is a superset, do not merge, log the differences for the author, and keep the hard `?` error disabled.
   - Regenerate OpenAI's definitions once using the new emitter, merging each gated beta pair into its twin with an optional `beta` query parameter. Convert its hand-written pagination overlay to endpoint-level assignments; unknown overlay endpoint ids remain errors.
   - Route the OpenAI assembly/registry through its context; explicitly preserve old component names/order except the ruled container removals. Do not schedule another OpenAI definition rewrite in Phase 6.
 
 ### Wave 11 — Import Regression Coverage (Sequential)
 
-- [ ] **Prove Reimports**
+- [x] **Prove Reimports**
   - For a small real importer-produced fixture, compile/evaluate emitted builder source and compare its public RestApi/registry result with the in-memory import. Re-import twice to prove determinism and execute JSON/YAML path-normalization matrices.
   - Test a generic configured overlay call and unchanged overlay source; re-import OpenAI into a temporary destination and prove resolved endpoint pagination survives.
   - Run R10/R24 for OpenAI and all nine-path fixture cases; log each removed Beta* endpoint, its surviving twin, and the URL equivalence with and without `beta` per endpoint/output. Check the isolated generated crate. Refresh committed affected artifacts through the generator so ordinary drift tests remain green.
@@ -499,7 +601,40 @@ For imported query-bearing paths, the edited field is the path-map key under an 
 
 Keep legal repeated parameters in distinct locations distinct; this table does not forbid valid OpenAPI behavior. If reconciliation reads another field such as a parameter default, schema type, or Rust-name extension, Phase 1 must add its complete column and outcomes before implementation. Do not accept null via Option or silently filter malformed declarations. Import normalization also covers malformed query expressions, unsupported placeholders, duplicate query keys, and suffixed paths whose merge would conflict with the twin's declared parameters, with endpoint-specific errors. If enforcing these affected-input contracts exposes an existing parser defect, fix it at the shared read boundary or log a concrete unmet requirement; do not treat a one-off negative case as complete coverage.
 
-- [ ] **Verify Input Matrices**
+The import matrices also cover every additional field read during reconciliation:
+
+| Shape (JSON and YAML independently) | required | schema | schema.type | GET requestBody |
+| --- | --- | --- | --- | --- |
+| Control | Native true/false preserved in public ParamDef | Supported schema preserves query type | Nonempty supported string preserves query type | Absent permits GET |
+| Absent | Explicit OpenAPI default false | Reject missing schema for consumed declaration | Explicit unconstrained type becomes Json | Accept no body |
+| Explicit null | Reject | Reject | Reject | Reject with API/endpoint/GET context |
+| Wrong whole type | Reject nonboolean, including quoted YAML false | Reject nonobject | Reject nonstring | Reject |
+| One wrong element | Reject array representation | Reject mixed array representation | Reject array representation | Reject |
+| Every wrong element | Reject array representation | Reject array representation | Reject array representation | Reject |
+| Empty | Reject empty string/object/array | Accept explicit unconstrained object as Json | Reject empty string/object/array | Reject any body presence, including empty object |
+| Duplicate key | Reject before map collection | Reject before map collection | Reject before map collection | Reject before map collection |
+| Trailing/invalid content | Reject whole input | Reject whole input | Reject whole input | Reject whole input |
+
+A metadata-only foundation import may contain no operations; normal `run_import`
+rejects it as having no usable endpoints before writing either output form.
+This preserves foundational metadata imports while enforcing the usable-API boundary.
+
+The additive endpoint transfer field has the following explicit JSON contract;
+its Collection representation is the existing pagination model.
+
+| Shape | Endpoint pagination |
+| --- | --- |
+| Control | Explicit collection reaches API build, resolved item type and caller knobs |
+| Absent | No endpoint assignment; legacy row/default/inference remains applicable |
+| Explicit null | Same documented optional no-assignment state, separately asserted |
+| Wrong whole type | Reject scalar instead of Collection |
+| One wrong element | Reject mixed array instead of Collection |
+| Every wrong element | Reject malformed array instead of Collection |
+| Empty | Reject empty object or array lacking Collection fields |
+| Duplicate key | Reject duplicate pagination field |
+| Trailing/invalid content | Reject whole transfer document |
+
+- [x] **Verify Input Matrices**
   - Phase 2 owns the descriptor JSON matrix; Phase 5 owns the JSON and YAML import matrices. One test per format walks its entire applicable matrix from a real-tool fixture, making one edit per cell and asserting the public definition/API validation outcome. The unedited control proves the fields affect output; assert endpoint presence, schema/path/shape, and emitted query values rather than just serde success.
   - Preserve duplicate keys and trailing content using textual mutations; a parsed JSON Value cannot represent duplicate keys. Use fixture variants for legal non-component/wrapper states. Unknown malformed data must not turn into empty successful output.
   - Audit affected read paths for `#[serde(default)]`, Option where absence/null differ, `filter_map(.. as_str())`, `unwrap_or_default()`, and `.ok()` swallowing load-bearing errors. Any review finding reports every other cell in its row and column. Matrix evidence is required at the owning phase's gate, not deferred to final review.

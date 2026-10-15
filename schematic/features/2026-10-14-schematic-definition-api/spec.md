@@ -34,25 +34,27 @@ related: []
 next_spec: 2026-10-15-schematic-definition-vocabulary
 human_review: false
 message_to_agent: |-
-  Phase 4 adds Endpoint.cross_origin and ParamDef.rust_name/secret/pager_managed.
-  All unused fields omit from serialized definitions; legacy source literals now
-  explicitly initialize these fields. Continue migrating them to builders in the
-  scheduled phases. Endpoint cross_origin replaces the API policy for redirects
-  and followed pager links. Generated ApiDefinition.endpoint_cross_origin stores
-  it by endpoint ID; caller policies must tighten every applicable policy.
-  ParamDef::new(wire, type) is optional by default; required/describes/rust_name/
-  secret/pager_managed author metadata. Endpoint query/header_param/cookie state
-  locations; constant header(name,value) remains. rust_name affects Rust only.
-  API request_id_header and secret_header normalize lowercase and validate names;
-  default_pagination feeds existing resolution. API build invokes the existing
-  pagination validator; unmatched managed markers fail, required managed inputs
-  retain PagerManagedRequiredWithoutDefault. GET bodies fail endpoint build and
-  destination API build; HEAD is unchanged. See docs/definition-builders.md.
-  The definition emitter carries new fields but remains literal-based until
-  Phase 5. Path-query severity remains Warning until all Phase 6 migrations.
-  Provider definitions changed only for new field initialization, with historical
-  JSON and generated artifacts retained. Keep schema descriptor evidence and
-  ABI 4; do not drop aliases or secret/adoption metadata during emitter migration.
+  Phase 5 fully migrates OpenAI through the generic builder emitter: 258 endpoints
+  remain after seven schema-gated beta merges; ordinary IDs expose optional beta
+  query inputs and compatible beta request/response types. Do not rewrite OpenAI
+  again in Phase 6 or edit its vendored spec. Run just import-openai to reproduce.
+  module_group() assembles API and ordered registry from one DefinitionContext.
+  Generated nominal models implement Registration; 21 old container/primitive/Value
+  alias components disappear under the inline-type rule, with an exact historical
+  comparison in definition_baseline::openai. Keep bounded registration batches and
+  small endpoint helpers: a single giant builder function overflows the default
+  debug test stack. Source tests and isolated compiled fixture cover reimports.
+  Endpoint.pagination: Option<Collection> and builder .pagination(Collection) now
+  take precedence over legacy API exceptions. OpenAI overlay assigns collections
+  directly; ListInputItems uses BetaItemResource. Legacy table/types remain for
+  other providers until Phase 6; ResolutionOrigin::Exception intentionally covers
+  both explicit forms during migration. The hard path-query error remains Warning
+  until Gitea and GitLab finish; shared import normalization tests cover all nine
+  original routes independently. Preserve typed untouched OpenAPI operations when
+  normalizing: Value round trips sort media maps and changed CreateRealtimeCall's
+  multipart preference. JSON/YAML public matrices cover paths, parameters, names,
+  locations, required, schema/type and GET bodies, with strict duplicate/null rules.
+  Empty foundation metadata imports are allowed; run_import rejects no endpoints.
 ---
 
 # Schematic definition API: builders and typed registration
