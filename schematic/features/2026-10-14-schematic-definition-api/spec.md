@@ -34,27 +34,31 @@ related: []
 next_spec: 2026-10-15-schematic-definition-vocabulary
 human_review: false
 message_to_agent: |-
-  Phase 5 fully migrates OpenAI through the generic builder emitter: 258 endpoints
-  remain after seven schema-gated beta merges; ordinary IDs expose optional beta
-  query inputs and compatible beta request/response types. Do not rewrite OpenAI
-  again in Phase 6 or edit its vendored spec. Run just import-openai to reproduce.
-  module_group() assembles API and ordered registry from one DefinitionContext.
-  Generated nominal models implement Registration; 21 old container/primitive/Value
-  alias components disappear under the inline-type rule, with an exact historical
-  comparison in definition_baseline::openai. Keep bounded registration batches and
-  small endpoint helpers: a single giant builder function overflows the default
-  debug test stack. Source tests and isolated compiled fixture cover reimports.
-  Endpoint.pagination: Option<Collection> and builder .pagination(Collection) now
-  take precedence over legacy API exceptions. OpenAI overlay assigns collections
-  directly; ListInputItems uses BetaItemResource. Legacy table/types remain for
-  other providers until Phase 6; ResolutionOrigin::Exception intentionally covers
-  both explicit forms during migration. The hard path-query error remains Warning
-  until Gitea and GitLab finish; shared import normalization tests cover all nine
-  original routes independently. Preserve typed untouched OpenAPI operations when
-  normalizing: Value round trips sort media maps and changed CreateRealtimeCall's
-  multipart preference. JSON/YAML public matrices cover paths, parameters, names,
-  locations, required, schema/type and GET bodies, with strict duplicate/null rules.
-  Empty foundation metadata imports are allowed; run_import rejects no endpoints.
+  Phase 7 is complete: all local Schematic gates and dependent test/lint/all-target
+  checks passed. Native source/compiler/wire/consumer evidence covers macOS, Linux,
+  native Windows/MSVC, and WSL2; generated-schema tests passed 55/55 on each.
+  The WSL2 relocated archive passed 641/641 with manifest verification and the
+  builder target hidden. These dirty-tree cross-check snapshots are verification,
+  not published qualifying CI receipts. Exact commands/results/exclusions and
+  per-host source snapshots are in the Phase 7 implementation log.
+  Keep schematic/gen/build.rs: migrated catalog assembly overflowed Windows'
+  default 1 MiB main stack in three public CLI tests. Its target-specific 8 MiB
+  reservation fixes those exact inputs; MSVC was executed, GNU follows the
+  established linker pattern. All updated CLI/artifact checks pass below 5 s.
+  Postman drift now checks the complete file set as well as expected-file bytes;
+  a temporary retired-file negative control proved it fails and was removed.
+  Regeneration produced no new artifact differences from Phase 6. Do not widen
+  historical normalization or recapture the preserved migration baselines.
+  Existing native-Windows aws-lc TLS ignores, other resource/helper exclusions,
+  unrelated Windows warnings, and broad-run timing observations are explicitly
+  recorded; do not describe them as fixed or as new acceptance exemptions.
+  Phase 8 remains pending: finish authoring guidance and the full R1-R31/review
+  ledger, including the command guidance. No dependency changed in this phase.
+  Preserve Phase 6's GitLab git_ref setter, concrete Bitbucket generic paths,
+  explicit empty EnvMapping semantics, 93 pagers, and retained serialized
+  Exception/PaginationException and WebSocket Schema.module_path contracts.
+  Required-query constructor fidelity remains deferred to the vocabulary work.
+  Do not implement or refresh the follow-up specs before author review.
 ---
 
 # Schematic definition API: builders and typed registration

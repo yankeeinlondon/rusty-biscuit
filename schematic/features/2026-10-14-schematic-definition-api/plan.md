@@ -1,7 +1,7 @@
 ---
 total_phases: 8
 created: 2026-10-11
-phase: 5
+phase: 7
 agent: codex/gpt-6.1-sol
 yolo: "true"
 source_files_during_phase_1:
@@ -67,6 +67,8 @@ packages:
   - schematic-define
   - schematic-gen
   - schematic-definitions
+  - schematic-schema
+  - sniff
 source_files_during_phase_2:
   - Cargo.lock
   - schematic/define/Cargo.toml
@@ -326,6 +328,228 @@ skills_files_updated_during_phase_5:
   - .claude/skills/schematic-define/SKILL.md
   - .claude/skills/schematic-define/schematic/SKILL.md
   - .claude/skills/schematic-define/schematic/definitions.md
+source_files_during_phase_6:
+  - schematic/define/src/builders.rs
+  - schematic/define/src/lib.rs
+  - schematic/define/src/oauth.rs
+  - schematic/define/src/openapi/export/info.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/paths.rs
+  - schematic/define/src/openapi/extensions.rs
+  - schematic/define/src/openapi/import/builder.rs
+  - schematic/define/src/openapi/import/mappings/mod.rs
+  - schematic/define/src/pagination.rs
+  - schematic/define/src/pagination/collection.rs
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/pagination/validate.rs
+  - schematic/define/src/params/mod.rs
+  - schematic/define/src/prelude.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/schema.rs
+  - schematic/define/src/types.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/construction_enforcement.rs
+  - schematic/define/tests/cross_origin_policy.rs
+  - schematic/define/tests/definition_serde.rs
+  - schematic/define/tests/endpoint_literal_surface.rs
+  - schematic/define/tests/endpoint_pagination.rs
+  - schematic/define/tests/pagination_inventory.rs
+  - schematic/define/tests/pagination_partitions.rs
+  - schematic/define/tests/pagination_serde.rs
+  - schematic/define/tests/pagination_support/mod.rs
+  - schematic/define/tests/pagination_tables.rs
+  - schematic/definitions/src/anthropic/mod.rs
+  - schematic/definitions/src/anthropic/types/api.rs
+  - schematic/definitions/src/anthropic/types/messages.rs
+  - schematic/definitions/src/anthropic/types/tools.rs
+  - schematic/definitions/src/artificial_analysis/mod.rs
+  - schematic/definitions/src/artificial_analysis/types.rs
+  - schematic/definitions/src/bitbucket/mod.rs
+  - schematic/definitions/src/bitbucket/types/branches.rs
+  - schematic/definitions/src/bitbucket/types/common.rs
+  - schematic/definitions/src/bitbucket/types/downloads.rs
+  - schematic/definitions/src/bitbucket/types/issues.rs
+  - schematic/definitions/src/bitbucket/types/pull_requests.rs
+  - schematic/definitions/src/bitbucket/types/repos.rs
+  - schematic/definitions/src/bitbucket/types/tags.rs
+  - schematic/definitions/src/elevenlabs/endpoints/history.rs
+  - schematic/definitions/src/elevenlabs/endpoints/sound_generation.rs
+  - schematic/definitions/src/elevenlabs/endpoints/speech.rs
+  - schematic/definitions/src/elevenlabs/endpoints/voices.rs
+  - schematic/definitions/src/elevenlabs/endpoints/workspace.rs
+  - schematic/definitions/src/elevenlabs/mod.rs
+  - schematic/definitions/src/elevenlabs/types/common.rs
+  - schematic/definitions/src/elevenlabs/types/history.rs
+  - schematic/definitions/src/elevenlabs/types/speech.rs
+  - schematic/definitions/src/elevenlabs/types/voices.rs
+  - schematic/definitions/src/elevenlabs/types/workspace.rs
+  - schematic/definitions/src/emqx/endpoints/auth_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/banned_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/client_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/messaging_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/monitoring_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/rules_endpoints.rs
+  - schematic/definitions/src/emqx/mod.rs
+  - schematic/definitions/src/emqx/types/auth.rs
+  - schematic/definitions/src/emqx/types/banned.rs
+  - schematic/definitions/src/emqx/types/broker.rs
+  - schematic/definitions/src/emqx/types/clients.rs
+  - schematic/definitions/src/emqx/types/common.rs
+  - schematic/definitions/src/emqx/types/messaging.rs
+  - schematic/definitions/src/emqx/types/rules.rs
+  - schematic/definitions/src/eversolo/mod.rs
+  - schematic/definitions/src/eversolo/types.rs
+  - schematic/definitions/src/gitea/mod.rs
+  - schematic/definitions/src/gitea/types.rs
+  - schematic/definitions/src/github/mod.rs
+  - schematic/definitions/src/github/types/issues.rs
+  - schematic/definitions/src/github/types/pull_requests.rs
+  - schematic/definitions/src/github/types/releases.rs
+  - schematic/definitions/src/github/types/repos.rs
+  - schematic/definitions/src/github/types/workflow.rs
+  - schematic/definitions/src/gitlab/endpoints/branches.rs
+  - schematic/definitions/src/gitlab/endpoints/issues.rs
+  - schematic/definitions/src/gitlab/endpoints/merge_requests.rs
+  - schematic/definitions/src/gitlab/endpoints/pipelines.rs
+  - schematic/definitions/src/gitlab/endpoints/projects.rs
+  - schematic/definitions/src/gitlab/endpoints/releases.rs
+  - schematic/definitions/src/gitlab/mod.rs
+  - schematic/definitions/src/gitlab/types/branches.rs
+  - schematic/definitions/src/gitlab/types/common.rs
+  - schematic/definitions/src/gitlab/types/issues.rs
+  - schematic/definitions/src/gitlab/types/merge_requests.rs
+  - schematic/definitions/src/gitlab/types/pipelines.rs
+  - schematic/definitions/src/gitlab/types/projects.rs
+  - schematic/definitions/src/gitlab/types/releases.rs
+  - schematic/definitions/src/huggingface/mod.rs
+  - schematic/definitions/src/huggingface/types/collections.rs
+  - schematic/definitions/src/huggingface/types/common.rs
+  - schematic/definitions/src/huggingface/types/datasets.rs
+  - schematic/definitions/src/huggingface/types/discussions.rs
+  - schematic/definitions/src/huggingface/types/models.rs
+  - schematic/definitions/src/huggingface/types/repos.rs
+  - schematic/definitions/src/huggingface/types/spaces.rs
+  - schematic/definitions/src/huggingface/types/stubs.rs
+  - schematic/definitions/src/huggingface/types/users.rs
+  - schematic/definitions/src/lib.rs
+  - schematic/definitions/src/lmstudio/mod.rs
+  - schematic/definitions/src/lmstudio/types.rs
+  - schematic/definitions/src/ollama/mod.rs
+  - schematic/definitions/src/ollama/types/completion.rs
+  - schematic/definitions/src/ollama/types/models.rs
+  - schematic/definitions/src/ollama/types/openai.rs
+  - schematic/definitions/src/prelude.rs
+  - schematic/definitions/src/registry/lookup.rs
+  - schematic/definitions/src/registry/mod.rs
+  - schematic/definitions/src/registry/typed.rs
+  - schematic/definitions/src/samsung_smart_tv/mod.rs
+  - schematic/definitions/src/samsung_smart_tv/types.rs
+  - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+  - schematic/definitions/src/unfolded_circle/core_rest/types.rs
+  - schematic/definitions/tests/authoring_surface.rs
+  - schematic/definitions/tests/pagination_coverage/forges.rs
+  - schematic/definitions/tests/pagination_coverage/main.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/error.rs
+  - schematic/gen/src/codegen/pagination/mod.rs
+  - schematic/gen/src/codegen/pagination/tests.rs
+  - schematic/gen/src/codegen/request_enum.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/src/diagnostics.rs
+  - schematic/gen/src/export/naming.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/collection.rs
+  - schematic/gen/src/export/postman/mod.rs
+  - schematic/gen/src/export/postman/tests.rs
+  - schematic/gen/src/output/assemble/api.rs
+  - schematic/gen/src/pipeline.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/tests/fixtures/wire_baseline/query_request_lines.txt
+  - schematic/gen/tests/l1/artifact_drift.rs
+  - schematic/gen/tests/l1/definition_baseline.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/pagination_validation.rs
+  - schematic/gen/tests/l1/partial_generation.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/postman_golden.rs
+  - schematic/gen/tests/l1/query_param_detection.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/openapi/anthropic.json
+  - schematic/openapi/artificial_analysis.json
+  - schematic/openapi/bitbucket.json
+  - schematic/openapi/elevenlabs.json
+  - schematic/openapi/emqx.json
+  - schematic/openapi/eversolo.json
+  - schematic/openapi/gitea.json
+  - schematic/openapi/github.json
+  - schematic/openapi/gitlab.json
+  - schematic/openapi/huggingface.json
+  - schematic/openapi/lmstudio.json
+  - schematic/openapi/ollama.json
+  - schematic/openapi/samsung_smart_tv.json
+  - schematic/openapi/unfolded_circle_core_rest.json
+  - schematic/postman/gitea.postman_collection.json
+  - schematic/postman/gitlab.postman_collection.json
+  - schematic/schema/Cargo.lock
+  - schematic/schema/src/anthropic.rs
+  - schematic/schema/src/artificial_analysis.rs
+  - schematic/schema/src/bitbucket/requests.rs
+  - schematic/schema/src/elevenlabs/requests.rs
+  - schematic/schema/src/emqx/requests.rs
+  - schematic/schema/src/eversolo/requests.rs
+  - schematic/schema/src/gitea/mod.rs
+  - schematic/schema/src/gitea/requests.rs
+  - schematic/schema/src/github/requests.rs
+  - schematic/schema/src/gitlab/requests.rs
+  - schematic/schema/src/huggingface/requests.rs
+  - schematic/schema/src/lmstudio.rs
+  - schematic/schema/src/ollama.rs
+  - schematic/schema/src/samsung_smart_tv.rs
+  - schematic/schema/src/unfolded_circle_core_rest.rs
+  - schematic/schema/tests/fixtures/compile_fail/after_on_a_page_number_endpoint.stderr
+  - schematic/schema/tests/fixtures/compile_fail/pager_on_an_unpaginated_endpoint.stderr
+  - sniff/lib/src/remote/gitea.rs
+  - sniff/lib/src/remote/gitlab.rs
+docs_updated_during_phase_6:
+  - schematic/README.md
+  - schematic/define/README.md
+  - schematic/definitions/README.md
+  - schematic/docs/definition-builders.md
+  - schematic/docs/definition-snapshots.md
+  - schematic/docs/generation/request-side.md
+  - schematic/docs/generation/validation.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/io/openapi-extensions.md
+  - schematic/docs/pagination.md
+  - schematic/docs/typed-registration.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+docs_created_during_phase_6:
+  - schematic/docs/generation/workflow.md
+skills_files_updated_during_phase_6:
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - .claude/skills/schematic-define/schematic/define.md
+  - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_7:
+  - schematic/gen/build.rs
+  - schematic/gen/tests/l1/artifact_drift.rs
+docs_updated_during_phase_7:
+  - schematic/docs/generation/workflow.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/os/windows.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
 ---
 
 # Schematic definition API implementation plan
@@ -508,7 +732,7 @@ Phase gate: R22 passes, OpenAI's original count/order (less exactly the merged B
 
 ### Wave 12 — Verified Provider Batches (Sequential)
 
-- [ ] **Convert Providers**
+- [x] **Convert Providers**
   - Use Phase 1's smallest-first inventory for every remaining REST API. For each batch, migrate its definition function, ordered typed registrations, lookup assembly, headers/auth/params, and every endpoint in one pass. Neither WebSocket definitions nor type-module stored-form tests are wholesale rewritten.
   - Move pagination exceptions to endpoint builders and retain each API's existing strategy functions in its own module. Remove or convert all 35 Gitea/GitHub/GitLab/Bitbucket legacy declarations according to their current resolved behavior, preserving the 94 authored pagers and their controls across all APIs. Bitbucket GetSource's binary non-list remains a non-list; its inert declaration is removed without authoring a pager. No shared presets.
   - Merge Gitea GetGitTreeRecursive into GetGitTree with an optional `recursive` query parameter, and convert the GitLab ref query input, within their API batches; migrate the inventoried users of the removed Gitea request type. Migrate inventoried GitLab call sites in the same batch, preserving git_ref where possible; log unavoidable source changes.
@@ -517,12 +741,12 @@ Phase gate: R22 passes, OpenAI's original count/order (less exactly the merged B
 
 ### Wave 13 — Legacy Removal and Enforcement (Sequential)
 
-- [ ] **Remove Legacy Interfaces**
+- [x] **Remove Legacy Interfaces**
   - After the final provider migration, remove pagination exception tables and their validation, PaginationStyle, PaginationResponse, with_pagination, and the two legacy EndpointParams fields. Retain OpenAI overlay id validation.
   - Remove hand-typed registry filling and string-vs-string completeness checks; replace them with destination-context validation while preserving strict OpenAPI completeness coverage. Module-group assembly returns definitions/registry together for all lookup and generator entry points.
   - Repeat oauth_scopes/auth_policy and Schema.module_path reader scans. Remove oauth_scopes from live definition, exporter extension, emitter, and consumers; retain/test auth_policy. Apply/log PD21 without breaking WebSocket readers.
   - Enable the hard `?` error in shared validation/build/import boundaries only now, after confirming all nine paths are migrated and no merge left a same-route duplicate; if the schema gate blocked an OpenAI pair, leave it disabled and log the hold for the author. Assert diagnostics name API, endpoint, and offending path.
-- [ ] **Enforce Construction**
+- [x] **Enforce Construction**
   - Apply non_exhaustive to Endpoint/RestApi after a workspace consumer scan confirms migration. Add external literal compile-fail coverage and source scans forbidding Endpoint literals, ApiResponse/ApiRequest/Schema constructors, json_type strings, and string registrations in provider authoring, with only narrow type/test exceptions.
   - Complete R27's six-entry retirement ledger: name each replacement and preserve pagination-resolution coverage, EndpointParams allow-list coverage, and no-GraphQL coverage. Remove tautological tests/tables only with a logged reason or behavioral replacement.
   - Verify removed identifiers have no live consumers across the workspace; distinguish historical documentation from code. Confirm every API exposes its expected count and id list.
@@ -533,17 +757,17 @@ Phase gate: R6, R12, R16, R18–R21, R23, R27–R31 pass across the complete pro
 
 ### Wave 14 — Final Artifact Integration (Sequential)
 
-- [ ] **Regenerate Artifacts**
+- [x] **Regenerate Artifacts**
   - Run the generator for the complete Rust/schema, OpenAPI, and Postman trees; never hand-edit generated source. Review complete file-set and byte differences against the Phase 1 baseline and log each intended difference by API, endpoint/registry entry, file, and cause.
   - Final drift L1 compares against final committed artifacts with no allow-list. Historical definition normalization remains narrow and reviewable; migration baselines remain available through review.
   - Run `just test`, `just lint`, `just doctest`, `just test-schema`, and `just lint-schema` in schematic. Include new schematic-runtime checks using the actual predecessor recipes; current area recipes omit that not-yet-created package.
 
 ### Wave 15 — Dependents and Platform Evidence (Parallel with Separate Build Targets)
 
-- [ ] **Verify Dependents**
+- [x] **Verify Dependents**
   - Resolve actual package names from inventory and run root `just test {pkg}` for sniff/lib, biscuit-speaks/lib, model-citizen/lib, homelab/lib, eversolo-integration, arcam-amp-integration, sony-receiver-integration, and unfolded-integration-helper, plus any additional discovered direct consumers. Include schematic-oauth and all five WebSocket definition builds/tests.
   - Compile relevant lib/bin/test targets plus declared examples/benches and changed reverse dependencies. Run corresponding lint recipes. Fix only migration-induced call-site failures and log each touched consumer; an unrelated failure is recorded separately.
-- [ ] **Verify Platforms**
+- [x] **Verify Platforms**
   - Load the os skill before choosing remote procedures or reporting a platform unavailable. Reuse qualifying evidence per required cell; otherwise run required checks on macOS, Linux, native Windows, and WSL2 using documented non-interactive host access and isolated target directories.
   - Exercise generated paths, compile-fail fixtures, temporary artifact paths, query encoding, and affected dependents on each required environment. Record exact commands, features, results, hosts, and missing evidence; never report one host's pass as four-platform coverage.
   - Use only documented unattended credential procedures. If a host is inaccessible, record the blocker and evidence still required; do not add CI cells or silently weaken acceptance. Run existing relevant L2 suites only via just test-l2 with background/no-focus harness visibility.

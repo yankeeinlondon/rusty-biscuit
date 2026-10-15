@@ -66,6 +66,8 @@ packages:
   - schematic-define
   - schematic-gen
   - schematic-definitions
+  - schematic-schema
+  - sniff
 source_files_during_phase_2:
   - Cargo.lock
   - schematic/define/Cargo.toml
@@ -325,6 +327,228 @@ skills_files_updated_during_phase_5:
   - .claude/skills/schematic-define/SKILL.md
   - .claude/skills/schematic-define/schematic/SKILL.md
   - .claude/skills/schematic-define/schematic/definitions.md
+source_files_during_phase_6:
+  - schematic/define/src/builders.rs
+  - schematic/define/src/lib.rs
+  - schematic/define/src/oauth.rs
+  - schematic/define/src/openapi/export/info.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/paths.rs
+  - schematic/define/src/openapi/extensions.rs
+  - schematic/define/src/openapi/import/builder.rs
+  - schematic/define/src/openapi/import/mappings/mod.rs
+  - schematic/define/src/pagination.rs
+  - schematic/define/src/pagination/collection.rs
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/pagination/validate.rs
+  - schematic/define/src/params/mod.rs
+  - schematic/define/src/prelude.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/schema.rs
+  - schematic/define/src/types.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/construction_enforcement.rs
+  - schematic/define/tests/cross_origin_policy.rs
+  - schematic/define/tests/definition_serde.rs
+  - schematic/define/tests/endpoint_literal_surface.rs
+  - schematic/define/tests/endpoint_pagination.rs
+  - schematic/define/tests/pagination_inventory.rs
+  - schematic/define/tests/pagination_partitions.rs
+  - schematic/define/tests/pagination_serde.rs
+  - schematic/define/tests/pagination_support/mod.rs
+  - schematic/define/tests/pagination_tables.rs
+  - schematic/definitions/src/anthropic/mod.rs
+  - schematic/definitions/src/anthropic/types/api.rs
+  - schematic/definitions/src/anthropic/types/messages.rs
+  - schematic/definitions/src/anthropic/types/tools.rs
+  - schematic/definitions/src/artificial_analysis/mod.rs
+  - schematic/definitions/src/artificial_analysis/types.rs
+  - schematic/definitions/src/bitbucket/mod.rs
+  - schematic/definitions/src/bitbucket/types/branches.rs
+  - schematic/definitions/src/bitbucket/types/common.rs
+  - schematic/definitions/src/bitbucket/types/downloads.rs
+  - schematic/definitions/src/bitbucket/types/issues.rs
+  - schematic/definitions/src/bitbucket/types/pull_requests.rs
+  - schematic/definitions/src/bitbucket/types/repos.rs
+  - schematic/definitions/src/bitbucket/types/tags.rs
+  - schematic/definitions/src/elevenlabs/endpoints/history.rs
+  - schematic/definitions/src/elevenlabs/endpoints/sound_generation.rs
+  - schematic/definitions/src/elevenlabs/endpoints/speech.rs
+  - schematic/definitions/src/elevenlabs/endpoints/voices.rs
+  - schematic/definitions/src/elevenlabs/endpoints/workspace.rs
+  - schematic/definitions/src/elevenlabs/mod.rs
+  - schematic/definitions/src/elevenlabs/types/common.rs
+  - schematic/definitions/src/elevenlabs/types/history.rs
+  - schematic/definitions/src/elevenlabs/types/speech.rs
+  - schematic/definitions/src/elevenlabs/types/voices.rs
+  - schematic/definitions/src/elevenlabs/types/workspace.rs
+  - schematic/definitions/src/emqx/endpoints/auth_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/banned_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/client_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/messaging_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/monitoring_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/rules_endpoints.rs
+  - schematic/definitions/src/emqx/mod.rs
+  - schematic/definitions/src/emqx/types/auth.rs
+  - schematic/definitions/src/emqx/types/banned.rs
+  - schematic/definitions/src/emqx/types/broker.rs
+  - schematic/definitions/src/emqx/types/clients.rs
+  - schematic/definitions/src/emqx/types/common.rs
+  - schematic/definitions/src/emqx/types/messaging.rs
+  - schematic/definitions/src/emqx/types/rules.rs
+  - schematic/definitions/src/eversolo/mod.rs
+  - schematic/definitions/src/eversolo/types.rs
+  - schematic/definitions/src/gitea/mod.rs
+  - schematic/definitions/src/gitea/types.rs
+  - schematic/definitions/src/github/mod.rs
+  - schematic/definitions/src/github/types/issues.rs
+  - schematic/definitions/src/github/types/pull_requests.rs
+  - schematic/definitions/src/github/types/releases.rs
+  - schematic/definitions/src/github/types/repos.rs
+  - schematic/definitions/src/github/types/workflow.rs
+  - schematic/definitions/src/gitlab/endpoints/branches.rs
+  - schematic/definitions/src/gitlab/endpoints/issues.rs
+  - schematic/definitions/src/gitlab/endpoints/merge_requests.rs
+  - schematic/definitions/src/gitlab/endpoints/pipelines.rs
+  - schematic/definitions/src/gitlab/endpoints/projects.rs
+  - schematic/definitions/src/gitlab/endpoints/releases.rs
+  - schematic/definitions/src/gitlab/mod.rs
+  - schematic/definitions/src/gitlab/types/branches.rs
+  - schematic/definitions/src/gitlab/types/common.rs
+  - schematic/definitions/src/gitlab/types/issues.rs
+  - schematic/definitions/src/gitlab/types/merge_requests.rs
+  - schematic/definitions/src/gitlab/types/pipelines.rs
+  - schematic/definitions/src/gitlab/types/projects.rs
+  - schematic/definitions/src/gitlab/types/releases.rs
+  - schematic/definitions/src/huggingface/mod.rs
+  - schematic/definitions/src/huggingface/types/collections.rs
+  - schematic/definitions/src/huggingface/types/common.rs
+  - schematic/definitions/src/huggingface/types/datasets.rs
+  - schematic/definitions/src/huggingface/types/discussions.rs
+  - schematic/definitions/src/huggingface/types/models.rs
+  - schematic/definitions/src/huggingface/types/repos.rs
+  - schematic/definitions/src/huggingface/types/spaces.rs
+  - schematic/definitions/src/huggingface/types/stubs.rs
+  - schematic/definitions/src/huggingface/types/users.rs
+  - schematic/definitions/src/lib.rs
+  - schematic/definitions/src/lmstudio/mod.rs
+  - schematic/definitions/src/lmstudio/types.rs
+  - schematic/definitions/src/ollama/mod.rs
+  - schematic/definitions/src/ollama/types/completion.rs
+  - schematic/definitions/src/ollama/types/models.rs
+  - schematic/definitions/src/ollama/types/openai.rs
+  - schematic/definitions/src/prelude.rs
+  - schematic/definitions/src/registry/lookup.rs
+  - schematic/definitions/src/registry/mod.rs
+  - schematic/definitions/src/registry/typed.rs
+  - schematic/definitions/src/samsung_smart_tv/mod.rs
+  - schematic/definitions/src/samsung_smart_tv/types.rs
+  - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+  - schematic/definitions/src/unfolded_circle/core_rest/types.rs
+  - schematic/definitions/tests/authoring_surface.rs
+  - schematic/definitions/tests/pagination_coverage/forges.rs
+  - schematic/definitions/tests/pagination_coverage/main.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/error.rs
+  - schematic/gen/src/codegen/pagination/mod.rs
+  - schematic/gen/src/codegen/pagination/tests.rs
+  - schematic/gen/src/codegen/request_enum.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/src/diagnostics.rs
+  - schematic/gen/src/export/naming.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/collection.rs
+  - schematic/gen/src/export/postman/mod.rs
+  - schematic/gen/src/export/postman/tests.rs
+  - schematic/gen/src/output/assemble/api.rs
+  - schematic/gen/src/pipeline.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/tests/fixtures/wire_baseline/query_request_lines.txt
+  - schematic/gen/tests/l1/artifact_drift.rs
+  - schematic/gen/tests/l1/definition_baseline.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/pagination_validation.rs
+  - schematic/gen/tests/l1/partial_generation.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/postman_golden.rs
+  - schematic/gen/tests/l1/query_param_detection.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/openapi/anthropic.json
+  - schematic/openapi/artificial_analysis.json
+  - schematic/openapi/bitbucket.json
+  - schematic/openapi/elevenlabs.json
+  - schematic/openapi/emqx.json
+  - schematic/openapi/eversolo.json
+  - schematic/openapi/gitea.json
+  - schematic/openapi/github.json
+  - schematic/openapi/gitlab.json
+  - schematic/openapi/huggingface.json
+  - schematic/openapi/lmstudio.json
+  - schematic/openapi/ollama.json
+  - schematic/openapi/samsung_smart_tv.json
+  - schematic/openapi/unfolded_circle_core_rest.json
+  - schematic/postman/gitea.postman_collection.json
+  - schematic/postman/gitlab.postman_collection.json
+  - schematic/schema/Cargo.lock
+  - schematic/schema/src/anthropic.rs
+  - schematic/schema/src/artificial_analysis.rs
+  - schematic/schema/src/bitbucket/requests.rs
+  - schematic/schema/src/elevenlabs/requests.rs
+  - schematic/schema/src/emqx/requests.rs
+  - schematic/schema/src/eversolo/requests.rs
+  - schematic/schema/src/gitea/mod.rs
+  - schematic/schema/src/gitea/requests.rs
+  - schematic/schema/src/github/requests.rs
+  - schematic/schema/src/gitlab/requests.rs
+  - schematic/schema/src/huggingface/requests.rs
+  - schematic/schema/src/lmstudio.rs
+  - schematic/schema/src/ollama.rs
+  - schematic/schema/src/samsung_smart_tv.rs
+  - schematic/schema/src/unfolded_circle_core_rest.rs
+  - schematic/schema/tests/fixtures/compile_fail/after_on_a_page_number_endpoint.stderr
+  - schematic/schema/tests/fixtures/compile_fail/pager_on_an_unpaginated_endpoint.stderr
+  - sniff/lib/src/remote/gitea.rs
+  - sniff/lib/src/remote/gitlab.rs
+docs_updated_during_phase_6:
+  - schematic/README.md
+  - schematic/define/README.md
+  - schematic/definitions/README.md
+  - schematic/docs/definition-builders.md
+  - schematic/docs/definition-snapshots.md
+  - schematic/docs/generation/request-side.md
+  - schematic/docs/generation/validation.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/io/openapi-extensions.md
+  - schematic/docs/pagination.md
+  - schematic/docs/typed-registration.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+docs_created_during_phase_6:
+  - schematic/docs/generation/workflow.md
+skills_files_updated_during_phase_6:
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - .claude/skills/schematic-define/schematic/define.md
+  - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_7:
+  - schematic/gen/build.rs
+  - schematic/gen/tests/l1/artifact_drift.rs
+docs_updated_during_phase_7:
+  - schematic/docs/generation/workflow.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/os/windows.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
 ---
 
 # Implementation Log for 2026-10-14-schematic-definition-api (8 phases)
@@ -768,3 +992,460 @@ Historical OpenAI comparison passes with the exact seven merges, endpoint collec
 **Phase 5 implementation complete, ready for review.** All three Phase 5 plan tasks and the shared input-matrix task are checked; later-phase tasks remain pending. Required plan/log frontmatter inventories contain **84 source/artifact files, eight updated documentation files, no created documentation files and three updated skill files**. The complete file inventory is the frontmatter source_files_during_phase_5 list above; most non-OpenAI provider/test edits only initialize the additive Endpoint.pagination field while their migration remains scheduled. Accumulated packages retain schematic-define, schematic-definitions, schematic-gen and schematic-runtime. Spec frontmatter has human_review false and a fresh Phase 6 handoff. Metadata keys are unique.
 
 No feature lifecycle move, cargo fmt, staging command or commit occurred. Earlier staged/unstaged work was preserved. All delegated tasks and verification processes finished in this turn; nothing is left waiting.
+
+## Phase 6
+
+### Test map before implementation
+
+| Behavior | Concrete test | Boundary / fidelity / tier |
+| --- | --- | --- |
+| Provider builders and shared ordered contexts preserve definitions, IDs, schemas and pagers | definition_baseline (all 18 APIs), pagination_coverage, api_policy; fresh_output_compile | Public crate/registry/generation F2 L1, isolated compiler guard |
+| Gitea recursive merge and GitLab ref query | definition_baseline::{gitea,gitlab}, fresh_output_compile real-client wire fixture with omitted/false/true and reserved/Unicode values | Generated client/HTTP loopback F2 L1 compiler guard |
+| Legacy removal and source enforcement | definition_surface, source corpus and fresh_output_compile compile-fail cases | Public API/source/compiler F2 L1 |
+| Path query hard rejection | public builder and output_validation negative tests with original query paths | Public builder/generator F2 L1 |
+| Context destination validation and strict completeness | typed_registration, registry tests, strict completeness and artifact_drift | Cross-crate/artifact F2 L1 |
+
+Existing historical JSON fixtures remain immutable. This phase changes authored Rust data and construction, not a configuration reader; the input robustness matrix does not apply to that migration. Existing JSON/YAML import normalization matrices remain active. Bounded independent provider implementation assignments are collected in this same run; coordinator owns shared removal, integrations, generated artifacts and closing metadata. No formatting, staging or commits.
+
+### Provider integration checkpoint
+
+All remaining provider sources now use typed builders and module-group assembly. Independent source ownership was used for bounded implementation work; integration checks remain serial, with original frozen baselines retained. Targeted larger-provider evidence passed 176/176 tests including preserved ElevenLabs WebSocket and model stored forms. Earlier targeted forge/small runs found shared test-fixture literal errors during non-exhaustive enforcement, subsequently migrated; no failures are accepted as gaps.
+
+Gitea has 15 endpoints after dropping exactly GetGitTreeRecursive. Its surviving GetGitTree exposes optional recursive and sniff now sets recursive(true). GitLab GetRepositoryFile retains the git_ref Rust spelling as a declared ref query value; the generated constructor now takes the two path arguments and exposes git_ref through an ordinary setter. Wire capture adds omitted/false recursion and Unicode/empty ref while preserving the original true/ref request lines.
+
+A migration exposed LM Studio's existing Some(EnvMapping::default()) alongside LM_API_TOKEN in env_auth. A targeted new public builder regression first failed on the empty mapping. Empty mapping fields declare no environment credential name; only two present, conflicting names are contradictions. Builder validation now preserves that distinction independent of setter order; all existing nonempty conflict tests remain. LM Studio authors the mapping directly through its builder, without post-build restoration. Its existing effective empty mapping and generated lack of env fallback remain unchanged. This preserves R11 output rather than silently correcting the separately deferred auth dual-source issue.
+
+### Historical registry and pagination accounting
+
+The first integrated selection passed all 17 provider comparisons it reached; Core REST was not reached after the deliberate-description negative control failed on raw old/current representations. That control was aligned to the same explained lowering. The later Core REST comparison exposed the two expected container-alias response spellings, now explicitly expanded for comparison; the final gate must pass all 18. No nominal fingerprint changed. The following exact old component names retire as inline containers:
+
+- GitHub: Vec<PullRequestSummary>, Vec<PullRequestFile>, Vec<IssueSummary>, Vec<IssueComment>, Vec<TimelineEvent>, Vec<RepoTag>, Vec<Release>, Vec<RepositoryInfo>.
+- Gitea: the same eight names plus Vec<GitRef>.
+- GitLab: Vec<TreeItem>, Vec<MergeRequest>, Vec<Commit>, Vec<Issue>, Vec<Note>, Vec<User>, Vec<Tag>, Vec<Release>, Vec<Project>, Vec<Pipeline>.
+- EMQX (both API views share one registry): Vec<AuthUser>.
+- ElevenLabs: Vec<ModelInfo>.
+- HuggingFace: Vec<ModelInfo>, Vec<RepoFile>, Vec<Commit>, Vec<DatasetInfo>, Vec<SpaceInfo>, Vec<RepoInfo>, Vec<Collection>.
+- Unfolded Circle Core REST: BackupRestoreReportItems and ResourceItems (Vec aliases).
+
+Seven nominal leaves become explicit at their former container registration positions: ElevenLabs ModelInfo; HuggingFace RepoFile, Commit, RepoInfo, Collection; Core REST BackupRestoreReportItem and ResourceItem. The baseline pins their exact names, positions and fingerprints rather than allowing arbitrary registry differences. Existing retained nominal schemas and order remain exact. HuggingFace Commit retains the public alias spelling through register_as and schema_name; Bitbucket's generic nominal PaginatedResponse<T> wrappers remain components. Other modules have no container removals. OpenAI's Phase 5 exact 21 alias removals remain unchanged.
+
+Every authored pager remains: 93 after Phase 5's already-accounted beta merge, not the spec snapshot's pre-merge 94. Gitea's removed recursive tree was unpaginated and its survivor remains explicitly unpaginated. Bitbucket GetSource remains binary NotAList with its previously materialized query fields. Pagination item paths are now qualified for inferred typed roots; historical comparison lowers that spelling and the exhaustive current table asserts the exact new qualified path. Strategies, selectors, controls, adoption and origins otherwise compare unchanged. ResolutionOrigin::Exception and the diagnostic Feature::PaginationException retain serialized category spellings for endpoint collections; neither is a removed exception-table type.
+
+### Legacy removal checkpoint
+
+Removed PaginationException, PaginationStyle, PaginationResponse, with_pagination and response-hint methods, RestApi.pagination_exceptions and both legacy EndpointParams fields. Endpoint.oauth_scopes is removed from model, operation extension, importer/emitter and tests; auth_policy remains, with explicit multi-method builder coverage. Shared Schema.module_path remains for the WebSocket full_path reader; REST importer emission now consumes type_name, and typed REST builders require module_path None. Provider, shared emitter and live-consumer scans found no old pagination-type consumers; only historical snapshot keys and retained diagnostic category names remain.
+
+The normal generation CLI successfully published all module groups (43 Rust files and 15 each OpenAPI/Postman artifacts). No vendored spec or historical baseline file was changed. The complete ordinary drift/compiled-output gate is in progress. The first ordinary integration run passed 1,244 tests before two exhaustive pagination-table assertions exposed the removed Gitea row and typed item qualification; both expectations were updated without dropping surviving list coverage.
+
+### R27 retirement ledger
+
+| Frozen contract | Replacement / retained behavior |
+| --- | --- |
+| No endpoint origin override / no GraphQL | cross_origin_policy::endpoints_support_cross_origin_override_and_no_graphql_export retains the no-GraphQL source assertion and checks the builder override. Runtime override/tighten-only coverage remains active. |
+| Endpoint literal surface | builders required-fact tests replace the old literal compile test. Fresh-crate misuse cases assert E0639 for external Endpoint and RestApi literals. |
+| EndpointParams literal surface | endpoint_literal_surface::endpoint_builder_and_parameter_default_preserve_unpaginated_behavior asserts the exhaustive query/header/cookie shape and its allow-listed empty Default. |
+| No endpoint-literal edits during pagination | Immutable definition_baseline, provider exact ordered-ID tests, and current artifact_drift replace the prior development constraint. |
+| Inert legacy metadata | Retired define/tests/pagination_tables legacy_pagination_metadata_does_not_change_resolution, gen/codegen/pagination legacy_pagination_metadata_does_not_change_the_output, and e2e_generation legacy_pagination_metadata_emits_no_pager: their inputs no longer exist. Concrete query fields and unpaginated/binary resolutions remain in provider, generator doc, and exhaustive pagination tests. Removed legacy enum storage/constructor-only tests have no surviving behavior to assert. |
+| Table rules and exhaustive resolution | All meaningful collection/strategy/parameter/session/partition tests now attach Collection directly to endpoints. Unknown/duplicate table-row-id mechanics are retired because the table no longer exists. OpenAI's external overlay still rejects unknown endpoint IDs. Exhaustive pagination_coverage retains every surviving list, exact controls, adoption, unverified inventory and non-list checks. |
+
+Generator pagination unit verification passed 20/20 and its public validator/pipeline selection passed 7/7 after updating obsolete invalid-selector diagnostic expectations and a stored-form fixture to share a typed context. The invalid input Collection::at("") is preserved. The old unknown-row example is replaced with an invalid endpoint collection; all rule-group outputs remain asserted.
+
+Construction is now non-exhaustive for Endpoint and RestApi after live source migration. Invalid stored data still uses ordinary builders as fixture seeds and then mutates public transfer fields; no fixture-only construction API was added. Provider source corpus checks and typed builder validation enforce authoring; underlying Serde transfer models remain available. Strict export completeness follows descriptor wire references and rejects same-spelled untyped strings; JSON form metadata participates too. The auth-policy reader and WebSocket Schema.full_path reader remain live and covered.
+
+### Concrete generic path and generated-consumer checks
+
+A fresh-context test of the actual Bitbucket PaginatedResponse<Repository> input failed before the fix: the generic Registration implementation emitted PaginatedResponse<T>, leaking an unbound type parameter. Nine concrete typed Registration implementations now sit beside that nominal declaration, using checked public paths and the existing component names; module-group registration order is unchanged. registry::typed::generic_paths::bitbucket_nominal_wrapper_retains_its_concrete_public_type_path and the Bitbucket module-group inventory passed 2/2 after the correction. One old provider assertion still matched the short Rust spelling and was changed to assert the descriptor's exact component reference. This is not a JSON schema change.
+
+Qualified typed schemas made five split-module response imports unused. The generator now emits that import only when stored-form schemas or unqualified paginated item types need it; raw fixtures and wrapper pagers retain the import. artifact_drift::qualified_typed_split_modules_need_no_unused_response_imports pins the normal EMQX output; compiled generated consumers provide the downstream check. Current OpenAI definitions and generated artifacts stay byte-identical to Phase 5.
+
+The first test-schema execution passed 54/55 tests; its only failure was two trybuild expected-output files still naming BetaListInputItemsRequest from before Phase 5. Reviewed changes remove that old suggested implementor and add ListChatCompletionsRequest as the eighth suggestion. Error codes, rejected calls, explanatory messages and all 14 compiler cases remain unchanged. The compiler suite will be rerun.
+
+The test/lint development failures were expected migration feedback, not accepted gaps: remaining table expectations, invalid fixture construction, generic path, temporary collection vectors/single-element loops and redundant EndpointParams Default updates were corrected. Final settled-source gates follow below.
+
+### Dependent boundary correction
+
+The first sniff selection compiled without its remote feature and selected zero tests; it is not counted as verification. Enabling remote exposed the actual GitLab source break: existing query parameters are generated as optional setters even when their definition metadata says required (general required-query fidelity belongs to the vocabulary work). The original three-argument get_repository_file call therefore became two path arguments plus git_ref("HEAD".to_string()). sniff's production caller and the real generated wire fixtures now use that form. This is the unavoidable R29 source change; no provider wire value was dropped, and general required-parameter generation was not expanded in this phase. Gitea's caller already uses recursive(true). Documentation and handoff metadata describe the setter rather than claiming a retained constructor argument.
+
+Strict-completeness fixtures that formerly used matching strings as positive evidence now construct their valid member through typed registration; their missing-member and malformed-spelling inputs and downstream publication assertions remain. The public output-isolation fixtures use an inline Value descriptor before deliberately mutating stored Rust spelling, preserving the distinction between invalid Rust and valid export data without restoring string-based authoring.
+
+### Provider batch gate and documentation checkpoint
+
+All 18 provider historical comparisons now pass, including Core REST's exact two alias expansions; every retained nominal schema fingerprint and endpoint order remains checked. Current full Rust artifact drift passed, and the regenerated schema suite passed 55/55 (including the established slow compiler guard), with no final schema compiler warnings. The last integrated provider is Core REST; all remaining provider factories and lookup paths use module-group assembly, so the Convert Providers task is checked. No provider batch remains unstarted.
+
+Affected-dependent verification with the remote feature passed 14/14 Gitea/GitLab sniff tests and compiled its production callers against the regenerated crate. Local macOS is the executed environment. The new code is portable Rust definitions, code generation, Serde/model and loopback behavior; no OS conditional, canonical-path comparison or terminal/browser behavior changed. Other OS rigs were not invoked; their normal CI coverage is unchanged.
+
+The area README had become a stale reference (including OpenAI=3 and Gitea=16). It is now an overview with install/build instructions, client examples and topic links. Its catalog and generation/verification/module-sharing reference now live in docs/generation/workflow.md with the actual 18 current API counts. All current authoring topics and four skill files describe typed context assembly, builder enforcement, inline containers, query controls and retained WebSocket schema compatibility. No current doc links to a moving feature/fix snapshot.
+
+The provider source corpus guard lives in schematic-definitions/tests/authoring_surface.rs, an automatically discovered L1 target reading its own package source via CARGO_MANIFEST_DIR. This keeps its source ownership local; no cross-package test-input declaration or CI-scope change is needed. All generator tests remain in their declared l1 binary; the isolated compiler misuse additions use its established live compiler recipe.
+
+The latest pre-final lint recipe passed all five packages. Subsequent changes are typed test-fixture corrections and the corpus-test relocation; the final lint/test executions below cover the settled tree. The ordinary test run now uses --no-fail-fast so it reports the full remaining inventory rather than hiding later fixture issues after an early failure.
+
+### Final requirement-to-test ledger
+
+| Requirement | Exact targeted/current coverage | Boundary / fidelity / tier |
+| --- | --- | --- |
+| R6/R7/R10/R18/R23/R24 typed provider/registry migration | definition_baseline::{anthropic, artificial_analysis_critpt, artificial_analysis_data, bitbucket, elevenlabs, emqx_basic, emqx_bearer, eversolo, gitea, github, gitlab, huggingface, lmstudio, ollama_native, ollama_openai, openai, samsung_smart_tv, unfolded_circle_core_rest}; changed_description_is_detected_at_its_exact_field; all three artifact_drift artifact comparisons | Crate/registry/generated-artifact F2 L1 |
+| Provider exact inventory (14 new tests) | {samsung_smart_tv,artificial_analysis,anthropic,lmstudio,ollama,bitbucket}::tests::module_group_preserves_endpoint_and_registry_inventory; {github,gitea,gitlab}::tests::typed_module_group_preserves_endpoint_order_and_completeness; {emqx,elevenlabs,eversolo,huggingface,unfolded_circle::core_rest}::tests::typed_module_group_preserves_endpoint_order_and_inline_components | Public factory/context F2 L1 |
+| R5 concrete nominal generic path | registry::typed::generic_paths::bitbucket_nominal_wrapper_retains_its_concrete_public_type_path (failed first on literal PaginatedResponse<T>, passed after concrete checked paths); existing alias/shared-context tests | Registration/public model crate F2 L1 |
+| R11 empty explicit env mapping / conflicting present names | builders::explicit_empty_mapping_preserves_the_absence_of_environment_credentials (failed first); existing bearer/basic/key conflict-order and explicit multi-method-policy tests | Public builder/default mapping F1 L1 |
+| R6 strict typed export evidence | registry::typed_completeness::{same_spelling_cannot_replace_typed_registration_evidence, form_json_metadata_requires_its_typed_components_too}; openapi_strict_completeness including explicitly selected real_* pair | Define/registry/export F2 L1 |
+| R12/R16/R20/R21 authoring enforcement and removals | authoring_surface::provider_authoring_uses_builders_and_typed_registrations; two new MISUSES entries “external Endpoint literal” and “external RestApi literal” in fresh_output_compile::slow_generated_types_reject_misuse_at_compile_time, asserting E0639; existing Default allow-list and WebSocket schema full_path tests; final live-reader scan | Source corpus/compiler/API boundary F2 L1; compiler cases use existing separate slow guard |
+| R19/R27 surviving pager behavior and retirement | pagination_coverage::{every_list_endpoint_of_every_api_resolves_as_authored,every_row_names_one_endpoint_of_a_shipped_api,every_unverified_list_names_its_recalled_strategy_and_needed_source}; migrated pagination_tables/inventory/partitions/serde tests; generated schema pagination and trybuild | Cross-crate resolver plus HTTP/compiler F2 L1; six-entry retirement ledger above |
+| R28/R29/R31 shared path/body boundaries and real wire values | construction_enforcement::query_bearing_paths_fail_endpoint_and_destination_api_build (failed first; exact original Gitea/GitLab/OpenAI paths); validation::tests::query_in_path_is_one_error_per_output; existing import_normalization JSON/YAML matrices; fresh_output_compile::slow_query_wire_matches_pre_split_baseline | Builder/import/generator F1/F2 L1; generated-client HTTP loopback F2 through established compiler guard |
+| Qualified generated code without unused imports | artifact_drift::qualified_typed_split_modules_need_no_unused_response_imports; compiled actual generated crate | Generator output/compiler F2 L1 |
+| Affected production consumers | sniff remote::gitea and remote::gitlab unit/auth/mock selection with --features remote | Generated crate/consumer/loopback F2 L1 |
+
+Wire additions retain the original true/ordinary request lines and assert dependent RequestParts and captured HTTP bytes. Gitea covers omitted/true/false recursive. GitLab covers original feature/x y+z, omitted ref, empty ref, and ünï+%&=/?# as one decoded query value; required-query constructor fidelity is explicitly outside this migration. The OpenAI seven-pair ordinary/true/false recordings remain. Definition-data persistence still reads/writes/reads twice and asserts dependent snapshots; no new configuration parser or load-bearing file field was introduced, so no new robustness-matrix table is required. Existing supported-format import/Serde matrices remain passing.
+
+### Final verification results
+
+- `NEXTEST_TEST_THREADS=4 just -f schematic/justfile test --no-fail-fast`: **2,305/2,305 ordinary tests passed**, **zero ordinary SLOW tests**, **17.487s**; then **7/7** isolated generated-crate guards passed (**188.862s**, one established compiler guard reported SLOW), then **1/1** runtime compiler guard passed (**2.487s**). The same invocation completed all three stages. Generated fixture execution, all 18 shipped APIs, the real wire capture, importer compilation, misuse diagnostic checks, ABI rejection and negative control all passed.
+- `just -f schematic/justfile lint`: **all five Schematic packages passed** on the settled source tree, with warnings denied. No formatter ran.
+- `NEXTEST_TEST_THREADS=4 just -f schematic/justfile test-schema`: **55/55 passed**, **zero skips**, **120.025s**; its existing trybuild/compiler case accounts for the slow report. No schema compiler warning remained after conditional imports.
+- `cargo nextest run -p sniff --features remote --lib -E 'test(remote::gitea) | test(remote::gitlab)'`: **14/14 passed**, **0.159s** execution; actual changed production callers compiled. The 1,926 excluded tests are outside this narrow affected-consumer selection.
+- Explicit strict-completeness selection `test(/openapi_strict_completeness::real_/)`: **2/2 passed**, **0.611s**. Their preexisting real_ names exclude them from ordinary L1, so this run supplies the missing direct evidence.
+- The query-path regression was rerun after correcting its GitLab spelling to the exact original `/projects/{id}/repository/files/{file_path}?ref={git_ref}` input: **1/1 passed**, **0.009s**. This was a test-input correction only after the full ordinary gate; production code did not change.
+- Ordinary L1's 13 exclusions are the seven generator compiler guards and one runtime compiler guard executed by that same recipe, the two strict-completeness tests explicitly executed above, and three preexisting ignored expensive generator tests (`e2e_generation::{generated_code_compiles,generated_code_passes_clippy,multiple_apis_compile}`). Active isolated compiler guards compile the current generated clients. No new ignore, retry, timeout extension, tier hiding or omitted matrix row was introduced. Compiler selections' 234/342 and strict selection's 239 filters are scope selection, not missing execution.
+- Development failures recorded above were corrected and rerun; none is accepted as a remaining failure. No live provider requests, terminal/browser windows, OS focus changes, cargo fmt, staging or commits occurred.
+
+The full area doctest recipe found two stale Gitea count assertions in schematic-definitions' root/prelude examples (16 instead of the surviving 15). Both comment-only assertions were corrected to match the code, and the full doctest recipe is rerunning. The root source snapshot and provider tests already assert that exact 15-endpoint inventory.
+
+### Exact generated-artifact disposition
+
+All changed generated Rust files below replace stored short model spellings with the context-checked qualified paths (including valid qualified-body examples). Gitea additionally removes GetGitTreeRecursive request/call/method and adds recursive to GetGitTree; GitLab moves git_ref to its query setter and removes it from constructor arguments. Core REST expands its two Vec aliases. These are the complete Rust files changed; every other generated Rust file, including OpenAI, is byte-identical:
+
+- schematic/schema/src/anthropic.rs
+- schematic/schema/src/artificial_analysis.rs
+- schematic/schema/src/bitbucket/requests.rs
+- schematic/schema/src/elevenlabs/requests.rs
+- schematic/schema/src/emqx/requests.rs
+- schematic/schema/src/eversolo/requests.rs
+- schematic/schema/src/gitea/mod.rs
+- schematic/schema/src/gitea/requests.rs
+- schematic/schema/src/github/requests.rs
+- schematic/schema/src/gitlab/requests.rs
+- schematic/schema/src/huggingface/requests.rs
+- schematic/schema/src/lmstudio.rs
+- schematic/schema/src/ollama.rs
+- schematic/schema/src/samsung_smart_tv.rs
+- schematic/schema/src/unfolded_circle_core_rest.rs
+
+The fourteen changed OpenAPI module documents are the remaining provider modules: their x-schematic typed descriptors/qualified paths replace old untyped references, named container components retire as listed above, and endpoint wire schemas use inline arrays. Gitea additionally drops the duplicate recursive operation and declares recursive; GitLab declares ref. Retained nominal fingerprints, auth, URLs, headers and all unaffected endpoint data compare exactly. OpenAI OpenAPI stays unchanged. The only changed Postman documents are gitea.postman_collection.json and gitlab.postman_collection.json, for those query migrations; every other Postman file is byte-identical. Vendored source documents and historical baseline files remain byte-identical.
+
+The now-unneeded response globs were omitted from these split request modules (their type and pager references are already qualified): schematic/schema/src/emqx/requests.rs, schematic/schema/src/eversolo/requests.rs, schematic/schema/src/gitea/requests.rs, schematic/schema/src/gitlab/requests.rs, schematic/schema/src/huggingface/requests.rs.
+
+The two reviewed schema .stderr changes affect only compiler suggested-implementor lists, as described above. No Cargo manifest or dependency changed.
+
+### Closing verification and handoff
+
+- Final `just -f schematic/justfile doctest`: **258 passed, zero failures**. The two preexisting ignored examples remain unfolded_circle::core_ws and unfolded_circle::integration_ws; neither was changed to hide a failure. Both stale Gitea count assertions found on the first attempt passed after their comment-only correction.
+- Final `just check-tier-coverage schematic`: **zero stranded tests**. Both new standalone test files are auto-discovered; generator additions belong to its declared l1 binary and existing compiler recipe.
+- The wire corpus contains **34 exact HTTP request lines**; its compiled execution passed. All required positive, omitted, empty, false, reserved-character and Unicode variants execute through the actual generated client. The source corpus guard and all 18 historical/current artifact checks passed in the ordinary 2,305-test run.
+- `git diff --check` passes. Plan/log frontmatter inventories list **187 source/artifact files, 14 updated documentation files, one created documentation file, and four updated skill files**. The created page is schematic/docs/generation/workflow.md. Their complete source inventories are the source_files_during_phase_6 lists above; generated-file causes and all dropped/added registry entries are enumerated in this section. Cumulative packages retain earlier packages and add schematic-schema and sniff. Metadata keys are unique and all inventoried paths exist.
+- All three Phase 6 tasks are checked. Phase 7 and Phase 8 tasks remain pending, and the feature stays in its active lifecycle directory. Spec frontmatter has human_review false and a fresh handoff covering GitLab setters, concrete generic paths, empty mappings, the 93-pager count and retained diagnostic/WebSocket names.
+- No final test/lint failure or running compiler/test/agent remains. Earlier development failures and preexisting exclusions are accounted for above. Linux, native Windows, and WSL2 were not executed locally; complete dependent/platform work belongs to the next planned phase. No formatter, staging, commit, signing bypass or lifecycle move occurred.
+
+**Phase 6 implementation complete, ready for review.**
+
+## Phase 7
+
+### Scope and pre-implementation test map
+
+Phase 7 integrates and verifies the existing migration. Preserve the dirty Phase 6 tree, regenerate all shipped artifacts through the normal generator, and change executable code only for demonstrated migration failures. No new parser/configuration behavior is planned; the input robustness matrix remains covered by prior descriptor/import tests.
+
+| Requirement | Concrete coverage | Boundary / fidelity / tier |
+| --- | --- | --- |
+| Complete Rust/OpenAPI/Postman output and no drift allow-list | artifact_drift::{generated_rust_artifacts_are_up_to_date,generated_openapi_artifacts_are_up_to_date,generated_postman_artifacts_are_up_to_date}; definition_baseline provider corpus | Generated filesystem artifacts / F2 / L1 |
+| Generated paths, temporary output, query encoding, external API misuse | fresh_output_compile::slow_*; schematic-schema request/pager/trybuild suites; runtime compile-fail guard | Actual Rust compiler and generated-client HTTP / F2 / existing compiler L1 recipe |
+| OAuth and all five WebSocket definitions remain valid | Full schematic area test/lint/doctest plus definition WebSocket inventory | Definition/runtime crates / F2 / L1 |
+| Actual consumers remain compatible | Root just test selections for all eight direct consumers; feature-enabled sniff remote; all-target compiler and corresponding lint | Crate and binary consumers / F2 / L1 |
+| macOS/Linux/native Windows/WSL2 | Local area/dependent gates, then documented cross-check runs; report exact host coverage and blockers | Native OS/compiler/filesystem / F2 / L1, relevant terminal L2 only via no-focus recipe |
+
+Existing tests will be identified before any fix; a new regression is required if existing assertions do not expose the failing input. Final artifact changes are compared with the Phase 7 starting tree and the preserved historical Phase 1 corpus. Phase 8 tasks remain out of scope.
+
+### Regeneration and initial local evidence
+
+- Executed normal CLI generation from schematic: `cargo run --color=never -p schematic-gen -- generate --api all --output schema/src --openapi-out openapi --postman-out postman -v`. It published 43 Rust files and 15 files in each export tree. Every output is byte-identical to the Phase 7 starting tree. No generated artifact was hand-edited. The Phase 6 Exact generated-artifact disposition and Historical registry and pagination accounting above remain the exact per-file/API/entry account against Phase 1; no new difference is authorized by this phase.
+- Initial ordinary `NEXTEST_TEST_THREADS=4 just test` stage: 2,305/2,305 passed in 22.849 s. Its compiler stages remain pending, so this is not yet the completed area gate.
+- Package inventory was resolved with sniff and confirmed against manifests. Direct external consumers are sniff, biscuit-speaks, model-citizen, homelab, eversolo-integration, arcam-amp-integration, sony-receiver-integration, unfolded-integration-helper. Their CLI/server reverse dependencies are included too.
+- BUILD_LINUX was declared as build-linux. BUILD_WIN and BUILD_WSL were initially unset; the user-provided rigs and SSH config identify build-win-native as native Windows/PowerShell and build-win as WSL2. All three answered `ssh -o BatchMode=yes -o ConnectTimeout=10` probes. Remote invocations explicitly supply the missing BUILD values, use cross-check standing clone isolation, and preserve Windows target placement. No qualifying existing receipt for this dirty tree was found or claimed.
+- Native-mode cross-check runs include all five Schematic workspace crates, eight direct consumers, and five CLI/server consumers, with `schematic-define/openapi,schematic-gen/terminal-tests,sniff/remote,biscuit-speaks/playa`. Filter `!test(/(^|::)(level2_|level3_|browser_|real_)/) | test(/openapi_strict_completeness::real_/)` includes slow compiler guards and explicitly restores the two preexisting misnamed strict-completeness tests while excluding real-device and terminal resources. Native mode is necessary for nested Cargo compiler guards; it publishes no CI receipt. Separate schema/archive evidence remains to be collected.
+
+### Consumer checkpoint
+
+Root invocation `NEXTEST_TEST_THREADS=4 just test sniff/lib biscuit-speaks/lib model-citizen/lib homelab/lib eversolo-integration arcam-amp-integration sony-receiver-integration unfolded-integration-helper sniff-cli biscuit-speaks-cli model-citizen-cli homelab-cli homelab-server` passed **4,382/4,382** in **42.770 s**, with 60 existing tier/filter exclusions. Features follow the root runner metadata, including sniff remote and biscuit-speaks playa. All eight direct consumers and five relevant CLI/server reverse dependencies compiled and executed. No call-site failure or source edit occurred. Corresponding lint and explicit all-target checks remain pending, so Verify Dependents is not yet checked.
+
+Five shipped WebSocket definitions execute in the full schematic-definitions suite: ElevenLabs TTS, Samsung Smart TV Remote, Unfolded Circle Core, Dock, and Integration. Their current construction/model tests passed in the ordinary area stage; OAuth is likewise included in the five-package area gate. No live hardware/provider call is implied.
+
+### Local compiler and terminal checkpoint
+
+- The seven generator compiler/import guards passed **7/7** in **123.830 s**. This explicitly runs the isolated slow Cargo-dependent tests excluded from ordinary L1. Runtime trybuild remains the third stage of the same area recipe.
+- Explicit strict export selection `cargo nextest run -p schematic-gen --test l1 -E 'test(/openapi_strict_completeness::real_/)'` passed **2/2** in **0.289 s**, covering the existing names excluded by ordinary tier selection.
+- `BISCUIT_TEST_REQUIRED_BACKENDS=tmux NEXTEST_TEST_THREADS=4 just test-l2` in schematic passed **3/3** in **5.351 s**. The backend was required; no silent missing-backend pass is counted. The existing detached tmux sessions never open/focus a GUI window. One existing L2 dry-run test exceeded five seconds; the ordinary L1 suite reported no slow tests.
+- `just check-tier-coverage schematic`: **zero stranded tests**. No new/renamed/feature-gated test was added in this phase.
+- Linux native combined selection exposed an existing OpenAI reimport timing above five seconds under unrestricted cross-package scheduling. Functional result and a targeted bounded-concurrency timing check remain pending; this is not silently waived.
+
+### Drift guard coverage gap and test mapping before edit
+
+Review found that Postman drift compares bytes for every expected module but never checks for unexpected files; OpenAPI and Rust already check their complete file sets. Phase 7 therefore strengthens `artifact_drift::generated_postman_artifacts_are_up_to_date` to compare the entire committed/generated Postman file sets, with no extension filter or allow-list. Boundary: shipped filesystem corpus and real exporter, F2 L1. Original negative-control input is an additional `retired.postman_collection.json` alongside the shipped corpus; the current assertion would ignore it. Existing positive coverage exercises every shipped provider, and the negative control must fail after the assertion is added. No parser/configuration behavior changes, and no production code change is required. The test remains in the declared generator l1 binary.
+
+### Native Windows regression and pre-fix mapping
+
+The native Windows full run failed three existing public CLI regressions with `thread main has overflowed its stack` / `STATUS_STACK_OVERFLOW` (-1073741571): `output_validation::cli_migrated_provider_generates_all_outputs_without_warnings` (literal `generate --api gitea` with Rust/OpenAPI/Postman roots); `output_validation::cli_reports_each_output_and_exits_nonzero_when_one_fails` (same call, OpenAPI root is an existing regular file); and `partial_generation::cli_refuses_an_unsafe_partial_run_and_claims_no_update` (literal `generate --api ollama-native --no-openapi --no-postman --output <existing hand-written crate>`). These are F2 L1 subprocess/filesystem tests, already failing before the production fix. They assert exit status, diagnostics, each output disposition, and published/unchanged trees, so no implementation-only linker assertion is needed.
+
+The os skill documents Windows main-thread stacks at 1 MiB and this repository's CLI-specific 8 MiB linker reservation. Apply that existing target-aware build-script pattern to schematic-gen (MSVC and GNU), covering the migrated catalog's debug assembly without changing provider/generator semantics, test timeouts, or spawned Rust thread stacks. Existing tests retain all original command arguments and negative inputs. Additional platform/compiler checks and relevant current docs/skills will cover the build change. Separate unrelated Sniff/model-citizen Windows warnings and high-concurrency timing observations are recorded rather than fixed as part of this migration.
+
+The Postman negative control failed exactly with `Postman artifact file-set drift` in 0.168 s; after deleting the injected retired.postman_collection.json, the same test passed in 0.163 s. No fixture remains in the shipped tree.
+
+### Integrated evidence checkpoint
+
+- Final Postman-assertion area run passed **2,305/2,305 ordinary tests** (16.041 s), **7/7 generator guards** (32.209 s), **1/1 runtime compiler guard** (1.954 s). The Windows build script was added during this run; compiler stages rebuilt it, and explicit CLI/artifact runs below check the updated executable on each platform.
+- Full schematic doctests: **258 passed**, **zero failures**, two preexisting ignored WebSocket examples. No doctest was disabled.
+- Linux on build-linux: combined 18-package native run **6,663/6,663 passed** (179.036 s, 64 tier/ignore exclusions), including all five WebSocket inventories, OAuth, current baseline/drift, query wire fixtures, compiler misuse cases, and every affected consumer. Generated schema: **55/55 passed**, zero skips (107.715 s; established compiler test accounts for the slow report).
+- Linux updated CLI/artifact selection passed **11/11** (2.316 s), including all three exact Windows-failing inputs against the new build-script tree, all artifact drift tests, and the new Postman file-set assertion. A separate two-test timing/updated-guard selection passed **2/2** (2.413 s); the formerly 6.431 s OpenAI reimport took **2.412 s** with four test threads. No performance code change, retry, timeout, or tier change was needed; the broad unbounded run oversubscribed the host.
+- Native Windows broad tests continue on the original pre-fix snapshot; their three known stack failures are intentionally retained as regression evidence. The updated build-script CLI selection is separately queued against a new snapshot and must pass before those failures count as resolved. Windows, WSL2, and archived WSL2 acceptance remain pending.
+
+### Regenerate Artifacts complete
+
+All required local artifact gates have passed: `just test` (ordinary plus compiler stages, detailed above), `just lint` (all five packages), `just doctest` (258 passing, two existing ignored examples), `just test-schema` (**55/55**, zero skips, 94.974 s including its existing compiler guard), and `just lint-schema` (all generated targets, warnings denied). The final lint invocation includes the new generator build script and updated drift guard. No fmt invocation occurred.
+
+The Regenerate Artifacts checklist item is now checked. Complete output remains byte-identical to the Phase 7 starting tree. The surviving Phase 1 normalization and Phase 6 per-file/API/registry difference ledger remain unchanged; no baseline, vendored specification, generated Rust/OpenAPI/Postman file, schema manifest, or schema lockfile was rewritten by hand. The only new output acceptance rule rejects extra Postman files and uses no allow-list.
+
+### Verify Dependents complete
+
+- Root direct/reverse-dependent L1: 4,382/4,382 passed as recorded above. No consumer source file needed another migration edit in Phase 7.
+- Corresponding area lint recipes all exited 0: `just -f sniff/justfile lint -D warnings`, `just -f biscuit-speaks/justfile lint`, `just -f model-citizen/justfile lint`, `just -f homelab/justfile lint`. All relevant Rust library/CLI/server/integration packages passed; Homelab frontend oxlint also ran and reported zero warnings/errors.
+- Explicit compilation exited 0 (1m29s): `cargo check --color=never --all-targets -p sniff -p sniff-cli -p biscuit-speaks -p biscuit-speaks-cli -p model-citizen -p model-citizen-cli -p homelab -p homelab-cli -p homelab-server -p eversolo-integration -p arcam-amp-integration -p sony-receiver-integration -p unfolded-integration-helper --features sniff/remote,sniff/bench-internals,sniff-cli/test-fixtures,biscuit-speaks/playa`. This includes lib/bin/test plus declared examples/benches, including sniff perf, and feature-gated helper targets.
+- Updated macOS CLI/artifact selection (the full artifact_drift module, output_validation::cli_ pair, and unsafe-partial-generation regression) passed **11/11** in **2.430 s** after adding the build script. Every changed behavior now has an executed local public-result test.
+- Documentation drift detected while following the OS skill: its nearby example implied sniff reserves 8 MiB, but sniff/cli/build.rs reserves 32 MiB. Corrected that documentation to match the existing code while adding the generator's 8 MiB case. No Sniff behavior changed.
+
+Verify Dependents is checked. Platform-specific completion remains a separate pending task; the local pass is not counted as remote evidence.
+
+### Native Windows fix verified; WSL2 broad suite complete
+
+- Native Windows original combined suite completed **6,597 passed / 3 failed / 6,600 executed**, 61 exclusions, 474.506 s. The only functional failures were the three recorded generator CLI stack overflows; every affected consumer, library/model, wire, and compiler guard passed. Existing compiler tests and unrestricted cross-package scheduling yielded 35 slow reports, discussed in the exclusions ledger; none was hidden or given a longer timeout. Existing non-migration Windows warnings remain in Sniff/model-citizen tests (unused imports/variables/helpers), rather than being swept into this change.
+- Updated build-script snapshot on build-win-native passed **12/12** CLI/artifact/reimport checks in **3.645 s**, zero slow reports. Exact previously failing commands now pass: Gitea all-output success **0.868 s**, Gitea partial-output failure **0.733 s**, unsafe Ollama partial-output rejection **0.288 s**. The new Postman corpus guard took **0.353 s**, complete Rust drift **2.828 s**, and vendored OpenAI reimport **3.144 s**. This is the public native-Windows proof of the fix, using MSVC. The GNU linker spelling is implemented following the established repo build-script pattern but no separate Windows-GNU environment was executed. Passing unaffected tests are retained from the broad run; no reason exists to repeat all consumer tests for a generator-binary-only linker setting.
+- WSL2 on build-win completed the combined **6,663/6,663 passing** suite in **406.334 s**, 64 exclusions, 15 existing slow reports under unrestricted scheduling. Its complete source/runtime/generated-consumer wire and compiler behavior passed; generated-schema, updated CLI/guard, and relocated archive evidence remain pending separately.
+
+### Explicit exclusion inventory
+
+A non-executing Nextest JSON listing of the same 18-package native selection on macOS enumerated the existing exclusions below. These are preexisting helper children (executed by parent tests), external provider/device tests, separate resource tiers, and the three superseded expensive generator compiler tests. The ordinary area's 13 exclusions additionally include the eight isolated Cargo guards and two strict tests explicitly executed elsewhere; native-mode selections restore both groups. No test was newly ignored or renamed. Platform-gated inventories differ by OS; native Windows also retains the documented four ignored aws-lc jitter-sensitive loopback TLS tests. These existing gaps are not claimed fixed by this migration.
+
+| Binary | Excluded test | Listing reason |
+| --- | --- | --- |
+| arcam-amp-integration::bin/arcam-amp-integration | dispatch::tests::destructive_real_device_mute_command_roundtrips | ignored |
+| arcam-amp-integration::bin/arcam-amp-integration | dispatch::tests::real_device_fetch_snapshot_returns_power_and_mute | ignored |
+| biscuit-speaks | providers::cloud::elevenlabs::tests::test_debug_voice_deserialization | ignored |
+| biscuit-speaks | providers::cloud::elevenlabs::tests::test_default_voice_any_returns_rachel | ignored |
+| biscuit-speaks | providers::cloud::elevenlabs::tests::test_default_voice_female | ignored |
+| biscuit-speaks | providers::cloud::elevenlabs::tests::test_default_voice_male | ignored |
+| biscuit-speaks | providers::cloud::elevenlabs::tests::test_generate_audio_integration | ignored |
+| biscuit-speaks | providers::cloud::elevenlabs::tests::test_list_models_integration | ignored |
+| biscuit-speaks | providers::cloud::elevenlabs::tests::test_list_voices_raw_integration | ignored |
+| biscuit-speaks | providers::cloud::elevenlabs::tests::test_tts_voice_inventory_list_voices_integration | ignored |
+| biscuit-speaks | providers::host::echogarden::tests::real_echogarden_lists_installed_voices | expression |
+| biscuit-speaks | providers::host::echogarden::tests::real_echogarden_speaks_muted | expression |
+| biscuit-speaks | providers::host::echogarden::tests::real_echogarden_speaks_muted_with_requested_voice | expression |
+| biscuit-speaks | providers::host::espeak::tests::test_list_voices_integration | ignored |
+| biscuit-speaks | providers::host::gtts::tests::real_gtts_lists_installed_voices | expression |
+| biscuit-speaks | providers::host::gtts::tests::real_gtts_reports_reachable_network | expression |
+| biscuit-speaks | providers::host::gtts::tests::real_gtts_speaks_muted | expression |
+| biscuit-speaks | providers::host::kokoro::tests::test_speak_integration | ignored |
+| biscuit-speaks | providers::host::say::tests::real_say_provider_speaks_muted | expression |
+| biscuit-speaks::real_detached_phase4 | real_kokoro_provider_reports_muted_native_complete | expression |
+| biscuit-speaks-cli::cli_test | real_cli_speaks_with_kokoro_provider | expression |
+| eversolo-integration::bin/eversolo-integration | dispatch::tests::destructive_real_device_source_switch_roundtrips | ignored |
+| eversolo-integration::bin/eversolo-integration | dispatch::tests::destructive_real_device_volume_command_roundtrips | ignored |
+| eversolo-integration::bin/eversolo-integration | dispatch::tests::real_device_fetch_snapshot_returns_catalog_and_player_state | ignored |
+| schematic-gen::l1 | e2e_generation::generated_code_compiles | ignored |
+| schematic-gen::l1 | e2e_generation::generated_code_passes_clippy | ignored |
+| schematic-gen::l1 | e2e_generation::multiple_apis_compile | ignored |
+| schematic-gen::level2 | terminal_capture::level2_generate_dry_run_emits_module_grouped_filenames | expression |
+| schematic-gen::level2 | terminal_capture::level2_validate_emits_ansi_styled_ok_on_success | expression |
+| schematic-gen::level2 | terminal_capture::level2_validate_unknown_api_emits_red_error | expression |
+| sniff | filesystem::git::remote_refresh::tests::refresh_timeout_child | ignored |
+| sniff | filesystem::query::macos_tests::live::usage_child | ignored |
+| sniff | filesystem::repo::nested::tests::git_ignore_rules_child | ignored |
+| sniff | network::gateway::darwin::tests::real_native_gateways_match_route_get | expression |
+| sniff | network::gateway::tests::real_detect_default_gateways_reads_the_host_table | expression |
+| sniff | package::network::tests::real_cargo_network_find_package | expression |
+| sniff | package::network::tests::real_cargo_network_latest_version | expression |
+| sniff | package::network::tests::real_cargo_network_nonexistent_package | expression |
+| sniff | package::network::tests::real_enrich_dependency_cargo | expression |
+| sniff | package::network::tests::real_enrich_dependency_npm | expression |
+| sniff | package::network::tests::real_npm_network_find_package | expression |
+| sniff | package::network::tests::real_npm_network_latest_version | expression |
+| sniff | package::network::tests::real_npm_network_nonexistent_package | expression |
+| sniff | process::tests::between_samples_descendant | ignored |
+| sniff | process::tests::child_detaches_between_samples | ignored |
+| sniff | process::tests::child_detaches_descendant_then_exits | ignored |
+| sniff | process::tests::child_sleeps | ignored |
+| sniff | process::tests::child_spawns_detached_pipe_holding_descendant | ignored |
+| sniff | process::tests::child_spawns_pipe_holding_descendant | ignored |
+| sniff | process::tests::child_spawns_quiet_detached_descendant | ignored |
+| sniff | process::tests::child_writes_large_output | ignored |
+| sniff | process::tests::configured_child | ignored |
+| sniff | process::tests::detached_pipe_holding_descendant | ignored |
+| sniff | process::tests::pipe_holding_descendant | ignored |
+| sniff | process::tests::quiet_detached_descendant | ignored |
+| sniff | programs::enums::metadata::burnttoast_tests::child_sleeps | ignored |
+| sniff | programs::install::execute::tests::install_timeout_child | ignored |
+| sniff::l1 | network_primitives::real_default_gateways_are_readable_and_well_formed | expression |
+| sniff::l1 | network_primitives::real_icmp_ipv4_loopback_replies | expression |
+| sniff::l1 | network_primitives::real_icmp_ipv6_loopback_replies | expression |
+| sniff::l1 | network_primitives::real_icmp_unanswered_target_is_no_reply_within_the_bound | expression |
+| sniff::l1 | network_primitives::real_icmp_unknown_scope_fails_before_sending | expression |
+| sniff-cli::l1 | cli_process_fixture::real_sniff_command_observes_the_fixture_launch_context | expression |
+| sony-receiver-integration::bin/sony-receiver-integration | dispatch::tests::destructive_real_device_source_switch_roundtrips | ignored |
+| sony-receiver-integration::bin/sony-receiver-integration | dispatch::tests::destructive_real_device_volume_command_roundtrips | ignored |
+| sony-receiver-integration::bin/sony-receiver-integration | dispatch::tests::real_device_fetch_receiver_state_returns_full_snapshot | ignored |
+
+The four existing Windows-only ignored runtime tests are `builder::{an_added_pem_root_lets_the_client_reach_a_server_it_signed,an_added_der_root_lets_the_client_reach_a_server_it_signed,without_the_added_root_the_handshake_fails_as_a_tls_error,accepting_invalid_certificates_reaches_a_self_signed_server_that_the_default_rejects}`. Their existing ignore reason is aws-lc CPU-jitter entropy abort under parallel load; all four execute on macOS/Linux/WSL2. Phase 7 neither changes nor claims to fix that existing native-Windows gap.
+
+### Platform command ledger
+
+All commands run from the repository root unless an area recipe is specified above. `GIT_TERMINAL_PROMPT=0` was set for cross-check invocations. BUILD_LINUX was already build-linux; Windows/WSL calls explicitly set BUILD_WIN=build-win-native and BUILD_WSL=build-win. Direct invocation of the documented cross-check script preserves quoted filter expressions that the Just argument re-splitting cannot carry; it is the same standing-clone/lock/snapshot mechanism as `just cross-check`.
+
+The complete native selection was executed separately with `--os linux`, `--os windows`, and `--os wsl`:
+
+```sh
+./scripts/cross-check.sh schematic-define --os OS \
+  --features schematic-define/openapi,schematic-gen/terminal-tests,sniff/remote,biscuit-speaks/playa \
+  -p schematic-definitions -p schematic-gen -p schematic-runtime -p schematic-oauth \
+  -p sniff -p biscuit-speaks -p model-citizen -p homelab \
+  -p eversolo-integration -p arcam-amp-integration -p sony-receiver-integration \
+  -p unfolded-integration-helper -p sniff-cli -p biscuit-speaks-cli \
+  -p model-citizen-cli -p homelab-cli -p homelab-server \
+  -E '!test(/(^|::)(level2_|level3_|browser_|real_)/) | test(/openapi_strict_completeness::real_/)'
+```
+
+Each remote OS separately runs the committed generated crate:
+
+```sh
+./scripts/cross-check.sh schematic-schema --os OS --all-features \
+  --manifest-path schematic/schema/Cargo.toml
+```
+
+Updated generator executable/artifact verification uses the same native script with `schematic-gen --os OS --features terminal-tests --test l1 --test-threads 4 output_validation::cli_ cli_refuses_an_unsafe_partial_run_and_claims_no_update artifact_drift::`. Windows additionally selects `reimporting_the_vendored_openai_document_reproduces_the_committed_definition` (12 tests rather than 11). The separate Linux timing/updated-Postman selection uses `generated_postman_artifacts_are_up_to_date reimporting_the_vendored_openai_document_reproduces_the_committed_definition`; Windows and WSL updated-Postman-only runs select the former.
+
+WSL2 relocation is checked independently with `BUILD_WSL=build-win ./scripts/cross-check.sh schematic-gen --os wsl`, without build flags. It must produce an ubuntu-latest archive, hide the builder target directory, and execute the verified archive from the consumer worktree as wsl2-ubuntu. Compiler guards are deliberately native-mode evidence, because an archive consumer has no Cargo. Native-mode runs publish no receipt. A dirty-tree/synthetic snapshot cannot be called qualifying committed-tree evidence; the exact host results here remain implementation verification, not claimed CI receipt publication.
+
+All three rigs use their own cross-check standing clone/target placement; concurrent requests for one rig serialize on its clone lock. No shared checkout was reset during another test, no Windows target directory was overridden, and no credentials/signing procedure was invoked. macOS is the local host; Linux is build-linux; native Windows/MSVC is build-win-native; WSL2 is build-win. The local tmux suite is the only terminal-resource execution because this phase changes no terminal rendering or interaction behavior; no remote L2/browser/live-provider result is claimed.
+
+### Broad-run timing observations
+
+The following existing tests exceeded five seconds during the combined native runs (unrestricted Nextest scheduling, with native Windows and WSL sharing a physical host). Compiler guards deliberately invoke Cargo and are the preexisting separate slow checks the plan requires; they are listed explicitly rather than represented as fast unit tests. Untouched Sniff/consumer timings are outside the migration fix scope. The three Windows CLI failures were fixed and verified below five seconds as recorded above. Targeted updated generator checks on macOS/Linux/Windows use four threads and have no slow reports. No test was renamed, retried, ignored, or granted a timeout increase to suppress a timing observation. These are preserved limitations of the broad runs, not claims that every preexisting test meets the five-second budget.
+
+| Environment | Test | Broad-run seconds |
+| --- | --- | --- |
+| linux | schematic-gen::l1 import_overlay::reimporting_the_vendored_openai_document_reproduces_the_committed_definition | 6.431 |
+| linux | schematic-runtime::l1 compile_fail::slow_compile_fail_cases_report_their_intended_diagnostic | 28.083 |
+| linux | schematic-gen::l1 fresh_output_compile::slow_a_runtime_of_another_abi_fails_the_build_with_a_readable_message | 50.406 |
+| linux | schematic-gen::l1 fresh_output_compile::slow_fixture_apis_compile_and_send_offline | 54.845 |
+| linux | schematic-gen::l1 fresh_output_compile::slow_generated_types_reject_misuse_at_compile_time | 39.153 |
+| linux | schematic-gen::l1 fresh_output_compile::slow_query_wire_matches_pre_split_baseline | 16.532 |
+| linux | schematic-gen::l1 fresh_output_compile::slow_real_apis_compile_offline | 10.222 |
+| windows | schematic-gen::l1 artifact_drift::generated_rust_artifacts_are_up_to_date | 5.971 |
+| windows | schematic-gen::l1 fresh_output_compile::generated_rest_code_references_the_runtime_and_defines_none_of_it | 5.371 |
+| windows | schematic-gen::l1 import_overlay::reimporting_the_vendored_openai_document_reproduces_the_committed_definition | 8.907 |
+| windows | sniff executable_index::tests::test_eager_lookup_returns_path_source | 5.340 |
+| windows | sniff executable_index::tests::eager_path_is_traversed_once_per_process | 5.894 |
+| windows | sniff executable_index::tests::eager_path_only_index_has_no_fallback_layers | 5.958 |
+| windows | sniff executable_index::tests::test_build_eager_path_returns_consistent_results | 7.424 |
+| windows | sniff filesystem::git::changed_paths_tests::file_type_replacements_agree_across_status_readers_and_commit_phases | 15.488 |
+| windows | sniff filesystem::git::changed_paths_tests::index_reads::linked_indexes_contain_cache_and_status_failures_with_absence_and_empty_controls | 15.622 |
+| windows | sniff filesystem::git::changed_paths_tests::index_reads::truncated_indexes_are_typed_errors_across_readers_and_cache_consumers | 19.254 |
+| windows | sniff filesystem::query::win32_tests::live::a_controlled_child_is_found_by_its_loaded_executable | 18.164 |
+| windows | sniff filesystem::query::win32_tests::live::handle_owners_are_found_while_a_child_waits_in_lock_file_ex | 18.602 |
+| windows | sniff filesystem::query::win32_tests::live::a_controlled_child_is_found_by_its_open_file_and_directory | 23.351 |
+| windows | sniff filesystem::repo::nested::tests::wide_tree_parity_holds_across_repeats_and_worker_counts | 12.418 |
+| windows | sniff programs::install::interview::runner_tests::remote_bash_preapproved_skips_consent | 5.002 |
+| windows | sniff::l1 bench_fixtures::fixture_builders_are_idempotent_over_fresh_dirs | 5.417 |
+| windows | sniff tests::test_detect_returns_result | 8.116 |
+| windows | sniff::l1 bench_fixtures::large_monorepo_dirty_files_are_rust_and_js | 8.528 |
+| windows | sniff::l1 benchmark_workloads::mixed_structure_workload_preserves_its_requested_cardinality | 10.763 |
+| windows | sniff::l1 bench_fixtures::large_monorepo_has_expected_shape | 13.390 |
+| windows | sniff::l1 git_parity::commit_by_sha_at_surfaces_ambiguous_prefix | 5.879 |
+| windows | sniff::l1 integration::test_git_full_reports_conflicted_files | 5.393 |
+| windows | sniff::l1 integration::test_detect_completes_in_reasonable_time | 8.299 |
+| windows | sniff::l1 lockfile_fixtures::bun_tool_fixtures_report_the_accepted_version_matrix | 5.587 |
+| windows | sniff::l1 lockfile_fixtures::invalid_workspace_member_entries_are_incomplete_manifest_discovery | 6.542 |
+| windows | sniff::l1 lockfile_fixtures::yarn_tool_fixtures_report_the_accepted_version_matrix | 6.560 |
+| windows | sniff::l1 lockfile_provenance::declining_requests_report_manifest_provenance_and_read_no_lockfile | 6.472 |
+| windows | sniff::l1 lockfile_provenance::corroborating_requests_report_hand_written_provenance_for_every_lockfile_state | 6.594 |
+| windows | sniff::l1 lockfile_provenance::every_other_authority_reports_its_complete_repository_result | 7.204 |
+| windows | sniff::l1 merge_conflict_prediction::unsafe_merge_configuration_is_rejected_when_the_builtin_merge_is_clean | 6.944 |
+| windows | sniff::l1 merge_conflict_prediction::structural_fixtures_match_canonical_git_when_available | 7.613 |
+| windows | schematic-runtime::l1 compile_fail::slow_compile_fail_cases_report_their_intended_diagnostic | 191.855 |
+| windows | sniff-cli::l1 cli::files_association_is_stable_inside_a_large_monorepo | 25.690 |
+| windows | sniff-cli::l1 cli::test_repo_subcommand_json_shapes_are_distinct | 6.073 |
+| windows | schematic-gen::l1 fresh_output_compile::slow_a_runtime_of_another_abi_fails_the_build_with_a_readable_message | 249.626 |
+| windows | schematic-gen::l1 fresh_output_compile::slow_fixture_apis_compile_and_send_offline | 104.650 |
+| windows | schematic-gen::l1 fresh_output_compile::slow_generated_types_reject_misuse_at_compile_time | 49.399 |
+| windows | schematic-gen::l1 fresh_output_compile::slow_query_wire_matches_pre_split_baseline | 25.330 |
+| windows | schematic-gen::l1 fresh_output_compile::slow_real_apis_compile_offline | 12.601 |
+| windows | schematic-gen::l1 import_overlay::slow_imported_builders_compile_and_match_public_import | 7.893 |
+| wsl | model-citizen-cli::integration_test test_list_json | 5.113 |
+| wsl | schematic-define::import_normalization shipped_openai_query_schema_gate_and_reimports | 5.576 |
+| wsl | schematic-gen::l1 e2e_generation::multiple_apis_generate_together | 6.166 |
+| wsl | schematic-gen::l1 artifact_drift::generated_rust_artifacts_are_up_to_date | 10.467 |
+| wsl | schematic-gen::l1 fresh_output_compile::generated_rest_code_references_the_runtime_and_defines_none_of_it | 9.436 |
+| wsl | schematic-gen::l1 import_overlay::reimporting_the_vendored_openai_document_reproduces_the_committed_definition | 10.847 |
+| wsl | schematic-gen::l1 partial_generation::owned_stale_files_in_a_regenerated_group_go_and_hand_written_content_stays | 5.001 |
+| wsl | sniff filesystem::blast_radius::tests::changed_path_collection::source_code_filter_excludes_non_source | 5.761 |
+| wsl | sniff filesystem::blast_radius::tests::changed_path_collection::collect_dirty_returns_paths_in_real_repo | 6.250 |
+| wsl | sniff filesystem::blast_radius::tests::changed_path_collection::substring_filter_or_logic | 6.379 |
+| wsl | sniff filesystem::git::changed_paths_tests::index_reads::truncated_indexes_are_typed_errors_across_readers_and_cache_consumers | 5.962 |
+| wsl | sniff filesystem::repo::nested::tests::wide_tree_parity_holds_across_repeats_and_worker_counts | 5.051 |
+| wsl | sniff-cli::l1 cli::files_verbose_link_destinations_match_native_absolute_paths | 5.641 |
+| wsl | schematic-runtime::l1 compile_fail::slow_compile_fail_cases_report_their_intended_diagnostic | 128.245 |
+| wsl | schematic-gen::l1 fresh_output_compile::slow_a_runtime_of_another_abi_fails_the_build_with_a_readable_message | 193.711 |
+| wsl | schematic-gen::l1 fresh_output_compile::slow_fixture_apis_compile_and_send_offline | 88.684 |
+| wsl | schematic-gen::l1 fresh_output_compile::slow_generated_types_reject_misuse_at_compile_time | 53.176 |
+| wsl | schematic-gen::l1 fresh_output_compile::slow_query_wire_matches_pre_split_baseline | 28.819 |
+| wsl | schematic-gen::l1 fresh_output_compile::slow_real_apis_compile_offline | 12.360 |
+| wsl | schematic-gen::l1 import_overlay::slow_imported_builders_compile_and_match_public_import | 5.788 |
+
+### Four-environment generated schema evidence
+
+The generated crate's complete suite, including pager compiler misuse diagnostics, passed **55/55 with zero skips on every required environment**: macOS 94.974 s; Linux/build-linux 107.715 s; native Windows/MSVC/build-win-native 188.352 s; WSL2/build-win 209.926 s. Each ran the actual generated schema manifest via the commands above. Its existing compiler case accounts for each slow report. WSL2 updated CLI/drift and archived relocation remain pending, so Verify Platforms remains unchecked at this checkpoint.
+
+### Final native source snapshots
+
+Cross-check's initial complete snapshots (relative to origin/main 5410c31cb) were Linux 8f045fb82, native Windows 65d4fe9eb, and WSL2 107731fd4. Updated generator build-script/artifact snapshots were Linux de0dc3afd, native Windows 5587563ed, and WSL2 561a5a651. These are throwaway cross-check objects, not commits on the user's branch. They contain earlier-phase work as well as Phase 7, explaining the 1,174/1,175-file bundle inventory; Phase 7's own source inventory remains exactly the two frontmatter paths.
+
+Updated WSL2 CLI/artifact proof passed **11/11** in **2.365 s**, zero slow reports; updated Postman-only proof passed **1/1** in **0.273 s**. Generated Rust file-set/byte comparison took 2.266 s. All four environments have now executed the updated guard and generator CLI after the fix; the standalone schema suites also all passed. The WSL2 archive a52293f57 / planned key 9d56647417fe6ff2 is the only remaining check at this checkpoint.
+
+### Verify Platforms complete
+
+The relocated WSL2 archive run passed **641/641** in **5.143 s**, with 15 existing tier/ignore exclusions. Full cross-check duration was **130 s**. It reported a clean consumer (`cross-check-dirty: 0`), successful expected-test manifest (`cross-check-manifest-exit: 0`), and test exit **0** with the builder target directory hidden. Planned key **9d56647417fe6ff2**, realized digest **685ebce5fdbd8c93**, tested tree **3e4e10981a64b8bce7b9e9e21fec06b1b56a5fd2**. Cross-check correctly published **no** wsl2-ubuntu observation because this synthetic uncommitted tested tree differs from HEAD; no receipt or four-host reuse claim is fabricated.
+
+| Environment / host | Workspace/consumer behavior | Updated CLI/artifact behavior | Generated schema | Relocated archive |
+| --- | --- | --- | --- | --- |
+| macOS / local | 2,305 ordinary + 7 generator + 1 runtime compiler checks; 4,382 consumers; area/dependent lint and all-target checks; 258 doctests; 3 tmux tests | 11/11 pass, Postman stale-file negative control fails then restored control passes | 55/55 pass, lint-schema pass | Not needed for this host; WSL2 archive supplies the required relocation boundary |
+| Linux / build-linux | 6,663/6,663 pass, including consumers and compiler/wire checks | 11/11 pass; 2/2 updated guard/reimport timing pass | 55/55 pass | Native evidence, not claimed as an archive run |
+| Native Windows / build-win-native (MSVC) | Original 6,597 pass + 3 generator stack failures; exact failed cases fixed and rerun; all unaffected passing coverage retained | 12/12 pass after stack fix, zero slow tests; standalone updated Postman guard 1/1 pass | 55/55 pass | Native evidence, not claimed as an archive run |
+| WSL2 / build-win | 6,663/6,663 pass including consumers and compiler/wire checks | 11/11 pass, zero slow tests; standalone updated Postman guard 1/1 pass | 55/55 pass | 641/641 pass, manifest verification pass, builder target hidden |
+
+Verify Platforms is now checked. Full four-environment functional evidence exists for this migration, with the existing excluded resources/tests, Windows warnings, and historical slow observations explicitly recorded above. No new ignore, timeout exemption, retry, test tier change, CI cell, or gate was introduced. The native-Windows broad run is not falsely relabeled green: its only three failures have direct subsequent public-result proof of repair.
+
+### Final requirement-to-test mapping and disposition
+
+| Phase 7 behavior/requirement | Exact evidence | Result |
+| --- | --- | --- |
+| Complete regeneration with preserved historical data | Normal all-API generation; definition_baseline provider corpus; artifact_drift complete outputs | No Phase 7 artifact byte/file difference; historical normalization unchanged |
+| Detect stale Postman files | Strengthened artifact_drift::generated_postman_artifacts_are_up_to_date, F2 L1; injected retired.postman_collection.json negative control | Positive shipped corpus passes on all four environments; stale-file input fails with the file-set diagnostic, restored input passes |
+| Windows main-stack compatibility | Existing output_validation::{cli_migrated_provider_generates_all_outputs_without_warnings,cli_reports_each_output_and_exits_nonzero_when_one_fails} and partial_generation::cli_refuses_an_unsafe_partial_run_and_claims_no_update, F2 L1 | Original exact Gitea success/failure and unsafe Ollama inputs fail before build-script fix and pass afterward; exit/output/filesystem assertions retained |
+| Generated paths, temporary trees, query encoding and API misuse | fresh_output_compile::slow_{fixture_apis_compile_and_send_offline,real_apis_compile_offline,generated_types_reject_misuse_at_compile_time,a_runtime_of_another_abi_fails_the_build_with_a_readable_message,negative_control_reports_compiler_error,query_wire_matches_pre_split_baseline}; import_overlay::slow_imported_builders_compile_and_match_public_import; runtime and generated-schema compiler tests | Executed on each required native environment; four 55-test generated-schema suites pass; existing 34-request wire corpus retained |
+| OAuth and five WebSocket definitions; direct and reverse consumers | Five-package area gates, 18-package native selections, root 13-consumer selection, explicit --all-targets compiler, four consumer-area lint recipes | All migration behavior passes; zero consumer source edits required in Phase 7 |
+| Archive/relocation boundary | Normal unfiltered cross-check schematic-gen --os wsl, verified CI archive and manifest | 641/641 pass with hidden builder target and relocated consumer |
+
+Only two source files changed during Phase 7: **schematic/gen/build.rs** (created) and **schematic/gen/tests/l1/artifact_drift.rs** (updated). There is no new test name or undeclared test file: the strengthened test remains compiled in the existing declared l1 target and ordinary L1 tier; existing CLI regressions cover the build-script behavior. All new/changed ordinary behavior tests complete below five seconds in the final bounded selections. No new parser, deserializer, file format, persisted value, dependency, or ambient production-request read was introduced, so no new input-robustness matrix or persistence round-trip is required. Existing descriptor/import matrices, corpus/real-artifact generation tests, and repeated stored-definition round trips remain passing in the area suites.
+
+Current documentation updated: schematic/docs/generation/workflow.md plus this plan/log/spec metadata. Skills updated: .claude/skills/os/windows.md and .claude/skills/schematic-define/schematic/SKILL.md. No document was created. Frontmatter inventories distinguish these Phase 7 edits from the preserved Phase 6 dirty tree; cumulative package inventory is retained (the executable/source changes are in schematic-gen).
+
+All three Phase 7 tasks are checked; Phase 8 remains pending. Spec frontmatter has human_review false and a fresh Phase 8 handoff. The active feature directory remains in place. No formatter, staging, branch commit, lifecycle move, or focus-changing terminal/browser operation occurred.
+
+The first final-audit script incorrectly required a phase field in the historical log (which instead records started_phase: 1). Corrected that audit assumption without changing historical metadata; the complete audit then passed. All eight Phase 7 changed paths exactly match the frontmatter inventories (two source, four documentation, two skill files); metadata keys are unique, every inventoried path exists, all three Phase 7 checkboxes are complete, git diff --check passes, the index is unchanged/empty, and the negative-control artifact is absent. All tool-run test/compiler/cross-check jobs have returned; no agent or background work remains. Earlier development/negative-control failures, existing exclusions, Windows warnings, and timing limits are explicitly accounted for above.
+
+**Phase 7 implementation complete, ready for review.**
