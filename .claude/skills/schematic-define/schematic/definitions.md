@@ -7,7 +7,7 @@ Pre-built REST API definitions using `schematic-define` primitives.
 | API | Function | Endpoints | Auth | Env vars the client reads (in order) |
 |-----|----------|-----------|------|-------------|
 | Anthropic | `define_anthropic_api()` | 4 | `ApiKey { header: "X-Api-Key" }` | `ANTHROPIC_API_KEY` |
-| OpenAI | `define_openai_api()` | 265 | `BearerToken` | none (imported definition has no env mapping; pass a `Credential`) |
+| OpenAI | `define_openai_api()` | 258 | `BearerToken` | none (imported definition has no env mapping; pass a `Credential`) |
 | HuggingFace Hub | `define_huggingface_hub_api()` | 26 | `BearerToken` | `HF_TOKEN`, `HUGGING_FACE_API_KEY`, `HF_API_KEY` |
 | ElevenLabs REST | `define_elevenlabs_rest_api()` | 42 | `ApiKey { header: "xi-api-key" }` | `ELEVEN_LABS_API_KEY`, `ELEVENLABS_API_KEY` |
 | ElevenLabs WebSocket | `define_elevenlabs_websocket_api()` | 2 | `ApiKey` | `ELEVEN_LABS_API_KEY` |

@@ -112,7 +112,7 @@ For `AuthStrategy::Basic`:
 ### 6) API-Level Runtime Policy Fields
 
 Every `RestApi` literal sets three fields (no `Default` for `RestApi`,
-no per-endpoint override):
+endpoint policies may replace the API policy):
 
 - `cross_origin: CrossOrigin` — redirects and followed next-page links.
   `same_origin()` (default), `allow_origins([..])` (exact origins, credentials
@@ -127,15 +127,16 @@ no per-endpoint override):
 `definitions/tests/api_policy.rs` pins all three for every shipped API; a new
 definition must add its row there.
 
-### 7) Pagination Is Authored Per API, Not Per Endpoint
+### 7) Pagination Defaults and Explicit Endpoint Collections
 
 Every `RestApi` literal also sets `default_pagination: Option<Strategy>` and
 `pagination_exceptions: Vec<PaginationException>` (empty: `None`, `vec![]`).
-`Endpoint` and `EndpointParams` gained no field. Types live in
+`Endpoint.pagination: Option<Collection>` overrides a legacy exception row;
+OpenAI uses this form. Other providers retain their tables during migration. Types live in
 `schematic_define::pagination` (and the prelude), not the crate root.
 The canonical behavior page is `schematic/docs/pagination.md`.
 
-- `pagination::resolve(api, endpoint)`: a row for the endpoint id decides;
+- `pagination::resolve(api, endpoint)`: an endpoint collection, then a legacy row for the endpoint id, decides;
   else a **GET** whose response is literally `Vec<T>` is a list inheriting the
   default; else not a list. Wrappers, opt-outs, overrides, and non-GET lists
   all need a row: `PaginationException::new("Id", Collection::at("data").item_type("Item"))`.
@@ -155,10 +156,10 @@ The canonical behavior page is `schematic/docs/pagination.md`.
   features; rules are listed in `schematic/docs/generation/validation.md`.
 - `PaginationStyle`, `PaginationResponse`, and `with_pagination` are
   superseded and inert: only the query params they materialize matter.
-- Real definitions keep one API-local strategy helper (`github_page_number()`,
+- Definitions keep one API-local strategy helper (`github_page_number()`,
   `bitbucket_next_link()`, ...) and never edit endpoint literals to page them.
   Authored: GitHub, GitLab, Gitea, Bitbucket, OpenAI, and ElevenLabs
-  `GetHistory`/`ListSharedVoices` (94 lists). Unverified providers (Anthropic,
+  `GetHistory`/`ListSharedVoices` (93 pagers). Unverified providers (Anthropic,
   EMQX, Hugging Face, GitLab participants, Gitea trees) stay unpaginated: a
   GET `Vec<T>` under a default needs a `Collection::root().unpaginated()` row,
   and a wrapper gets an `.unpaginated()` row so it reads as a list.
@@ -272,7 +273,7 @@ x-schematic:
 
 Keep these aligned when docs/examples mention built-in APIs:
 
-- OpenAI: 265 endpoints, 1394 types, bearer auth; the imported definition has
+- OpenAI: 258 endpoints, 1394 types, bearer auth; the imported definition has
   no env mapping, so the client reads **no** variable (pass a `Credential`). **Generated**
   from `schematic/specs/openai/openapi.yaml` — never hand-edit
   `definitions/src/openai/`; re-run `just -f schematic/justfile import-openai`.
@@ -336,7 +337,7 @@ so the imported API flows through the normal `generate` pipeline.
 - `--exclude-path <PREFIX>` drops endpoints by path prefix (repeatable).
 - `--request-id-header <HEADER>` sets the imported `RestApi::request_id_header` (OpenAPI does not declare one); `just import-openai` passes `x-request-id`.
 - `--overlay <RUST_PATH>` (requires `--definitions-out`) makes the factory end
-  `let api = RestApi { .. }; <path>(api)`, so hand-written additions survive a
+  fallible typed builder assembly ending in `Ok(<path>(api))`, so hand-written additions survive a
   re-import. OpenAI's pagination lives in `definitions/src/openai_pagination.rs`
   (`--overlay crate::openai_pagination::apply`); the importer never writes it.
   `import_overlay::reimporting_the_vendored_openai_document_reproduces_the_committed_definition`
@@ -416,3 +417,25 @@ at API build; JSON schemas without evidence fail the builder too. OpenAPI export
 retain GET list inference, while Option/nominal wrappers do not. Legacy providers,
 import emitter and external literals remain until migration. Read
 `schematic/docs/definition-builders.md` for accepted forms and the Default allow-list.
+
+## Imported builder assemblies
+
+`import --definitions-out` emits fallible Endpoint/RestApi builders and a public
+`module_group() -> Result<ModuleGroup, DefinitionError>`. Its API and registry
+share one ordered DefinitionContext; catalog factories unwrap that assembly.
+Nominal generated models implement Registration; aliases reuse their underlying
+implementation, so containers/primitives/Value create no components. The emitter
+bounds debug stack use with small endpoint helpers and batches of registrations.
+OpenAI is regenerated through this route, never manually rewritten.
+
+The shared importer normalizes query-bearing paths and schema-gates twin merges.
+The seven OpenAI beta operations now share their ordinary IDs with optional
+`beta` query inputs; beta model types supply the compatible superset. GET bodies
+and malformed or conflicting expressions fail with context. JSON/YAML reject
+null/malformed declarations, duplicate keys and trailing invalid input. Empty
+foundation metadata imports remain possible; run_import rejects no usable endpoints.
+
+`EndpointBuilder::pagination(Collection)` and Endpoint.pagination override legacy
+API exception rows. OpenAI's untouched-by-import overlay assigns endpoint collections
+and rejects unknown IDs. ResolutionOrigin::Exception remains the interim serialized
+origin for both explicit forms; other providers/table removal remain later migration.

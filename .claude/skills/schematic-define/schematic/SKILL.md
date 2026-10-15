@@ -362,3 +362,25 @@ HEAD is unchanged. `.pager_managed()` is serializable and requires a matching
 resolved strategy input/caller control, plus a sent default for required inputs.
 `.default_pagination(strategy)` feeds the existing resolver. New unused fields omit
 from JSON; path-query remains a warning until provider migrations finish.
+
+## Imported builder assemblies
+
+`import --definitions-out` emits fallible Endpoint/RestApi builders and a public
+`module_group() -> Result<ModuleGroup, DefinitionError>`. Its API and registry
+share one ordered DefinitionContext; catalog factories unwrap that assembly.
+Nominal generated models implement Registration; aliases reuse their underlying
+implementation, so containers/primitives/Value create no components. The emitter
+bounds debug stack use with small endpoint helpers and batches of registrations.
+OpenAI is regenerated through this route, never manually rewritten.
+
+The shared importer normalizes query-bearing paths and schema-gates twin merges.
+The seven OpenAI beta operations now share their ordinary IDs with optional
+`beta` query inputs; beta model types supply the compatible superset. GET bodies
+and malformed or conflicting expressions fail with context. JSON/YAML reject
+null/malformed declarations, duplicate keys and trailing invalid input. Empty
+foundation metadata imports remain possible; run_import rejects no usable endpoints.
+
+`EndpointBuilder::pagination(Collection)` and Endpoint.pagination override legacy
+API exception rows. OpenAI's untouched-by-import overlay assigns endpoint collections
+and rejects unknown IDs. ResolutionOrigin::Exception remains the interim serialized
+origin for both explicit forms; other providers/table removal remain later migration.
