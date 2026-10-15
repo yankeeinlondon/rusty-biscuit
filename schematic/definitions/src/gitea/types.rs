@@ -135,6 +135,13 @@ pub struct RepositoryInfo {
     #[serde(default)]
     pub empty: bool,
 }
+impl schematic_define::Registration for RepositoryInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RepositoryInfo));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 // =============================================================================
 // Git Tree Types
@@ -167,6 +174,13 @@ pub struct GitTreeResponse {
     #[serde(default)]
     pub page: Option<i64>,
 }
+impl schematic_define::Registration for GitTreeResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(GitTreeResponse));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// A single entry in a Git tree.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -287,6 +301,13 @@ pub struct PullRequestSummary {
     #[serde(default)]
     pub labels: Option<Vec<Label>>,
 }
+impl schematic_define::Registration for PullRequestSummary {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(PullRequestSummary));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// A label applied to a Gitea issue or pull request.
 ///
@@ -317,6 +338,13 @@ pub struct Label {
     #[serde(default)]
     pub url: Option<String>,
 }
+impl schematic_define::Registration for Label {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Label));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// A file changed in a pull request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -341,6 +369,13 @@ pub struct PullRequestFile {
     #[serde(default)]
     pub changes: Option<i64>,
 }
+impl schematic_define::Registration for PullRequestFile {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(PullRequestFile));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 // =============================================================================
 // Issue Types
@@ -405,6 +440,13 @@ pub struct IssueSummary {
     #[serde(default)]
     pub html_url: Option<String>,
 }
+impl schematic_define::Registration for IssueSummary {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(IssueSummary));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 impl IssueSummary {
     /// Returns `true` if this issue is actually a pull request.
@@ -441,6 +483,13 @@ pub struct IssueComment {
     #[serde(default)]
     pub updated_at: Option<String>,
 }
+impl schematic_define::Registration for IssueComment {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(IssueComment));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// A timeline event on an issue.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -461,6 +510,13 @@ pub struct TimelineEvent {
     #[serde(flatten)]
     pub extra: serde_json::Value,
 }
+impl schematic_define::Registration for TimelineEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(TimelineEvent));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 // =============================================================================
 // Tag and Release Types
@@ -501,6 +557,13 @@ pub struct RepoTag {
     #[serde(default)]
     pub zipball_url: Option<String>,
 }
+impl schematic_define::Registration for RepoTag {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RepoTag));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// A Gitea release from `GET /repos/{owner}/{repo}/releases`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -545,6 +608,13 @@ pub struct Release {
     #[serde(default)]
     pub author: Option<UserSummary>,
 }
+impl schematic_define::Registration for Release {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Release));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 // =============================================================================
 // Branch Types
@@ -578,6 +648,13 @@ pub struct Branch {
     #[serde(default)]
     pub protected: Option<bool>,
 }
+impl schematic_define::Registration for Branch {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Branch));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 // =============================================================================
 // Git Reference Types
@@ -628,6 +705,13 @@ pub struct GitRef {
     #[serde(default)]
     pub object: Option<GitRefObject>,
 }
+impl schematic_define::Registration for GitRef {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(GitRef));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// An annotated tag object from `GET /repos/{owner}/{repo}/git/tags/{sha}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -648,6 +732,13 @@ pub struct AnnotatedTagObject {
     #[serde(default)]
     pub url: Option<String>,
 }
+impl schematic_define::Registration for AnnotatedTagObject {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(AnnotatedTagObject));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 // =============================================================================
 // Tests

@@ -42,14 +42,32 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::unfolded_circle::core_rest::LoginRequest",
+                    "schema_name": "LoginRequest"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "LoginRequest"
+              "type_name": "::schematic_definitions::unfolded_circle::core_rest::LoginRequest"
             }
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::unfolded_circle::core_rest::ApiResponseMessage",
+                    "schema_name": "ApiResponseMessage"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "ApiResponseMessage"
+              "type_name": "::schematic_definitions::unfolded_circle::core_rest::ApiResponseMessage"
             }
           }
         }
@@ -90,8 +108,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::unfolded_circle::core_rest::SystemInfo",
+                    "schema_name": "SystemInfo"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "SystemInfo"
+              "type_name": "::schematic_definitions::unfolded_circle::core_rest::SystemInfo"
             }
           }
         }
@@ -150,7 +177,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BackupRestoreReportItems"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BackupRestoreReportItem"
+                  }
                 }
               }
             }
@@ -175,8 +205,19 @@
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::unfolded_circle::core_rest::BackupRestoreReportItem",
+                      "schema_name": "BackupRestoreReportItem"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "BackupRestoreReportItems"
+              "type_name": "::std::vec::Vec<::schematic_definitions::unfolded_circle::core_rest::BackupRestoreReportItem>"
             }
           }
         }
@@ -212,7 +253,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ResourceItems"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ResourceItem"
+                  }
                 }
               }
             }
@@ -237,8 +281,19 @@
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::unfolded_circle::core_rest::ResourceItem",
+                      "schema_name": "ResourceItem"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "ResourceItems"
+              "type_name": "::std::vec::Vec<::schematic_definitions::unfolded_circle::core_rest::ResourceItem>"
             }
           }
         }
@@ -353,8 +408,17 @@
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::unfolded_circle::core_rest::IntegrationDriverInfo",
+                    "schema_name": "IntegrationDriverInfo"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "IntegrationDriverInfo"
+              "type_name": "::schematic_definitions::unfolded_circle::core_rest::IntegrationDriverInfo"
             }
           }
         }
@@ -415,8 +479,17 @@
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::unfolded_circle::core_rest::CodeSetUploadResult",
+                    "schema_name": "CodeSetUploadResult"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "CodeSetUploadResult"
+              "type_name": "::schematic_definitions::unfolded_circle::core_rest::CodeSetUploadResult"
             }
           }
         }
@@ -488,8 +561,17 @@
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::unfolded_circle::core_rest::CustomInstall",
+                    "schema_name": "CustomInstall"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "CustomInstall"
+              "type_name": "::schematic_definitions::unfolded_circle::core_rest::CustomInstall"
             }
           }
         }
@@ -594,21 +676,8 @@
           "hw_revision"
         ]
       },
-      "BackupRestoreReportItems": {
-        "title": "Array_of_BackupRestoreReportItem",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/BackupRestoreReportItem"
-            }
-          ]
-        }
-      },
-      "BackupRestoreItem": {
-        "description": "Backup restore report item type."
-      },
       "BackupRestoreReportItem": {
+        "title": "BackupRestoreReportItem",
         "description": "One backup-restore report row.",
         "type": "object",
         "properties": {
@@ -618,12 +687,7 @@
             "format": "int32"
           },
           "item": {
-            "description": "Restored object category.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/BackupRestoreItem"
-              }
-            ]
+            "description": "Restored object category."
           },
           "ok": {
             "description": "Successfully restored items.",
@@ -637,18 +701,11 @@
           "ok"
         ]
       },
-      "ResourceItems": {
-        "title": "Array_of_ResourceItem",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/ResourceItem"
-            }
-          ]
-        }
+      "BackupRestoreItem": {
+        "description": "Backup restore report item type."
       },
       "ResourceItem": {
+        "title": "ResourceItem",
         "description": "Single uploaded/listed resource item.",
         "type": "object",
         "properties": {
@@ -657,7 +714,9 @@
             "type": "string"
           },
           "size": {
-            "description": "Size in bytes."
+            "description": "Size in bytes.",
+            "type": "integer",
+            "format": "uint32"
           },
           "type": {
             "description": "Resource type.\n\nSerialized as `type` in API payloads.",

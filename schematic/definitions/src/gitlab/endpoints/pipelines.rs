@@ -1,21 +1,17 @@
+use super::super::*;
 use schematic_define::{
-    ApiResponse, Endpoint,
-    params::{EndpointParams, PaginationStyle, QueryParamType},
+    Endpoint,
+    params::{EndpointParams, QueryParamType},
 };
 
 /// Returns all CI/CD pipeline endpoints.
-pub fn all() -> Vec<Endpoint> {
-    vec![Endpoint {
-        id: "ListProjectPipelines".to_string(),
-        method: schematic_define::RestMethod::Get,
-        path: "/projects/{id}/pipelines".to_string(),
-        description: "List CI/CD pipelines for a project".to_string(),
-        request: None,
-        response: ApiResponse::json_vec_type("Pipeline"),
-        headers: vec![],
-        params: Some(
-            EndpointParams::default()
-                .with_pagination(PaginationStyle::gitlab())
+pub fn all(ctx: &mut schematic_define::DefinitionContext) -> Result<Vec<Endpoint>, schematic_define::DefinitionError> {
+    Ok(vec![Endpoint::get("ListProjectPipelines", "/projects/{id}/pipelines")
+                .describes("List CI/CD pipelines for a project")
+                .returns_json::<Vec<Pipeline>>(ctx)
+                .params(EndpointParams::default()
+                .with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("per_page", QueryParamType::Integer, false, Some("Items per page (default: 100, max: 100)"))
                 .with_query_param(
                     "status",
                     QueryParamType::Enum(vec![
@@ -51,8 +47,6 @@ pub fn all() -> Vec<Endpoint> {
                     QueryParamType::String,
                     false,
                     Some("Filter by commit SHA"),
-                ),
-        ),
-        oauth_scopes: None, cross_origin: None, pagination: None,
-    }]
+                ),)
+                .build()?])
 }

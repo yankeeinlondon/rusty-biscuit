@@ -12,8 +12,7 @@
 //!
 //! **GET**:
 //! - `GetRepository` - Get repository metadata including default branch
-//! - `GetGitTree` - Get a Git tree (non-recursive, single level)
-//! - `GetGitTreeRecursive` - Get a Git tree recursively (may be paginated for large repos)
+//! - `GetGitTree` - Get a Git tree; set recursive to include nested entries
 //! - `GetRepositoryContentRaw` - Get raw file content from repository
 //! - `ListPullRequests` - List pull requests with metadata
 //! - `ListPullRequestFiles` - List files changed in a pull request

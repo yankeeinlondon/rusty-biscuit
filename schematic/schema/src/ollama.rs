@@ -57,28 +57,25 @@ impl Default for OllamaNative {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::ollama::{GenerateNativeRequest, GenerateBody};
+/// use schematic_schema::ollama::GenerateNativeRequest;
 ///
-/// let body = GenerateBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::ollama::GenerateBody = Default::default();
 /// let request = GenerateNativeRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GenerateNativeRequest {
     /// Request body
-    pub body: GenerateBody,
+    pub body: ::schematic_definitions::ollama::GenerateBody,
 }
 impl GenerateNativeRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: GenerateBody) -> Self {
+    pub fn new(body: ::schematic_definitions::ollama::GenerateBody) -> Self {
         Self { body }
     }
 }
-impl From<GenerateBody> for GenerateNativeRequest {
-    fn from(body: GenerateBody) -> Self {
+impl From<::schematic_definitions::ollama::GenerateBody> for GenerateNativeRequest {
+    fn from(body: ::schematic_definitions::ollama::GenerateBody) -> Self {
         Self { body }
     }
 }
@@ -116,28 +113,25 @@ impl schematic_runtime::EndpointSpec for GenerateNativeRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::ollama::{ChatNativeRequest, ChatBody};
+/// use schematic_schema::ollama::ChatNativeRequest;
 ///
-/// let body = ChatBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::ollama::ChatBody = Default::default();
 /// let request = ChatNativeRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ChatNativeRequest {
     /// Request body
-    pub body: ChatBody,
+    pub body: ::schematic_definitions::ollama::ChatBody,
 }
 impl ChatNativeRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: ChatBody) -> Self {
+    pub fn new(body: ::schematic_definitions::ollama::ChatBody) -> Self {
         Self { body }
     }
 }
-impl From<ChatBody> for ChatNativeRequest {
-    fn from(body: ChatBody) -> Self {
+impl From<::schematic_definitions::ollama::ChatBody> for ChatNativeRequest {
+    fn from(body: ::schematic_definitions::ollama::ChatBody) -> Self {
         Self { body }
     }
 }
@@ -175,36 +169,35 @@ impl schematic_runtime::EndpointSpec for ChatNativeRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::ollama::{EmbeddingsNativeRequest, EmbeddingsBody};
+/// use schematic_schema::ollama::EmbeddingsNativeRequest;
 ///
-/// let body = EmbeddingsBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::ollama::EmbeddingsBody = Default::default();
 /// let request = EmbeddingsNativeRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EmbeddingsNativeRequest {
     /// Request body
-    pub body: EmbeddingsBody,
+    pub body: ::schematic_definitions::ollama::EmbeddingsBody,
 }
 impl EmbeddingsNativeRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: EmbeddingsBody) -> Self {
+    pub fn new(body: ::schematic_definitions::ollama::EmbeddingsBody) -> Self {
         Self { body }
     }
 }
-impl From<EmbeddingsBody> for EmbeddingsNativeRequest {
-    fn from(body: EmbeddingsBody) -> Self {
+impl From<::schematic_definitions::ollama::EmbeddingsBody> for EmbeddingsNativeRequest {
+    fn from(body: ::schematic_definitions::ollama::EmbeddingsBody) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for EmbeddingsNativeRequest {
     type Api = OllamaNativeApi;
-    type Success = EmbeddingsResponse;
+    type Success = ::schematic_definitions::ollama::EmbeddingsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<EmbeddingsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::ollama::EmbeddingsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "Embeddings";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -243,9 +236,11 @@ impl schematic_runtime::EndpointSpec for EmbeddingsNativeRequest {
 pub struct ListModelsNativeRequest {}
 impl schematic_runtime::EndpointSpec for ListModelsNativeRequest {
     type Api = OllamaNativeApi;
-    type Success = ListModelsResponse;
+    type Success = ::schematic_definitions::ollama::ListModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListModelsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::ollama::ListModelsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListModels";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -268,36 +263,35 @@ impl schematic_runtime::EndpointSpec for ListModelsNativeRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::ollama::{ShowModelNativeRequest, ShowModelBody};
+/// use schematic_schema::ollama::ShowModelNativeRequest;
 ///
-/// let body = ShowModelBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::ollama::ShowModelBody = Default::default();
 /// let request = ShowModelNativeRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ShowModelNativeRequest {
     /// Request body
-    pub body: ShowModelBody,
+    pub body: ::schematic_definitions::ollama::ShowModelBody,
 }
 impl ShowModelNativeRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: ShowModelBody) -> Self {
+    pub fn new(body: ::schematic_definitions::ollama::ShowModelBody) -> Self {
         Self { body }
     }
 }
-impl From<ShowModelBody> for ShowModelNativeRequest {
-    fn from(body: ShowModelBody) -> Self {
+impl From<::schematic_definitions::ollama::ShowModelBody> for ShowModelNativeRequest {
+    fn from(body: ::schematic_definitions::ollama::ShowModelBody) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for ShowModelNativeRequest {
     type Api = OllamaNativeApi;
-    type Success = ShowModelResponse;
+    type Success = ::schematic_definitions::ollama::ShowModelResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ShowModelResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::ollama::ShowModelResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ShowModel";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -327,28 +321,25 @@ impl schematic_runtime::EndpointSpec for ShowModelNativeRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::ollama::{PullModelNativeRequest, PullModelBody};
+/// use schematic_schema::ollama::PullModelNativeRequest;
 ///
-/// let body = PullModelBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::ollama::PullModelBody = Default::default();
 /// let request = PullModelNativeRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PullModelNativeRequest {
     /// Request body
-    pub body: PullModelBody,
+    pub body: ::schematic_definitions::ollama::PullModelBody,
 }
 impl PullModelNativeRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: PullModelBody) -> Self {
+    pub fn new(body: ::schematic_definitions::ollama::PullModelBody) -> Self {
         Self { body }
     }
 }
-impl From<PullModelBody> for PullModelNativeRequest {
-    fn from(body: PullModelBody) -> Self {
+impl From<::schematic_definitions::ollama::PullModelBody> for PullModelNativeRequest {
+    fn from(body: ::schematic_definitions::ollama::PullModelBody) -> Self {
         Self { body }
     }
 }
@@ -386,28 +377,25 @@ impl schematic_runtime::EndpointSpec for PullModelNativeRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::ollama::{PushModelNativeRequest, PushModelBody};
+/// use schematic_schema::ollama::PushModelNativeRequest;
 ///
-/// let body = PushModelBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::ollama::PushModelBody = Default::default();
 /// let request = PushModelNativeRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PushModelNativeRequest {
     /// Request body
-    pub body: PushModelBody,
+    pub body: ::schematic_definitions::ollama::PushModelBody,
 }
 impl PushModelNativeRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: PushModelBody) -> Self {
+    pub fn new(body: ::schematic_definitions::ollama::PushModelBody) -> Self {
         Self { body }
     }
 }
-impl From<PushModelBody> for PushModelNativeRequest {
-    fn from(body: PushModelBody) -> Self {
+impl From<::schematic_definitions::ollama::PushModelBody> for PushModelNativeRequest {
+    fn from(body: ::schematic_definitions::ollama::PushModelBody) -> Self {
         Self { body }
     }
 }
@@ -445,28 +433,25 @@ impl schematic_runtime::EndpointSpec for PushModelNativeRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::ollama::{CopyModelNativeRequest, CopyModelBody};
+/// use schematic_schema::ollama::CopyModelNativeRequest;
 ///
-/// let body = CopyModelBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::ollama::CopyModelBody = Default::default();
 /// let request = CopyModelNativeRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CopyModelNativeRequest {
     /// Request body
-    pub body: CopyModelBody,
+    pub body: ::schematic_definitions::ollama::CopyModelBody,
 }
 impl CopyModelNativeRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CopyModelBody) -> Self {
+    pub fn new(body: ::schematic_definitions::ollama::CopyModelBody) -> Self {
         Self { body }
     }
 }
-impl From<CopyModelBody> for CopyModelNativeRequest {
-    fn from(body: CopyModelBody) -> Self {
+impl From<::schematic_definitions::ollama::CopyModelBody> for CopyModelNativeRequest {
+    fn from(body: ::schematic_definitions::ollama::CopyModelBody) -> Self {
         Self { body }
     }
 }
@@ -504,28 +489,26 @@ impl schematic_runtime::EndpointSpec for CopyModelNativeRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::ollama::{DeleteModelNativeRequest, DeleteModelBody};
+/// use schematic_schema::ollama::DeleteModelNativeRequest;
 ///
-/// let body = DeleteModelBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::ollama::DeleteModelBody = Default::default();
 /// let request = DeleteModelNativeRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteModelNativeRequest {
     /// Request body
-    pub body: DeleteModelBody,
+    pub body: ::schematic_definitions::ollama::DeleteModelBody,
 }
 impl DeleteModelNativeRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: DeleteModelBody) -> Self {
+    pub fn new(body: ::schematic_definitions::ollama::DeleteModelBody) -> Self {
         Self { body }
     }
 }
-impl From<DeleteModelBody> for DeleteModelNativeRequest {
-    fn from(body: DeleteModelBody) -> Self {
+impl From<::schematic_definitions::ollama::DeleteModelBody>
+for DeleteModelNativeRequest {
+    fn from(body: ::schematic_definitions::ollama::DeleteModelBody) -> Self {
         Self { body }
     }
 }
@@ -563,28 +546,26 @@ impl schematic_runtime::EndpointSpec for DeleteModelNativeRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::ollama::{CreateModelNativeRequest, CreateModelBody};
+/// use schematic_schema::ollama::CreateModelNativeRequest;
 ///
-/// let body = CreateModelBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::ollama::CreateModelBody = Default::default();
 /// let request = CreateModelNativeRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateModelNativeRequest {
     /// Request body
-    pub body: CreateModelBody,
+    pub body: ::schematic_definitions::ollama::CreateModelBody,
 }
 impl CreateModelNativeRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateModelBody) -> Self {
+    pub fn new(body: ::schematic_definitions::ollama::CreateModelBody) -> Self {
         Self { body }
     }
 }
-impl From<CreateModelBody> for CreateModelNativeRequest {
-    fn from(body: CreateModelBody) -> Self {
+impl From<::schematic_definitions::ollama::CreateModelBody>
+for CreateModelNativeRequest {
+    fn from(body: ::schematic_definitions::ollama::CreateModelBody) -> Self {
         Self { body }
     }
 }
@@ -631,9 +612,11 @@ impl schematic_runtime::EndpointSpec for CreateModelNativeRequest {
 pub struct ListRunningModelsNativeRequest {}
 impl schematic_runtime::EndpointSpec for ListRunningModelsNativeRequest {
     type Api = OllamaNativeApi;
-    type Success = ListRunningModelsResponse;
+    type Success = ::schematic_definitions::ollama::ListRunningModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListRunningModelsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::ollama::ListRunningModelsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListRunningModels";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -1225,8 +1208,11 @@ impl OllamaNative {
     ///
     /// ## Arguments
     ///
-    /// - `body: GenerateBody`: the request body
-    pub fn generate(&self, body: GenerateBody) -> GenerateNativeCall<'_> {
+    /// - `body: ::schematic_definitions::ollama::GenerateBody`: the request body
+    pub fn generate(
+        &self,
+        body: ::schematic_definitions::ollama::GenerateBody,
+    ) -> GenerateNativeCall<'_> {
         GenerateNativeCall(self.0.send(GenerateNativeRequest::new(body)))
     }
     /// Generate chat completion from messages (streaming NDJSON by default)
@@ -1237,8 +1223,11 @@ impl OllamaNative {
     ///
     /// ## Arguments
     ///
-    /// - `body: ChatBody`: the request body
-    pub fn chat(&self, body: ChatBody) -> ChatNativeCall<'_> {
+    /// - `body: ::schematic_definitions::ollama::ChatBody`: the request body
+    pub fn chat(
+        &self,
+        body: ::schematic_definitions::ollama::ChatBody,
+    ) -> ChatNativeCall<'_> {
         ChatNativeCall(self.0.send(ChatNativeRequest::new(body)))
     }
     /// Generate embeddings for text
@@ -1249,8 +1238,11 @@ impl OllamaNative {
     ///
     /// ## Arguments
     ///
-    /// - `body: EmbeddingsBody`: the request body
-    pub fn embeddings(&self, body: EmbeddingsBody) -> EmbeddingsNativeCall<'_> {
+    /// - `body: ::schematic_definitions::ollama::EmbeddingsBody`: the request body
+    pub fn embeddings(
+        &self,
+        body: ::schematic_definitions::ollama::EmbeddingsBody,
+    ) -> EmbeddingsNativeCall<'_> {
         EmbeddingsNativeCall(self.0.send(EmbeddingsNativeRequest::new(body)))
     }
     /// List locally available models
@@ -1269,8 +1261,11 @@ impl OllamaNative {
     ///
     /// ## Arguments
     ///
-    /// - `body: ShowModelBody`: the request body
-    pub fn show_model(&self, body: ShowModelBody) -> ShowModelNativeCall<'_> {
+    /// - `body: ::schematic_definitions::ollama::ShowModelBody`: the request body
+    pub fn show_model(
+        &self,
+        body: ::schematic_definitions::ollama::ShowModelBody,
+    ) -> ShowModelNativeCall<'_> {
         ShowModelNativeCall(self.0.send(ShowModelNativeRequest::new(body)))
     }
     /// Pull a model from the Ollama registry (streaming progress by default)
@@ -1281,8 +1276,11 @@ impl OllamaNative {
     ///
     /// ## Arguments
     ///
-    /// - `body: PullModelBody`: the request body
-    pub fn pull_model(&self, body: PullModelBody) -> PullModelNativeCall<'_> {
+    /// - `body: ::schematic_definitions::ollama::PullModelBody`: the request body
+    pub fn pull_model(
+        &self,
+        body: ::schematic_definitions::ollama::PullModelBody,
+    ) -> PullModelNativeCall<'_> {
         PullModelNativeCall(self.0.send(PullModelNativeRequest::new(body)))
     }
     /// Push a model to the Ollama registry (streaming progress by default)
@@ -1293,8 +1291,11 @@ impl OllamaNative {
     ///
     /// ## Arguments
     ///
-    /// - `body: PushModelBody`: the request body
-    pub fn push_model(&self, body: PushModelBody) -> PushModelNativeCall<'_> {
+    /// - `body: ::schematic_definitions::ollama::PushModelBody`: the request body
+    pub fn push_model(
+        &self,
+        body: ::schematic_definitions::ollama::PushModelBody,
+    ) -> PushModelNativeCall<'_> {
         PushModelNativeCall(self.0.send(PushModelNativeRequest::new(body)))
     }
     /// Copy a model to a new name
@@ -1305,8 +1306,11 @@ impl OllamaNative {
     ///
     /// ## Arguments
     ///
-    /// - `body: CopyModelBody`: the request body
-    pub fn copy_model(&self, body: CopyModelBody) -> CopyModelNativeCall<'_> {
+    /// - `body: ::schematic_definitions::ollama::CopyModelBody`: the request body
+    pub fn copy_model(
+        &self,
+        body: ::schematic_definitions::ollama::CopyModelBody,
+    ) -> CopyModelNativeCall<'_> {
         CopyModelNativeCall(self.0.send(CopyModelNativeRequest::new(body)))
     }
     /// Delete a model
@@ -1317,8 +1321,11 @@ impl OllamaNative {
     ///
     /// ## Arguments
     ///
-    /// - `body: DeleteModelBody`: the request body
-    pub fn delete_model(&self, body: DeleteModelBody) -> DeleteModelNativeCall<'_> {
+    /// - `body: ::schematic_definitions::ollama::DeleteModelBody`: the request body
+    pub fn delete_model(
+        &self,
+        body: ::schematic_definitions::ollama::DeleteModelBody,
+    ) -> DeleteModelNativeCall<'_> {
         DeleteModelNativeCall(self.0.send(DeleteModelNativeRequest::new(body)))
     }
     /// Create a model from a Modelfile (streaming progress by default)
@@ -1329,8 +1336,11 @@ impl OllamaNative {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateModelBody`: the request body
-    pub fn create_model(&self, body: CreateModelBody) -> CreateModelNativeCall<'_> {
+    /// - `body: ::schematic_definitions::ollama::CreateModelBody`: the request body
+    pub fn create_model(
+        &self,
+        body: ::schematic_definitions::ollama::CreateModelBody,
+    ) -> CreateModelNativeCall<'_> {
         CreateModelNativeCall(self.0.send(CreateModelNativeRequest::new(body)))
     }
     /// List models currently loaded in memory
@@ -1388,28 +1398,28 @@ impl Default for OllamaOpenAI {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::ollama::{ChatCompletionsOaiRequest, OpenAIChatCompletionRequest};
+/// use schematic_schema::ollama::ChatCompletionsOaiRequest;
 ///
-/// let body = OpenAIChatCompletionRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::ollama::OpenAIChatCompletionRequest = Default::default();
 /// let request = ChatCompletionsOaiRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ChatCompletionsOaiRequest {
     /// Request body
-    pub body: OpenAIChatCompletionRequest,
+    pub body: ::schematic_definitions::ollama::OpenAIChatCompletionRequest,
 }
 impl ChatCompletionsOaiRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: OpenAIChatCompletionRequest) -> Self {
+    pub fn new(
+        body: ::schematic_definitions::ollama::OpenAIChatCompletionRequest,
+    ) -> Self {
         Self { body }
     }
 }
-impl From<OpenAIChatCompletionRequest> for ChatCompletionsOaiRequest {
-    fn from(body: OpenAIChatCompletionRequest) -> Self {
+impl From<::schematic_definitions::ollama::OpenAIChatCompletionRequest>
+for ChatCompletionsOaiRequest {
+    fn from(body: ::schematic_definitions::ollama::OpenAIChatCompletionRequest) -> Self {
         Self { body }
     }
 }
@@ -1447,28 +1457,26 @@ impl schematic_runtime::EndpointSpec for ChatCompletionsOaiRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::ollama::{CompletionsOaiRequest, OpenAICompletionRequest};
+/// use schematic_schema::ollama::CompletionsOaiRequest;
 ///
-/// let body = OpenAICompletionRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::ollama::OpenAICompletionRequest = Default::default();
 /// let request = CompletionsOaiRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CompletionsOaiRequest {
     /// Request body
-    pub body: OpenAICompletionRequest,
+    pub body: ::schematic_definitions::ollama::OpenAICompletionRequest,
 }
 impl CompletionsOaiRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: OpenAICompletionRequest) -> Self {
+    pub fn new(body: ::schematic_definitions::ollama::OpenAICompletionRequest) -> Self {
         Self { body }
     }
 }
-impl From<OpenAICompletionRequest> for CompletionsOaiRequest {
-    fn from(body: OpenAICompletionRequest) -> Self {
+impl From<::schematic_definitions::ollama::OpenAICompletionRequest>
+for CompletionsOaiRequest {
+    fn from(body: ::schematic_definitions::ollama::OpenAICompletionRequest) -> Self {
         Self { body }
     }
 }
@@ -1506,36 +1514,36 @@ impl schematic_runtime::EndpointSpec for CompletionsOaiRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::ollama::{EmbeddingsOaiRequest, OpenAIEmbeddingRequest};
+/// use schematic_schema::ollama::EmbeddingsOaiRequest;
 ///
-/// let body = OpenAIEmbeddingRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::ollama::OpenAIEmbeddingRequest = Default::default();
 /// let request = EmbeddingsOaiRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EmbeddingsOaiRequest {
     /// Request body
-    pub body: OpenAIEmbeddingRequest,
+    pub body: ::schematic_definitions::ollama::OpenAIEmbeddingRequest,
 }
 impl EmbeddingsOaiRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: OpenAIEmbeddingRequest) -> Self {
+    pub fn new(body: ::schematic_definitions::ollama::OpenAIEmbeddingRequest) -> Self {
         Self { body }
     }
 }
-impl From<OpenAIEmbeddingRequest> for EmbeddingsOaiRequest {
-    fn from(body: OpenAIEmbeddingRequest) -> Self {
+impl From<::schematic_definitions::ollama::OpenAIEmbeddingRequest>
+for EmbeddingsOaiRequest {
+    fn from(body: ::schematic_definitions::ollama::OpenAIEmbeddingRequest) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for EmbeddingsOaiRequest {
     type Api = OllamaOpenAIApi;
-    type Success = OpenAIEmbeddingResponse;
+    type Success = ::schematic_definitions::ollama::OpenAIEmbeddingResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<OpenAIEmbeddingResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::ollama::OpenAIEmbeddingResponse,
+    >;
     const ENDPOINT_ID: &'static str = "Embeddings";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -1574,9 +1582,11 @@ impl schematic_runtime::EndpointSpec for EmbeddingsOaiRequest {
 pub struct ListModelsOaiRequest {}
 impl schematic_runtime::EndpointSpec for ListModelsOaiRequest {
     type Api = OllamaOpenAIApi;
-    type Success = OpenAIListModelsResponse;
+    type Success = ::schematic_definitions::ollama::OpenAIListModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<OpenAIListModelsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::ollama::OpenAIListModelsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListModels";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -1807,10 +1817,10 @@ impl OllamaOpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: OpenAIChatCompletionRequest`: the request body
+    /// - `body: ::schematic_definitions::ollama::OpenAIChatCompletionRequest`: the request body
     pub fn chat_completions(
         &self,
-        body: OpenAIChatCompletionRequest,
+        body: ::schematic_definitions::ollama::OpenAIChatCompletionRequest,
     ) -> ChatCompletionsOaiCall<'_> {
         ChatCompletionsOaiCall(self.0.send(ChatCompletionsOaiRequest::new(body)))
     }
@@ -1822,8 +1832,11 @@ impl OllamaOpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: OpenAICompletionRequest`: the request body
-    pub fn completions(&self, body: OpenAICompletionRequest) -> CompletionsOaiCall<'_> {
+    /// - `body: ::schematic_definitions::ollama::OpenAICompletionRequest`: the request body
+    pub fn completions(
+        &self,
+        body: ::schematic_definitions::ollama::OpenAICompletionRequest,
+    ) -> CompletionsOaiCall<'_> {
         CompletionsOaiCall(self.0.send(CompletionsOaiRequest::new(body)))
     }
     /// Generate embeddings for text
@@ -1834,8 +1847,11 @@ impl OllamaOpenAI {
     ///
     /// ## Arguments
     ///
-    /// - `body: OpenAIEmbeddingRequest`: the request body
-    pub fn embeddings(&self, body: OpenAIEmbeddingRequest) -> EmbeddingsOaiCall<'_> {
+    /// - `body: ::schematic_definitions::ollama::OpenAIEmbeddingRequest`: the request body
+    pub fn embeddings(
+        &self,
+        body: ::schematic_definitions::ollama::OpenAIEmbeddingRequest,
+    ) -> EmbeddingsOaiCall<'_> {
         EmbeddingsOaiCall(self.0.send(EmbeddingsOaiRequest::new(body)))
     }
     /// List available models in OpenAI format

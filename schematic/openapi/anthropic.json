@@ -42,14 +42,32 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::anthropic::CreateMessageBody",
+                    "schema_name": "CreateMessageBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "CreateMessageBody"
+              "type_name": "::schematic_definitions::anthropic::CreateMessageBody"
             }
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::anthropic::MessageResponse",
+                    "schema_name": "MessageResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "MessageResponse"
+              "type_name": "::schematic_definitions::anthropic::MessageResponse"
             }
           }
         }
@@ -85,14 +103,32 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::anthropic::CountTokensBody",
+                    "schema_name": "CountTokensBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "CountTokensBody"
+              "type_name": "::schematic_definitions::anthropic::CountTokensBody"
             }
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::anthropic::CountTokensResponse",
+                    "schema_name": "CountTokensResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "CountTokensResponse"
+              "type_name": "::schematic_definitions::anthropic::CountTokensResponse"
             }
           }
         }
@@ -118,8 +154,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::anthropic::ListModelsResponse",
+                    "schema_name": "ListModelsResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "ListModelsResponse"
+              "type_name": "::schematic_definitions::anthropic::ListModelsResponse"
             }
           }
         }
@@ -145,8 +190,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::anthropic::ModelInfo",
+                    "schema_name": "ModelInfo"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "ModelInfo"
+              "type_name": "::schematic_definitions::anthropic::ModelInfo"
             }
           }
         }

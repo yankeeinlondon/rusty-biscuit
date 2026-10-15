@@ -23,3 +23,9 @@ pub struct Pipeline {
     #[serde(default)]
     pub name: Option<String>,
 }
+impl schematic_define::Registration for Pipeline {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Pipeline));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}

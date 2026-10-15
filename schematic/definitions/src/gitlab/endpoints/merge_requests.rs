@@ -1,22 +1,18 @@
+use super::super::*;
 use schematic_define::{
-    ApiResponse, Endpoint,
-    params::{EndpointParams, PaginationStyle, QueryParamType},
+    Endpoint,
+    params::{EndpointParams, QueryParamType},
 };
 
 /// Returns all merge request endpoints (list, get, commits, changes).
-pub fn all() -> Vec<Endpoint> {
-    vec![
-        Endpoint {
-            id: "ListMergeRequests".to_string(),
-            method: schematic_define::RestMethod::Get,
-            path: "/projects/{id}/merge_requests".to_string(),
-            description: "List merge requests with metadata".to_string(),
-            request: None,
-            response: ApiResponse::json_vec_type("MergeRequest"),
-            headers: vec![],
-            params: Some(
-                EndpointParams::default()
-                    .with_pagination(PaginationStyle::gitlab())
+pub fn all(ctx: &mut schematic_define::DefinitionContext) -> Result<Vec<Endpoint>, schematic_define::DefinitionError> {
+    Ok(vec![
+        Endpoint::get("ListMergeRequests", "/projects/{id}/merge_requests")
+                .describes("List merge requests with metadata")
+                .returns_json::<Vec<MergeRequest>>(ctx)
+                .params(EndpointParams::default()
+                    .with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("per_page", QueryParamType::Integer, false, Some("Items per page (default: 100, max: 100)"))
                     .with_query_param(
                         "state",
                         QueryParamType::Enum(vec![
@@ -27,42 +23,21 @@ pub fn all() -> Vec<Endpoint> {
                         ]),
                         false,
                         Some("Filter by merge request state"),
-                    ),
-            ),
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "GetMergeRequest".to_string(),
-            method: schematic_define::RestMethod::Get,
-            path: "/projects/{id}/merge_requests/{merge_request_iid}".to_string(),
-            description: "Get a single merge request by IID".to_string(),
-            request: None,
-            response: ApiResponse::json_type("MergeRequest"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "ListMergeRequestCommits".to_string(),
-            method: schematic_define::RestMethod::Get,
-            path: "/projects/{id}/merge_requests/{merge_request_iid}/commits".to_string(),
-            description: "List commits in a merge request".to_string(),
-            request: None,
-            response: ApiResponse::json_vec_type("Commit"),
-            headers: vec![],
-            params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitlab())),
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "ListMergeRequestChanges".to_string(),
-            method: schematic_define::RestMethod::Get,
-            path: "/projects/{id}/merge_requests/{merge_request_iid}/changes".to_string(),
-            description: "Get merge request with file changes/diffs".to_string(),
-            request: None,
-            response: ApiResponse::json_type("MergeRequestChanges"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-    ]
+                    ),)
+                .build()?,
+        Endpoint::get("GetMergeRequest", "/projects/{id}/merge_requests/{merge_request_iid}")
+                .describes("Get a single merge request by IID")
+                .returns_json::<MergeRequest>(ctx)
+                .build()?,
+        Endpoint::get("ListMergeRequestCommits", "/projects/{id}/merge_requests/{merge_request_iid}/commits")
+                .describes("List commits in a merge request")
+                .returns_json::<Vec<Commit>>(ctx)
+                .params(EndpointParams::default().with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("per_page", QueryParamType::Integer, false, Some("Items per page (default: 100, max: 100)")))
+                .build()?,
+        Endpoint::get("ListMergeRequestChanges", "/projects/{id}/merge_requests/{merge_request_iid}/changes")
+                .describes("Get merge request with file changes/diffs")
+                .returns_json::<MergeRequestChanges>(ctx)
+                .build()?,
+    ])
 }

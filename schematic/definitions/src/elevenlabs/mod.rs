@@ -33,12 +33,13 @@ mod types;
 
 pub use types::*;
 
-use crate::registry::SchemaRegistry;
+use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
+use schematic_define::{DefinitionContext, DefinitionError};
 #[cfg(test)]
 use schematic_define::ApiResponse;
 use schematic_define::{
     ApiKeyEnv, AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping, RestApi, Schema,
-    pagination::{Collection, CursorSource, MoreSignal, PageSize, PaginationException, Strategy},
+    pagination::{Collection, CursorSource, MoreSignal, PageSize, Strategy},
 };
 
 /// Creates a schema registry containing all ElevenLabs response types.
@@ -64,78 +65,71 @@ use schematic_define::{
 /// ```
 #[must_use]
 pub fn openapi_registry() -> SchemaRegistry {
-    SchemaRegistry::new()
-        .register::<CreateSpeechBody>("CreateSpeechBody")
-        .register::<AddSharedVoiceBody>("AddSharedVoiceBody")
-        .register::<CreatePvcVoiceBody>("CreatePvcVoiceBody")
-        .register::<TrainPvcVoiceBody>("TrainPvcVoiceBody")
-        .register::<CreateSoundEffectBody>("CreateSoundEffectBody")
-        .register::<DownloadHistoryBody>("DownloadHistoryBody")
-        .register::<ShareResourceBody>("ShareResourceBody")
-        .register::<UnshareResourceBody>("UnshareResourceBody")
-        .register::<CopyResourceBody>("CopyResourceBody")
-        .register::<CreateApiKeyBody>("CreateApiKeyBody")
-        .register::<UpdateApiKeyBody>("UpdateApiKeyBody")
-        .register::<CreateWebhookBody>("CreateWebhookBody")
-        .register::<UpdateWebhookBody>("UpdateWebhookBody")
-        .register::<SpeechWithTimestampsResponse>("SpeechWithTimestampsResponse")
-        .register::<ListVoicesResponse>("ListVoicesResponse")
-        .register::<VoiceResponseModel>("VoiceResponseModel")
-        .register::<StatusResponse>("StatusResponse")
-        .register::<VoiceSettings>("VoiceSettings")
-        .register::<AddSampleResponse>("AddSampleResponse")
-        .register::<ListSharedVoicesResponse>("ListSharedVoicesResponse")
-        .register::<AddSharedVoiceResponse>("AddSharedVoiceResponse")
-        .register::<Vec<ModelInfo>>("Vec<ModelInfo>")
-        .register::<SingleUseTokenResponse>("SingleUseTokenResponse")
-        .register::<GetHistoryResponse>("GetHistoryResponse")
-        .register::<SpeechHistoryItemResponseModel>("SpeechHistoryItemResponseModel")
-        .register::<UsageStatsResponse>("UsageStatsResponse")
-        .register::<UserResponse>("UserResponse")
-        .register::<SubscriptionModel>("SubscriptionModel")
-        .register::<ResourceResponse>("ResourceResponse")
-        .register::<ListServiceAccountsResponse>("ListServiceAccountsResponse")
-        .register::<ListApiKeysResponse>("ListApiKeysResponse")
-        .register::<CreateApiKeyResponse>("CreateApiKeyResponse")
-        .register::<ListWebhooksResponse>("ListWebhooksResponse")
-        .register::<CreateWebhookResponse>("CreateWebhookResponse")
+    module_group().expect("valid shipped API").registry
 }
 
-/// The REST API's list collections. ElevenLabs has no API-wide default: each
-/// list pages its own way.
-fn elevenlabs_lists() -> Vec<PaginationException> {
-    let history = Strategy::cursor(
-        "start_after_history_item_id",
-        CursorSource::body("last_history_item_id"),
-    )
-    .more_when(MoreSignal::has_more("has_more"))
-    .page_size(PageSize::new("page_size").server_default(100).max(1000))
-    .resumable();
-    let shared_voices = Strategy::page_number("page", MoreSignal::has_more("has_more"))
-        .zero_based()
-        .page_size(PageSize::new("page_size").server_default(30).max(100));
-    vec![
-        PaginationException::new(
-            "GetHistory",
-            Collection::at("history")
-                .item_type("SpeechHistoryItemResponseModel")
-                .paginate(history),
-        ),
-        PaginationException::new(
-            "ListSharedVoices",
-            Collection::at("voices")
-                .item_type("LibraryVoiceResponseModel")
-                .paginate(shared_voices),
-        ),
-        // Definition gap: the definition sends `page_token`, the provider
-        // reference names the input `next_page_token`.
-        PaginationException::new(
-            "ListVoices",
-            Collection::at("voices")
-                .item_type("VoiceResponseModel")
-                .unpaginated(),
-        ),
-    ]
+/// Assemble the APIs and ordered schemas in one destination context.
+pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+    assemble_module_group("::schematic_definitions::elevenlabs", |ctx| {
+        ctx.register::<CreateSpeechBody>()?;
+        ctx.register::<AddSharedVoiceBody>()?;
+        ctx.register::<CreatePvcVoiceBody>()?;
+        ctx.register::<TrainPvcVoiceBody>()?;
+        ctx.register::<CreateSoundEffectBody>()?;
+        ctx.register::<DownloadHistoryBody>()?;
+        ctx.register::<ShareResourceBody>()?;
+        ctx.register::<UnshareResourceBody>()?;
+        ctx.register::<CopyResourceBody>()?;
+        ctx.register::<CreateApiKeyBody>()?;
+        ctx.register::<UpdateApiKeyBody>()?;
+        ctx.register::<CreateWebhookBody>()?;
+        ctx.register::<UpdateWebhookBody>()?;
+        ctx.register::<SpeechWithTimestampsResponse>()?;
+        ctx.register::<ListVoicesResponse>()?;
+        ctx.register::<VoiceResponseModel>()?;
+        ctx.register::<StatusResponse>()?;
+        ctx.register::<VoiceSettings>()?;
+        ctx.register::<AddSampleResponse>()?;
+        ctx.register::<ListSharedVoicesResponse>()?;
+        ctx.register::<AddSharedVoiceResponse>()?;
+        ctx.register::<Vec<ModelInfo>>()?;
+        ctx.register::<SingleUseTokenResponse>()?;
+        ctx.register::<GetHistoryResponse>()?;
+        ctx.register::<SpeechHistoryItemResponseModel>()?;
+        ctx.register::<UsageStatsResponse>()?;
+        ctx.register::<UserResponse>()?;
+        ctx.register::<SubscriptionModel>()?;
+        ctx.register::<ResourceResponse>()?;
+        ctx.register::<ListServiceAccountsResponse>()?;
+        ctx.register::<ListApiKeysResponse>()?;
+        ctx.register::<CreateApiKeyResponse>()?;
+        ctx.register::<ListWebhooksResponse>()?;
+        ctx.register::<CreateWebhookResponse>()?;
+        Ok(vec![build_elevenlabs_rest_api(ctx)?])
+    })
+}
+
+/// History's cursor and shared voices' page number are independent provider strategies.
+fn history_collection() -> Collection {
+    Collection::at("history")
+        .item_type("SpeechHistoryItemResponseModel")
+        .paginate(Strategy::cursor("start_after_history_item_id", CursorSource::body("last_history_item_id"))
+            .more_when(MoreSignal::has_more("has_more"))
+            .page_size(PageSize::new("page_size").server_default(100).max(1000))
+            .resumable())
+}
+
+fn shared_voices_collection() -> Collection {
+    Collection::at("voices")
+        .item_type("LibraryVoiceResponseModel")
+        .paginate(Strategy::page_number("page", MoreSignal::has_more("has_more"))
+            .zero_based()
+            .page_size(PageSize::new("page_size").server_default(30).max(100)))
+}
+
+fn voices_collection() -> Collection {
+    // The definition sends `page_token`, while the reference names `next_page_token`.
+    Collection::at("voices").item_type("VoiceResponseModel").unpaginated()
 }
 
 /// Creates the ElevenLabs REST API definition.
@@ -167,34 +161,28 @@ fn elevenlabs_lists() -> Vec<PaginationException> {
 /// assert_eq!(api.base_url, "https://api.elevenlabs.io");
 /// ```
 pub fn define_elevenlabs_rest_api() -> RestApi {
-    let mut endpoints: Vec<Endpoint> = vec![];
-    endpoints.extend(endpoints::speech::all());
-    endpoints.extend(endpoints::voices::all());
-    endpoints.extend(endpoints::sound_generation::all());
-    endpoints.extend(endpoints::history::all());
-    endpoints.extend(endpoints::workspace::all());
+    module_group().expect("valid shipped API").apis.remove(0)
+}
 
-    RestApi {
-        name: "ElevenLabs".to_string(),
-        description: "ElevenLabs Creative Platform API for text-to-speech, voice management, and sound generation".to_string(),
-        base_url: "https://api.elevenlabs.io".to_string(),
-        docs_url: Some("https://elevenlabs.io/docs/api-reference".to_string()),
-        auth: AuthStrategy::ApiKey {
+fn build_elevenlabs_rest_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
+    let mut endpoints: Vec<Endpoint> = vec![];
+    endpoints.extend(endpoints::speech::all(ctx)?);
+    endpoints.extend(endpoints::voices::all(ctx)?);
+    endpoints.extend(endpoints::sound_generation::all(ctx)?);
+    endpoints.extend(endpoints::history::all(ctx)?);
+    endpoints.extend(endpoints::workspace::all(ctx)?);
+
+    {
+        RestApi::builder(ctx, "ElevenLabs", "https://api.elevenlabs.io")
+            .describes("ElevenLabs Creative Platform API for text-to-speech, voice management, and sound generation")
+            .authentication(AuthStrategy::ApiKey {
             header: "xi-api-key".to_string(),
             value_prefix: None,
-        },
-        auth_policy: None,
-        env_auth: vec![
+        }, vec![
             "ELEVEN_LABS_API_KEY".to_string(),
             "ELEVENLABS_API_KEY".to_string(),
-        ],
-        env_username: None,
-        headers: vec![],
-        endpoints,
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        env_mapping: Some(EnvMapping {
+        ])
+            .env_mapping(EnvMapping {
             api_key: Some(ApiKeyEnv {
                 names: EnvList::new(vec![
                     "ELEVEN_LABS_API_KEY".to_string(),
@@ -203,12 +191,11 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 header: "xi-api-key".to_string(),
             }),
             ..Default::default()
-        }),
-        cross_origin: CrossOrigin::same_origin(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: elevenlabs_lists(),
+        })
+            .docs_url("https://elevenlabs.io/docs/api-reference".to_string())
+            .cross_origin(CrossOrigin::same_origin())
+            .endpoints(endpoints)
+            .build()
     }
 }
 
@@ -630,4 +617,18 @@ mod tests {
 
         assert!(multi.path.contains("multi-stream-input"));
     }
+    #[test]
+    fn typed_module_group_preserves_endpoint_order_and_inline_components() {
+        let group = module_group().unwrap();
+        let ids = |api: &RestApi| api.endpoints.iter().map(|ep| ep.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&group.apis[0]), ["CreateSpeech", "StreamSpeech", "CreateSpeechWithTimestamps", "StreamSpeechWithTimestamps", "ListVoices", "GetVoice", "DeleteVoice", "GetDefaultVoiceSettings", "GetVoiceSettings", "UpdateVoiceSettings", "GetVoiceSampleAudio", "DeleteVoiceSample", "AddVoiceSample", "ListSharedVoices", "AddSharedVoice", "CreatePvcVoice", "UpdatePvcVoice", "TrainPvcVoice", "CreateSoundEffect", "ListModels", "CreateSingleUseToken", "GetHistory", "GetHistoryItem", "DeleteHistoryItem", "GetHistoryItemAudio", "DownloadHistoryItems", "GetUsageStats", "GetUser", "GetUserSubscription", "GetResource", "ShareResource", "UnshareResource", "CopyResourceToWorkspace", "ListServiceAccounts", "ListServiceAccountApiKeys", "CreateApiKey", "UpdateApiKey", "DeleteApiKey", "ListWebhooks", "CreateWebhook", "UpdateWebhook", "DeleteWebhook"]);
+        for api in &group.apis {
+            assert!(group.registry.validate_completeness(api).is_ok());
+        }
+        assert!(group.registry.get("Vec<ModelInfo>").is_none(), "container component must be inline");
+        for id in ["GetHistory", "ListSharedVoices", "ListVoices"] {
+            assert!(group.apis[0].endpoints.iter().find(|ep| ep.id == id).unwrap().pagination.is_some());
+        }
+    }
+
 }

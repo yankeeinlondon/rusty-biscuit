@@ -31,9 +31,11 @@ impl GetRepositoryRequest {
 }
 impl schematic_runtime::EndpointSpec for GetRepositoryRequest {
     type Api = GitHubApi;
-    type Success = RepositoryInfo;
+    type Success = ::schematic_definitions::github::RepositoryInfo;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<RepositoryInfo>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::github::RepositoryInfo,
+    >;
     const ENDPOINT_ID: &'static str = "GetRepository";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -98,9 +100,11 @@ impl GetGitTreeRequest {
 }
 impl schematic_runtime::EndpointSpec for GetGitTreeRequest {
     type Api = GitHubApi;
-    type Success = GitTreeResponse;
+    type Success = ::schematic_definitions::github::GitTreeResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<GitTreeResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::github::GitTreeResponse,
+    >;
     const ENDPOINT_ID: &'static str = "GetGitTree";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -240,9 +244,11 @@ impl ListPullRequestsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListPullRequestsRequest {
     type Api = GitHubApi;
-    type Success = Vec<PullRequestSummary>;
+    type Success = ::std::vec::Vec<::schematic_definitions::github::PullRequestSummary>;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Vec<PullRequestSummary>>;
+    type Decoder = schematic_runtime::Json<
+        ::std::vec::Vec<::schematic_definitions::github::PullRequestSummary>,
+    >;
     const ENDPOINT_ID: &'static str = "ListPullRequests";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -307,9 +313,11 @@ impl ListPullRequestFilesRequest {
 }
 impl schematic_runtime::EndpointSpec for ListPullRequestFilesRequest {
     type Api = GitHubApi;
-    type Success = Vec<PullRequestFile>;
+    type Success = ::std::vec::Vec<::schematic_definitions::github::PullRequestFile>;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Vec<PullRequestFile>>;
+    type Decoder = schematic_runtime::Json<
+        ::std::vec::Vec<::schematic_definitions::github::PullRequestFile>,
+    >;
     const ENDPOINT_ID: &'static str = "ListPullRequestFiles";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -386,9 +394,11 @@ impl ListIssuesRequest {
 }
 impl schematic_runtime::EndpointSpec for ListIssuesRequest {
     type Api = GitHubApi;
-    type Success = Vec<IssueSummary>;
+    type Success = ::std::vec::Vec<::schematic_definitions::github::IssueSummary>;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Vec<IssueSummary>>;
+    type Decoder = schematic_runtime::Json<
+        ::std::vec::Vec<::schematic_definitions::github::IssueSummary>,
+    >;
     const ENDPOINT_ID: &'static str = "ListIssues";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -453,9 +463,11 @@ impl GetIssueRequest {
 }
 impl schematic_runtime::EndpointSpec for GetIssueRequest {
     type Api = GitHubApi;
-    type Success = IssueSummary;
+    type Success = ::schematic_definitions::github::IssueSummary;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<IssueSummary>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::github::IssueSummary,
+    >;
     const ENDPOINT_ID: &'static str = "GetIssue";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -512,9 +524,11 @@ impl ListIssueCommentsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListIssueCommentsRequest {
     type Api = GitHubApi;
-    type Success = Vec<IssueComment>;
+    type Success = ::std::vec::Vec<::schematic_definitions::github::IssueComment>;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Vec<IssueComment>>;
+    type Decoder = schematic_runtime::Json<
+        ::std::vec::Vec<::schematic_definitions::github::IssueComment>,
+    >;
     const ENDPOINT_ID: &'static str = "ListIssueComments";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -571,9 +585,11 @@ impl ListIssueTimelineRequest {
 }
 impl schematic_runtime::EndpointSpec for ListIssueTimelineRequest {
     type Api = GitHubApi;
-    type Success = Vec<TimelineEvent>;
+    type Success = ::std::vec::Vec<::schematic_definitions::github::TimelineEvent>;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Vec<TimelineEvent>>;
+    type Decoder = schematic_runtime::Json<
+        ::std::vec::Vec<::schematic_definitions::github::TimelineEvent>,
+    >;
     const ENDPOINT_ID: &'static str = "ListIssueTimeline";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -623,9 +639,11 @@ impl ListTagsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListTagsRequest {
     type Api = GitHubApi;
-    type Success = Vec<RepoTag>;
+    type Success = ::std::vec::Vec<::schematic_definitions::github::RepoTag>;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Vec<RepoTag>>;
+    type Decoder = schematic_runtime::Json<
+        ::std::vec::Vec<::schematic_definitions::github::RepoTag>,
+    >;
     const ENDPOINT_ID: &'static str = "ListTags";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -674,9 +692,11 @@ impl ListReleasesRequest {
 }
 impl schematic_runtime::EndpointSpec for ListReleasesRequest {
     type Api = GitHubApi;
-    type Success = Vec<Release>;
+    type Success = ::std::vec::Vec<::schematic_definitions::github::Release>;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Vec<Release>>;
+    type Decoder = schematic_runtime::Json<
+        ::std::vec::Vec<::schematic_definitions::github::Release>,
+    >;
     const ENDPOINT_ID: &'static str = "ListReleases";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -732,9 +752,9 @@ impl GetTagReferenceRequest {
 }
 impl schematic_runtime::EndpointSpec for GetTagReferenceRequest {
     type Api = GitHubApi;
-    type Success = GitRef;
+    type Success = ::schematic_definitions::github::GitRef;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<GitRef>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::github::GitRef>;
     const ENDPOINT_ID: &'static str = "GetTagReference";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -791,9 +811,9 @@ impl GetBranchReferenceRequest {
 }
 impl schematic_runtime::EndpointSpec for GetBranchReferenceRequest {
     type Api = GitHubApi;
-    type Success = GitRef;
+    type Success = ::schematic_definitions::github::GitRef;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<GitRef>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::github::GitRef>;
     const ENDPOINT_ID: &'static str = "GetBranchReference";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -850,9 +870,11 @@ impl GetAnnotatedTagRequest {
 }
 impl schematic_runtime::EndpointSpec for GetAnnotatedTagRequest {
     type Api = GitHubApi;
-    type Success = AnnotatedTagObject;
+    type Success = ::schematic_definitions::github::AnnotatedTagObject;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<AnnotatedTagObject>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::github::AnnotatedTagObject,
+    >;
     const ENDPOINT_ID: &'static str = "GetAnnotatedTag";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -929,9 +951,11 @@ impl ListWorkflowRunsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListWorkflowRunsRequest {
     type Api = GitHubApi;
-    type Success = WorkflowRunsResponse;
+    type Success = ::schematic_definitions::github::WorkflowRunsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<WorkflowRunsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::github::WorkflowRunsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListWorkflowRuns";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -1033,9 +1057,11 @@ impl From<String> for ListOrgReposRequest {
 }
 impl schematic_runtime::EndpointSpec for ListOrgReposRequest {
     type Api = GitHubApi;
-    type Success = Vec<RepositoryInfo>;
+    type Success = ::std::vec::Vec<::schematic_definitions::github::RepositoryInfo>;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Vec<RepositoryInfo>>;
+    type Decoder = schematic_runtime::Json<
+        ::std::vec::Vec<::schematic_definitions::github::RepositoryInfo>,
+    >;
     const ENDPOINT_ID: &'static str = "ListOrgRepos";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -1065,7 +1091,7 @@ impl schematic_runtime::EndpointSpec for ListOrgReposRequest {
     }
 }
 impl schematic_runtime::pager::Paginated for ListPullRequestsRequest {
-    type Item = PullRequestSummary;
+    type Item = ::schematic_definitions::github::PullRequestSummary;
     type Kind = schematic_runtime::pager::PageNumberKind;
     type Session = schematic_runtime::pager::NoSession;
     const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
@@ -1099,7 +1125,7 @@ impl schematic_runtime::pager::Paginated for ListPullRequestsRequest {
 }
 impl schematic_runtime::pager::PageSizeKnob for ListPullRequestsRequest {}
 impl schematic_runtime::pager::Paginated for ListPullRequestFilesRequest {
-    type Item = PullRequestFile;
+    type Item = ::schematic_definitions::github::PullRequestFile;
     type Kind = schematic_runtime::pager::PageNumberKind;
     type Session = schematic_runtime::pager::NoSession;
     const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
@@ -1133,7 +1159,7 @@ impl schematic_runtime::pager::Paginated for ListPullRequestFilesRequest {
 }
 impl schematic_runtime::pager::PageSizeKnob for ListPullRequestFilesRequest {}
 impl schematic_runtime::pager::Paginated for ListIssuesRequest {
-    type Item = IssueSummary;
+    type Item = ::schematic_definitions::github::IssueSummary;
     type Kind = schematic_runtime::pager::PageNumberKind;
     type Session = schematic_runtime::pager::NoSession;
     const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
@@ -1167,7 +1193,7 @@ impl schematic_runtime::pager::Paginated for ListIssuesRequest {
 }
 impl schematic_runtime::pager::PageSizeKnob for ListIssuesRequest {}
 impl schematic_runtime::pager::Paginated for ListIssueCommentsRequest {
-    type Item = IssueComment;
+    type Item = ::schematic_definitions::github::IssueComment;
     type Kind = schematic_runtime::pager::PageNumberKind;
     type Session = schematic_runtime::pager::NoSession;
     const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
@@ -1201,7 +1227,7 @@ impl schematic_runtime::pager::Paginated for ListIssueCommentsRequest {
 }
 impl schematic_runtime::pager::PageSizeKnob for ListIssueCommentsRequest {}
 impl schematic_runtime::pager::Paginated for ListIssueTimelineRequest {
-    type Item = TimelineEvent;
+    type Item = ::schematic_definitions::github::TimelineEvent;
     type Kind = schematic_runtime::pager::PageNumberKind;
     type Session = schematic_runtime::pager::NoSession;
     const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
@@ -1235,7 +1261,7 @@ impl schematic_runtime::pager::Paginated for ListIssueTimelineRequest {
 }
 impl schematic_runtime::pager::PageSizeKnob for ListIssueTimelineRequest {}
 impl schematic_runtime::pager::Paginated for ListTagsRequest {
-    type Item = RepoTag;
+    type Item = ::schematic_definitions::github::RepoTag;
     type Kind = schematic_runtime::pager::PageNumberKind;
     type Session = schematic_runtime::pager::NoSession;
     const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
@@ -1269,7 +1295,7 @@ impl schematic_runtime::pager::Paginated for ListTagsRequest {
 }
 impl schematic_runtime::pager::PageSizeKnob for ListTagsRequest {}
 impl schematic_runtime::pager::Paginated for ListReleasesRequest {
-    type Item = Release;
+    type Item = ::schematic_definitions::github::Release;
     type Kind = schematic_runtime::pager::PageNumberKind;
     type Session = schematic_runtime::pager::NoSession;
     const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {
@@ -1341,7 +1367,7 @@ impl schematic_runtime::pager::Paginated for ListWorkflowRunsRequest {
 impl schematic_runtime::pager::PageSizeKnob for ListWorkflowRunsRequest {}
 impl schematic_runtime::pager::HasTotal for ListWorkflowRunsRequest {}
 impl schematic_runtime::pager::Paginated for ListOrgReposRequest {
-    type Item = RepositoryInfo;
+    type Item = ::schematic_definitions::github::RepositoryInfo;
     type Kind = schematic_runtime::pager::PageNumberKind;
     type Session = schematic_runtime::pager::NoSession;
     const STRATEGY: &'static schematic_runtime::pager::Strategy = &schematic_runtime::pager::spec::Strategy {

@@ -1,184 +1,82 @@
-use schematic_define::{ApiRequest, ApiResponse, Endpoint, RestMethod};
+use super::super::*;
+use schematic_define::{DefinitionContext, DefinitionError};
+use schematic_define::{Endpoint, RestMethod};
 
-pub fn all() -> Vec<Endpoint> {
-    vec![
-        Endpoint {
-            id: "GetUsageStats".to_string(),
-            method: RestMethod::Get,
-            path: "/v1/usage/character-stats".to_string(),
-            description: "Gets usage statistics".to_string(),
-            request: None,
-            response: ApiResponse::json_type("UsageStatsResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "GetUser".to_string(),
-            method: RestMethod::Get,
-            path: "/v1/user".to_string(),
-            description: "Gets current user information".to_string(),
-            request: None,
-            response: ApiResponse::json_type("UserResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "GetUserSubscription".to_string(),
-            method: RestMethod::Get,
-            path: "/v1/user/subscription".to_string(),
-            description: "Gets user subscription information".to_string(),
-            request: None,
-            response: ApiResponse::json_type("SubscriptionModel"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "GetResource".to_string(),
-            method: RestMethod::Get,
-            path: "/v1/workspace/resources/{resource_id}".to_string(),
-            description: "Gets resource information".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ResourceResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "ShareResource".to_string(),
-            method: RestMethod::Post,
-            path: "/v1/workspace/resources/{resource_id}/share".to_string(),
-            description: "Shares a resource".to_string(),
-            request: Some(ApiRequest::json_type("ShareResourceBody")),
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "UnshareResource".to_string(),
-            method: RestMethod::Post,
-            path: "/v1/workspace/resources/{resource_id}/unshare".to_string(),
-            description: "Removes sharing for a resource".to_string(),
-            request: Some(ApiRequest::json_type("UnshareResourceBody")),
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "CopyResourceToWorkspace".to_string(),
-            method: RestMethod::Post,
-            path: "/v1/workspace/resources/{resource_id}/copy-to-workspace".to_string(),
-            description: "Copies a resource to another workspace".to_string(),
-            request: Some(ApiRequest::json_type("CopyResourceBody")),
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "ListServiceAccounts".to_string(),
-            method: RestMethod::Get,
-            path: "/v1/service-accounts".to_string(),
-            description: "Lists service accounts".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ListServiceAccountsResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "ListServiceAccountApiKeys".to_string(),
-            method: RestMethod::Get,
-            path: "/v1/service-accounts/{service_account_user_id}/api-keys".to_string(),
-            description: "Lists API keys for a service account".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ListApiKeysResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "CreateApiKey".to_string(),
-            method: RestMethod::Post,
-            path: "/v1/service-accounts/{service_account_user_id}/api-keys".to_string(),
-            description: "Creates an API key for a service account".to_string(),
-            request: Some(ApiRequest::json_type("CreateApiKeyBody")),
-            response: ApiResponse::json_type("CreateApiKeyResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "UpdateApiKey".to_string(),
-            method: RestMethod::Patch,
-            path: "/v1/service-accounts/{service_account_user_id}/api-keys/{api_key_id}"
-                .to_string(),
-            description: "Updates an API key".to_string(),
-            request: Some(ApiRequest::json_type("UpdateApiKeyBody")),
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "DeleteApiKey".to_string(),
-            method: RestMethod::Delete,
-            path: "/v1/service-accounts/{service_account_user_id}/api-keys/{api_key_id}"
-                .to_string(),
-            description: "Deletes an API key".to_string(),
-            request: None,
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "ListWebhooks".to_string(),
-            method: RestMethod::Get,
-            path: "/v1/workspace/webhooks".to_string(),
-            description: "Lists webhooks".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ListWebhooksResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "CreateWebhook".to_string(),
-            method: RestMethod::Post,
-            path: "/v1/workspace/webhooks".to_string(),
-            description: "Creates a webhook".to_string(),
-            request: Some(ApiRequest::json_type("CreateWebhookBody")),
-            response: ApiResponse::json_type("CreateWebhookResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "UpdateWebhook".to_string(),
-            method: RestMethod::Patch,
-            path: "/v1/workspace/webhooks/{webhook_id}".to_string(),
-            description: "Updates a webhook".to_string(),
-            request: Some(ApiRequest::json_type("UpdateWebhookBody")),
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "DeleteWebhook".to_string(),
-            method: RestMethod::Delete,
-            path: "/v1/workspace/webhooks/{webhook_id}".to_string(),
-            description: "Deletes a webhook".to_string(),
-            request: None,
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-    ]
+pub fn all(ctx: &mut DefinitionContext) -> Result<Vec<Endpoint>, DefinitionError> {
+    Ok(vec![
+        Endpoint::new("GetUsageStats", RestMethod::Get, "/v1/usage/character-stats")
+            .describes("Gets usage statistics")
+            .returns_json::<UsageStatsResponse>(ctx)
+            .build()?,
+        Endpoint::new("GetUser", RestMethod::Get, "/v1/user")
+            .describes("Gets current user information")
+            .returns_json::<UserResponse>(ctx)
+            .build()?,
+        Endpoint::new("GetUserSubscription", RestMethod::Get, "/v1/user/subscription")
+            .describes("Gets user subscription information")
+            .returns_json::<SubscriptionModel>(ctx)
+            .build()?,
+        Endpoint::new("GetResource", RestMethod::Get, "/v1/workspace/resources/{resource_id}")
+            .describes("Gets resource information")
+            .returns_json::<ResourceResponse>(ctx)
+            .build()?,
+        Endpoint::new("ShareResource", RestMethod::Post, "/v1/workspace/resources/{resource_id}/share")
+            .describes("Shares a resource")
+            .request_json::<ShareResourceBody>(ctx)
+            .returns_json::<StatusResponse>(ctx)
+            .build()?,
+        Endpoint::new("UnshareResource", RestMethod::Post, "/v1/workspace/resources/{resource_id}/unshare")
+            .describes("Removes sharing for a resource")
+            .request_json::<UnshareResourceBody>(ctx)
+            .returns_json::<StatusResponse>(ctx)
+            .build()?,
+        Endpoint::new("CopyResourceToWorkspace", RestMethod::Post, "/v1/workspace/resources/{resource_id}/copy-to-workspace")
+            .describes("Copies a resource to another workspace")
+            .request_json::<CopyResourceBody>(ctx)
+            .returns_json::<StatusResponse>(ctx)
+            .build()?,
+        Endpoint::new("ListServiceAccounts", RestMethod::Get, "/v1/service-accounts")
+            .describes("Lists service accounts")
+            .returns_json::<ListServiceAccountsResponse>(ctx)
+            .build()?,
+        Endpoint::new("ListServiceAccountApiKeys", RestMethod::Get, "/v1/service-accounts/{service_account_user_id}/api-keys")
+            .describes("Lists API keys for a service account")
+            .returns_json::<ListApiKeysResponse>(ctx)
+            .build()?,
+        Endpoint::new("CreateApiKey", RestMethod::Post, "/v1/service-accounts/{service_account_user_id}/api-keys")
+            .describes("Creates an API key for a service account")
+            .request_json::<CreateApiKeyBody>(ctx)
+            .returns_json::<CreateApiKeyResponse>(ctx)
+            .build()?,
+        Endpoint::new("UpdateApiKey", RestMethod::Patch, "/v1/service-accounts/{service_account_user_id}/api-keys/{api_key_id}"
+                )
+            .describes("Updates an API key")
+            .request_json::<UpdateApiKeyBody>(ctx)
+            .returns_json::<StatusResponse>(ctx)
+            .build()?,
+        Endpoint::new("DeleteApiKey", RestMethod::Delete, "/v1/service-accounts/{service_account_user_id}/api-keys/{api_key_id}"
+                )
+            .describes("Deletes an API key")
+            .returns_json::<StatusResponse>(ctx)
+            .build()?,
+        Endpoint::new("ListWebhooks", RestMethod::Get, "/v1/workspace/webhooks")
+            .describes("Lists webhooks")
+            .returns_json::<ListWebhooksResponse>(ctx)
+            .build()?,
+        Endpoint::new("CreateWebhook", RestMethod::Post, "/v1/workspace/webhooks")
+            .describes("Creates a webhook")
+            .request_json::<CreateWebhookBody>(ctx)
+            .returns_json::<CreateWebhookResponse>(ctx)
+            .build()?,
+        Endpoint::new("UpdateWebhook", RestMethod::Patch, "/v1/workspace/webhooks/{webhook_id}")
+            .describes("Updates a webhook")
+            .request_json::<UpdateWebhookBody>(ctx)
+            .returns_json::<StatusResponse>(ctx)
+            .build()?,
+        Endpoint::new("DeleteWebhook", RestMethod::Delete, "/v1/workspace/webhooks/{webhook_id}")
+            .describes("Deletes a webhook")
+            .returns_json::<StatusResponse>(ctx)
+            .build()?,
+    ])
+
 }

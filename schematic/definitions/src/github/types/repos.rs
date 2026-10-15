@@ -91,6 +91,13 @@ pub struct RepositoryInfo {
     #[serde(default)]
     pub topics: Vec<String>,
 }
+impl schematic_define::Registration for RepositoryInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(RepositoryInfo));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// License information for a repository.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -126,6 +133,13 @@ pub struct GitTreeResponse {
     #[serde(default)]
     pub truncated: bool,
 }
+impl schematic_define::Registration for GitTreeResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(GitTreeResponse));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// A single entry in a Git tree.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

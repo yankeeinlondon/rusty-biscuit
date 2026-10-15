@@ -19,9 +19,12 @@ mod types;
 
 pub use types::*;
 
-use crate::registry::SchemaRegistry;
+#[cfg(test)]
+use schematic_define::{ApiResponse, AuthStrategy};
+use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
+use schematic_define::{DefinitionContext, DefinitionError};
 use schematic_define::{
-    ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EndpointParams, EnvMapping, QueryParamType,
+    CrossOrigin, Endpoint, EndpointParams, EnvMapping, QueryParamType,
     RestApi, RestMethod,
 };
 
@@ -48,14 +51,21 @@ use schematic_define::{
 /// ```
 #[must_use]
 pub fn openapi_registry() -> SchemaRegistry {
-    SchemaRegistry::new()
-        .register::<StatusResponse>("StatusResponse")
-        .register::<GetModelResponse>("GetModelResponse")
-        .register::<GetStateResponse>("GetStateResponse")
-        .register::<InputOutputListResponse>("InputOutputListResponse")
-        .register::<PowerOptionsResponse>("PowerOptionsResponse")
-        .register::<BrightnessResponse>("BrightnessResponse")
-        .register::<DisplayModeListResponse>("DisplayModeListResponse")
+    module_group().expect("valid shipped API").registry
+}
+
+/// Assemble the APIs and ordered schemas in one destination context.
+pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+    assemble_module_group("::schematic_definitions::eversolo", |ctx| {
+        ctx.register::<StatusResponse>()?;
+        ctx.register::<GetModelResponse>()?;
+        ctx.register::<GetStateResponse>()?;
+        ctx.register::<InputOutputListResponse>()?;
+        ctx.register::<PowerOptionsResponse>()?;
+        ctx.register::<BrightnessResponse>()?;
+        ctx.register::<DisplayModeListResponse>()?;
+        Ok(vec![build_eversolo_api(ctx)?])
+    })
 }
 
 /// Creates the Eversolo DMP-A8 API definition.
@@ -73,411 +83,255 @@ pub fn openapi_registry() -> SchemaRegistry {
 /// assert_eq!(api.endpoints.len(), 24);
 /// ```
 pub fn define_eversolo_api() -> RestApi {
-    RestApi {
-        name: "Eversolo".to_string(),
-        description: "Eversolo DMP-A8 local-network HTTP control API (Zidoo lineage)".to_string(),
-        base_url: "http://192.168.1.1:9529".to_string(),
-        docs_url: Some("https://eversolo.com/Support/developer/".to_string()),
-        auth: AuthStrategy::None,
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        headers: vec![],
-        endpoints: build_endpoints(),
-        module_path: Some("eversolo".to_string()),
-        request_suffix: None,
-        version: None,
-        env_mapping: Some(EnvMapping::default()),
-        cross_origin: CrossOrigin::same_origin(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
+    module_group().expect("valid shipped API").apis.remove(0)
+}
+
+fn build_eversolo_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
+    {
+        let endpoints = build_endpoints(ctx)?;
+        RestApi::builder(ctx, "Eversolo", "http://192.168.1.1:9529")
+            .describes("Eversolo DMP-A8 local-network HTTP control API (Zidoo lineage)")
+            .no_auth()
+            .env_mapping(EnvMapping::default())
+            .docs_url("https://eversolo.com/Support/developer/".to_string())
+            .module_path("eversolo".to_string())
+            .cross_origin(CrossOrigin::same_origin())
+            .endpoints(endpoints)
+            .build()
     }
 }
 
-fn build_endpoints() -> Vec<Endpoint> {
+fn build_endpoints(ctx: &mut DefinitionContext) -> Result<Vec<Endpoint>, DefinitionError> {
     let mut eps = Vec::with_capacity(24);
-    eps.extend(device_endpoints());
-    eps.extend(remote_endpoints());
-    eps.extend(music_endpoints());
-    eps.extend(power_endpoints());
-    eps.extend(system_endpoints());
-    eps
+    eps.extend(device_endpoints(ctx)?);
+    eps.extend(remote_endpoints(ctx)?);
+    eps.extend(music_endpoints(ctx)?);
+    eps.extend(power_endpoints(ctx)?);
+    eps.extend(system_endpoints(ctx)?);
+    Ok(eps)
 }
 
 // =============================================================================
 // Device Identity
 // =============================================================================
 
-fn device_endpoints() -> Vec<Endpoint> {
-    vec![Endpoint {
-        id: "DeviceGetModel".to_string(),
-        method: RestMethod::Get,
-        path: "/ZidooControlCenter/getModel".to_string(),
-        description: "Get device model, firmware, and network information".to_string(),
-        request: None,
-        response: ApiResponse::json_type("GetModelResponse"),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None, cross_origin: None, pagination: None,
-    }]
+fn device_endpoints(ctx: &mut DefinitionContext) -> Result<Vec<Endpoint>, DefinitionError> {
+    Ok(vec![Endpoint::new("DeviceGetModel", RestMethod::Get, "/ZidooControlCenter/getModel")
+            .describes("Get device model, firmware, and network information")
+            .returns_json::<GetModelResponse>(ctx)
+            .build()?])
+
 }
 
 // =============================================================================
 // Remote Control
 // =============================================================================
 
-fn remote_endpoints() -> Vec<Endpoint> {
-    vec![
-        Endpoint {
-            id: "RemoteSendKey".to_string(),
-            method: RestMethod::Get,
-            path: "/ZidooControlCenter/RemoteControl/sendkey".to_string(),
-            description: "Send a remote control key command to the device".to_string(),
-            request: None,
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: Some(EndpointParams::default().with_query_param(
+fn remote_endpoints(ctx: &mut DefinitionContext) -> Result<Vec<Endpoint>, DefinitionError> {
+    Ok(vec![
+        Endpoint::new("RemoteSendKey", RestMethod::Get, "/ZidooControlCenter/RemoteControl/sendkey")
+            .describes("Send a remote control key command to the device")
+            .returns_json::<StatusResponse>(ctx)
+            .params(EndpointParams::default().with_query_param(
                 "key",
                 QueryParamType::String,
                 true,
                 Some("Remote key constant (e.g., Key.VolumeUp, Key.MediaPlay, Key.PowerOff)"),
-            )),
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "RemoteInputText".to_string(),
-            method: RestMethod::Get,
-            path: "/ZidooControlCenter/RemoteControl/inputtext".to_string(),
-            description: "Send text input to the device".to_string(),
-            request: None,
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: Some(EndpointParams::default().with_query_param(
+            ))
+            .build()?,
+        Endpoint::new("RemoteInputText", RestMethod::Get, "/ZidooControlCenter/RemoteControl/inputtext")
+            .describes("Send text input to the device")
+            .returns_json::<StatusResponse>(ctx)
+            .params(EndpointParams::default().with_query_param(
                 "text",
                 QueryParamType::String,
                 true,
                 Some("Text string to input"),
-            )),
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-    ]
+            ))
+            .build()?,
+    ])
+
 }
 
 // =============================================================================
 // Music Control
 // =============================================================================
 
-fn music_endpoints() -> Vec<Endpoint> {
-    vec![
-        Endpoint {
-            id: "MusicGetState".to_string(),
-            method: RestMethod::Get,
-            path: "/ZidooMusicControl/v2/getState".to_string(),
-            description: "Get current playback state, track info, and volume".to_string(),
-            request: None,
-            response: ApiResponse::json_type("GetStateResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "MusicPlayOrPause".to_string(),
-            method: RestMethod::Get,
-            path: "/ZidooMusicControl/v2/playOrPause".to_string(),
-            description: "Toggle play/pause on the current track".to_string(),
-            request: None,
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "MusicPlayNext".to_string(),
-            method: RestMethod::Get,
-            path: "/ZidooMusicControl/v2/playNext".to_string(),
-            description: "Skip to the next track".to_string(),
-            request: None,
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "MusicPlayLast".to_string(),
-            method: RestMethod::Get,
-            path: "/ZidooMusicControl/v2/playLast".to_string(),
-            description: "Go back to the previous track".to_string(),
-            request: None,
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "MusicSeekTo".to_string(),
-            method: RestMethod::Get,
-            path: "/ZidooMusicControl/v2/seekTo".to_string(),
-            description: "Seek to a position in the current track".to_string(),
-            request: None,
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: Some(EndpointParams::default().with_query_param(
+fn music_endpoints(ctx: &mut DefinitionContext) -> Result<Vec<Endpoint>, DefinitionError> {
+    Ok(vec![
+        Endpoint::new("MusicGetState", RestMethod::Get, "/ZidooMusicControl/v2/getState")
+            .describes("Get current playback state, track info, and volume")
+            .returns_json::<GetStateResponse>(ctx)
+            .build()?,
+        Endpoint::new("MusicPlayOrPause", RestMethod::Get, "/ZidooMusicControl/v2/playOrPause")
+            .describes("Toggle play/pause on the current track")
+            .returns_json::<StatusResponse>(ctx)
+            .build()?,
+        Endpoint::new("MusicPlayNext", RestMethod::Get, "/ZidooMusicControl/v2/playNext")
+            .describes("Skip to the next track")
+            .returns_json::<StatusResponse>(ctx)
+            .build()?,
+        Endpoint::new("MusicPlayLast", RestMethod::Get, "/ZidooMusicControl/v2/playLast")
+            .describes("Go back to the previous track")
+            .returns_json::<StatusResponse>(ctx)
+            .build()?,
+        Endpoint::new("MusicSeekTo", RestMethod::Get, "/ZidooMusicControl/v2/seekTo")
+            .describes("Seek to a position in the current track")
+            .returns_json::<StatusResponse>(ctx)
+            .params(EndpointParams::default().with_query_param(
                 "time",
                 QueryParamType::Integer,
                 true,
                 Some("Target position in milliseconds"),
-            )),
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "MusicGetInputOutputList".to_string(),
-            method: RestMethod::Get,
-            path: "/ZidooMusicControl/v2/getInputAndOutputList".to_string(),
-            description: "List available audio inputs and outputs".to_string(),
-            request: None,
-            response: ApiResponse::json_type("InputOutputListResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "MusicSetInput".to_string(),
-            method: RestMethod::Get,
-            path: "/ZidooMusicControl/v2/setInputList".to_string(),
-            description: "Set the active audio input".to_string(),
-            request: None,
-            response: ApiResponse::json_type("InputOutputListResponse"),
-            headers: vec![],
-            params: Some(EndpointParams::default().with_query_param(
+            ))
+            .build()?,
+        Endpoint::new("MusicGetInputOutputList", RestMethod::Get, "/ZidooMusicControl/v2/getInputAndOutputList")
+            .describes("List available audio inputs and outputs")
+            .returns_json::<InputOutputListResponse>(ctx)
+            .build()?,
+        Endpoint::new("MusicSetInput", RestMethod::Get, "/ZidooMusicControl/v2/setInputList")
+            .describes("Set the active audio input")
+            .returns_json::<InputOutputListResponse>(ctx)
+            .params(EndpointParams::default().with_query_param(
                 "tag",
                 QueryParamType::String,
                 true,
                 Some("Input tag from getInputAndOutputList"),
-            )),
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "MusicSetOutput".to_string(),
-            method: RestMethod::Get,
-            path: "/ZidooMusicControl/v2/setOutInputList".to_string(),
-            description: "Set the active audio output".to_string(),
-            request: None,
-            response: ApiResponse::json_type("InputOutputListResponse"),
-            headers: vec![],
-            params: Some(EndpointParams::default().with_query_param(
+            ))
+            .build()?,
+        Endpoint::new("MusicSetOutput", RestMethod::Get, "/ZidooMusicControl/v2/setOutInputList")
+            .describes("Set the active audio output")
+            .returns_json::<InputOutputListResponse>(ctx)
+            .params(EndpointParams::default().with_query_param(
                 "tag",
                 QueryParamType::String,
                 true,
                 Some("Output tag from getInputAndOutputList"),
-            )),
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "MusicSetVolume".to_string(),
-            method: RestMethod::Get,
-            path: "/ZidooMusicControl/v2/setDevicesVolume".to_string(),
-            description: "Set the absolute volume level".to_string(),
-            request: None,
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: Some(EndpointParams::default().with_query_param(
+            ))
+            .build()?,
+        Endpoint::new("MusicSetVolume", RestMethod::Get, "/ZidooMusicControl/v2/setDevicesVolume")
+            .describes("Set the absolute volume level")
+            .returns_json::<StatusResponse>(ctx)
+            .params(EndpointParams::default().with_query_param(
                 "volume",
                 QueryParamType::Integer,
                 true,
                 Some("Volume level (0 to maxVolume)"),
-            )),
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "MusicSetMute".to_string(),
-            method: RestMethod::Get,
-            path: "/ZidooMusicControl/v2/setMuteVolume".to_string(),
-            description: "Set or clear mute state".to_string(),
-            request: None,
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            // Keep integer here: the wire contract is `0` / `1` rather than `true` / `false`.
-            params: Some(EndpointParams::default().with_query_param(
+            ))
+            .build()?,
+        Endpoint::new("MusicSetMute", RestMethod::Get, "/ZidooMusicControl/v2/setMuteVolume")
+            .describes("Set or clear mute state")
+            .returns_json::<StatusResponse>(ctx)
+            .params(EndpointParams::default().with_query_param(
                 "isMute",
                 QueryParamType::Integer,
                 true,
                 Some("Mute state: 0 = unmuted, 1 = muted"),
-            )),
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-    ]
+            ))
+            .build()?,
+    ])
+
 }
 
 // =============================================================================
 // Power Control
 // =============================================================================
 
-fn power_endpoints() -> Vec<Endpoint> {
-    vec![
-        Endpoint {
-            id: "PowerGetOptions".to_string(),
-            method: RestMethod::Get,
-            path: "/ZidooMusicControl/v2/getPowerOption".to_string(),
-            description: "Get available power options (shutdown, reboot, etc.)".to_string(),
-            request: None,
-            response: ApiResponse::json_type("PowerOptionsResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "PowerSetOption".to_string(),
-            method: RestMethod::Get,
-            path: "/ZidooMusicControl/v2/setPowerOption".to_string(),
-            description: "Execute a power action (poweroff, reboot, screen, timeshutdown)"
-                .to_string(),
-            request: None,
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: Some(EndpointParams::default().with_query_param(
+fn power_endpoints(ctx: &mut DefinitionContext) -> Result<Vec<Endpoint>, DefinitionError> {
+    Ok(vec![
+        Endpoint::new("PowerGetOptions", RestMethod::Get, "/ZidooMusicControl/v2/getPowerOption")
+            .describes("Get available power options (shutdown, reboot, etc.)")
+            .returns_json::<PowerOptionsResponse>(ctx)
+            .build()?,
+        Endpoint::new("PowerSetOption", RestMethod::Get, "/ZidooMusicControl/v2/setPowerOption")
+            .describes("Execute a power action (poweroff, reboot, screen, timeshutdown)"
+                )
+            .returns_json::<StatusResponse>(ctx)
+            .params(EndpointParams::default().with_query_param(
                 "tag",
                 QueryParamType::String,
                 true,
                 Some("Power option tag (poweroff, reboot, screen, timeshutdown)"),
-            )),
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-    ]
+            ))
+            .build()?,
+    ])
+
 }
 
 // =============================================================================
 // System Settings (community-discovered, undocumented)
 // =============================================================================
 
-fn system_endpoints() -> Vec<Endpoint> {
-    vec![
-        Endpoint {
-            id: "SystemGetScreenBrightness".to_string(),
-            method: RestMethod::Get,
-            path: "/SystemSettings/displaySettings/getScreenBrightness".to_string(),
-            description: "Get current screen brightness level (community-discovered)".to_string(),
-            request: None,
-            response: ApiResponse::json_type("BrightnessResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "SystemSetScreenBrightness".to_string(),
-            method: RestMethod::Get,
-            path: "/SystemSettings/displaySettings/setScreenBrightness".to_string(),
-            description: "Set screen brightness level (community-discovered)".to_string(),
-            request: None,
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: Some(EndpointParams::default().with_query_param(
+fn system_endpoints(ctx: &mut DefinitionContext) -> Result<Vec<Endpoint>, DefinitionError> {
+    Ok(vec![
+        Endpoint::new("SystemGetScreenBrightness", RestMethod::Get, "/SystemSettings/displaySettings/getScreenBrightness")
+            .describes("Get current screen brightness level (community-discovered)")
+            .returns_json::<BrightnessResponse>(ctx)
+            .build()?,
+        Endpoint::new("SystemSetScreenBrightness", RestMethod::Get, "/SystemSettings/displaySettings/setScreenBrightness")
+            .describes("Set screen brightness level (community-discovered)")
+            .returns_json::<StatusResponse>(ctx)
+            .params(EndpointParams::default().with_query_param(
                 "index",
                 QueryParamType::Integer,
                 true,
                 Some("Brightness level index"),
-            )),
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "SystemGetKnobBrightness".to_string(),
-            method: RestMethod::Get,
-            path: "/SystemSettings/displaySettings/getKnobBrightness".to_string(),
-            description: "Get current knob LED brightness level (community-discovered)".to_string(),
-            request: None,
-            response: ApiResponse::json_type("BrightnessResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "SystemSetKnobBrightness".to_string(),
-            method: RestMethod::Get,
-            path: "/SystemSettings/displaySettings/setKnobBrightness".to_string(),
-            description: "Set knob LED brightness level (community-discovered)".to_string(),
-            request: None,
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: Some(EndpointParams::default().with_query_param(
+            ))
+            .build()?,
+        Endpoint::new("SystemGetKnobBrightness", RestMethod::Get, "/SystemSettings/displaySettings/getKnobBrightness")
+            .describes("Get current knob LED brightness level (community-discovered)")
+            .returns_json::<BrightnessResponse>(ctx)
+            .build()?,
+        Endpoint::new("SystemSetKnobBrightness", RestMethod::Get, "/SystemSettings/displaySettings/setKnobBrightness")
+            .describes("Set knob LED brightness level (community-discovered)")
+            .returns_json::<StatusResponse>(ctx)
+            .params(EndpointParams::default().with_query_param(
                 "index",
                 QueryParamType::Integer,
                 true,
                 Some("Brightness level index"),
-            )),
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "SystemGetVuModeList".to_string(),
-            method: RestMethod::Get,
-            path: "/SystemSettings/displaySettings/getVUModeList".to_string(),
-            description: "List available VU meter display modes (community-discovered)".to_string(),
-            request: None,
-            response: ApiResponse::json_type("DisplayModeListResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "SystemSetVuMode".to_string(),
-            method: RestMethod::Get,
-            path: "/SystemSettings/displaySettings/setVUMode".to_string(),
-            description: "Set the VU meter display mode (community-discovered)".to_string(),
-            request: None,
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: Some(EndpointParams::default().with_query_param(
+            ))
+            .build()?,
+        Endpoint::new("SystemGetVuModeList", RestMethod::Get, "/SystemSettings/displaySettings/getVUModeList")
+            .describes("List available VU meter display modes (community-discovered)")
+            .returns_json::<DisplayModeListResponse>(ctx)
+            .build()?,
+        Endpoint::new("SystemSetVuMode", RestMethod::Get, "/SystemSettings/displaySettings/setVUMode")
+            .describes("Set the VU meter display mode (community-discovered)")
+            .returns_json::<StatusResponse>(ctx)
+            .params(EndpointParams::default().with_query_param(
                 "index",
                 QueryParamType::Integer,
                 true,
                 Some("VU mode index from getVUModeList"),
-            )),
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "SystemGetSpectrumModeList".to_string(),
-            method: RestMethod::Get,
-            path: "/SystemSettings/displaySettings/getSpPlayModeList".to_string(),
-            description: "List available spectrum display modes (community-discovered)".to_string(),
-            request: None,
-            response: ApiResponse::json_type("DisplayModeListResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "SystemSetSpectrumMode".to_string(),
-            method: RestMethod::Get,
-            path: "/SystemSettings/displaySettings/setSpPlayModeList".to_string(),
-            description: "Set the spectrum display mode (community-discovered)".to_string(),
-            request: None,
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: Some(EndpointParams::default().with_query_param(
+            ))
+            .build()?,
+        Endpoint::new("SystemGetSpectrumModeList", RestMethod::Get, "/SystemSettings/displaySettings/getSpPlayModeList")
+            .describes("List available spectrum display modes (community-discovered)")
+            .returns_json::<DisplayModeListResponse>(ctx)
+            .build()?,
+        Endpoint::new("SystemSetSpectrumMode", RestMethod::Get, "/SystemSettings/displaySettings/setSpPlayModeList")
+            .describes("Set the spectrum display mode (community-discovered)")
+            .returns_json::<StatusResponse>(ctx)
+            .params(EndpointParams::default().with_query_param(
                 "index",
                 QueryParamType::Integer,
                 true,
                 Some("Spectrum mode index from getSpPlayModeList"),
-            )),
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "SystemChangeVuDisplay".to_string(),
-            method: RestMethod::Get,
-            path: "/ZidooMusicControl/v2/changVUDisplay".to_string(),
-            description: "Toggle VU display open/close (community-discovered)".to_string(),
-            request: None,
-            response: ApiResponse::json_type("StatusResponse"),
-            headers: vec![],
-            params: Some(EndpointParams::default().with_query_param(
+            ))
+            .build()?,
+        Endpoint::new("SystemChangeVuDisplay", RestMethod::Get, "/ZidooMusicControl/v2/changVUDisplay")
+            .describes("Toggle VU display open/close (community-discovered)")
+            .returns_json::<StatusResponse>(ctx)
+            .params(EndpointParams::default().with_query_param(
                 "openType",
                 QueryParamType::Integer,
                 true,
                 Some("Display open type"),
-            )),
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-    ]
+            ))
+            .build()?,
+    ])
+
 }
 
 #[cfg(test)]
@@ -772,26 +626,36 @@ mod tests {
 
     #[test]
     fn device_group_has_1_endpoint() {
-        assert_eq!(device_endpoints().len(), 1);
+        assert_eq!(device_endpoints(&mut DefinitionContext::types_in("::schematic_definitions::eversolo")).unwrap().len(), 1);
     }
 
     #[test]
     fn remote_group_has_2_endpoints() {
-        assert_eq!(remote_endpoints().len(), 2);
+        assert_eq!(remote_endpoints(&mut DefinitionContext::types_in("::schematic_definitions::eversolo")).unwrap().len(), 2);
     }
 
     #[test]
     fn music_group_has_10_endpoints() {
-        assert_eq!(music_endpoints().len(), 10);
+        assert_eq!(music_endpoints(&mut DefinitionContext::types_in("::schematic_definitions::eversolo")).unwrap().len(), 10);
     }
 
     #[test]
     fn power_group_has_2_endpoints() {
-        assert_eq!(power_endpoints().len(), 2);
+        assert_eq!(power_endpoints(&mut DefinitionContext::types_in("::schematic_definitions::eversolo")).unwrap().len(), 2);
     }
 
     #[test]
     fn system_group_has_9_endpoints() {
-        assert_eq!(system_endpoints().len(), 9);
+        assert_eq!(system_endpoints(&mut DefinitionContext::types_in("::schematic_definitions::eversolo")).unwrap().len(), 9);
     }
+    #[test]
+    fn typed_module_group_preserves_endpoint_order_and_inline_components() {
+        let group = module_group().unwrap();
+        let ids = |api: &RestApi| api.endpoints.iter().map(|ep| ep.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&group.apis[0]), ["DeviceGetModel", "RemoteSendKey", "RemoteInputText", "MusicGetState", "MusicPlayOrPause", "MusicPlayNext", "MusicPlayLast", "MusicSeekTo", "MusicGetInputOutputList", "MusicSetInput", "MusicSetOutput", "MusicSetVolume", "MusicSetMute", "PowerGetOptions", "PowerSetOption", "SystemGetScreenBrightness", "SystemSetScreenBrightness", "SystemGetKnobBrightness", "SystemSetKnobBrightness", "SystemGetVuModeList", "SystemSetVuMode", "SystemGetSpectrumModeList", "SystemSetSpectrumMode", "SystemChangeVuDisplay"]);
+        for api in &group.apis {
+            assert!(group.registry.validate_completeness(api).is_ok());
+        }
+    }
+
 }

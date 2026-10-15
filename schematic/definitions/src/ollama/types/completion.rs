@@ -82,6 +82,13 @@ pub struct Message {
     pub images: Option<Vec<String>>,
 }
 
+impl schematic_define::Registration for Message {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("Message");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Request body for the `/api/generate` endpoint.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct GenerateBody {
@@ -122,6 +129,13 @@ pub struct GenerateBody {
     /// Context from a previous response to continue generation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<Vec<i64>>,
+}
+
+impl schematic_define::Registration for GenerateBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("GenerateBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// Response from the `/api/generate` endpoint (non-streaming).
@@ -194,6 +208,13 @@ pub struct ChatBody {
     pub format: Option<String>,
 }
 
+impl schematic_define::Registration for ChatBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ChatBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Response from the `/api/chat` endpoint (non-streaming).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChatResponse {
@@ -252,11 +273,25 @@ pub struct EmbeddingsBody {
     pub keep_alive: Option<String>,
 }
 
+impl schematic_define::Registration for EmbeddingsBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("EmbeddingsBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Response from the `/api/embeddings` endpoint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct EmbeddingsResponse {
     /// The embedding vector.
     pub embedding: Vec<f64>,
+}
+
+impl schematic_define::Registration for EmbeddingsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("EmbeddingsResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// A streaming chunk from the `/api/chat` endpoint.

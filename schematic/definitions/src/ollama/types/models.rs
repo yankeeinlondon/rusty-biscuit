@@ -29,6 +29,13 @@ pub struct ModelDetails {
     pub family: Option<String>,
 }
 
+impl schematic_define::Registration for ModelDetails {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ModelDetails");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// A model in the list response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelInfo {
@@ -52,11 +59,25 @@ pub struct ModelInfo {
     pub details: Option<ModelDetails>,
 }
 
+impl schematic_define::Registration for ModelInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ModelInfo");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Response from the `/api/tags` endpoint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListModelsResponse {
     /// List of available models.
     pub models: Vec<ModelInfo>,
+}
+
+impl schematic_define::Registration for ListModelsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ListModelsResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// Request body for the `/api/show` endpoint.
@@ -68,6 +89,13 @@ pub struct ShowModelBody {
     /// Include verbose details.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verbose: Option<bool>,
+}
+
+impl schematic_define::Registration for ShowModelBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ShowModelBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// Response from the `/api/show` endpoint.
@@ -106,6 +134,13 @@ pub struct ShowModelResponse {
     pub capabilities: Option<Vec<String>>,
 }
 
+impl schematic_define::Registration for ShowModelResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ShowModelResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Request body for the `/api/pull` endpoint.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PullModelBody {
@@ -119,6 +154,13 @@ pub struct PullModelBody {
     /// Allow insecure connections.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub insecure: Option<bool>,
+}
+
+impl schematic_define::Registration for PullModelBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("PullModelBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// Progress response during model pull (streaming).
@@ -155,6 +197,13 @@ pub struct PushModelBody {
     pub insecure: Option<bool>,
 }
 
+impl schematic_define::Registration for PushModelBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("PushModelBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Progress response during model push (streaming).
 pub type PushModelProgress = PullModelProgress;
 
@@ -168,11 +217,25 @@ pub struct CopyModelBody {
     pub destination: String,
 }
 
+impl schematic_define::Registration for CopyModelBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CopyModelBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Request body for the `/api/delete` endpoint.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DeleteModelBody {
     /// Model name to delete.
     pub name: String,
+}
+
+impl schematic_define::Registration for DeleteModelBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("DeleteModelBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// Request body for the `/api/create` endpoint.
@@ -192,6 +255,13 @@ pub struct CreateModelBody {
     /// Enable streaming progress updates (default: true).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
+}
+
+impl schematic_define::Registration for CreateModelBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CreateModelBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// Progress response during model creation (streaming).
@@ -232,11 +302,25 @@ pub struct RunningModel {
     pub size_vram: Option<u64>,
 }
 
+impl schematic_define::Registration for RunningModel {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("RunningModel");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Response from the `/api/ps` endpoint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListRunningModelsResponse {
     /// List of currently running models.
     pub models: Vec<RunningModel>,
+}
+
+impl schematic_define::Registration for ListRunningModelsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ListRunningModelsResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 #[cfg(test)]

@@ -82,9 +82,11 @@ impl Default for ArtificialAnalysisData {
 pub struct ListLlmModelsRequest {}
 impl schematic_runtime::EndpointSpec for ListLlmModelsRequest {
     type Api = ArtificialAnalysisDataApi;
-    type Success = LlmModelsResponse;
+    type Success = ::schematic_definitions::artificial_analysis::LlmModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<LlmModelsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::artificial_analysis::LlmModelsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListLlmModels";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -131,9 +133,11 @@ impl ListTextToImageModelsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListTextToImageModelsRequest {
     type Api = ArtificialAnalysisDataApi;
-    type Success = MediaModelsResponse;
+    type Success = ::schematic_definitions::artificial_analysis::MediaModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<MediaModelsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::artificial_analysis::MediaModelsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListTextToImageModels";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -168,9 +172,11 @@ impl schematic_runtime::EndpointSpec for ListTextToImageModelsRequest {
 pub struct ListImageEditingModelsRequest {}
 impl schematic_runtime::EndpointSpec for ListImageEditingModelsRequest {
     type Api = ArtificialAnalysisDataApi;
-    type Success = MediaModelsResponse;
+    type Success = ::schematic_definitions::artificial_analysis::MediaModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<MediaModelsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::artificial_analysis::MediaModelsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListImageEditingModels";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -202,9 +208,11 @@ impl schematic_runtime::EndpointSpec for ListImageEditingModelsRequest {
 pub struct ListTextToSpeechModelsRequest {}
 impl schematic_runtime::EndpointSpec for ListTextToSpeechModelsRequest {
     type Api = ArtificialAnalysisDataApi;
-    type Success = MediaModelsResponse;
+    type Success = ::schematic_definitions::artificial_analysis::MediaModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<MediaModelsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::artificial_analysis::MediaModelsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListTextToSpeechModels";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -251,9 +259,11 @@ impl ListTextToVideoModelsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListTextToVideoModelsRequest {
     type Api = ArtificialAnalysisDataApi;
-    type Success = MediaModelsResponse;
+    type Success = ::schematic_definitions::artificial_analysis::MediaModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<MediaModelsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::artificial_analysis::MediaModelsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListTextToVideoModels";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -303,9 +313,11 @@ impl ListImageToVideoModelsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListImageToVideoModelsRequest {
     type Api = ArtificialAnalysisDataApi;
-    type Success = MediaModelsResponse;
+    type Success = ::schematic_definitions::artificial_analysis::MediaModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<MediaModelsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::artificial_analysis::MediaModelsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListImageToVideoModels";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -792,36 +804,40 @@ impl Default for ArtificialAnalysisCritPt {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::artificial_analysis::{EvaluateCritPtRequest, CritPtEvaluateBody};
+/// use schematic_schema::artificial_analysis::EvaluateCritPtRequest;
 ///
-/// let body = CritPtEvaluateBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::artificial_analysis::CritPtEvaluateBody = Default::default();
 /// let request = EvaluateCritPtRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EvaluateCritPtRequest {
     /// Request body
-    pub body: CritPtEvaluateBody,
+    pub body: ::schematic_definitions::artificial_analysis::CritPtEvaluateBody,
 }
 impl EvaluateCritPtRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CritPtEvaluateBody) -> Self {
+    pub fn new(
+        body: ::schematic_definitions::artificial_analysis::CritPtEvaluateBody,
+    ) -> Self {
         Self { body }
     }
 }
-impl From<CritPtEvaluateBody> for EvaluateCritPtRequest {
-    fn from(body: CritPtEvaluateBody) -> Self {
+impl From<::schematic_definitions::artificial_analysis::CritPtEvaluateBody>
+for EvaluateCritPtRequest {
+    fn from(
+        body: ::schematic_definitions::artificial_analysis::CritPtEvaluateBody,
+    ) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for EvaluateCritPtRequest {
     type Api = ArtificialAnalysisCritPtApi;
-    type Success = CritPtEvaluateResponse;
+    type Success = ::schematic_definitions::artificial_analysis::CritPtEvaluateResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<CritPtEvaluateResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::artificial_analysis::CritPtEvaluateResponse,
+    >;
     const ENDPOINT_ID: &'static str = "EvaluateCritPt";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -910,8 +926,11 @@ impl ArtificialAnalysisCritPt {
     ///
     /// ## Arguments
     ///
-    /// - `body: CritPtEvaluateBody`: the request body
-    pub fn evaluate_crit_pt(&self, body: CritPtEvaluateBody) -> EvaluateCritPtCall<'_> {
+    /// - `body: ::schematic_definitions::artificial_analysis::CritPtEvaluateBody`: the request body
+    pub fn evaluate_crit_pt(
+        &self,
+        body: ::schematic_definitions::artificial_analysis::CritPtEvaluateBody,
+    ) -> EvaluateCritPtCall<'_> {
         EvaluateCritPtCall(self.0.send(EvaluateCritPtRequest::new(body)))
     }
 }

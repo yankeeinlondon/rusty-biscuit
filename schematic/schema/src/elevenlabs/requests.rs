@@ -8,12 +8,9 @@ use super::{ElevenLabs, ElevenLabsApi};
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::elevenlabs::{CreateSpeechRequest, CreateSpeechBody};
+/// use schematic_schema::elevenlabs::CreateSpeechRequest;
 ///
-/// let body = CreateSpeechBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::elevenlabs::CreateSpeechBody = Default::default();
 /// let request = CreateSpeechRequest::new("voice_id_value", body)
 ///;
 /// ```
@@ -22,11 +19,14 @@ pub struct CreateSpeechRequest {
     /// Path parameter: voice_id
     pub voice_id: String,
     /// Request body
-    pub body: CreateSpeechBody,
+    pub body: ::schematic_definitions::elevenlabs::CreateSpeechBody,
 }
 impl CreateSpeechRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(voice_id: impl Into<String>, body: CreateSpeechBody) -> Self {
+    pub fn new(
+        voice_id: impl Into<String>,
+        body: ::schematic_definitions::elevenlabs::CreateSpeechBody,
+    ) -> Self {
         Self {
             voice_id: voice_id.into(),
             body,
@@ -69,12 +69,9 @@ impl schematic_runtime::EndpointSpec for CreateSpeechRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::elevenlabs::{StreamSpeechRequest, CreateSpeechBody};
+/// use schematic_schema::elevenlabs::StreamSpeechRequest;
 ///
-/// let body = CreateSpeechBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::elevenlabs::CreateSpeechBody = Default::default();
 /// let request = StreamSpeechRequest::new("voice_id_value", body)
 ///;
 /// ```
@@ -83,11 +80,14 @@ pub struct StreamSpeechRequest {
     /// Path parameter: voice_id
     pub voice_id: String,
     /// Request body
-    pub body: CreateSpeechBody,
+    pub body: ::schematic_definitions::elevenlabs::CreateSpeechBody,
 }
 impl StreamSpeechRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(voice_id: impl Into<String>, body: CreateSpeechBody) -> Self {
+    pub fn new(
+        voice_id: impl Into<String>,
+        body: ::schematic_definitions::elevenlabs::CreateSpeechBody,
+    ) -> Self {
         Self {
             voice_id: voice_id.into(),
             body,
@@ -131,12 +131,9 @@ impl schematic_runtime::EndpointSpec for StreamSpeechRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::elevenlabs::{CreateSpeechWithTimestampsRequest, CreateSpeechBody};
+/// use schematic_schema::elevenlabs::CreateSpeechWithTimestampsRequest;
 ///
-/// let body = CreateSpeechBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::elevenlabs::CreateSpeechBody = Default::default();
 /// let request = CreateSpeechWithTimestampsRequest::new("voice_id_value", body)
 ///;
 /// ```
@@ -145,11 +142,14 @@ pub struct CreateSpeechWithTimestampsRequest {
     /// Path parameter: voice_id
     pub voice_id: String,
     /// Request body
-    pub body: CreateSpeechBody,
+    pub body: ::schematic_definitions::elevenlabs::CreateSpeechBody,
 }
 impl CreateSpeechWithTimestampsRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(voice_id: impl Into<String>, body: CreateSpeechBody) -> Self {
+    pub fn new(
+        voice_id: impl Into<String>,
+        body: ::schematic_definitions::elevenlabs::CreateSpeechBody,
+    ) -> Self {
         Self {
             voice_id: voice_id.into(),
             body,
@@ -158,9 +158,11 @@ impl CreateSpeechWithTimestampsRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateSpeechWithTimestampsRequest {
     type Api = ElevenLabsApi;
-    type Success = SpeechWithTimestampsResponse;
+    type Success = ::schematic_definitions::elevenlabs::SpeechWithTimestampsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<SpeechWithTimestampsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::SpeechWithTimestampsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CreateSpeechWithTimestamps";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -193,12 +195,9 @@ impl schematic_runtime::EndpointSpec for CreateSpeechWithTimestampsRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::elevenlabs::{StreamSpeechWithTimestampsRequest, CreateSpeechBody};
+/// use schematic_schema::elevenlabs::StreamSpeechWithTimestampsRequest;
 ///
-/// let body = CreateSpeechBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::elevenlabs::CreateSpeechBody = Default::default();
 /// let request = StreamSpeechWithTimestampsRequest::new("voice_id_value", body)
 ///;
 /// ```
@@ -207,11 +206,14 @@ pub struct StreamSpeechWithTimestampsRequest {
     /// Path parameter: voice_id
     pub voice_id: String,
     /// Request body
-    pub body: CreateSpeechBody,
+    pub body: ::schematic_definitions::elevenlabs::CreateSpeechBody,
 }
 impl StreamSpeechWithTimestampsRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(voice_id: impl Into<String>, body: CreateSpeechBody) -> Self {
+    pub fn new(
+        voice_id: impl Into<String>,
+        body: ::schematic_definitions::elevenlabs::CreateSpeechBody,
+    ) -> Self {
         Self {
             voice_id: voice_id.into(),
             body,
@@ -220,9 +222,11 @@ impl StreamSpeechWithTimestampsRequest {
 }
 impl schematic_runtime::EndpointSpec for StreamSpeechWithTimestampsRequest {
     type Api = ElevenLabsApi;
-    type Success = SpeechWithTimestampsResponse;
+    type Success = ::schematic_definitions::elevenlabs::SpeechWithTimestampsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<SpeechWithTimestampsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::SpeechWithTimestampsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "StreamSpeechWithTimestamps";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -290,9 +294,11 @@ impl ListVoicesRequest {
 }
 impl schematic_runtime::EndpointSpec for ListVoicesRequest {
     type Api = ElevenLabsApi;
-    type Success = ListVoicesResponse;
+    type Success = ::schematic_definitions::elevenlabs::ListVoicesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListVoicesResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::ListVoicesResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListVoices";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -351,9 +357,11 @@ impl From<String> for GetVoiceRequest {
 }
 impl schematic_runtime::EndpointSpec for GetVoiceRequest {
     type Api = ElevenLabsApi;
-    type Success = VoiceResponseModel;
+    type Success = ::schematic_definitions::elevenlabs::VoiceResponseModel;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VoiceResponseModel>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::VoiceResponseModel,
+    >;
     const ENDPOINT_ID: &'static str = "GetVoice";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -408,9 +416,11 @@ impl From<String> for DeleteVoiceRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteVoiceRequest {
     type Api = ElevenLabsApi;
-    type Success = StatusResponse;
+    type Success = ::schematic_definitions::elevenlabs::StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<StatusResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::StatusResponse,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteVoice";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -444,9 +454,11 @@ impl schematic_runtime::EndpointSpec for DeleteVoiceRequest {
 pub struct GetDefaultVoiceSettingsRequest {}
 impl schematic_runtime::EndpointSpec for GetDefaultVoiceSettingsRequest {
     type Api = ElevenLabsApi;
-    type Success = VoiceSettings;
+    type Success = ::schematic_definitions::elevenlabs::VoiceSettings;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VoiceSettings>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::VoiceSettings,
+    >;
     const ENDPOINT_ID: &'static str = "GetDefaultVoiceSettings";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -499,9 +511,11 @@ impl From<String> for GetVoiceSettingsRequest {
 }
 impl schematic_runtime::EndpointSpec for GetVoiceSettingsRequest {
     type Api = ElevenLabsApi;
-    type Success = VoiceSettings;
+    type Success = ::schematic_definitions::elevenlabs::VoiceSettings;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<VoiceSettings>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::VoiceSettings,
+    >;
     const ENDPOINT_ID: &'static str = "GetVoiceSettings";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -526,12 +540,9 @@ impl schematic_runtime::EndpointSpec for GetVoiceSettingsRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::elevenlabs::{UpdateVoiceSettingsRequest, VoiceSettings};
+/// use schematic_schema::elevenlabs::UpdateVoiceSettingsRequest;
 ///
-/// let body = VoiceSettings {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::elevenlabs::VoiceSettings = Default::default();
 /// let request = UpdateVoiceSettingsRequest::new("voice_id_value", body)
 ///;
 /// ```
@@ -540,11 +551,14 @@ pub struct UpdateVoiceSettingsRequest {
     /// Path parameter: voice_id
     pub voice_id: String,
     /// Request body
-    pub body: VoiceSettings,
+    pub body: ::schematic_definitions::elevenlabs::VoiceSettings,
 }
 impl UpdateVoiceSettingsRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(voice_id: impl Into<String>, body: VoiceSettings) -> Self {
+    pub fn new(
+        voice_id: impl Into<String>,
+        body: ::schematic_definitions::elevenlabs::VoiceSettings,
+    ) -> Self {
         Self {
             voice_id: voice_id.into(),
             body,
@@ -553,9 +567,11 @@ impl UpdateVoiceSettingsRequest {
 }
 impl schematic_runtime::EndpointSpec for UpdateVoiceSettingsRequest {
     type Api = ElevenLabsApi;
-    type Success = StatusResponse;
+    type Success = ::schematic_definitions::elevenlabs::StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<StatusResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::StatusResponse,
+    >;
     const ENDPOINT_ID: &'static str = "UpdateVoiceSettings";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -662,9 +678,11 @@ impl DeleteVoiceSampleRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteVoiceSampleRequest {
     type Api = ElevenLabsApi;
-    type Success = StatusResponse;
+    type Success = ::schematic_definitions::elevenlabs::StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<StatusResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::StatusResponse,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteVoiceSample";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -743,9 +761,11 @@ impl AddVoiceSampleRequest {
 }
 impl schematic_runtime::EndpointSpec for AddVoiceSampleRequest {
     type Api = ElevenLabsApi;
-    type Success = AddSampleResponse;
+    type Success = ::schematic_definitions::elevenlabs::AddSampleResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<AddSampleResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::AddSampleResponse,
+    >;
     const ENDPOINT_ID: &'static str = "AddVoiceSample";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -779,9 +799,11 @@ impl schematic_runtime::EndpointSpec for AddVoiceSampleRequest {
 pub struct ListSharedVoicesRequest {}
 impl schematic_runtime::EndpointSpec for ListSharedVoicesRequest {
     type Api = ElevenLabsApi;
-    type Success = ListSharedVoicesResponse;
+    type Success = ::schematic_definitions::elevenlabs::ListSharedVoicesResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListSharedVoicesResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::ListSharedVoicesResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListSharedVoices";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -804,12 +826,9 @@ impl schematic_runtime::EndpointSpec for ListSharedVoicesRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::elevenlabs::{AddSharedVoiceRequest, AddSharedVoiceBody};
+/// use schematic_schema::elevenlabs::AddSharedVoiceRequest;
 ///
-/// let body = AddSharedVoiceBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::elevenlabs::AddSharedVoiceBody = Default::default();
 /// let request = AddSharedVoiceRequest::new("public_user_id_value", "voice_id_value", body)
 ///;
 /// ```
@@ -820,14 +839,14 @@ pub struct AddSharedVoiceRequest {
     /// Path parameter: voice_id
     pub voice_id: String,
     /// Request body
-    pub body: AddSharedVoiceBody,
+    pub body: ::schematic_definitions::elevenlabs::AddSharedVoiceBody,
 }
 impl AddSharedVoiceRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         public_user_id: impl Into<String>,
         voice_id: impl Into<String>,
-        body: AddSharedVoiceBody,
+        body: ::schematic_definitions::elevenlabs::AddSharedVoiceBody,
     ) -> Self {
         Self {
             public_user_id: public_user_id.into(),
@@ -838,9 +857,11 @@ impl AddSharedVoiceRequest {
 }
 impl schematic_runtime::EndpointSpec for AddSharedVoiceRequest {
     type Api = ElevenLabsApi;
-    type Success = AddSharedVoiceResponse;
+    type Success = ::schematic_definitions::elevenlabs::AddSharedVoiceResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<AddSharedVoiceResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::AddSharedVoiceResponse,
+    >;
     const ENDPOINT_ID: &'static str = "AddSharedVoice";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -873,36 +894,36 @@ impl schematic_runtime::EndpointSpec for AddSharedVoiceRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::elevenlabs::{CreatePvcVoiceRequest, CreatePvcVoiceBody};
+/// use schematic_schema::elevenlabs::CreatePvcVoiceRequest;
 ///
-/// let body = CreatePvcVoiceBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::elevenlabs::CreatePvcVoiceBody = Default::default();
 /// let request = CreatePvcVoiceRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreatePvcVoiceRequest {
     /// Request body
-    pub body: CreatePvcVoiceBody,
+    pub body: ::schematic_definitions::elevenlabs::CreatePvcVoiceBody,
 }
 impl CreatePvcVoiceRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreatePvcVoiceBody) -> Self {
+    pub fn new(body: ::schematic_definitions::elevenlabs::CreatePvcVoiceBody) -> Self {
         Self { body }
     }
 }
-impl From<CreatePvcVoiceBody> for CreatePvcVoiceRequest {
-    fn from(body: CreatePvcVoiceBody) -> Self {
+impl From<::schematic_definitions::elevenlabs::CreatePvcVoiceBody>
+for CreatePvcVoiceRequest {
+    fn from(body: ::schematic_definitions::elevenlabs::CreatePvcVoiceBody) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreatePvcVoiceRequest {
     type Api = ElevenLabsApi;
-    type Success = AddSharedVoiceResponse;
+    type Success = ::schematic_definitions::elevenlabs::AddSharedVoiceResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<AddSharedVoiceResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::AddSharedVoiceResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CreatePvcVoice";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -932,12 +953,9 @@ impl schematic_runtime::EndpointSpec for CreatePvcVoiceRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::elevenlabs::{UpdatePvcVoiceRequest, CreatePvcVoiceBody};
+/// use schematic_schema::elevenlabs::UpdatePvcVoiceRequest;
 ///
-/// let body = CreatePvcVoiceBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::elevenlabs::CreatePvcVoiceBody = Default::default();
 /// let request = UpdatePvcVoiceRequest::new("voice_id_value", body)
 ///;
 /// ```
@@ -946,11 +964,14 @@ pub struct UpdatePvcVoiceRequest {
     /// Path parameter: voice_id
     pub voice_id: String,
     /// Request body
-    pub body: CreatePvcVoiceBody,
+    pub body: ::schematic_definitions::elevenlabs::CreatePvcVoiceBody,
 }
 impl UpdatePvcVoiceRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(voice_id: impl Into<String>, body: CreatePvcVoiceBody) -> Self {
+    pub fn new(
+        voice_id: impl Into<String>,
+        body: ::schematic_definitions::elevenlabs::CreatePvcVoiceBody,
+    ) -> Self {
         Self {
             voice_id: voice_id.into(),
             body,
@@ -959,9 +980,11 @@ impl UpdatePvcVoiceRequest {
 }
 impl schematic_runtime::EndpointSpec for UpdatePvcVoiceRequest {
     type Api = ElevenLabsApi;
-    type Success = StatusResponse;
+    type Success = ::schematic_definitions::elevenlabs::StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<StatusResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::StatusResponse,
+    >;
     const ENDPOINT_ID: &'static str = "UpdatePvcVoice";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -993,12 +1016,9 @@ impl schematic_runtime::EndpointSpec for UpdatePvcVoiceRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::elevenlabs::{TrainPvcVoiceRequest, TrainPvcVoiceBody};
+/// use schematic_schema::elevenlabs::TrainPvcVoiceRequest;
 ///
-/// let body = TrainPvcVoiceBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::elevenlabs::TrainPvcVoiceBody = Default::default();
 /// let request = TrainPvcVoiceRequest::new("voice_id_value", body)
 ///;
 /// ```
@@ -1007,11 +1027,14 @@ pub struct TrainPvcVoiceRequest {
     /// Path parameter: voice_id
     pub voice_id: String,
     /// Request body
-    pub body: TrainPvcVoiceBody,
+    pub body: ::schematic_definitions::elevenlabs::TrainPvcVoiceBody,
 }
 impl TrainPvcVoiceRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(voice_id: impl Into<String>, body: TrainPvcVoiceBody) -> Self {
+    pub fn new(
+        voice_id: impl Into<String>,
+        body: ::schematic_definitions::elevenlabs::TrainPvcVoiceBody,
+    ) -> Self {
         Self {
             voice_id: voice_id.into(),
             body,
@@ -1020,9 +1043,11 @@ impl TrainPvcVoiceRequest {
 }
 impl schematic_runtime::EndpointSpec for TrainPvcVoiceRequest {
     type Api = ElevenLabsApi;
-    type Success = StatusResponse;
+    type Success = ::schematic_definitions::elevenlabs::StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<StatusResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::StatusResponse,
+    >;
     const ENDPOINT_ID: &'static str = "TrainPvcVoice";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -1054,28 +1079,28 @@ impl schematic_runtime::EndpointSpec for TrainPvcVoiceRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::elevenlabs::{CreateSoundEffectRequest, CreateSoundEffectBody};
+/// use schematic_schema::elevenlabs::CreateSoundEffectRequest;
 ///
-/// let body = CreateSoundEffectBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::elevenlabs::CreateSoundEffectBody = Default::default();
 /// let request = CreateSoundEffectRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateSoundEffectRequest {
     /// Request body
-    pub body: CreateSoundEffectBody,
+    pub body: ::schematic_definitions::elevenlabs::CreateSoundEffectBody,
 }
 impl CreateSoundEffectRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateSoundEffectBody) -> Self {
+    pub fn new(
+        body: ::schematic_definitions::elevenlabs::CreateSoundEffectBody,
+    ) -> Self {
         Self { body }
     }
 }
-impl From<CreateSoundEffectBody> for CreateSoundEffectRequest {
-    fn from(body: CreateSoundEffectBody) -> Self {
+impl From<::schematic_definitions::elevenlabs::CreateSoundEffectBody>
+for CreateSoundEffectRequest {
+    fn from(body: ::schematic_definitions::elevenlabs::CreateSoundEffectBody) -> Self {
         Self { body }
     }
 }
@@ -1122,9 +1147,11 @@ impl schematic_runtime::EndpointSpec for CreateSoundEffectRequest {
 pub struct ListModelsRequest {}
 impl schematic_runtime::EndpointSpec for ListModelsRequest {
     type Api = ElevenLabsApi;
-    type Success = Vec<ModelInfo>;
+    type Success = ::std::vec::Vec<::schematic_definitions::elevenlabs::ModelInfo>;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Vec<ModelInfo>>;
+    type Decoder = schematic_runtime::Json<
+        ::std::vec::Vec<::schematic_definitions::elevenlabs::ModelInfo>,
+    >;
     const ENDPOINT_ID: &'static str = "ListModels";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -1179,9 +1206,11 @@ impl From<String> for CreateSingleUseTokenRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateSingleUseTokenRequest {
     type Api = ElevenLabsApi;
-    type Success = SingleUseTokenResponse;
+    type Success = ::schematic_definitions::elevenlabs::SingleUseTokenResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<SingleUseTokenResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::SingleUseTokenResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CreateSingleUseToken";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -1215,9 +1244,11 @@ impl schematic_runtime::EndpointSpec for CreateSingleUseTokenRequest {
 pub struct GetHistoryRequest {}
 impl schematic_runtime::EndpointSpec for GetHistoryRequest {
     type Api = ElevenLabsApi;
-    type Success = GetHistoryResponse;
+    type Success = ::schematic_definitions::elevenlabs::GetHistoryResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<GetHistoryResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::GetHistoryResponse,
+    >;
     const ENDPOINT_ID: &'static str = "GetHistory";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -1272,9 +1303,11 @@ impl From<String> for GetHistoryItemRequest {
 }
 impl schematic_runtime::EndpointSpec for GetHistoryItemRequest {
     type Api = ElevenLabsApi;
-    type Success = SpeechHistoryItemResponseModel;
+    type Success = ::schematic_definitions::elevenlabs::SpeechHistoryItemResponseModel;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<SpeechHistoryItemResponseModel>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::SpeechHistoryItemResponseModel,
+    >;
     const ENDPOINT_ID: &'static str = "GetHistoryItem";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -1331,9 +1364,11 @@ impl From<String> for DeleteHistoryItemRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteHistoryItemRequest {
     type Api = ElevenLabsApi;
-    type Success = StatusResponse;
+    type Success = ::schematic_definitions::elevenlabs::StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<StatusResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::StatusResponse,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteHistoryItem";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -1418,28 +1453,26 @@ impl schematic_runtime::EndpointSpec for GetHistoryItemAudioRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::elevenlabs::{DownloadHistoryItemsRequest, DownloadHistoryBody};
+/// use schematic_schema::elevenlabs::DownloadHistoryItemsRequest;
 ///
-/// let body = DownloadHistoryBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::elevenlabs::DownloadHistoryBody = Default::default();
 /// let request = DownloadHistoryItemsRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DownloadHistoryItemsRequest {
     /// Request body
-    pub body: DownloadHistoryBody,
+    pub body: ::schematic_definitions::elevenlabs::DownloadHistoryBody,
 }
 impl DownloadHistoryItemsRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: DownloadHistoryBody) -> Self {
+    pub fn new(body: ::schematic_definitions::elevenlabs::DownloadHistoryBody) -> Self {
         Self { body }
     }
 }
-impl From<DownloadHistoryBody> for DownloadHistoryItemsRequest {
-    fn from(body: DownloadHistoryBody) -> Self {
+impl From<::schematic_definitions::elevenlabs::DownloadHistoryBody>
+for DownloadHistoryItemsRequest {
+    fn from(body: ::schematic_definitions::elevenlabs::DownloadHistoryBody) -> Self {
         Self { body }
     }
 }
@@ -1486,9 +1519,11 @@ impl schematic_runtime::EndpointSpec for DownloadHistoryItemsRequest {
 pub struct GetUsageStatsRequest {}
 impl schematic_runtime::EndpointSpec for GetUsageStatsRequest {
     type Api = ElevenLabsApi;
-    type Success = UsageStatsResponse;
+    type Success = ::schematic_definitions::elevenlabs::UsageStatsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<UsageStatsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::UsageStatsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "GetUsageStats";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -1520,9 +1555,11 @@ impl schematic_runtime::EndpointSpec for GetUsageStatsRequest {
 pub struct GetUserRequest {}
 impl schematic_runtime::EndpointSpec for GetUserRequest {
     type Api = ElevenLabsApi;
-    type Success = UserResponse;
+    type Success = ::schematic_definitions::elevenlabs::UserResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<UserResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::UserResponse,
+    >;
     const ENDPOINT_ID: &'static str = "GetUser";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -1554,9 +1591,11 @@ impl schematic_runtime::EndpointSpec for GetUserRequest {
 pub struct GetUserSubscriptionRequest {}
 impl schematic_runtime::EndpointSpec for GetUserSubscriptionRequest {
     type Api = ElevenLabsApi;
-    type Success = SubscriptionModel;
+    type Success = ::schematic_definitions::elevenlabs::SubscriptionModel;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<SubscriptionModel>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::SubscriptionModel,
+    >;
     const ENDPOINT_ID: &'static str = "GetUserSubscription";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -1611,9 +1650,11 @@ impl From<String> for GetResourceRequest {
 }
 impl schematic_runtime::EndpointSpec for GetResourceRequest {
     type Api = ElevenLabsApi;
-    type Success = ResourceResponse;
+    type Success = ::schematic_definitions::elevenlabs::ResourceResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ResourceResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::ResourceResponse,
+    >;
     const ENDPOINT_ID: &'static str = "GetResource";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -1639,12 +1680,9 @@ impl schematic_runtime::EndpointSpec for GetResourceRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::elevenlabs::{ShareResourceRequest, ShareResourceBody};
+/// use schematic_schema::elevenlabs::ShareResourceRequest;
 ///
-/// let body = ShareResourceBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::elevenlabs::ShareResourceBody = Default::default();
 /// let request = ShareResourceRequest::new("resource_id_value", body)
 ///;
 /// ```
@@ -1653,11 +1691,14 @@ pub struct ShareResourceRequest {
     /// Path parameter: resource_id
     pub resource_id: String,
     /// Request body
-    pub body: ShareResourceBody,
+    pub body: ::schematic_definitions::elevenlabs::ShareResourceBody,
 }
 impl ShareResourceRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(resource_id: impl Into<String>, body: ShareResourceBody) -> Self {
+    pub fn new(
+        resource_id: impl Into<String>,
+        body: ::schematic_definitions::elevenlabs::ShareResourceBody,
+    ) -> Self {
         Self {
             resource_id: resource_id.into(),
             body,
@@ -1666,9 +1707,11 @@ impl ShareResourceRequest {
 }
 impl schematic_runtime::EndpointSpec for ShareResourceRequest {
     type Api = ElevenLabsApi;
-    type Success = StatusResponse;
+    type Success = ::schematic_definitions::elevenlabs::StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<StatusResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::StatusResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ShareResource";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -1701,12 +1744,9 @@ impl schematic_runtime::EndpointSpec for ShareResourceRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::elevenlabs::{UnshareResourceRequest, UnshareResourceBody};
+/// use schematic_schema::elevenlabs::UnshareResourceRequest;
 ///
-/// let body = UnshareResourceBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::elevenlabs::UnshareResourceBody = Default::default();
 /// let request = UnshareResourceRequest::new("resource_id_value", body)
 ///;
 /// ```
@@ -1715,11 +1755,14 @@ pub struct UnshareResourceRequest {
     /// Path parameter: resource_id
     pub resource_id: String,
     /// Request body
-    pub body: UnshareResourceBody,
+    pub body: ::schematic_definitions::elevenlabs::UnshareResourceBody,
 }
 impl UnshareResourceRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(resource_id: impl Into<String>, body: UnshareResourceBody) -> Self {
+    pub fn new(
+        resource_id: impl Into<String>,
+        body: ::schematic_definitions::elevenlabs::UnshareResourceBody,
+    ) -> Self {
         Self {
             resource_id: resource_id.into(),
             body,
@@ -1728,9 +1771,11 @@ impl UnshareResourceRequest {
 }
 impl schematic_runtime::EndpointSpec for UnshareResourceRequest {
     type Api = ElevenLabsApi;
-    type Success = StatusResponse;
+    type Success = ::schematic_definitions::elevenlabs::StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<StatusResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::StatusResponse,
+    >;
     const ENDPOINT_ID: &'static str = "UnshareResource";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -1763,12 +1808,9 @@ impl schematic_runtime::EndpointSpec for UnshareResourceRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::elevenlabs::{CopyResourceToWorkspaceRequest, CopyResourceBody};
+/// use schematic_schema::elevenlabs::CopyResourceToWorkspaceRequest;
 ///
-/// let body = CopyResourceBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::elevenlabs::CopyResourceBody = Default::default();
 /// let request = CopyResourceToWorkspaceRequest::new("resource_id_value", body)
 ///;
 /// ```
@@ -1777,11 +1819,14 @@ pub struct CopyResourceToWorkspaceRequest {
     /// Path parameter: resource_id
     pub resource_id: String,
     /// Request body
-    pub body: CopyResourceBody,
+    pub body: ::schematic_definitions::elevenlabs::CopyResourceBody,
 }
 impl CopyResourceToWorkspaceRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(resource_id: impl Into<String>, body: CopyResourceBody) -> Self {
+    pub fn new(
+        resource_id: impl Into<String>,
+        body: ::schematic_definitions::elevenlabs::CopyResourceBody,
+    ) -> Self {
         Self {
             resource_id: resource_id.into(),
             body,
@@ -1790,9 +1835,11 @@ impl CopyResourceToWorkspaceRequest {
 }
 impl schematic_runtime::EndpointSpec for CopyResourceToWorkspaceRequest {
     type Api = ElevenLabsApi;
-    type Success = StatusResponse;
+    type Success = ::schematic_definitions::elevenlabs::StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<StatusResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::StatusResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CopyResourceToWorkspace";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -1834,9 +1881,11 @@ impl schematic_runtime::EndpointSpec for CopyResourceToWorkspaceRequest {
 pub struct ListServiceAccountsRequest {}
 impl schematic_runtime::EndpointSpec for ListServiceAccountsRequest {
     type Api = ElevenLabsApi;
-    type Success = ListServiceAccountsResponse;
+    type Success = ::schematic_definitions::elevenlabs::ListServiceAccountsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListServiceAccountsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::ListServiceAccountsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListServiceAccounts";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -1893,9 +1942,11 @@ impl From<String> for ListServiceAccountApiKeysRequest {
 }
 impl schematic_runtime::EndpointSpec for ListServiceAccountApiKeysRequest {
     type Api = ElevenLabsApi;
-    type Success = ListApiKeysResponse;
+    type Success = ::schematic_definitions::elevenlabs::ListApiKeysResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListApiKeysResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::ListApiKeysResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListServiceAccountApiKeys";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -1921,12 +1972,9 @@ impl schematic_runtime::EndpointSpec for ListServiceAccountApiKeysRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::elevenlabs::{CreateApiKeyRequest, CreateApiKeyBody};
+/// use schematic_schema::elevenlabs::CreateApiKeyRequest;
 ///
-/// let body = CreateApiKeyBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::elevenlabs::CreateApiKeyBody = Default::default();
 /// let request = CreateApiKeyRequest::new("service_account_user_id_value", body)
 ///;
 /// ```
@@ -1935,13 +1983,13 @@ pub struct CreateApiKeyRequest {
     /// Path parameter: service_account_user_id
     pub service_account_user_id: String,
     /// Request body
-    pub body: CreateApiKeyBody,
+    pub body: ::schematic_definitions::elevenlabs::CreateApiKeyBody,
 }
 impl CreateApiKeyRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         service_account_user_id: impl Into<String>,
-        body: CreateApiKeyBody,
+        body: ::schematic_definitions::elevenlabs::CreateApiKeyBody,
     ) -> Self {
         Self {
             service_account_user_id: service_account_user_id.into(),
@@ -1951,9 +1999,11 @@ impl CreateApiKeyRequest {
 }
 impl schematic_runtime::EndpointSpec for CreateApiKeyRequest {
     type Api = ElevenLabsApi;
-    type Success = CreateApiKeyResponse;
+    type Success = ::schematic_definitions::elevenlabs::CreateApiKeyResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<CreateApiKeyResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::CreateApiKeyResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CreateApiKey";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -1986,12 +2036,9 @@ impl schematic_runtime::EndpointSpec for CreateApiKeyRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::elevenlabs::{UpdateApiKeyRequest, UpdateApiKeyBody};
+/// use schematic_schema::elevenlabs::UpdateApiKeyRequest;
 ///
-/// let body = UpdateApiKeyBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::elevenlabs::UpdateApiKeyBody = Default::default();
 /// let request = UpdateApiKeyRequest::new("service_account_user_id_value", "api_key_id_value", body)
 ///;
 /// ```
@@ -2002,14 +2049,14 @@ pub struct UpdateApiKeyRequest {
     /// Path parameter: api_key_id
     pub api_key_id: String,
     /// Request body
-    pub body: UpdateApiKeyBody,
+    pub body: ::schematic_definitions::elevenlabs::UpdateApiKeyBody,
 }
 impl UpdateApiKeyRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(
         service_account_user_id: impl Into<String>,
         api_key_id: impl Into<String>,
-        body: UpdateApiKeyBody,
+        body: ::schematic_definitions::elevenlabs::UpdateApiKeyBody,
     ) -> Self {
         Self {
             service_account_user_id: service_account_user_id.into(),
@@ -2020,9 +2067,11 @@ impl UpdateApiKeyRequest {
 }
 impl schematic_runtime::EndpointSpec for UpdateApiKeyRequest {
     type Api = ElevenLabsApi;
-    type Success = StatusResponse;
+    type Success = ::schematic_definitions::elevenlabs::StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<StatusResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::StatusResponse,
+    >;
     const ENDPOINT_ID: &'static str = "UpdateApiKey";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::PATCH;
     fn into_parts(
@@ -2082,9 +2131,11 @@ impl DeleteApiKeyRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteApiKeyRequest {
     type Api = ElevenLabsApi;
-    type Success = StatusResponse;
+    type Success = ::schematic_definitions::elevenlabs::StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<StatusResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::StatusResponse,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteApiKey";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -2120,9 +2171,11 @@ impl schematic_runtime::EndpointSpec for DeleteApiKeyRequest {
 pub struct ListWebhooksRequest {}
 impl schematic_runtime::EndpointSpec for ListWebhooksRequest {
     type Api = ElevenLabsApi;
-    type Success = ListWebhooksResponse;
+    type Success = ::schematic_definitions::elevenlabs::ListWebhooksResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListWebhooksResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::ListWebhooksResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListWebhooks";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -2145,36 +2198,36 @@ impl schematic_runtime::EndpointSpec for ListWebhooksRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::elevenlabs::{CreateWebhookRequest, CreateWebhookBody};
+/// use schematic_schema::elevenlabs::CreateWebhookRequest;
 ///
-/// let body = CreateWebhookBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::elevenlabs::CreateWebhookBody = Default::default();
 /// let request = CreateWebhookRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateWebhookRequest {
     /// Request body
-    pub body: CreateWebhookBody,
+    pub body: ::schematic_definitions::elevenlabs::CreateWebhookBody,
 }
 impl CreateWebhookRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateWebhookBody) -> Self {
+    pub fn new(body: ::schematic_definitions::elevenlabs::CreateWebhookBody) -> Self {
         Self { body }
     }
 }
-impl From<CreateWebhookBody> for CreateWebhookRequest {
-    fn from(body: CreateWebhookBody) -> Self {
+impl From<::schematic_definitions::elevenlabs::CreateWebhookBody>
+for CreateWebhookRequest {
+    fn from(body: ::schematic_definitions::elevenlabs::CreateWebhookBody) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateWebhookRequest {
     type Api = ElevenLabsApi;
-    type Success = CreateWebhookResponse;
+    type Success = ::schematic_definitions::elevenlabs::CreateWebhookResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<CreateWebhookResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::CreateWebhookResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CreateWebhook";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -2204,12 +2257,9 @@ impl schematic_runtime::EndpointSpec for CreateWebhookRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::elevenlabs::{UpdateWebhookRequest, UpdateWebhookBody};
+/// use schematic_schema::elevenlabs::UpdateWebhookRequest;
 ///
-/// let body = UpdateWebhookBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::elevenlabs::UpdateWebhookBody = Default::default();
 /// let request = UpdateWebhookRequest::new("webhook_id_value", body)
 ///;
 /// ```
@@ -2218,11 +2268,14 @@ pub struct UpdateWebhookRequest {
     /// Path parameter: webhook_id
     pub webhook_id: String,
     /// Request body
-    pub body: UpdateWebhookBody,
+    pub body: ::schematic_definitions::elevenlabs::UpdateWebhookBody,
 }
 impl UpdateWebhookRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(webhook_id: impl Into<String>, body: UpdateWebhookBody) -> Self {
+    pub fn new(
+        webhook_id: impl Into<String>,
+        body: ::schematic_definitions::elevenlabs::UpdateWebhookBody,
+    ) -> Self {
         Self {
             webhook_id: webhook_id.into(),
             body,
@@ -2231,9 +2284,11 @@ impl UpdateWebhookRequest {
 }
 impl schematic_runtime::EndpointSpec for UpdateWebhookRequest {
     type Api = ElevenLabsApi;
-    type Success = StatusResponse;
+    type Success = ::schematic_definitions::elevenlabs::StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<StatusResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::StatusResponse,
+    >;
     const ENDPOINT_ID: &'static str = "UpdateWebhook";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::PATCH;
     fn into_parts(
@@ -2298,9 +2353,11 @@ impl From<String> for DeleteWebhookRequest {
 }
 impl schematic_runtime::EndpointSpec for DeleteWebhookRequest {
     type Api = ElevenLabsApi;
-    type Success = StatusResponse;
+    type Success = ::schematic_definitions::elevenlabs::StatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<StatusResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::elevenlabs::StatusResponse,
+    >;
     const ENDPOINT_ID: &'static str = "DeleteWebhook";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::DELETE;
     fn into_parts(
@@ -4687,11 +4744,11 @@ impl ElevenLabs {
     /// ## Arguments
     ///
     /// - `voice_id: impl Into<String>`: the `{voice_id}` path parameter
-    /// - `body: CreateSpeechBody`: the request body
+    /// - `body: ::schematic_definitions::elevenlabs::CreateSpeechBody`: the request body
     pub fn create_speech(
         &self,
         voice_id: impl Into<String>,
-        body: CreateSpeechBody,
+        body: ::schematic_definitions::elevenlabs::CreateSpeechBody,
     ) -> CreateSpeechCall<'_> {
         CreateSpeechCall(self.0.send(CreateSpeechRequest::new(voice_id, body)))
     }
@@ -4704,11 +4761,11 @@ impl ElevenLabs {
     /// ## Arguments
     ///
     /// - `voice_id: impl Into<String>`: the `{voice_id}` path parameter
-    /// - `body: CreateSpeechBody`: the request body
+    /// - `body: ::schematic_definitions::elevenlabs::CreateSpeechBody`: the request body
     pub fn stream_speech(
         &self,
         voice_id: impl Into<String>,
-        body: CreateSpeechBody,
+        body: ::schematic_definitions::elevenlabs::CreateSpeechBody,
     ) -> StreamSpeechCall<'_> {
         StreamSpeechCall(self.0.send(StreamSpeechRequest::new(voice_id, body)))
     }
@@ -4721,11 +4778,11 @@ impl ElevenLabs {
     /// ## Arguments
     ///
     /// - `voice_id: impl Into<String>`: the `{voice_id}` path parameter
-    /// - `body: CreateSpeechBody`: the request body
+    /// - `body: ::schematic_definitions::elevenlabs::CreateSpeechBody`: the request body
     pub fn create_speech_with_timestamps(
         &self,
         voice_id: impl Into<String>,
-        body: CreateSpeechBody,
+        body: ::schematic_definitions::elevenlabs::CreateSpeechBody,
     ) -> CreateSpeechWithTimestampsCall<'_> {
         CreateSpeechWithTimestampsCall(
             self.0.send(CreateSpeechWithTimestampsRequest::new(voice_id, body)),
@@ -4740,11 +4797,11 @@ impl ElevenLabs {
     /// ## Arguments
     ///
     /// - `voice_id: impl Into<String>`: the `{voice_id}` path parameter
-    /// - `body: CreateSpeechBody`: the request body
+    /// - `body: ::schematic_definitions::elevenlabs::CreateSpeechBody`: the request body
     pub fn stream_speech_with_timestamps(
         &self,
         voice_id: impl Into<String>,
-        body: CreateSpeechBody,
+        body: ::schematic_definitions::elevenlabs::CreateSpeechBody,
     ) -> StreamSpeechWithTimestampsCall<'_> {
         StreamSpeechWithTimestampsCall(
             self.0.send(StreamSpeechWithTimestampsRequest::new(voice_id, body)),
@@ -4821,11 +4878,11 @@ impl ElevenLabs {
     /// ## Arguments
     ///
     /// - `voice_id: impl Into<String>`: the `{voice_id}` path parameter
-    /// - `body: VoiceSettings`: the request body
+    /// - `body: ::schematic_definitions::elevenlabs::VoiceSettings`: the request body
     pub fn update_voice_settings(
         &self,
         voice_id: impl Into<String>,
-        body: VoiceSettings,
+        body: ::schematic_definitions::elevenlabs::VoiceSettings,
     ) -> UpdateVoiceSettingsCall<'_> {
         UpdateVoiceSettingsCall(
             self.0.send(UpdateVoiceSettingsRequest::new(voice_id, body)),
@@ -4904,12 +4961,12 @@ impl ElevenLabs {
     ///
     /// - `public_user_id: impl Into<String>`: the `{public_user_id}` path parameter
     /// - `voice_id: impl Into<String>`: the `{voice_id}` path parameter
-    /// - `body: AddSharedVoiceBody`: the request body
+    /// - `body: ::schematic_definitions::elevenlabs::AddSharedVoiceBody`: the request body
     pub fn add_shared_voice(
         &self,
         public_user_id: impl Into<String>,
         voice_id: impl Into<String>,
-        body: AddSharedVoiceBody,
+        body: ::schematic_definitions::elevenlabs::AddSharedVoiceBody,
     ) -> AddSharedVoiceCall<'_> {
         AddSharedVoiceCall(
             self.0.send(AddSharedVoiceRequest::new(public_user_id, voice_id, body)),
@@ -4923,8 +4980,11 @@ impl ElevenLabs {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreatePvcVoiceBody`: the request body
-    pub fn create_pvc_voice(&self, body: CreatePvcVoiceBody) -> CreatePvcVoiceCall<'_> {
+    /// - `body: ::schematic_definitions::elevenlabs::CreatePvcVoiceBody`: the request body
+    pub fn create_pvc_voice(
+        &self,
+        body: ::schematic_definitions::elevenlabs::CreatePvcVoiceBody,
+    ) -> CreatePvcVoiceCall<'_> {
         CreatePvcVoiceCall(self.0.send(CreatePvcVoiceRequest::new(body)))
     }
     /// Updates a PVC voice
@@ -4936,11 +4996,11 @@ impl ElevenLabs {
     /// ## Arguments
     ///
     /// - `voice_id: impl Into<String>`: the `{voice_id}` path parameter
-    /// - `body: CreatePvcVoiceBody`: the request body
+    /// - `body: ::schematic_definitions::elevenlabs::CreatePvcVoiceBody`: the request body
     pub fn update_pvc_voice(
         &self,
         voice_id: impl Into<String>,
-        body: CreatePvcVoiceBody,
+        body: ::schematic_definitions::elevenlabs::CreatePvcVoiceBody,
     ) -> UpdatePvcVoiceCall<'_> {
         UpdatePvcVoiceCall(self.0.send(UpdatePvcVoiceRequest::new(voice_id, body)))
     }
@@ -4953,11 +5013,11 @@ impl ElevenLabs {
     /// ## Arguments
     ///
     /// - `voice_id: impl Into<String>`: the `{voice_id}` path parameter
-    /// - `body: TrainPvcVoiceBody`: the request body
+    /// - `body: ::schematic_definitions::elevenlabs::TrainPvcVoiceBody`: the request body
     pub fn train_pvc_voice(
         &self,
         voice_id: impl Into<String>,
-        body: TrainPvcVoiceBody,
+        body: ::schematic_definitions::elevenlabs::TrainPvcVoiceBody,
     ) -> TrainPvcVoiceCall<'_> {
         TrainPvcVoiceCall(self.0.send(TrainPvcVoiceRequest::new(voice_id, body)))
     }
@@ -4969,10 +5029,10 @@ impl ElevenLabs {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateSoundEffectBody`: the request body
+    /// - `body: ::schematic_definitions::elevenlabs::CreateSoundEffectBody`: the request body
     pub fn create_sound_effect(
         &self,
-        body: CreateSoundEffectBody,
+        body: ::schematic_definitions::elevenlabs::CreateSoundEffectBody,
     ) -> CreateSoundEffectCall<'_> {
         CreateSoundEffectCall(self.0.send(CreateSoundEffectRequest::new(body)))
     }
@@ -5066,10 +5126,10 @@ impl ElevenLabs {
     ///
     /// ## Arguments
     ///
-    /// - `body: DownloadHistoryBody`: the request body
+    /// - `body: ::schematic_definitions::elevenlabs::DownloadHistoryBody`: the request body
     pub fn download_history_items(
         &self,
-        body: DownloadHistoryBody,
+        body: ::schematic_definitions::elevenlabs::DownloadHistoryBody,
     ) -> DownloadHistoryItemsCall<'_> {
         DownloadHistoryItemsCall(self.0.send(DownloadHistoryItemsRequest::new(body)))
     }
@@ -5118,11 +5178,11 @@ impl ElevenLabs {
     /// ## Arguments
     ///
     /// - `resource_id: impl Into<String>`: the `{resource_id}` path parameter
-    /// - `body: ShareResourceBody`: the request body
+    /// - `body: ::schematic_definitions::elevenlabs::ShareResourceBody`: the request body
     pub fn share_resource(
         &self,
         resource_id: impl Into<String>,
-        body: ShareResourceBody,
+        body: ::schematic_definitions::elevenlabs::ShareResourceBody,
     ) -> ShareResourceCall<'_> {
         ShareResourceCall(self.0.send(ShareResourceRequest::new(resource_id, body)))
     }
@@ -5135,11 +5195,11 @@ impl ElevenLabs {
     /// ## Arguments
     ///
     /// - `resource_id: impl Into<String>`: the `{resource_id}` path parameter
-    /// - `body: UnshareResourceBody`: the request body
+    /// - `body: ::schematic_definitions::elevenlabs::UnshareResourceBody`: the request body
     pub fn unshare_resource(
         &self,
         resource_id: impl Into<String>,
-        body: UnshareResourceBody,
+        body: ::schematic_definitions::elevenlabs::UnshareResourceBody,
     ) -> UnshareResourceCall<'_> {
         UnshareResourceCall(self.0.send(UnshareResourceRequest::new(resource_id, body)))
     }
@@ -5152,11 +5212,11 @@ impl ElevenLabs {
     /// ## Arguments
     ///
     /// - `resource_id: impl Into<String>`: the `{resource_id}` path parameter
-    /// - `body: CopyResourceBody`: the request body
+    /// - `body: ::schematic_definitions::elevenlabs::CopyResourceBody`: the request body
     pub fn copy_resource_to_workspace(
         &self,
         resource_id: impl Into<String>,
-        body: CopyResourceBody,
+        body: ::schematic_definitions::elevenlabs::CopyResourceBody,
     ) -> CopyResourceToWorkspaceCall<'_> {
         CopyResourceToWorkspaceCall(
             self.0.send(CopyResourceToWorkspaceRequest::new(resource_id, body)),
@@ -5196,11 +5256,11 @@ impl ElevenLabs {
     /// ## Arguments
     ///
     /// - `service_account_user_id: impl Into<String>`: the `{service_account_user_id}` path parameter
-    /// - `body: CreateApiKeyBody`: the request body
+    /// - `body: ::schematic_definitions::elevenlabs::CreateApiKeyBody`: the request body
     pub fn create_api_key(
         &self,
         service_account_user_id: impl Into<String>,
-        body: CreateApiKeyBody,
+        body: ::schematic_definitions::elevenlabs::CreateApiKeyBody,
     ) -> CreateApiKeyCall<'_> {
         CreateApiKeyCall(
             self.0.send(CreateApiKeyRequest::new(service_account_user_id, body)),
@@ -5216,12 +5276,12 @@ impl ElevenLabs {
     ///
     /// - `service_account_user_id: impl Into<String>`: the `{service_account_user_id}` path parameter
     /// - `api_key_id: impl Into<String>`: the `{api_key_id}` path parameter
-    /// - `body: UpdateApiKeyBody`: the request body
+    /// - `body: ::schematic_definitions::elevenlabs::UpdateApiKeyBody`: the request body
     pub fn update_api_key(
         &self,
         service_account_user_id: impl Into<String>,
         api_key_id: impl Into<String>,
-        body: UpdateApiKeyBody,
+        body: ::schematic_definitions::elevenlabs::UpdateApiKeyBody,
     ) -> UpdateApiKeyCall<'_> {
         UpdateApiKeyCall(
             self
@@ -5266,8 +5326,11 @@ impl ElevenLabs {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateWebhookBody`: the request body
-    pub fn create_webhook(&self, body: CreateWebhookBody) -> CreateWebhookCall<'_> {
+    /// - `body: ::schematic_definitions::elevenlabs::CreateWebhookBody`: the request body
+    pub fn create_webhook(
+        &self,
+        body: ::schematic_definitions::elevenlabs::CreateWebhookBody,
+    ) -> CreateWebhookCall<'_> {
         CreateWebhookCall(self.0.send(CreateWebhookRequest::new(body)))
     }
     /// Updates a webhook
@@ -5279,11 +5342,11 @@ impl ElevenLabs {
     /// ## Arguments
     ///
     /// - `webhook_id: impl Into<String>`: the `{webhook_id}` path parameter
-    /// - `body: UpdateWebhookBody`: the request body
+    /// - `body: ::schematic_definitions::elevenlabs::UpdateWebhookBody`: the request body
     pub fn update_webhook(
         &self,
         webhook_id: impl Into<String>,
-        body: UpdateWebhookBody,
+        body: ::schematic_definitions::elevenlabs::UpdateWebhookBody,
     ) -> UpdateWebhookCall<'_> {
         UpdateWebhookCall(self.0.send(UpdateWebhookRequest::new(webhook_id, body)))
     }

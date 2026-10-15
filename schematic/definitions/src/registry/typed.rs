@@ -14,7 +14,6 @@ pub struct ModuleGroup {
 /// Assemble a module group once, propagating registration failures.
 ///
 /// The callback owns its API inventory; this seam maintains no parallel list.
-/// Existing literal-based lookups remain available until migration.
 pub fn assemble_module_group(
     module_path: &str,
     define: impl FnOnce(&mut DefinitionContext) -> Result<Vec<RestApi>, DefinitionError>,
@@ -31,7 +30,7 @@ pub fn assemble_module_group(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schematic_define::{Registration, TypeDesc, definition_type, rust_path};
+    use schematic_define::{definition_type, rust_path};
     use schemars::JsonSchema;
     use crate::huggingface::CommitInfo;
     mod ollama_fixture {
@@ -41,18 +40,6 @@ mod tests {
     }
     use ollama_fixture::PullModelProgress;
     use crate::emqx::NodeInfo;
-
-    // Test-only adaptations leave the shipped literal-based factories untouched.
-    macro_rules! adapt {
-        ($($t:ty),*) => { $(
-            impl Registration for $t {
-                fn register(c: &mut DefinitionContext) -> Result<TypeDesc, DefinitionError> {
-                    c.register_as::<Self>(rust_path!($t))
-                }
-            }
-        )* };
-    }
-    adapt!(CommitInfo, NodeInfo);
 
     definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] struct Nested { value: String });
     definition_type!(#[derive(JsonSchema)] #[allow(dead_code)] struct Explicit { nested: Nested });
@@ -138,5 +125,23 @@ mod tests {
         assert!(invalid.register::<Clash>().is_err());
         assert!(SchemaRegistry::from_context(&invalid).is_err());
         assert!(assemble_module_group("::fixture", |_| Err(DefinitionError::NotLeaf)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod generic_paths {
+    use super::*;
+
+    #[test]
+    fn bitbucket_nominal_wrapper_retains_its_concrete_public_type_path() {
+        let mut context = DefinitionContext::types_in("::schematic_definitions::bitbucket");
+        let descriptor = context.register::<crate::bitbucket::PaginatedResponse<crate::bitbucket::Repository>>().unwrap();
+        let path: String = descriptor.rust_path().split_whitespace().collect();
+        assert!(path.contains("bitbucket::PaginatedResponse<"), "{path}");
+        assert!(path.contains("bitbucket::Repository>"), "{path}");
+        let reference = descriptor.wire_schema();
+        assert_eq!(reference["$ref"], "#/components/schemas/PaginatedResponse<Repository>");
+        let registry = SchemaRegistry::from_context(&context).unwrap();
+        assert!(registry.get("PaginatedResponse<Repository>").is_some());
     }
 }

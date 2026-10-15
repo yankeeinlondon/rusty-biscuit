@@ -17,6 +17,13 @@ pub struct Tag {
     #[serde(default)]
     pub created_at: Option<String>,
 }
+impl schematic_define::Registration for Tag {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Tag));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TagCommit {
@@ -76,6 +83,13 @@ pub struct Release {
     #[serde(default)]
     pub upcoming_release: Option<bool>,
 }
+impl schematic_define::Registration for Release {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Release));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ReleaseCommit {

@@ -127,7 +127,7 @@
 //!
 //! let api = define_gitea_api();
 //! assert_eq!(api.name, "Gitea");
-//! assert_eq!(api.endpoints.len(), 16);
+//! assert_eq!(api.endpoints.len(), 15);
 //! ```
 //!
 //! ```
@@ -223,26 +223,7 @@ use schematic_define::RestApi;
 /// assert_eq!(grouped["emqx"].len(), 2);
 /// ```
 pub fn apis_by_module() -> IndexMap<String, Vec<RestApi>> {
-    let all_apis = vec![
-        define_anthropic_api(),
-        define_artificial_analysis_data_api(),
-        define_artificial_analysis_critpt_api(),
-        define_bitbucket_api(),
-        define_openai_api(),
-        define_elevenlabs_rest_api(),
-        define_gitea_api(),
-        define_github_api(),
-        define_gitlab_api(),
-        define_huggingface_hub_api(),
-        define_lmstudio_api(),
-        define_ollama_native_api(),
-        define_ollama_openai_api(),
-        define_emqx_basic_api(),
-        define_emqx_bearer_api(),
-        define_eversolo_api(),
-        define_samsung_smart_tv_api(),
-        define_unfolded_circle_core_rest_api(),
-    ];
+    let all_apis = all_apis();
 
     let mut grouped: IndexMap<String, Vec<RestApi>> = IndexMap::new();
 
@@ -257,4 +238,10 @@ pub fn apis_by_module() -> IndexMap<String, Vec<RestApi>> {
     }
 
     grouped
+}
+
+/// All shipped REST APIs in catalog order, assembled with their module registries.
+pub fn all_apis() -> Vec<RestApi> {
+    registry::MODULES.iter().flat_map(|(_, assemble)|
+        assemble().expect("valid shipped module group").apis).collect()
 }

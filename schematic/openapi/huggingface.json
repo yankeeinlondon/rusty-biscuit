@@ -23,7 +23,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<ModelInfo>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ModelInfo"
+                  }
                 }
               }
             }
@@ -32,8 +35,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::huggingface::ModelInfo",
+                      "schema_name": "ModelInfo"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<ModelInfo>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::huggingface::ModelInfo>"
             }
           }
         }
@@ -59,8 +73,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::huggingface::ModelInfo",
+                    "schema_name": "ModelInfo"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "ModelInfo"
+              "type_name": "::schematic_definitions::huggingface::ModelInfo"
             }
           }
         }
@@ -88,7 +111,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<RepoFile>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RepoFile"
+                  }
                 }
               }
             }
@@ -97,8 +123,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::huggingface::RepoFile",
+                      "schema_name": "RepoFile"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<RepoFile>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::huggingface::RepoFile>"
             }
           }
         }
@@ -144,8 +181,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::huggingface::FileMetadata",
+                    "schema_name": "FileMetadata"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "FileMetadata"
+              "type_name": "::schematic_definitions::huggingface::FileMetadata"
             }
           }
         }
@@ -191,7 +237,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<Commit>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Commit"
+                  }
                 }
               }
             }
@@ -200,8 +249,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "schematic_definitions::huggingface::Commit",
+                      "schema_name": "Commit"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<Commit>"
+              "type_name": "::std::vec::Vec<schematic_definitions::huggingface::Commit>"
             }
           }
         }
@@ -289,8 +349,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::huggingface::DiscussionList",
+                    "schema_name": "DiscussionList"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "DiscussionList"
+              "type_name": "::schematic_definitions::huggingface::DiscussionList"
             }
           }
         }
@@ -360,7 +429,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<DatasetInfo>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DatasetInfo"
+                  }
                 }
               }
             }
@@ -369,8 +441,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::huggingface::DatasetInfo",
+                      "schema_name": "DatasetInfo"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<DatasetInfo>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::huggingface::DatasetInfo>"
             }
           }
         }
@@ -396,8 +479,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::huggingface::DatasetInfo",
+                    "schema_name": "DatasetInfo"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "DatasetInfo"
+              "type_name": "::schematic_definitions::huggingface::DatasetInfo"
             }
           }
         }
@@ -425,7 +517,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<RepoFile>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RepoFile"
+                  }
                 }
               }
             }
@@ -434,8 +529,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::huggingface::RepoFile",
+                      "schema_name": "RepoFile"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<RepoFile>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::huggingface::RepoFile>"
             }
           }
         }
@@ -481,8 +587,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::huggingface::FileMetadata",
+                    "schema_name": "FileMetadata"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "FileMetadata"
+              "type_name": "::schematic_definitions::huggingface::FileMetadata"
             }
           }
         }
@@ -528,7 +643,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<Commit>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Commit"
+                  }
                 }
               }
             }
@@ -537,8 +655,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "schematic_definitions::huggingface::Commit",
+                      "schema_name": "Commit"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<Commit>"
+              "type_name": "::std::vec::Vec<schematic_definitions::huggingface::Commit>"
             }
           }
         }
@@ -617,7 +746,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<SpaceInfo>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SpaceInfo"
+                  }
                 }
               }
             }
@@ -626,8 +758,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::huggingface::SpaceInfo",
+                      "schema_name": "SpaceInfo"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<SpaceInfo>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::huggingface::SpaceInfo>"
             }
           }
         }
@@ -653,8 +796,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::huggingface::SpaceInfo",
+                    "schema_name": "SpaceInfo"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "SpaceInfo"
+              "type_name": "::schematic_definitions::huggingface::SpaceInfo"
             }
           }
         }
@@ -682,7 +834,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<RepoFile>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RepoFile"
+                  }
                 }
               }
             }
@@ -691,8 +846,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::huggingface::RepoFile",
+                      "schema_name": "RepoFile"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<RepoFile>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::huggingface::RepoFile>"
             }
           }
         }
@@ -738,8 +904,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::huggingface::FileMetadata",
+                    "schema_name": "FileMetadata"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "FileMetadata"
+              "type_name": "::schematic_definitions::huggingface::FileMetadata"
             }
           }
         }
@@ -804,14 +979,32 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::huggingface::CreateRepoBody",
+                    "schema_name": "CreateRepoBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "CreateRepoBody"
+              "type_name": "::schematic_definitions::huggingface::CreateRepoBody"
             }
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::huggingface::RepoUrl",
+                    "schema_name": "RepoUrl"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "RepoUrl"
+              "type_name": "::schematic_definitions::huggingface::RepoUrl"
             }
           }
         }
@@ -847,14 +1040,32 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::huggingface::DeleteRepoBody",
+                    "schema_name": "DeleteRepoBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "DeleteRepoBody"
+              "type_name": "::schematic_definitions::huggingface::DeleteRepoBody"
             }
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::huggingface::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::huggingface::StatusResponse"
             }
           }
         }
@@ -890,14 +1101,32 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::huggingface::UpdateRepoSettingsBody",
+                    "schema_name": "UpdateRepoSettingsBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "UpdateRepoSettingsBody"
+              "type_name": "::schematic_definitions::huggingface::UpdateRepoSettingsBody"
             }
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::huggingface::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::huggingface::StatusResponse"
             }
           }
         }
@@ -953,14 +1182,32 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::huggingface::MoveRepoBody",
+                    "schema_name": "MoveRepoBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "MoveRepoBody"
+              "type_name": "::schematic_definitions::huggingface::MoveRepoBody"
             }
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::huggingface::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::huggingface::StatusResponse"
             }
           }
         }
@@ -986,8 +1233,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::huggingface::UserInfo",
+                    "schema_name": "UserInfo"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "UserInfo"
+              "type_name": "::schematic_definitions::huggingface::UserInfo"
             }
           }
         }
@@ -1013,8 +1269,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::huggingface::UserInfo",
+                    "schema_name": "UserInfo"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "UserInfo"
+              "type_name": "::schematic_definitions::huggingface::UserInfo"
             }
           }
         }
@@ -1042,7 +1307,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<RepoInfo>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RepoInfo"
+                  }
                 }
               }
             }
@@ -1051,8 +1319,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::huggingface::RepoInfo",
+                      "schema_name": "RepoInfo"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<RepoInfo>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::huggingface::RepoInfo>"
             }
           }
         }
@@ -1080,7 +1359,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<Collection>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Collection"
+                  }
                 }
               }
             }
@@ -1089,8 +1371,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::huggingface::Collection",
+                      "schema_name": "Collection"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<Collection>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::huggingface::Collection>"
             }
           }
         }
@@ -1242,16 +1535,110 @@
       "GatedStatus": {
         "type": "string"
       },
-      "Vec<ModelInfo>": {
-        "title": "Array_of_ModelInfo",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/ModelInfo"
+      "ModelInfo": {
+        "title": "ModelInfo",
+        "type": "object",
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "cardData": {},
+          "config": {
+            "type": "object"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "downloads": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "downloadsAllTime": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "gated": {},
+          "inference": {},
+          "lastModified": {
+            "type": "string"
+          },
+          "library_name": {
+            "type": "string"
+          },
+          "likes": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "mask_token": {
+            "type": "string"
+          },
+          "model-index": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ModelIndexEntry"
+                }
+              ]
             }
-          ]
-        }
+          },
+          "modelId": {
+            "type": "string"
+          },
+          "pipeline_tag": {
+            "type": "string"
+          },
+          "private": {
+            "type": "boolean"
+          },
+          "safetensors": {},
+          "sha": {
+            "type": "string"
+          },
+          "siblings": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/RepoFile"
+                }
+              ]
+            }
+          },
+          "spaces": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "transformersInfo": {},
+          "trendingScore": {
+            "type": "number",
+            "format": "double"
+          },
+          "widgetData": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/WidgetConfig"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "modelId"
+        ]
       },
       "CardData": {
         "type": "object",
@@ -1388,120 +1775,21 @@
           "name"
         ]
       },
-      "ModelInfo": {
-        "title": "ModelInfo",
-        "type": "object",
-        "properties": {
-          "author": {
-            "type": "string"
-          },
-          "cardData": {},
-          "config": {
-            "type": "object"
-          },
-          "createdAt": {
-            "type": "string"
-          },
-          "disabled": {
-            "type": "boolean"
-          },
-          "downloads": {
-            "type": "integer",
-            "format": "uint64"
-          },
-          "downloadsAllTime": {
-            "type": "integer",
-            "format": "uint64"
-          },
-          "gated": {},
-          "inference": {},
-          "lastModified": {
-            "type": "string"
-          },
-          "library_name": {
-            "type": "string"
-          },
-          "likes": {
-            "type": "integer",
-            "format": "uint64"
-          },
-          "mask_token": {
-            "type": "string"
-          },
-          "model-index": {
-            "type": "array",
-            "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/ModelIndexEntry"
-                }
-              ]
-            }
-          },
-          "modelId": {
-            "type": "string"
-          },
-          "pipeline_tag": {
-            "type": "string"
-          },
-          "private": {
-            "type": "boolean"
-          },
-          "safetensors": {},
-          "sha": {
-            "type": "string"
-          },
-          "siblings": {
-            "type": "array",
-            "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/RepoFile"
-                }
-              ]
-            }
-          },
-          "spaces": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "tags": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "transformersInfo": {},
-          "trendingScore": {
-            "type": "number",
-            "format": "double"
-          },
-          "widgetData": {
-            "type": "array",
-            "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/WidgetConfig"
-                }
-              ]
-            }
-          }
-        },
-        "required": [
-          "modelId"
-        ]
-      },
       "RepoFile": {
+        "title": "RepoFile",
         "type": "object",
         "properties": {
-          "blobId": {},
+          "blobId": {
+            "type": "string"
+          },
           "lfs": {},
           "rfilename": {
             "type": "string"
           },
-          "size": {}
+          "size": {
+            "type": "integer",
+            "format": "uint64"
+          }
         },
         "required": [
           "rfilename"
@@ -1543,17 +1831,6 @@
           "text": {}
         }
       },
-      "Vec<RepoFile>": {
-        "title": "Array_of_RepoFile",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/RepoFile"
-            }
-          ]
-        }
-      },
       "FileMetadata": {
         "title": "FileMetadata",
         "type": "object",
@@ -1576,26 +1853,22 @@
           "path"
         ]
       },
-      "Vec<Commit>": {
-        "title": "Array_of_CommitInfo",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/CommitInfo"
-            }
-          ]
-        }
-      },
-      "CommitInfo": {
+      "Commit": {
+        "title": "CommitInfo",
         "type": "object",
         "properties": {
-          "date": {},
+          "date": {
+            "type": "string"
+          },
           "id": {
             "type": "string"
           },
-          "message": {},
-          "title": {}
+          "message": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
         },
         "required": [
           "id"
@@ -1679,81 +1952,6 @@
       "DiscussionStatus": {
         "type": "string"
       },
-      "Vec<DatasetInfo>": {
-        "title": "Array_of_DatasetInfo",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/DatasetInfo"
-            }
-          ]
-        }
-      },
-      "DatasetCardData": {
-        "type": "object",
-        "properties": {
-          "configs": {
-            "type": "array",
-            "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/DatasetConfig"
-                }
-              ]
-            }
-          },
-          "language": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "license": {},
-          "pretty_name": {},
-          "size_categories": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "tags": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "task_categories": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "task_ids": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        }
-      },
-      "DatasetConfig": {
-        "type": "object",
-        "properties": {
-          "config_name": {},
-          "data_files": {},
-          "splits": {
-            "type": "array",
-            "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/DatasetSplit"
-                }
-              ]
-            }
-          }
-        }
-      },
       "DatasetInfo": {
         "title": "DatasetInfo",
         "type": "object",
@@ -1820,6 +2018,70 @@
           "id"
         ]
       },
+      "DatasetCardData": {
+        "type": "object",
+        "properties": {
+          "configs": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/DatasetConfig"
+                }
+              ]
+            }
+          },
+          "language": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "license": {},
+          "pretty_name": {},
+          "size_categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "task_categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "DatasetConfig": {
+        "type": "object",
+        "properties": {
+          "config_name": {},
+          "data_files": {},
+          "splits": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/DatasetSplit"
+                }
+              ]
+            }
+          }
+        }
+      },
       "DatasetSplit": {
         "type": "object",
         "properties": {
@@ -1832,55 +2094,6 @@
         "required": [
           "name"
         ]
-      },
-      "Vec<SpaceInfo>": {
-        "title": "Array_of_SpaceInfo",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/SpaceInfo"
-            }
-          ]
-        }
-      },
-      "SpaceCardData": {
-        "type": "object",
-        "properties": {
-          "app_file": {},
-          "app_port": {},
-          "colorFrom": {},
-          "colorTo": {},
-          "datasets": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "emoji": {},
-          "license": {},
-          "models": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "pinned": {
-            "type": "boolean"
-          },
-          "sdk": {},
-          "sdk_version": {},
-          "short_description": {},
-          "suggested_hardware": {},
-          "suggested_storage": {},
-          "tags": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "title": {}
-        }
       },
       "SpaceInfo": {
         "title": "SpaceInfo",
@@ -1965,6 +2178,44 @@
         "required": [
           "id"
         ]
+      },
+      "SpaceCardData": {
+        "type": "object",
+        "properties": {
+          "app_file": {},
+          "app_port": {},
+          "colorFrom": {},
+          "colorTo": {},
+          "datasets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "emoji": {},
+          "license": {},
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "sdk": {},
+          "sdk_version": {},
+          "short_description": {},
+          "suggested_hardware": {},
+          "suggested_storage": {},
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "title": {}
+        }
       },
       "SpaceRuntime": {
         "type": "object",
@@ -2053,46 +2304,32 @@
           "name"
         ]
       },
-      "Vec<RepoInfo>": {
-        "title": "Array_of_RepoInfo",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/RepoInfo"
-            }
-          ]
-        }
-      },
       "RepoInfo": {
+        "title": "RepoInfo",
         "type": "object",
         "properties": {
           "id": {
             "type": "string"
           },
-          "private": {},
+          "private": {
+            "type": "boolean"
+          },
           "type": {}
         },
         "required": [
           "id"
         ]
       },
-      "Vec<Collection>": {
-        "title": "Array_of_Collection",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/Collection"
-            }
-          ]
-        }
-      },
       "Collection": {
+        "title": "Collection",
         "type": "object",
         "properties": {
-          "createdAt": {},
-          "description": {},
+          "createdAt": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
           "items": {
             "type": "array",
             "items": {
@@ -2103,16 +2340,25 @@
               ]
             }
           },
-          "lastUpdated": {},
-          "owner": {},
-          "position": {},
+          "lastUpdated": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "format": "uint64"
+          },
           "private": {
             "type": "boolean"
           },
           "slug": {
             "type": "string"
           },
-          "theme": {},
+          "theme": {
+            "type": "string"
+          },
           "title": {
             "type": "string"
           },

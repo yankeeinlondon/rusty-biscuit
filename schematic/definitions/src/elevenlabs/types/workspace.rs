@@ -8,6 +8,13 @@ pub struct UsageStatsResponse {
     pub time: Vec<i64>,
     pub usage: std::collections::HashMap<String, Vec<f64>>,
 }
+impl schematic_define::Registration for UsageStatsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("UsageStatsResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct InvoiceModel {
@@ -43,6 +50,13 @@ pub struct SubscriptionModel {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_invoice: Option<InvoiceModel>,
 }
+impl schematic_define::Registration for SubscriptionModel {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("SubscriptionModel");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct UserResponse {
@@ -60,6 +74,13 @@ pub struct UserResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<i64>,
 }
+impl schematic_define::Registration for UserResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("UserResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ShareOptionModel {
@@ -83,6 +104,13 @@ pub struct ResourceResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub share_options: Option<Vec<ShareOptionModel>>,
 }
+impl schematic_define::Registration for ResourceResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ResourceResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ShareResourceBody {
@@ -95,6 +123,13 @@ pub struct ShareResourceBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_api_key_id: Option<String>,
 }
+impl schematic_define::Registration for ShareResourceBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ShareResourceBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct UnshareResourceBody {
@@ -106,12 +141,26 @@ pub struct UnshareResourceBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_api_key_id: Option<String>,
 }
+impl schematic_define::Registration for UnshareResourceBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("UnshareResourceBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CopyResourceBody {
     pub resource_type: ResourceType,
     pub target_user_id: String,
 }
+impl schematic_define::Registration for CopyResourceBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CopyResourceBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ApiKeyModel {
@@ -148,12 +197,26 @@ pub struct ListServiceAccountsResponse {
     #[serde(rename = "service-accounts")]
     pub service_accounts: Vec<ServiceAccountModel>,
 }
+impl schematic_define::Registration for ListServiceAccountsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ListServiceAccountsResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListApiKeysResponse {
     #[serde(rename = "api-keys")]
     pub api_keys: Vec<ApiKeyModel>,
 }
+impl schematic_define::Registration for ListApiKeysResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ListApiKeysResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
@@ -175,6 +238,13 @@ pub struct CreateApiKeyBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub character_limit: Option<i64>,
 }
+impl schematic_define::Registration for CreateApiKeyBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CreateApiKeyBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -182,6 +252,13 @@ pub struct CreateApiKeyResponse {
     pub xi_api_key: String,
     pub key_id: String,
 }
+impl schematic_define::Registration for CreateApiKeyResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CreateApiKeyResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateApiKeyBody {
@@ -194,6 +271,13 @@ pub struct UpdateApiKeyBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub character_limit: Option<i64>,
 }
+impl schematic_define::Registration for UpdateApiKeyBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("UpdateApiKeyBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProductModel {
@@ -226,6 +310,13 @@ pub struct WebhookModel {
 pub struct ListWebhooksResponse {
     pub webhooks: Vec<WebhookModel>,
 }
+impl schematic_define::Registration for ListWebhooksResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ListWebhooksResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WebhookSettings {
@@ -239,6 +330,13 @@ pub struct WebhookSettings {
 pub struct CreateWebhookBody {
     pub settings: WebhookSettings,
 }
+impl schematic_define::Registration for CreateWebhookBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CreateWebhookBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateWebhookResponse {
@@ -246,6 +344,13 @@ pub struct CreateWebhookResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub webhook_secret: Option<String>,
 }
+impl schematic_define::Registration for CreateWebhookResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CreateWebhookResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateWebhookBody {
@@ -253,4 +358,10 @@ pub struct UpdateWebhookBody {
     pub is_disabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+}
+impl schematic_define::Registration for UpdateWebhookBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("UpdateWebhookBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }

@@ -32,8 +32,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::artificial_analysis::LlmModelsResponse",
+                    "schema_name": "LlmModelsResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "LlmModelsResponse"
+              "type_name": "::schematic_definitions::artificial_analysis::LlmModelsResponse"
             }
           }
         }
@@ -71,8 +80,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::artificial_analysis::MediaModelsResponse",
+                    "schema_name": "MediaModelsResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "MediaModelsResponse"
+              "type_name": "::schematic_definitions::artificial_analysis::MediaModelsResponse"
             }
           }
         }
@@ -98,8 +116,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::artificial_analysis::MediaModelsResponse",
+                    "schema_name": "MediaModelsResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "MediaModelsResponse"
+              "type_name": "::schematic_definitions::artificial_analysis::MediaModelsResponse"
             }
           }
         }
@@ -125,8 +152,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::artificial_analysis::MediaModelsResponse",
+                    "schema_name": "MediaModelsResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "MediaModelsResponse"
+              "type_name": "::schematic_definitions::artificial_analysis::MediaModelsResponse"
             }
           }
         }
@@ -164,8 +200,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::artificial_analysis::MediaModelsResponse",
+                    "schema_name": "MediaModelsResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "MediaModelsResponse"
+              "type_name": "::schematic_definitions::artificial_analysis::MediaModelsResponse"
             }
           }
         }
@@ -203,8 +248,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::artificial_analysis::MediaModelsResponse",
+                    "schema_name": "MediaModelsResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "MediaModelsResponse"
+              "type_name": "::schematic_definitions::artificial_analysis::MediaModelsResponse"
             }
           }
         }
@@ -240,14 +294,32 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::artificial_analysis::CritPtEvaluateBody",
+                    "schema_name": "CritPtEvaluateBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "CritPtEvaluateBody"
+              "type_name": "::schematic_definitions::artificial_analysis::CritPtEvaluateBody"
             }
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::artificial_analysis::CritPtEvaluateResponse",
+                    "schema_name": "CritPtEvaluateResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "CritPtEvaluateResponse"
+              "type_name": "::schematic_definitions::artificial_analysis::CritPtEvaluateResponse"
             }
           }
         }

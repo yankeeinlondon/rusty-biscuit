@@ -31,6 +31,13 @@ pub struct PaginationMeta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hasnext: Option<bool>,
 }
+impl schematic_define::Registration for PaginationMeta {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("PaginationMeta");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Standard error response from EMQX API.
 ///

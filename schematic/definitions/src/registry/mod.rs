@@ -210,10 +210,11 @@ impl SchemaRegistry {
         }
     }
 
-    /// Validates that all schema names referenced by an API are registered.
+    /// Checks the wire references of typed request and response descriptors.
     ///
-    /// This method checks the API definition to find all response schema names
-    /// and verifies they exist in the registry.
+    /// API builders validate descriptors against their destination context first.
+    /// This export check rejects untyped schemas even if a registry happens to
+    /// contain an identically spelled name.
     ///
     /// ## Returns
     ///
@@ -263,15 +264,19 @@ impl SchemaRegistry {
             let response = match &endpoint.response {
                 schematic_define::ApiResponse::Json(schema) => Some(schema), _ => None,
             };
-            let request = match &endpoint.request {
-                Some(schematic_define::ApiRequest::Json(schema)) => Some(schema), _ => None,
+            let request: Vec<_> = match &endpoint.request {
+                Some(schematic_define::ApiRequest::Json(schema)) => vec![schema],
+                Some(schematic_define::ApiRequest::FormData { fields } | schematic_define::ApiRequest::UrlEncoded { fields }) => fields.iter().filter_map(|field| match &field.kind {
+                    schematic_define::FormFieldKind::Json(schema) => Some(schema), _ => None,
+                }).collect(),
+                _ => vec![],
             };
             for schema in response.into_iter().chain(request) {
                 let mut names = Vec::new();
                 if let Some(descriptor) = &schema.descriptor {
                     references(&descriptor.wire_schema(), &mut names);
-                } else if !schema.type_name.contains("::") {
-                    names.push(schema.type_name.clone());
+                } else {
+                    missing.push(schema.type_name.clone());
                 }
                 missing.extend(names.into_iter().filter(|name| !self.types.contains_key(name)));
             }
@@ -464,50 +469,10 @@ mod tests {
         // Create an API with duplicate response types
         use schematic_define::{ApiResponse, Endpoint, RestApi, RestMethod};
 
-        let api = RestApi {
-            name: "Test".to_string(),
-            description: "Test".to_string(),
-            base_url: "https://test.com".to_string(),
-            docs_url: None,
-            auth: schematic_define::AuthStrategy::None,
-            auth_policy: None,
-            env_auth: vec![],
-            env_username: None,
-            headers: vec![],
-            endpoints: vec![
-                Endpoint {
-                    id: "Get1".to_string(),
-                    method: RestMethod::Get,
-                    path: "/1".to_string(),
-                    description: String::new(),
-                    request: None,
-                    response: ApiResponse::json_type("MissingType"),
-                    headers: vec![],
-                    params: None,
-                    oauth_scopes: None, cross_origin: None, pagination: None,
-                },
-                Endpoint {
-                    id: "Get2".to_string(),
-                    method: RestMethod::Get,
-                    path: "/2".to_string(),
-                    description: String::new(),
-                    request: None,
-                    response: ApiResponse::json_type("MissingType"), // Same type
-                    headers: vec![],
-                    params: None,
-                    oauth_scopes: None, cross_origin: None, pagination: None,
-                },
-            ],
-            module_path: None,
-            request_suffix: None,
-            version: None,
-            env_mapping: None,
-            cross_origin: CrossOrigin::same_origin(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
-        };
+        let api = { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "Test".to_string(); fixture.description = "Test".to_string(); fixture.base_url = "https://test.com".to_string(); fixture.docs_url = None; fixture.auth = schematic_define::AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.headers = vec![]; fixture.endpoints = vec![
+                { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "Get1".to_string(); fixture.method = RestMethod::Get; fixture.path = "/1".to_string(); fixture.description = String::new(); fixture.request = None; fixture.response = ApiResponse::json_type("MissingType"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+                { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "Get2".to_string(); fixture.method = RestMethod::Get; fixture.path = "/2".to_string(); fixture.description = String::new(); fixture.request = None; fixture.response = ApiResponse::json_type("MissingType"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+            ]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::same_origin(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture };
 
         let registry = SchemaRegistry::new();
         let result = registry.validate_completeness(&api);
@@ -523,37 +488,7 @@ mod tests {
     fn validate_completeness_fails_for_missing_request_types() {
         use schematic_define::{ApiRequest, ApiResponse, Endpoint, RestApi, RestMethod};
 
-        let api = RestApi {
-            name: "Test".to_string(),
-            description: "Test".to_string(),
-            base_url: "https://test.com".to_string(),
-            docs_url: None,
-            auth: schematic_define::AuthStrategy::None,
-            auth_policy: None,
-            env_auth: vec![],
-            env_username: None,
-            headers: vec![],
-            endpoints: vec![Endpoint {
-                id: "Create".to_string(),
-                method: RestMethod::Post,
-                path: "/create".to_string(),
-                description: String::new(),
-                request: Some(ApiRequest::json_type("SomeBody")),
-                response: ApiResponse::Empty,
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            }],
-            module_path: None,
-            request_suffix: None,
-            version: None,
-            env_mapping: None,
-            cross_origin: CrossOrigin::same_origin(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
-        };
+        let api = { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "Test".to_string(); fixture.description = "Test".to_string(); fixture.base_url = "https://test.com".to_string(); fixture.docs_url = None; fixture.auth = schematic_define::AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.headers = vec![]; fixture.endpoints = vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "Create".to_string(); fixture.method = RestMethod::Post; fixture.path = "/create".to_string(); fixture.description = String::new(); fixture.request = Some(ApiRequest::json_type("SomeBody")); fixture.response = ApiResponse::Empty; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::same_origin(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture };
 
         let registry = SchemaRegistry::new();
         let result = registry.validate_completeness(&api);
@@ -567,61 +502,11 @@ mod tests {
     fn validate_completeness_ignores_non_json_responses() {
         use schematic_define::{ApiResponse, Endpoint, RestApi, RestMethod};
 
-        let api = RestApi {
-            name: "Test".to_string(),
-            description: "Test".to_string(),
-            base_url: "https://test.com".to_string(),
-            docs_url: None,
-            auth: schematic_define::AuthStrategy::None,
-            auth_policy: None,
-            env_auth: vec![],
-            env_username: None,
-            headers: vec![],
-            endpoints: vec![
-                Endpoint {
-                    id: "Binary".to_string(),
-                    method: RestMethod::Get,
-                    path: "/binary".to_string(),
-                    description: String::new(),
-                    request: None,
-                    response: ApiResponse::Binary,
-                    headers: vec![],
-                    params: None,
-                    oauth_scopes: None, cross_origin: None, pagination: None,
-                },
-                Endpoint {
-                    id: "Text".to_string(),
-                    method: RestMethod::Get,
-                    path: "/text".to_string(),
-                    description: String::new(),
-                    request: None,
-                    response: ApiResponse::Text,
-                    headers: vec![],
-                    params: None,
-                    oauth_scopes: None, cross_origin: None, pagination: None,
-                },
-                Endpoint {
-                    id: "Empty".to_string(),
-                    method: RestMethod::Delete,
-                    path: "/empty".to_string(),
-                    description: String::new(),
-                    request: None,
-                    response: ApiResponse::Empty,
-                    headers: vec![],
-                    params: None,
-                    oauth_scopes: None, cross_origin: None, pagination: None,
-                },
-            ],
-            module_path: None,
-            request_suffix: None,
-            version: None,
-            env_mapping: None,
-            cross_origin: CrossOrigin::same_origin(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
-        };
+        let api = { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "Test".to_string(); fixture.description = "Test".to_string(); fixture.base_url = "https://test.com".to_string(); fixture.docs_url = None; fixture.auth = schematic_define::AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.headers = vec![]; fixture.endpoints = vec![
+                { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "Binary".to_string(); fixture.method = RestMethod::Get; fixture.path = "/binary".to_string(); fixture.description = String::new(); fixture.request = None; fixture.response = ApiResponse::Binary; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+                { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "Text".to_string(); fixture.method = RestMethod::Get; fixture.path = "/text".to_string(); fixture.description = String::new(); fixture.request = None; fixture.response = ApiResponse::Text; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+                { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "Empty".to_string(); fixture.method = RestMethod::Delete; fixture.path = "/empty".to_string(); fixture.description = String::new(); fixture.request = None; fixture.response = ApiResponse::Empty; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+            ]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::same_origin(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture };
 
         let registry = SchemaRegistry::new();
         let result = registry.validate_completeness(&api);
@@ -914,4 +799,38 @@ mod tests {
         assert!(get_registries_for_module("OLLAMA").is_some());
         assert!(get_registries_for_module("Ollama").is_some());
     }
+}
+
+#[cfg(test)]
+mod typed_completeness {
+    use super::*;
+    use schematic_define::{ApiResponse, DefinitionContext, Endpoint, RestApi};
+
+    #[test]
+    fn same_spelling_cannot_replace_typed_registration_evidence() {
+        let mut context = DefinitionContext::types_in("::schematic_definitions::openai");
+        let endpoint = Endpoint::get("Model", "/models/{id}").describes("Model")
+            .returns_json::<crate::openai::Model>(&mut context).build().unwrap();
+        let mut api = RestApi::builder(&context, "Fixture", "https://example.test")
+            .describes("Fixture").no_auth().endpoints([endpoint]).build().unwrap();
+        let registry = SchemaRegistry::from_context(&context).unwrap();
+        assert!(registry.validate_completeness(&api).is_ok());
+        for name in ["Model", "::schematic_definitions::openai::Model"] {
+            api.endpoints[0].response = ApiResponse::json_type(name);
+            assert_eq!(registry.validate_completeness(&api), Err(vec![name.into()]));
+        }
+    }
+    #[test]
+    fn form_json_metadata_requires_its_typed_components_too() {
+        let mut context = DefinitionContext::types_in("::schematic_definitions::openai");
+        let descriptor = context.register::<crate::openai::Model>().unwrap();
+        let endpoint = Endpoint::post("Upload", "/upload").describes("Upload")
+            .request_form(vec![schematic_define::FormField::json_desc("metadata", descriptor)])
+            .returns_empty().build().unwrap();
+        let api = RestApi::builder(&context, "Fixture", "https://example.test")
+            .describes("Fixture").no_auth().endpoints([endpoint]).build().unwrap();
+        assert!(SchemaRegistry::from_context(&context).unwrap().validate_completeness(&api).is_ok());
+        assert_eq!(SchemaRegistry::new().validate_completeness(&api), Err(vec!["Model".into()]));
+    }
+
 }

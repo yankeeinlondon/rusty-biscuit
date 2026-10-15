@@ -43,11 +43,11 @@ mod types;
 
 pub use types::*;
 
-use crate::registry::SchemaRegistry;
+use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
 use schematic_define::{
-    ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping, RestApi, RestMethod,
-    pagination::{Collection, MoreSignal, PageSize, PaginationException, Strategy, ValueSource},
-    params::{EndpointParams, PaginationStyle, QueryParamType},
+    EnvList, EnvMapping, AuthStrategy, DefinitionError, Endpoint, EndpointParams,
+    RestApi, QueryParamType,
+    pagination::{Collection, MoreSignal, PageSize, Strategy, ValueSource},
 };
 
 /// Creates a schema registry containing all GitHub response types.
@@ -73,27 +73,7 @@ use schematic_define::{
 /// ```
 #[must_use]
 pub fn openapi_registry() -> SchemaRegistry {
-    SchemaRegistry::new()
-        .register::<RepositoryInfo>("RepositoryInfo")
-        .register::<GitTreeResponse>("GitTreeResponse")
-        .register::<PullRequestSummary>("PullRequestSummary")
-        .register::<Vec<PullRequestSummary>>("Vec<PullRequestSummary>")
-        .register::<PullRequestFile>("PullRequestFile")
-        .register::<Vec<PullRequestFile>>("Vec<PullRequestFile>")
-        .register::<IssueSummary>("IssueSummary")
-        .register::<Vec<IssueSummary>>("Vec<IssueSummary>")
-        .register::<IssueComment>("IssueComment")
-        .register::<Vec<IssueComment>>("Vec<IssueComment>")
-        .register::<TimelineEvent>("TimelineEvent")
-        .register::<Vec<TimelineEvent>>("Vec<TimelineEvent>")
-        .register::<RepoTag>("RepoTag")
-        .register::<Vec<RepoTag>>("Vec<RepoTag>")
-        .register::<Release>("Release")
-        .register::<Vec<Release>>("Vec<Release>")
-        .register::<GitRef>("GitRef")
-        .register::<AnnotatedTagObject>("AnnotatedTagObject")
-        .register::<WorkflowRunsResponse>("WorkflowRunsResponse")
-        .register::<Vec<RepositoryInfo>>("Vec<RepositoryInfo>")
+    module_group().expect("valid github definition").registry
 }
 
 /// GitHub's page-number pagination: a 1-based `page`, a `per_page` size, and
@@ -145,94 +125,58 @@ fn github_page_number() -> Strategy {
 /// assert_eq!(api.endpoints.len(), 16);
 /// ```
 pub fn define_github_api() -> RestApi {
-    RestApi {
-        name: "GitHub".to_string(),
-        description: "GitHub REST API v2022-11-28 for repository, PR, issue, and release workflows"
-            .to_string(),
-        base_url: "https://api.github.com".to_string(),
-        docs_url: Some("https://docs.github.com/en/rest".to_string()),
-        auth: AuthStrategy::BearerToken { header: None },
-        auth_policy: None,
-        env_auth: vec!["GITHUB_TOKEN".to_string(), "GH_TOKEN".to_string()],
-        env_username: None,
-        headers: vec![
-            (
-                "Accept".to_string(),
-                "application/vnd.github+json".to_string(),
-            ),
-            ("X-GitHub-Api-Version".to_string(), "2022-11-28".to_string()),
-            (
-                "User-Agent".to_string(),
-                "schematic-github-client".to_string(),
-            ),
-        ],
-        endpoints: vec![
-            // =================================================================
-            // Repository Metadata
-            // =================================================================
-            Endpoint {
-                id: "GetRepository".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}".to_string(),
-                description: "Get repository metadata including default branch".to_string(),
-                request: None,
-                response: ApiResponse::json_type("RepositoryInfo"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            // =================================================================
-            // Git Trees (for file discovery)
-            // =================================================================
-            Endpoint {
-                id: "GetGitTree".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/git/trees/{tree_sha}".to_string(),
-                description: "Get a Git tree; set `recursive` to include every nested entry \
-                              (may truncate at 100k entries or 7MB)"
-                    .to_string(),
-                request: None,
-                response: ApiResponse::json_type("GitTreeResponse"),
-                headers: vec![],
-                params: Some(EndpointParams::default().with_query_param(
+    module_group().expect("valid github definition").apis.remove(0)
+}
+
+/// Assemble the API and its schemas from one ordered registration context.
+pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+    assemble_module_group("::schematic_definitions::github", |ctx| {
+        ctx.register::<RepositoryInfo>()?;
+        ctx.register::<GitTreeResponse>()?;
+        ctx.register::<PullRequestSummary>()?;
+        ctx.register::<PullRequestFile>()?;
+        ctx.register::<IssueSummary>()?;
+        ctx.register::<IssueComment>()?;
+        ctx.register::<TimelineEvent>()?;
+        ctx.register::<RepoTag>()?;
+        ctx.register::<Release>()?;
+        ctx.register::<GitRef>()?;
+        ctx.register::<AnnotatedTagObject>()?;
+        ctx.register::<WorkflowRunsResponse>()?;
+        let endpoints = vec![
+
+            Endpoint::get("GetRepository", "/repos/{owner}/{repo}")
+                .describes("Get repository metadata including default branch")
+                .returns_json::<RepositoryInfo>(ctx)
+                .build()?,
+
+            Endpoint::get("GetGitTree", "/repos/{owner}/{repo}/git/trees/{tree_sha}")
+                .describes("Get a Git tree; set `recursive` to include every nested entry \
+                              (may truncate at 100k entries or 7MB)")
+                .returns_json::<GitTreeResponse>(ctx)
+                .params(EndpointParams::default().with_query_param(
                     "recursive",
                     QueryParamType::Boolean,
                     false,
                     Some("Fetch the tree recursively instead of a single level"),
-                )),
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            // =================================================================
-            // Repository Contents (raw file access)
-            // =================================================================
-            Endpoint {
-                id: "GetRepositoryContentRaw".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/contents/{+path}".to_string(),
-                description: "Get raw file content from repository".to_string(),
-                request: None,
-                response: ApiResponse::Text,
-                headers: vec![(
+                ))
+                .build()?,
+
+            Endpoint::get("GetRepositoryContentRaw", "/repos/{owner}/{repo}/contents/{+path}")
+                .describes("Get raw file content from repository")
+                .returns_text()
+                .header(
                     "Accept".to_string(),
                     "application/vnd.github.raw+json".to_string(),
-                )],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            // =================================================================
-            // Pull Requests
-            // =================================================================
-            Endpoint {
-                id: "ListPullRequests".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/pulls".to_string(),
-                description: "List pull requests with metadata".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("PullRequestSummary"),
-                headers: vec![],
-                params: Some(
-                    EndpointParams::default()
-                        .with_pagination(PaginationStyle::github())
+                )
+                .build()?,
+
+            Endpoint::get("ListPullRequests", "/repos/{owner}/{repo}/pulls")
+                .describes("List pull requests with metadata")
+                .returns_json::<Vec<PullRequestSummary>>(ctx)
+                .params(EndpointParams::default()
+                        .with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("per_page", QueryParamType::Integer, false, Some("Items per page (default: 100, max: 100)"))
                         .with_query_param(
                             "state",
                             QueryParamType::Enum(vec![
@@ -259,35 +203,21 @@ pub fn define_github_api() -> RestApi {
                             QueryParamType::Enum(vec!["asc".to_string(), "desc".to_string()]),
                             false,
                             Some("Sort direction"),
-                        ),
-                ),
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "ListPullRequestFiles".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/pulls/{pull_number}/files".to_string(),
-                description: "List files changed in a pull request".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("PullRequestFile"),
-                headers: vec![],
-                params: Some(EndpointParams::default().with_pagination(PaginationStyle::github())),
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            // =================================================================
-            // Issues
-            // =================================================================
-            Endpoint {
-                id: "ListIssues".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/issues".to_string(),
-                description: "List issues (includes PRs; filter by pull_request field)".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("IssueSummary"),
-                headers: vec![],
-                params: Some(
-                    EndpointParams::default()
-                        .with_pagination(PaginationStyle::github())
+                        ),)
+                .build()?,
+            Endpoint::get("ListPullRequestFiles", "/repos/{owner}/{repo}/pulls/{pull_number}/files")
+                .describes("List files changed in a pull request")
+                .returns_json::<Vec<PullRequestFile>>(ctx)
+                .params(EndpointParams::default().with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("per_page", QueryParamType::Integer, false, Some("Items per page (default: 100, max: 100)")))
+                .build()?,
+
+            Endpoint::get("ListIssues", "/repos/{owner}/{repo}/issues")
+                .describes("List issues (includes PRs; filter by pull_request field)")
+                .returns_json::<Vec<IssueSummary>>(ctx)
+                .params(EndpointParams::default()
+                        .with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("per_page", QueryParamType::Integer, false, Some("Items per page (default: 100, max: 100)"))
                         .with_query_param(
                             "state",
                             QueryParamType::Enum(vec![
@@ -313,122 +243,57 @@ pub fn define_github_api() -> RestApi {
                             QueryParamType::Enum(vec!["asc".to_string(), "desc".to_string()]),
                             false,
                             Some("Sort direction"),
-                        ),
-                ),
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "GetIssue".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/issues/{issue_number}".to_string(),
-                description: "Get a single issue by number".to_string(),
-                request: None,
-                response: ApiResponse::json_type("IssueSummary"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "ListIssueComments".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/issues/{issue_number}/comments".to_string(),
-                description: "List comments on an issue".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("IssueComment"),
-                headers: vec![],
-                params: Some(EndpointParams::default().with_pagination(PaginationStyle::github())),
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "ListIssueTimeline".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/issues/{issue_number}/timeline".to_string(),
-                description: "List timeline events for an issue".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("TimelineEvent"),
-                headers: vec![],
-                params: Some(EndpointParams::default().with_pagination(PaginationStyle::github())),
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            // =================================================================
-            // Tags and Releases
-            // =================================================================
-            Endpoint {
-                id: "ListTags".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/tags".to_string(),
-                description: "List repository tags".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("RepoTag"),
-                headers: vec![],
-                params: Some(EndpointParams::default().with_pagination(PaginationStyle::github())),
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "ListReleases".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/releases".to_string(),
-                description: "List releases (linked to tags via tag_name)".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("Release"),
-                headers: vec![],
-                params: Some(EndpointParams::default().with_pagination(PaginationStyle::github())),
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "GetTagReference".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/git/ref/tags/{tag}".to_string(),
-                description: "Get tag reference (check object.type: 'commit' vs 'tag')".to_string(),
-                request: None,
-                response: ApiResponse::json_type("GitRef"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            // =================================================================
-            // Branches
-            // =================================================================
-            // Singular `git/ref/`: the plural `git/refs/heads/{branch}` prefix-matches
-            // and returns an array when `{branch}/*` branches exist.
-            Endpoint {
-                id: "GetBranchReference".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/git/ref/heads/{branch}".to_string(),
-                description: "Get branch reference (object.sha is the branch head commit)"
-                    .to_string(),
-                request: None,
-                response: ApiResponse::json_type("GitRef"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "GetAnnotatedTag".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/git/tags/{tag_sha}".to_string(),
-                description: "Get annotated tag object details (message, tagger, verification)"
-                    .to_string(),
-                request: None,
-                response: ApiResponse::json_type("AnnotatedTagObject"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            // =================================================================
-            // Workflow Runs (Actions / CI/CD)
-            // =================================================================
-            Endpoint {
-                id: "ListWorkflowRuns".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/actions/runs".to_string(),
-                description: "List workflow runs for a repository".to_string(),
-                request: None,
-                response: ApiResponse::json_type("WorkflowRunsResponse"),
-                headers: vec![],
-                params: Some(
-                    EndpointParams::default()
-                        .with_pagination(PaginationStyle::github())
+                        ),)
+                .build()?,
+            Endpoint::get("GetIssue", "/repos/{owner}/{repo}/issues/{issue_number}")
+                .describes("Get a single issue by number")
+                .returns_json::<IssueSummary>(ctx)
+                .build()?,
+            Endpoint::get("ListIssueComments", "/repos/{owner}/{repo}/issues/{issue_number}/comments")
+                .describes("List comments on an issue")
+                .returns_json::<Vec<IssueComment>>(ctx)
+                .params(EndpointParams::default().with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("per_page", QueryParamType::Integer, false, Some("Items per page (default: 100, max: 100)")))
+                .build()?,
+            Endpoint::get("ListIssueTimeline", "/repos/{owner}/{repo}/issues/{issue_number}/timeline")
+                .describes("List timeline events for an issue")
+                .returns_json::<Vec<TimelineEvent>>(ctx)
+                .params(EndpointParams::default().with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("per_page", QueryParamType::Integer, false, Some("Items per page (default: 100, max: 100)")))
+                .build()?,
+
+            Endpoint::get("ListTags", "/repos/{owner}/{repo}/tags")
+                .describes("List repository tags")
+                .returns_json::<Vec<RepoTag>>(ctx)
+                .params(EndpointParams::default().with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("per_page", QueryParamType::Integer, false, Some("Items per page (default: 100, max: 100)")))
+                .build()?,
+            Endpoint::get("ListReleases", "/repos/{owner}/{repo}/releases")
+                .describes("List releases (linked to tags via tag_name)")
+                .returns_json::<Vec<Release>>(ctx)
+                .params(EndpointParams::default().with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("per_page", QueryParamType::Integer, false, Some("Items per page (default: 100, max: 100)")))
+                .build()?,
+            Endpoint::get("GetTagReference", "/repos/{owner}/{repo}/git/ref/tags/{tag}")
+                .describes("Get tag reference (check object.type: 'commit' vs 'tag')")
+                .returns_json::<GitRef>(ctx)
+                .build()?,
+
+            Endpoint::get("GetBranchReference", "/repos/{owner}/{repo}/git/ref/heads/{branch}")
+                .describes("Get branch reference (object.sha is the branch head commit)")
+                .returns_json::<GitRef>(ctx)
+                .build()?,
+            Endpoint::get("GetAnnotatedTag", "/repos/{owner}/{repo}/git/tags/{tag_sha}")
+                .describes("Get annotated tag object details (message, tagger, verification)")
+                .returns_json::<AnnotatedTagObject>(ctx)
+                .build()?,
+
+            Endpoint::get("ListWorkflowRuns", "/repos/{owner}/{repo}/actions/runs")
+                .describes("List workflow runs for a repository")
+                .returns_json::<WorkflowRunsResponse>(ctx)
+                .params(EndpointParams::default()
+                        .with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("per_page", QueryParamType::Integer, false, Some("Items per page (default: 100, max: 100)"))
                         .with_query_param(
                             "status",
                             QueryParamType::Enum(vec![
@@ -461,24 +326,16 @@ pub fn define_github_api() -> RestApi {
                             QueryParamType::String,
                             false,
                             Some("Filter by event type (e.g., push, pull_request)"),
-                        ),
-                ),
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            // =================================================================
-            // Organization Repositories
-            // =================================================================
-            Endpoint {
-                id: "ListOrgRepos".to_string(),
-                method: RestMethod::Get,
-                path: "/orgs/{org}/repos".to_string(),
-                description: "List repositories for an organization".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("RepositoryInfo"),
-                headers: vec![],
-                params: Some(
-                    EndpointParams::default()
-                        .with_pagination(PaginationStyle::github())
+                        ),)
+                .pagination(Collection::at("workflow_runs").item_type("WorkflowRun").paginate(github_page_number().total(ValueSource::body("total_count"))))
+                .build()?,
+
+            Endpoint::get("ListOrgRepos", "/orgs/{org}/repos")
+                .describes("List repositories for an organization")
+                .returns_json::<Vec<RepositoryInfo>>(ctx)
+                .params(EndpointParams::default()
+                        .with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("per_page", QueryParamType::Integer, false, Some("Items per page (default: 100, max: 100)"))
                         .with_query_param(
                             "repo_type",
                             QueryParamType::Enum(vec![
@@ -508,38 +365,43 @@ pub fn define_github_api() -> RestApi {
                             QueryParamType::Enum(vec!["asc".to_string(), "desc".to_string()]),
                             false,
                             Some("Sort direction"),
-                        ),
-                ),
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-        ],
-        module_path: Some("github".to_string()),
-        request_suffix: None,
-        version: None,
-        env_mapping: Some(EnvMapping {
+                        ),)
+                .build()?,
+        ];
+        let api = RestApi::builder(ctx, "GitHub", "https://api.github.com")
+            .describes("GitHub REST API v2022-11-28 for repository, PR, issue, and release workflows")
+            .authentication(AuthStrategy::BearerToken { header: None }, vec!["GITHUB_TOKEN".to_string(), "GH_TOKEN".to_string()])
+            .docs_url("https://docs.github.com/en/rest")
+            .module_path("github".to_string())
+            .env_mapping(EnvMapping {
             bearer_token: Some(EnvList::new(vec![
                 "GITHUB_TOKEN".to_string(),
                 "GH_TOKEN".to_string(),
             ])),
             ..Default::default()
-        }),
-        cross_origin: CrossOrigin::same_origin(),
-        // GitHub sends its request id in `X-GitHub-Request-Id`.
-        request_id_header: Some("x-github-request-id".to_string()),
-        secret_names: vec![],
-        default_pagination: Some(github_page_number()),
-        pagination_exceptions: vec![PaginationException::new(
-            "ListWorkflowRuns",
-            Collection::at("workflow_runs")
-                .item_type("WorkflowRun")
-                .paginate(github_page_number().total(ValueSource::body("total_count"))),
-        )],
-    }
+        })
+            .request_id_header("x-github-request-id".to_string())
+            .default_pagination(github_page_number())
+            .header(
+                "Accept".to_string(),
+                "application/vnd.github+json".to_string(),
+            )
+            .header("X-GitHub-Api-Version".to_string(), "2022-11-28".to_string())
+            .header(
+                "User-Agent".to_string(),
+                "schematic-github-client".to_string(),
+            )
+            .endpoints(endpoints)
+            .build()?;
+        Ok(vec![api])
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use schematic_define::{ApiResponse, RestMethod};
+    use schematic_define::pagination::{resolve, Resolution};
 
     // =============================================
     // openapi_registry() tests
@@ -552,13 +414,13 @@ mod tests {
         assert!(registry.get("RepositoryInfo").is_some());
         assert!(registry.get("GitTreeResponse").is_some());
         assert!(registry.get("PullRequestSummary").is_some());
-        assert!(registry.get("Vec<PullRequestSummary>").is_some());
+        assert!(!registry.get("Vec<PullRequestSummary>").is_some());
         assert!(registry.get("IssueSummary").is_some());
-        assert!(registry.get("Vec<IssueSummary>").is_some());
+        assert!(!registry.get("Vec<IssueSummary>").is_some());
         assert!(registry.get("RepoTag").is_some());
         assert!(registry.get("Release").is_some());
         assert!(registry.get("WorkflowRunsResponse").is_some());
-        assert_eq!(registry.len(), 20);
+        assert_eq!(registry.len(), 12);
     }
 
     #[test]
@@ -576,13 +438,13 @@ mod tests {
         let openapi_schemas = registry.to_openapi_schemas();
 
         assert!(
-            openapi_schemas.len() >= 20,
-            "expected at least 20 schemas, got {}",
+            openapi_schemas.len() >= 12,
+            "expected at least 12 schemas, got {}",
             openapi_schemas.len()
         );
         assert!(openapi_schemas.contains_key("RepositoryInfo"));
         assert!(openapi_schemas.contains_key("PullRequestSummary"));
-        assert!(openapi_schemas.contains_key("Vec<PullRequestSummary>"));
+        assert!(!openapi_schemas.contains_key("Vec<PullRequestSummary>"));
         assert!(openapi_schemas.contains_key("IssueSummary"));
         assert!(openapi_schemas.contains_key("WorkflowRunsResponse"));
     }
@@ -636,7 +498,7 @@ mod tests {
     }
 
     #[test]
-    fn api_has_seventeen_endpoints() {
+    fn api_has_sixteen_endpoints() {
         let api = define_github_api();
         assert_eq!(api.endpoints.len(), 16);
     }
@@ -664,7 +526,7 @@ mod tests {
         assert_eq!(tree.path, "/repos/{owner}/{repo}/git/trees/{tree_sha}");
         assert!(!tree.path.contains("recursive"));
         assert!(
-            matches!(&tree.response, ApiResponse::Json(schema) if schema.type_name == "GitTreeResponse")
+            matches!(&tree.response, ApiResponse::Json(schema) if schema.type_name.ends_with("::GitTreeResponse"))
         );
         let params = tree.params.as_ref().expect("should have params");
         let recursive = params
@@ -706,7 +568,7 @@ mod tests {
             .unwrap();
         assert_eq!(list_prs.path, "/repos/{owner}/{repo}/pulls");
         let params = list_prs.params.as_ref().expect("should have params");
-        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "page"));
         assert!(params.query.iter().any(|p| p.name == "state"));
         assert!(params.query.iter().any(|p| p.name == "sort"));
         assert!(params.query.iter().any(|p| p.name == "direction"));
@@ -718,7 +580,7 @@ mod tests {
             .unwrap();
         assert!(list_files.path.contains("{pull_number}"));
         let file_params = list_files.params.as_ref().expect("should have params");
-        assert!(file_params.has_pagination());
+        assert!(file_params.query.iter().any(|p| p.name == "page"));
     }
 
     #[test]
@@ -728,7 +590,7 @@ mod tests {
         let list = api.endpoints.iter().find(|e| e.id == "ListIssues").unwrap();
         assert_eq!(list.path, "/repos/{owner}/{repo}/issues");
         let params = list.params.as_ref().expect("should have params");
-        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "page"));
         assert!(params.query.iter().any(|p| p.name == "state"));
 
         let get = api.endpoints.iter().find(|e| e.id == "GetIssue").unwrap();
@@ -741,7 +603,7 @@ mod tests {
             .unwrap();
         assert!(comments.path.contains("{issue_number}/comments"));
         let comment_params = comments.params.as_ref().expect("should have params");
-        assert!(comment_params.has_pagination());
+        assert!(comment_params.query.iter().any(|p| p.name == "page"));
 
         let timeline = api
             .endpoints
@@ -750,7 +612,7 @@ mod tests {
             .unwrap();
         assert!(timeline.path.contains("timeline"));
         let timeline_params = timeline.params.as_ref().expect("should have params");
-        assert!(timeline_params.has_pagination());
+        assert!(timeline_params.query.iter().any(|p| p.name == "page"));
     }
 
     #[test]
@@ -760,7 +622,7 @@ mod tests {
         let tags = api.endpoints.iter().find(|e| e.id == "ListTags").unwrap();
         assert_eq!(tags.path, "/repos/{owner}/{repo}/tags");
         let tag_params = tags.params.as_ref().expect("should have params");
-        assert!(tag_params.has_pagination());
+        assert!(tag_params.query.iter().any(|p| p.name == "page"));
 
         let releases = api
             .endpoints
@@ -769,7 +631,7 @@ mod tests {
             .unwrap();
         assert_eq!(releases.path, "/repos/{owner}/{repo}/releases");
         let release_params = releases.params.as_ref().expect("should have params");
-        assert!(release_params.has_pagination());
+        assert!(release_params.query.iter().any(|p| p.name == "page"));
 
         let ref_endpoint = api
             .endpoints
@@ -801,9 +663,8 @@ mod tests {
             "/repos/{owner}/{repo}/git/ref/heads/{branch}"
         );
         assert!(endpoint.request.is_none());
-        assert!(endpoint.oauth_scopes.is_none());
         match &endpoint.response {
-            ApiResponse::Json(schema) => assert_eq!(schema.type_name, "GitRef"),
+            ApiResponse::Json(schema) => assert!(schema.type_name.ends_with("::GitRef")),
             _ => panic!("Expected JSON response"),
         }
         assert!(matches!(api.auth, AuthStrategy::BearerToken { .. }));
@@ -856,7 +717,7 @@ mod tests {
             match &endpoint.response {
                 ApiResponse::Json(schema) => {
                     assert!(
-                        schema.type_name.starts_with("Vec<"),
+                        schema.type_name.starts_with("::std::vec::Vec<"),
                         "Endpoint {} should return Vec type, got {}",
                         id,
                         schema.type_name
@@ -887,7 +748,7 @@ mod tests {
             // assert single-item shape for JSON responses.
             if let ApiResponse::Json(schema) = &endpoint.response {
                 assert!(
-                    !schema.type_name.starts_with("Vec<"),
+                    !schema.type_name.starts_with("::std::vec::Vec<"),
                     "Endpoint {} should return single item, not Vec",
                     id
                 );
@@ -918,11 +779,12 @@ mod tests {
                 .as_ref()
                 .unwrap_or_else(|| panic!("Endpoint {} should have params", id));
             assert!(
-                params.has_pagination(),
+                params.query.iter().any(|p| p.name == "page"),
                 "Endpoint {} should have pagination",
                 id
             );
-            // Verify GitHub-style pagination (page + per_page)
+            assert!(matches!(resolve(&api, endpoint), Resolution::Paginated { .. }));
+            // Preserve the query declarations adopted by the pager.
             assert!(
                 params.query.iter().any(|p| p.name == "page"),
                 "Endpoint {} should have page param",
@@ -951,13 +813,13 @@ mod tests {
         // Returns WorkflowRunsResponse (not Vec) because GitHub wraps in total_count + array
         match &endpoint.response {
             ApiResponse::Json(schema) => {
-                assert_eq!(schema.type_name, "WorkflowRunsResponse");
+                assert!(schema.type_name.ends_with("::WorkflowRunsResponse"));
             }
             _ => panic!("Expected JSON response"),
         }
 
         let params = endpoint.params.as_ref().expect("should have params");
-        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "page"));
         assert!(params.query.iter().any(|p| p.name == "status"));
         assert!(params.query.iter().any(|p| p.name == "branch"));
         assert!(params.query.iter().any(|p| p.name == "event"));
@@ -978,7 +840,7 @@ mod tests {
         match &endpoint.response {
             ApiResponse::Json(schema) => {
                 assert!(
-                    schema.type_name.starts_with("Vec<"),
+                    schema.type_name.starts_with("::std::vec::Vec<"),
                     "ListOrgRepos should return Vec type, got {}",
                     schema.type_name
                 );
@@ -987,7 +849,7 @@ mod tests {
         }
 
         let params = endpoint.params.as_ref().expect("should have params");
-        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "page"));
         assert!(params.query.iter().any(|p| p.name == "repo_type"));
         assert!(params.query.iter().any(|p| p.name == "sort"));
         assert!(params.query.iter().any(|p| p.name == "direction"));
@@ -1020,4 +882,15 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn typed_module_group_preserves_endpoint_order_and_completeness() {
+        let group = module_group().unwrap();
+        assert_eq!(group.apis.len(), 1);
+        let api = &group.apis[0];
+        assert_eq!(api.endpoints.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["GetRepository", "GetGitTree", "GetRepositoryContentRaw", "ListPullRequests", "ListPullRequestFiles", "ListIssues", "GetIssue", "ListIssueComments", "ListIssueTimeline", "ListTags", "ListReleases", "GetTagReference", "GetBranchReference", "GetAnnotatedTag", "ListWorkflowRuns", "ListOrgRepos"]);
+        assert_eq!(group.registry.names().collect::<Vec<_>>(), vec!["RepositoryInfo", "GitTreeResponse", "PullRequestSummary", "PullRequestFile", "IssueSummary", "IssueComment", "TimelineEvent", "RepoTag", "Release", "GitRef", "AnnotatedTagObject", "WorkflowRunsResponse"]);
+        group.registry.validate_completeness(api).unwrap();
+        assert!(api.endpoints.iter().all(|e| !e.path.contains('?')));
+    }
+
 }

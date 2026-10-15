@@ -16,6 +16,13 @@ pub struct LoginRequest {
     /// User password.
     pub password: String,
 }
+impl schematic_define::Registration for LoginRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("LoginRequest");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Generic API response envelope used by many endpoints.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -25,6 +32,13 @@ pub struct ApiResponseMessage {
     /// Human-readable message.
     pub message: Option<String>,
 }
+impl schematic_define::Registration for ApiResponseMessage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ApiResponseMessage");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// System information returned by `/system`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -38,6 +52,13 @@ pub struct SystemInfo {
     /// Hardware revision identifier.
     pub hw_revision: String,
 }
+impl schematic_define::Registration for SystemInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("SystemInfo");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Single uploaded/listed resource item.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -52,6 +73,13 @@ pub struct ResourceItem {
     /// Size in bytes.
     pub size: Option<u32>,
 }
+impl schematic_define::Registration for ResourceItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ResourceItem");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Resource list response.
 pub type ResourceItems = Vec<ResourceItem>;
@@ -108,6 +136,13 @@ pub struct IntegrationDriverInfo {
     /// Optional runtime state.
     pub driver_state: Option<DriverState>,
 }
+impl schematic_define::Registration for IntegrationDriverInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("IntegrationDriverInfo");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Result of uploading IR code-set CSV content.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -119,6 +154,13 @@ pub struct CodeSetUploadResult {
     /// Number of updated IR code rows.
     pub updated: u32,
 }
+impl schematic_define::Registration for CodeSetUploadResult {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CodeSetUploadResult");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Backup restore report item type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -154,6 +196,13 @@ pub struct BackupRestoreReportItem {
     /// Successfully restored items.
     pub ok: i32,
 }
+impl schematic_define::Registration for BackupRestoreReportItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("BackupRestoreReportItem");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Type of custom component installation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -177,6 +226,13 @@ pub struct CustomInstall {
     /// Installation timestamp (when installed).
     pub installation_date: Option<String>,
 }
+impl schematic_define::Registration for CustomInstall {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CustomInstall");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Backup restore report list.
 pub type BackupRestoreReportItems = Vec<BackupRestoreReportItem>;

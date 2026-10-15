@@ -1,39 +1,22 @@
-use schematic_define::{ApiRequest, ApiResponse, Endpoint, RestMethod};
+use super::super::*;
+use schematic_define::{DefinitionContext, DefinitionError};
+use schematic_define::{Endpoint, RestMethod};
 
-pub fn all() -> Vec<Endpoint> {
-    vec![
-        Endpoint {
-            id: "CreateSoundEffect".to_string(),
-            method: RestMethod::Post,
-            path: "/v1/sound-generation".to_string(),
-            description: "Generates a sound effect from text".to_string(),
-            request: Some(ApiRequest::json_type("CreateSoundEffectBody")),
-            response: ApiResponse::Binary,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "ListModels".to_string(),
-            method: RestMethod::Get,
-            path: "/v1/models".to_string(),
-            description: "Lists all available models".to_string(),
-            request: None,
-            response: ApiResponse::json_vec_type("ModelInfo"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "CreateSingleUseToken".to_string(),
-            method: RestMethod::Post,
-            path: "/v1/single-use-token/{token_type}".to_string(),
-            description: "Creates a single-use token for WebSocket auth".to_string(),
-            request: None,
-            response: ApiResponse::json_type("SingleUseTokenResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-    ]
+pub fn all(ctx: &mut DefinitionContext) -> Result<Vec<Endpoint>, DefinitionError> {
+    Ok(vec![
+        Endpoint::new("CreateSoundEffect", RestMethod::Post, "/v1/sound-generation")
+            .describes("Generates a sound effect from text")
+            .request_json::<CreateSoundEffectBody>(ctx)
+            .returns_binary()
+            .build()?,
+        Endpoint::new("ListModels", RestMethod::Get, "/v1/models")
+            .describes("Lists all available models")
+            .returns_json::<Vec<ModelInfo>>(ctx)
+            .build()?,
+        Endpoint::new("CreateSingleUseToken", RestMethod::Post, "/v1/single-use-token/{token_type}")
+            .describes("Creates a single-use token for WebSocket auth")
+            .returns_json::<SingleUseTokenResponse>(ctx)
+            .build()?,
+    ])
+
 }

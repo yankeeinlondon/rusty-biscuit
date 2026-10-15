@@ -43,8 +43,17 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::CreateSpeechBody",
+                    "schema_name": "CreateSpeechBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "CreateSpeechBody"
+              "type_name": "::schematic_definitions::elevenlabs::CreateSpeechBody"
             }
           },
           "response": "Binary"
@@ -93,8 +102,17 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::CreateSpeechBody",
+                    "schema_name": "CreateSpeechBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "CreateSpeechBody"
+              "type_name": "::schematic_definitions::elevenlabs::CreateSpeechBody"
             }
           },
           "response": "Binary"
@@ -142,14 +160,32 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::CreateSpeechBody",
+                    "schema_name": "CreateSpeechBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "CreateSpeechBody"
+              "type_name": "::schematic_definitions::elevenlabs::CreateSpeechBody"
             }
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::SpeechWithTimestampsResponse",
+                    "schema_name": "SpeechWithTimestampsResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "SpeechWithTimestampsResponse"
+              "type_name": "::schematic_definitions::elevenlabs::SpeechWithTimestampsResponse"
             }
           }
         }
@@ -196,14 +232,32 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::CreateSpeechBody",
+                    "schema_name": "CreateSpeechBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "CreateSpeechBody"
+              "type_name": "::schematic_definitions::elevenlabs::CreateSpeechBody"
             }
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::SpeechWithTimestampsResponse",
+                    "schema_name": "SpeechWithTimestampsResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "SpeechWithTimestampsResponse"
+              "type_name": "::schematic_definitions::elevenlabs::SpeechWithTimestampsResponse"
             }
           }
         }
@@ -262,8 +316,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::ListVoicesResponse",
+                    "schema_name": "ListVoicesResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "ListVoicesResponse"
+              "type_name": "::schematic_definitions::elevenlabs::ListVoicesResponse"
             }
           }
         }
@@ -289,8 +352,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::VoiceResponseModel",
+                    "schema_name": "VoiceResponseModel"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "VoiceResponseModel"
+              "type_name": "::schematic_definitions::elevenlabs::VoiceResponseModel"
             }
           }
         }
@@ -314,8 +386,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::elevenlabs::StatusResponse"
             }
           }
         }
@@ -352,8 +433,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::VoiceSettings",
+                    "schema_name": "VoiceSettings"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "VoiceSettings"
+              "type_name": "::schematic_definitions::elevenlabs::VoiceSettings"
             }
           }
         }
@@ -379,8 +469,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::VoiceSettings",
+                    "schema_name": "VoiceSettings"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "VoiceSettings"
+              "type_name": "::schematic_definitions::elevenlabs::VoiceSettings"
             }
           }
         }
@@ -427,14 +526,32 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::VoiceSettings",
+                    "schema_name": "VoiceSettings"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "VoiceSettings"
+              "type_name": "::schematic_definitions::elevenlabs::VoiceSettings"
             }
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::elevenlabs::StatusResponse"
             }
           }
         }
@@ -514,8 +631,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::elevenlabs::StatusResponse"
             }
           }
         }
@@ -609,8 +735,17 @@
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::AddSampleResponse",
+                    "schema_name": "AddSampleResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "AddSampleResponse"
+              "type_name": "::schematic_definitions::elevenlabs::AddSampleResponse"
             }
           }
         }
@@ -647,8 +782,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::ListSharedVoicesResponse",
+                    "schema_name": "ListSharedVoicesResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "ListSharedVoicesResponse"
+              "type_name": "::schematic_definitions::elevenlabs::ListSharedVoicesResponse"
             }
           }
         }
@@ -684,14 +828,32 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::AddSharedVoiceBody",
+                    "schema_name": "AddSharedVoiceBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "AddSharedVoiceBody"
+              "type_name": "::schematic_definitions::elevenlabs::AddSharedVoiceBody"
             }
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::AddSharedVoiceResponse",
+                    "schema_name": "AddSharedVoiceResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "AddSharedVoiceResponse"
+              "type_name": "::schematic_definitions::elevenlabs::AddSharedVoiceResponse"
             }
           }
         }
@@ -747,14 +909,32 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::CreatePvcVoiceBody",
+                    "schema_name": "CreatePvcVoiceBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "CreatePvcVoiceBody"
+              "type_name": "::schematic_definitions::elevenlabs::CreatePvcVoiceBody"
             }
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::AddSharedVoiceResponse",
+                    "schema_name": "AddSharedVoiceResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "AddSharedVoiceResponse"
+              "type_name": "::schematic_definitions::elevenlabs::AddSharedVoiceResponse"
             }
           }
         }
@@ -790,14 +970,32 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::CreatePvcVoiceBody",
+                    "schema_name": "CreatePvcVoiceBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "CreatePvcVoiceBody"
+              "type_name": "::schematic_definitions::elevenlabs::CreatePvcVoiceBody"
             }
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::elevenlabs::StatusResponse"
             }
           }
         }
@@ -844,14 +1042,32 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::TrainPvcVoiceBody",
+                    "schema_name": "TrainPvcVoiceBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "TrainPvcVoiceBody"
+              "type_name": "::schematic_definitions::elevenlabs::TrainPvcVoiceBody"
             }
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::elevenlabs::StatusResponse"
             }
           }
         }
@@ -899,8 +1115,17 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::CreateSoundEffectBody",
+                    "schema_name": "CreateSoundEffectBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "CreateSoundEffectBody"
+              "type_name": "::schematic_definitions::elevenlabs::CreateSoundEffectBody"
             }
           },
           "response": "Binary"
@@ -918,7 +1143,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<ModelInfo>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ModelInfo"
+                  }
                 }
               }
             }
@@ -927,8 +1155,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::elevenlabs::ModelInfo",
+                      "schema_name": "ModelInfo"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<ModelInfo>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::elevenlabs::ModelInfo>"
             }
           }
         }
@@ -954,8 +1193,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::SingleUseTokenResponse",
+                    "schema_name": "SingleUseTokenResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "SingleUseTokenResponse"
+              "type_name": "::schematic_definitions::elevenlabs::SingleUseTokenResponse"
             }
           }
         }
@@ -992,8 +1240,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::GetHistoryResponse",
+                    "schema_name": "GetHistoryResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "GetHistoryResponse"
+              "type_name": "::schematic_definitions::elevenlabs::GetHistoryResponse"
             }
           }
         }
@@ -1019,8 +1276,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::SpeechHistoryItemResponseModel",
+                    "schema_name": "SpeechHistoryItemResponseModel"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "SpeechHistoryItemResponseModel"
+              "type_name": "::schematic_definitions::elevenlabs::SpeechHistoryItemResponseModel"
             }
           }
         }
@@ -1044,8 +1310,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::elevenlabs::StatusResponse"
             }
           }
         }
@@ -1127,8 +1402,17 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::DownloadHistoryBody",
+                    "schema_name": "DownloadHistoryBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "DownloadHistoryBody"
+              "type_name": "::schematic_definitions::elevenlabs::DownloadHistoryBody"
             }
           },
           "response": "Binary"
@@ -1155,8 +1439,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::UsageStatsResponse",
+                    "schema_name": "UsageStatsResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "UsageStatsResponse"
+              "type_name": "::schematic_definitions::elevenlabs::UsageStatsResponse"
             }
           }
         }
@@ -1182,8 +1475,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::UserResponse",
+                    "schema_name": "UserResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "UserResponse"
+              "type_name": "::schematic_definitions::elevenlabs::UserResponse"
             }
           }
         }
@@ -1209,8 +1511,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::SubscriptionModel",
+                    "schema_name": "SubscriptionModel"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "SubscriptionModel"
+              "type_name": "::schematic_definitions::elevenlabs::SubscriptionModel"
             }
           }
         }
@@ -1236,8 +1547,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::ResourceResponse",
+                    "schema_name": "ResourceResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "ResourceResponse"
+              "type_name": "::schematic_definitions::elevenlabs::ResourceResponse"
             }
           }
         }
@@ -1284,14 +1604,32 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::ShareResourceBody",
+                    "schema_name": "ShareResourceBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "ShareResourceBody"
+              "type_name": "::schematic_definitions::elevenlabs::ShareResourceBody"
             }
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::elevenlabs::StatusResponse"
             }
           }
         }
@@ -1338,14 +1676,32 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::UnshareResourceBody",
+                    "schema_name": "UnshareResourceBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "UnshareResourceBody"
+              "type_name": "::schematic_definitions::elevenlabs::UnshareResourceBody"
             }
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::elevenlabs::StatusResponse"
             }
           }
         }
@@ -1392,14 +1748,32 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::CopyResourceBody",
+                    "schema_name": "CopyResourceBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "CopyResourceBody"
+              "type_name": "::schematic_definitions::elevenlabs::CopyResourceBody"
             }
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::elevenlabs::StatusResponse"
             }
           }
         }
@@ -1436,8 +1810,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::ListServiceAccountsResponse",
+                    "schema_name": "ListServiceAccountsResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "ListServiceAccountsResponse"
+              "type_name": "::schematic_definitions::elevenlabs::ListServiceAccountsResponse"
             }
           }
         }
@@ -1463,8 +1846,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::ListApiKeysResponse",
+                    "schema_name": "ListApiKeysResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "ListApiKeysResponse"
+              "type_name": "::schematic_definitions::elevenlabs::ListApiKeysResponse"
             }
           }
         }
@@ -1498,14 +1890,32 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::CreateApiKeyBody",
+                    "schema_name": "CreateApiKeyBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "CreateApiKeyBody"
+              "type_name": "::schematic_definitions::elevenlabs::CreateApiKeyBody"
             }
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::CreateApiKeyResponse",
+                    "schema_name": "CreateApiKeyResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "CreateApiKeyResponse"
+              "type_name": "::schematic_definitions::elevenlabs::CreateApiKeyResponse"
             }
           }
         }
@@ -1542,8 +1952,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::elevenlabs::StatusResponse"
             }
           }
         }
@@ -1577,14 +1996,32 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::UpdateApiKeyBody",
+                    "schema_name": "UpdateApiKeyBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "UpdateApiKeyBody"
+              "type_name": "::schematic_definitions::elevenlabs::UpdateApiKeyBody"
             }
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::elevenlabs::StatusResponse"
             }
           }
         }
@@ -1630,8 +2067,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::ListWebhooksResponse",
+                    "schema_name": "ListWebhooksResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "ListWebhooksResponse"
+              "type_name": "::schematic_definitions::elevenlabs::ListWebhooksResponse"
             }
           }
         }
@@ -1665,14 +2111,32 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::CreateWebhookBody",
+                    "schema_name": "CreateWebhookBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "CreateWebhookBody"
+              "type_name": "::schematic_definitions::elevenlabs::CreateWebhookBody"
             }
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::CreateWebhookResponse",
+                    "schema_name": "CreateWebhookResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "CreateWebhookResponse"
+              "type_name": "::schematic_definitions::elevenlabs::CreateWebhookResponse"
             }
           }
         }
@@ -1698,8 +2162,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::elevenlabs::StatusResponse"
             }
           }
         }
@@ -1733,14 +2206,32 @@
         "x-schematic": {
           "request": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::UpdateWebhookBody",
+                    "schema_name": "UpdateWebhookBody"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "UpdateWebhookBody"
+              "type_name": "::schematic_definitions::elevenlabs::UpdateWebhookBody"
             }
           },
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::elevenlabs::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::elevenlabs::StatusResponse"
             }
           }
         }
@@ -2467,18 +2958,8 @@
           "voice_id"
         ]
       },
-      "Vec<ModelInfo>": {
-        "title": "Array_of_ModelInfo",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/ModelInfo"
-            }
-          ]
-        }
-      },
       "ModelInfo": {
+        "title": "ModelInfo",
         "type": "object",
         "properties": {
           "can_be_finetuned": {
@@ -2496,14 +2977,34 @@
           "can_use_style": {
             "type": "boolean"
           },
-          "concurrency_group": {},
+          "concurrency_group": {
+            "type": "string"
+          },
           "description": {
             "type": "string"
           },
-          "languages": {},
-          "max_characters_request_free_user": {},
-          "max_characters_request_subscribed_user": {},
-          "maximum_text_length_per_request": {},
+          "languages": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/LanguageModel"
+                }
+              ]
+            }
+          },
+          "max_characters_request_free_user": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "max_characters_request_subscribed_user": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "maximum_text_length_per_request": {
+            "type": "integer",
+            "format": "int64"
+          },
           "model_id": {
             "type": "string"
           },
@@ -2517,7 +3018,10 @@
           "serves_pro_voices": {
             "type": "boolean"
           },
-          "token_cost_factor": {}
+          "token_cost_factor": {
+            "type": "number",
+            "format": "double"
+          }
         },
         "required": [
           "model_id",

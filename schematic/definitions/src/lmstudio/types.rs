@@ -53,6 +53,13 @@ pub struct ChatBody {
     pub stop: Option<Vec<String>>,
 }
 
+impl schematic_define::Registration for ChatBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ChatBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 // =============================================================================
 // Model Management Types
 // =============================================================================
@@ -63,6 +70,13 @@ pub struct Quantization {
     /// The quantization format (e.g., "Q4_0", "Q8_0").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
+}
+
+impl schematic_define::Registration for Quantization {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("Quantization");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// Model capabilities.
@@ -77,6 +91,13 @@ pub struct Capabilities {
     pub function_calling: Option<bool>,
 }
 
+impl schematic_define::Registration for Capabilities {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("Capabilities");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// A loaded model instance.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LoadedInstance {
@@ -89,6 +110,13 @@ pub struct LoadedInstance {
     pub context_length: Option<u32>,
 }
 
+impl schematic_define::Registration for LoadedInstance {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("LoadedInstance");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Statistics about a model.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Stats {
@@ -99,6 +127,13 @@ pub struct Stats {
     /// Number of parameters.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<String>,
+}
+
+impl schematic_define::Registration for Stats {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("Stats");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// Information about a model in the list response.
@@ -143,6 +178,13 @@ pub struct ModelInfo {
     pub loaded_instances: Option<Vec<LoadedInstance>>,
 }
 
+impl schematic_define::Registration for ModelInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ModelInfo");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Response from the `/api/v1/models` endpoint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListModelsResponse {
@@ -151,6 +193,13 @@ pub struct ListModelsResponse {
 
     /// List of available models.
     pub data: Vec<ModelInfo>,
+}
+
+impl schematic_define::Registration for ListModelsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ListModelsResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 // =============================================================================
@@ -191,6 +240,13 @@ pub struct LoadModelBody {
     pub integrations: Option<Vec<Integration>>,
 }
 
+impl schematic_define::Registration for LoadModelBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("LoadModelBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Response from the `/api/v1/models/load` endpoint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LoadModelResponse {
@@ -200,6 +256,13 @@ pub struct LoadModelResponse {
     /// Load status message.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+}
+
+impl schematic_define::Registration for LoadModelResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("LoadModelResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 // =============================================================================
@@ -213,11 +276,25 @@ pub struct UnloadModelBody {
     pub model: String,
 }
 
+impl schematic_define::Registration for UnloadModelBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("UnloadModelBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Response from the `/api/v1/models/unload` endpoint.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct UnloadModelResponse {
     /// Unload status message.
     pub status: String,
+}
+
+impl schematic_define::Registration for UnloadModelResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("UnloadModelResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 // =============================================================================
@@ -231,6 +308,13 @@ pub struct UnloadModelResponse {
 pub struct DownloadModelBody {
     /// Model identifier to download (e.g., "lmstudio-community/gemma-2-2b-it-GGUF").
     pub model: String,
+}
+
+impl schematic_define::Registration for DownloadModelBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("DownloadModelBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// Response from the `/api/v1/models/download` endpoint.
@@ -266,11 +350,25 @@ pub struct OutputItem {
     pub progress: Option<f64>,
 }
 
+impl schematic_define::Registration for OutputItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("OutputItem");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Request body for the `/api/v1/models/download/status` endpoint.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DownloadStatusBody {
     /// The job ID to check status for.
     pub job_id: String,
+}
+
+impl schematic_define::Registration for DownloadStatusBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("DownloadStatusBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// Response from the `/api/v1/models/download/status` endpoint.
@@ -290,6 +388,13 @@ pub struct DownloadStatusResponse {
     /// Error message if download failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+impl schematic_define::Registration for DownloadStatusResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("DownloadStatusResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 // =============================================================================

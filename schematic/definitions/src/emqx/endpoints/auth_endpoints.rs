@@ -1,74 +1,36 @@
-use schematic_define::{ApiRequest, ApiResponse, Endpoint, RestMethod};
+use super::super::*;
+use schematic_define::{DefinitionContext, DefinitionError};
+use schematic_define::{Endpoint, RestMethod};
 
 /// Authentication and authorization endpoints (authenticators, users, authz sources).
-pub fn auth_endpoints() -> Vec<Endpoint> {
-    vec![
-        Endpoint {
-            id: "ListAuthenticators".to_string(),
-            method: RestMethod::Get,
-            path: "/authentication".to_string(),
-            description: "List all configured authentication providers".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ListAuthenticatorsResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "GetAuthenticator".to_string(),
-            method: RestMethod::Get,
-            path: "/authentication/{id}".to_string(),
-            description: "Get details of a specific authenticator".to_string(),
-            request: None,
-            response: ApiResponse::json_type("AuthenticatorInfo"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "ListAuthUsers".to_string(),
-            method: RestMethod::Get,
-            path: "/authentication/{id}/users".to_string(),
-            description: "List users in a built-in database authenticator".to_string(),
-            request: None,
-            response: ApiResponse::json_vec_type("AuthUser"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "CreateAuthUser".to_string(),
-            method: RestMethod::Post,
-            path: "/authentication/{id}/users".to_string(),
-            description: "Create a new user in a built-in database authenticator".to_string(),
-            request: Some(ApiRequest::json_type("CreateAuthUserBody")),
-            response: ApiResponse::json_type("AuthUser"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "DeleteAuthUser".to_string(),
-            method: RestMethod::Delete,
-            path: "/authentication/{id}/users/{user_id}".to_string(),
-            description: "Delete a user from a built-in database authenticator".to_string(),
-            request: None,
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
+pub fn auth_endpoints(ctx: &mut DefinitionContext) -> Result<Vec<Endpoint>, DefinitionError> {
+    Ok(vec![
+        Endpoint::new("ListAuthenticators", RestMethod::Get, "/authentication")
+            .describes("List all configured authentication providers")
+            .returns_json::<ListAuthenticatorsResponse>(ctx)
+            .build()?,
+        Endpoint::new("GetAuthenticator", RestMethod::Get, "/authentication/{id}")
+            .describes("Get details of a specific authenticator")
+            .returns_json::<AuthenticatorInfo>(ctx)
+            .build()?,
+        Endpoint::new("ListAuthUsers", RestMethod::Get, "/authentication/{id}/users")
+            .describes("List users in a built-in database authenticator")
+            .returns_json::<Vec<AuthUser>>(ctx)
+            .build()?,
+        Endpoint::new("CreateAuthUser", RestMethod::Post, "/authentication/{id}/users")
+            .describes("Create a new user in a built-in database authenticator")
+            .request_json::<CreateAuthUserBody>(ctx)
+            .returns_json::<AuthUser>(ctx)
+            .build()?,
+        Endpoint::new("DeleteAuthUser", RestMethod::Delete, "/authentication/{id}/users/{user_id}")
+            .describes("Delete a user from a built-in database authenticator")
+            .returns_empty()
+            .build()?,
         // Authorization
-        Endpoint {
-            id: "ListAuthzSources".to_string(),
-            method: RestMethod::Get,
-            path: "/authorization/sources".to_string(),
-            description: "List all authorization sources".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ListAuthzSourcesResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-    ]
+        Endpoint::new("ListAuthzSources", RestMethod::Get, "/authorization/sources")
+            .describes("List all authorization sources")
+            .returns_json::<ListAuthzSourcesResponse>(ctx)
+            .build()?,
+    ])
+
 }

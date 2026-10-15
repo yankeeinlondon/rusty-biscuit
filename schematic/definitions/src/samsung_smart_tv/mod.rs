@@ -23,9 +23,12 @@ pub mod remote_ws;
 pub use remote_ws::define_samsung_smart_tv_remote_ws_api;
 pub use types::*;
 
-use crate::registry::SchemaRegistry;
+use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
+use schematic_define::{DefinitionContext, DefinitionError};
+#[cfg(test)]
+use schematic_define::{ApiResponse, RestMethod};
 use schematic_define::{
-    ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EnvMapping, RestApi, RestMethod,
+    Endpoint, EnvMapping, RestApi,
 };
 
 /// Creates a schema registry containing Samsung Smart TV REST response types.
@@ -48,15 +51,12 @@ use schematic_define::{
 /// ```
 #[must_use]
 pub fn openapi_registry() -> SchemaRegistry {
-    SchemaRegistry::new()
-        .register::<SamsungDeviceInfoResponse>("SamsungDeviceInfoResponse")
-        .register::<SamsungDeviceInfo>("SamsungDeviceInfo")
-        .register::<SamsungAppStatusResponse>("SamsungAppStatusResponse")
+    module_group().expect("valid samsung_smart_tv definitions").registry
 }
 
 /// Creates the Samsung Smart TV REST API definition.
 ///
-/// Models the Smart View HTTP API on port 8001 with four endpoints covering
+/// Models the Smart View HTTP API on port 8001 with seven endpoints covering
 /// device identity, debug logs, and application launch. No authentication
 /// is required for these HTTP endpoints; approval/token semantics are
 /// handled on the companion WebSocket channel.
@@ -72,131 +72,77 @@ pub fn openapi_registry() -> SchemaRegistry {
 /// ```
 #[must_use]
 pub fn define_samsung_smart_tv_api() -> RestApi {
-    RestApi {
-        name: "SamsungSmartTv".to_string(),
-        description: "Samsung Smart TV LAN API (S95C-focused modern Tizen subset)".to_string(),
-        base_url: "http://192.168.1.1:8001".to_string(),
-        docs_url: Some(
-            "https://developer.samsung.com/smarttv/develop/extension-libraries/smart-view-sdk/receiver-apps/debugging.html".to_string(),
-        ),
-        auth: AuthStrategy::None,
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        headers: vec![],
-        endpoints: build_samsung_smart_tv_endpoints(),
-        module_path: Some("samsung_smart_tv".to_string()),
-        request_suffix: None,
-        version: None,
-        env_mapping: Some(EnvMapping::default()),
-        cross_origin: CrossOrigin::same_origin(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    }
+    module_group().expect("valid samsung_smart_tv definitions").apis.remove(0)
 }
 
-fn build_samsung_smart_tv_endpoints() -> Vec<Endpoint> {
-    vec![
-        Endpoint {
-            id: "GetDeviceInfo".to_string(),
-            method: RestMethod::Get,
-            path: "/api/v2/".to_string(),
-            description: "Canonical Smart View info endpoint for modern Samsung TVs. \
+fn build_samsung_smart_tv_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
+    let endpoints = build_samsung_smart_tv_endpoints(ctx)?;
+    RestApi::builder(ctx, "SamsungSmartTv", "http://192.168.1.1:8001")
+        .describes("Samsung Smart TV LAN API (S95C-focused modern Tizen subset)")
+        .no_auth()
+        .docs_url("https://developer.samsung.com/smarttv/develop/extension-libraries/smart-view-sdk/receiver-apps/debugging.html")
+        .module_path("samsung_smart_tv")
+        .env_mapping(EnvMapping::default())
+        .endpoints(endpoints)
+        .build()
+}
+
+fn build_samsung_smart_tv_endpoints(ctx: &mut DefinitionContext) -> Result<Vec<Endpoint>, DefinitionError> {
+    Ok(vec![
+        Endpoint::get("GetDeviceInfo", "/api/v2/")
+                .describes("Canonical Smart View info endpoint for modern Samsung TVs. \
                 Returns device identity, model, firmware, and network details. \
                 Payload fields vary by model and firmware revision; unknown fields \
                 are preserved via flattened extras. For high-frequency polling, \
                 prefer conditional requests or payload diffing to reduce repeated \
                 owned-string allocations when firmware does not support ETag-style \
-                cache validation."
-                .to_string(),
-            request: None,
-            response: ApiResponse::json_type("SamsungDeviceInfoResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "GetServerLogs".to_string(),
-            method: RestMethod::Get,
-            path: "/logs/".to_string(),
-            description: "Debug/developer-facing log endpoint. May require developer mode \
-                enabled on the TV and can return non-success status when disabled."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Text,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "LaunchApplicationById".to_string(),
-            method: RestMethod::Post,
-            path: "/api/v2/applications/{app_id}".to_string(),
-            description: "Launch a Samsung application by its package ID. Firmware-dependent \
+                cache validation.")
+                .returns_json::<SamsungDeviceInfoResponse>(ctx)
+                .build()?,
+        Endpoint::get("GetServerLogs", "/logs/")
+                .describes("Debug/developer-facing log endpoint. May require developer mode \
+                enabled on the TV and can return non-success status when disabled.")
+                .returns_text()
+                .build()?,
+        Endpoint::post("LaunchApplicationById", "/api/v2/applications/{app_id}")
+                .describes("Launch a Samsung application by its package ID. Firmware-dependent \
                 support; use when the Samsung app ID is known. Recommended runtime \
-                strategy: attempt this endpoint first, fall back to LaunchApplicationByName."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "LaunchApplicationByName".to_string(),
-            method: RestMethod::Post,
-            path: "/ws/apps/{app_name}".to_string(),
-            description: "Launch a Samsung application by name. Compatibility fallback for \
-                firmware that does not honor /api/v2/applications/{id}."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "GetAppStatus".to_string(),
-            method: RestMethod::Get,
-            path: "/api/v2/applications/{app_id}".to_string(),
-            description: "Get the running status and metadata of a specific application. \
-                Returns visibility, running state, version, and name."
-                .to_string(),
-            request: None,
-            response: ApiResponse::json_type("SamsungAppStatusResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "CloseApp".to_string(),
-            method: RestMethod::Delete,
-            path: "/api/v2/applications/{app_id}".to_string(),
-            description: "Close a running application by its ID. Sends a DELETE to the \
-                application endpoint, which requests the TV terminate the app."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "InstallApp".to_string(),
-            method: RestMethod::Put,
-            path: "/api/v2/applications/{app_id}".to_string(),
-            description: "Install (or reinstall) an application by its ID. The TV downloads \
-                and installs the app from the Samsung app store."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-    ]
+                strategy: attempt this endpoint first, fall back to LaunchApplicationByName.")
+                .returns_empty()
+                .build()?,
+        Endpoint::post("LaunchApplicationByName", "/ws/apps/{app_name}")
+                .describes("Launch a Samsung application by name. Compatibility fallback for \
+                firmware that does not honor /api/v2/applications/{id}.")
+                .returns_empty()
+                .build()?,
+        Endpoint::get("GetAppStatus", "/api/v2/applications/{app_id}")
+                .describes("Get the running status and metadata of a specific application. \
+                Returns visibility, running state, version, and name.")
+                .returns_json::<SamsungAppStatusResponse>(ctx)
+                .build()?,
+        Endpoint::delete("CloseApp", "/api/v2/applications/{app_id}")
+                .describes("Close a running application by its ID. Sends a DELETE to the \
+                application endpoint, which requests the TV terminate the app.")
+                .returns_empty()
+                .build()?,
+        Endpoint::put("InstallApp", "/api/v2/applications/{app_id}")
+                .describes("Install (or reinstall) an application by its ID. The TV downloads \
+                and installs the app from the Samsung app store.")
+                .returns_empty()
+                .build()?,
+    ])
+}
+
+/// Assemble sibling APIs and their ordered nominal schemas in one context.
+pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+    assemble_module_group("::schematic_definitions::samsung_smart_tv", |ctx| {
+        ctx.register::<SamsungDeviceInfoResponse>()?;
+        ctx.register::<SamsungDeviceInfo>()?;
+        ctx.register::<SamsungAppStatusResponse>()?;
+        Ok(vec![
+            build_samsung_smart_tv_api(ctx)?,
+        ])
+    })
 }
 
 #[cfg(test)]
@@ -353,4 +299,18 @@ mod tests {
         assert!(components.schemas.contains_key("SamsungDeviceInfoResponse"));
         assert!(components.schemas.contains_key("SamsungDeviceInfo"));
     }
+
+    #[test]
+    fn module_group_preserves_endpoint_and_registry_inventory() {
+        let group = module_group().unwrap();
+        assert_eq!(
+            group.apis.iter().flat_map(|api| api.endpoints.iter().map(|endpoint| endpoint.id.as_str())).collect::<Vec<_>>(),
+            vec!["GetDeviceInfo", "GetServerLogs", "LaunchApplicationById", "LaunchApplicationByName", "GetAppStatus", "CloseApp", "InstallApp"]
+        );
+        assert_eq!(group.registry.names().collect::<Vec<_>>(), vec!["SamsungDeviceInfoResponse", "SamsungDeviceInfo", "SamsungAppStatusResponse"]);
+        for api in &group.apis {
+            assert!(group.registry.validate_completeness(api).is_ok());
+        }
+    }
+
 }

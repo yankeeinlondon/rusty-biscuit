@@ -57,6 +57,13 @@ pub struct ModelInfo {
     #[serde(rename = "model-index", skip_serializing_if = "Option::is_none")]
     pub model_index: Option<Vec<ModelIndexEntry>>,
 }
+impl schematic_define::Registration for ModelInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ModelInfo");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelSummary {

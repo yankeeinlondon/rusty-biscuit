@@ -29,6 +29,13 @@ pub struct CreateSpeechBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub apply_language_text_normalization: Option<bool>,
 }
+impl schematic_define::Registration for CreateSpeechBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CreateSpeechBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -38,4 +45,10 @@ pub struct SpeechWithTimestampsResponse {
     pub alignment: Option<HttpAlignment>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub normalized_alignment: Option<HttpAlignment>,
+}
+impl schematic_define::Registration for SpeechWithTimestampsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("SpeechWithTimestampsResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }

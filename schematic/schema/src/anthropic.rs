@@ -107,36 +107,36 @@ impl Default for Anthropic {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::anthropic::{CreateMessageRequest, CreateMessageBody};
+/// use schematic_schema::anthropic::CreateMessageRequest;
 ///
-/// let body = CreateMessageBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::anthropic::CreateMessageBody = Default::default();
 /// let request = CreateMessageRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateMessageRequest {
     /// Request body
-    pub body: CreateMessageBody,
+    pub body: ::schematic_definitions::anthropic::CreateMessageBody,
 }
 impl CreateMessageRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateMessageBody) -> Self {
+    pub fn new(body: ::schematic_definitions::anthropic::CreateMessageBody) -> Self {
         Self { body }
     }
 }
-impl From<CreateMessageBody> for CreateMessageRequest {
-    fn from(body: CreateMessageBody) -> Self {
+impl From<::schematic_definitions::anthropic::CreateMessageBody>
+for CreateMessageRequest {
+    fn from(body: ::schematic_definitions::anthropic::CreateMessageBody) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateMessageRequest {
     type Api = AnthropicApi;
-    type Success = MessageResponse;
+    type Success = ::schematic_definitions::anthropic::MessageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<MessageResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::anthropic::MessageResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CreateMessage";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -166,36 +166,35 @@ impl schematic_runtime::EndpointSpec for CreateMessageRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::anthropic::{CountTokensRequest, CountTokensBody};
+/// use schematic_schema::anthropic::CountTokensRequest;
 ///
-/// let body = CountTokensBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::anthropic::CountTokensBody = Default::default();
 /// let request = CountTokensRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CountTokensRequest {
     /// Request body
-    pub body: CountTokensBody,
+    pub body: ::schematic_definitions::anthropic::CountTokensBody,
 }
 impl CountTokensRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CountTokensBody) -> Self {
+    pub fn new(body: ::schematic_definitions::anthropic::CountTokensBody) -> Self {
         Self { body }
     }
 }
-impl From<CountTokensBody> for CountTokensRequest {
-    fn from(body: CountTokensBody) -> Self {
+impl From<::schematic_definitions::anthropic::CountTokensBody> for CountTokensRequest {
+    fn from(body: ::schematic_definitions::anthropic::CountTokensBody) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CountTokensRequest {
     type Api = AnthropicApi;
-    type Success = CountTokensResponse;
+    type Success = ::schematic_definitions::anthropic::CountTokensResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<CountTokensResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::anthropic::CountTokensResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CountTokens";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -234,9 +233,11 @@ impl schematic_runtime::EndpointSpec for CountTokensRequest {
 pub struct ListModelsRequest {}
 impl schematic_runtime::EndpointSpec for ListModelsRequest {
     type Api = AnthropicApi;
-    type Success = ListModelsResponse;
+    type Success = ::schematic_definitions::anthropic::ListModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListModelsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::anthropic::ListModelsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListModels";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -289,9 +290,11 @@ impl From<String> for RetrieveModelRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveModelRequest {
     type Api = AnthropicApi;
-    type Success = ModelInfo;
+    type Success = ::schematic_definitions::anthropic::ModelInfo;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ModelInfo>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::anthropic::ModelInfo,
+    >;
     const ENDPOINT_ID: &'static str = "RetrieveModel";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -524,8 +527,11 @@ impl Anthropic {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateMessageBody`: the request body
-    pub fn create_message(&self, body: CreateMessageBody) -> CreateMessageCall<'_> {
+    /// - `body: ::schematic_definitions::anthropic::CreateMessageBody`: the request body
+    pub fn create_message(
+        &self,
+        body: ::schematic_definitions::anthropic::CreateMessageBody,
+    ) -> CreateMessageCall<'_> {
         CreateMessageCall(self.0.send(CreateMessageRequest::new(body)))
     }
     /// Count tokens in a message before sending
@@ -536,8 +542,11 @@ impl Anthropic {
     ///
     /// ## Arguments
     ///
-    /// - `body: CountTokensBody`: the request body
-    pub fn count_tokens(&self, body: CountTokensBody) -> CountTokensCall<'_> {
+    /// - `body: ::schematic_definitions::anthropic::CountTokensBody`: the request body
+    pub fn count_tokens(
+        &self,
+        body: ::schematic_definitions::anthropic::CountTokensBody,
+    ) -> CountTokensCall<'_> {
         CountTokensCall(self.0.send(CountTokensRequest::new(body)))
     }
     /// List available Claude models

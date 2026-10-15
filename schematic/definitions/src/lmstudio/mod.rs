@@ -26,9 +26,12 @@ mod types;
 
 pub use types::*;
 
-use crate::registry::SchemaRegistry;
+use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
+use schematic_define::{DefinitionContext, DefinitionError};
+#[cfg(test)]
+use schematic_define::{ApiResponse, RestMethod};
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EnvMapping, RestApi, RestMethod,
+    AuthStrategy, Endpoint, EnvMapping, RestApi,
 };
 
 /// Creates a schema registry containing all LM Studio response types.
@@ -53,22 +56,7 @@ use schematic_define::{
 /// ```
 #[must_use]
 pub fn openapi_registry() -> SchemaRegistry {
-    SchemaRegistry::new()
-        .register::<ChatBody>("ChatBody")
-        .register::<LoadModelBody>("LoadModelBody")
-        .register::<UnloadModelBody>("UnloadModelBody")
-        .register::<DownloadModelBody>("DownloadModelBody")
-        .register::<DownloadStatusBody>("DownloadStatusBody")
-        .register::<ListModelsResponse>("ListModelsResponse")
-        .register::<ModelInfo>("ModelInfo")
-        .register::<Quantization>("Quantization")
-        .register::<Capabilities>("Capabilities")
-        .register::<LoadedInstance>("LoadedInstance")
-        .register::<Stats>("Stats")
-        .register::<LoadModelResponse>("LoadModelResponse")
-        .register::<UnloadModelResponse>("UnloadModelResponse")
-        .register::<DownloadStatusResponse>("DownloadStatusResponse")
-        .register::<OutputItem>("OutputItem")
+    module_group().expect("valid lmstudio definitions").registry
 }
 
 /// Creates the LM Studio v1 native API definition.
@@ -103,101 +91,78 @@ pub fn openapi_registry() -> SchemaRegistry {
 /// assert_eq!(api.endpoints.len(), 6);
 /// ```
 pub fn define_lmstudio_api() -> RestApi {
-    RestApi {
-        name: "LmStudio".to_string(),
-        description: "LM Studio v1 native REST API for local LLM inference and model management"
-            .to_string(),
-        base_url: "http://localhost:1234".to_string(),
-        docs_url: Some("https://lmstudio.ai/docs/developer/rest".to_string()),
-        auth: AuthStrategy::BearerToken { header: None },
-        auth_policy: None,
-        env_auth: vec!["LM_API_TOKEN".to_string()],
-        env_username: None,
-        headers: vec![],
-        endpoints: vec![
-            // Chat endpoint
-            Endpoint {
-                id: "Chat".to_string(),
-                method: RestMethod::Post,
-                path: "/api/v1/chat".to_string(),
-                description: "Chat completion with SSE streaming support".to_string(),
-                request: Some(ApiRequest::json_type("ChatBody")),
-                response: ApiResponse::Binary, // SSE streaming
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            // Model listing
-            Endpoint {
-                id: "ListModels".to_string(),
-                method: RestMethod::Get,
-                path: "/api/v1/models".to_string(),
-                description: "List available models".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ListModelsResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            // Model loading
-            Endpoint {
-                id: "LoadModel".to_string(),
-                method: RestMethod::Post,
-                path: "/api/v1/models/load".to_string(),
-                description: "Load a model into memory".to_string(),
-                request: Some(ApiRequest::json_type("LoadModelBody")),
-                response: ApiResponse::json_type("LoadModelResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            // Model unloading
-            Endpoint {
-                id: "UnloadModel".to_string(),
-                method: RestMethod::Post,
-                path: "/api/v1/models/unload".to_string(),
-                description: "Unload a model from memory".to_string(),
-                request: Some(ApiRequest::json_type("UnloadModelBody")),
-                response: ApiResponse::json_type("UnloadModelResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            // Model download
-            Endpoint {
-                id: "DownloadModel".to_string(),
-                method: RestMethod::Post,
-                path: "/api/v1/models/download".to_string(),
-                description: "Download a model from HuggingFace with SSE progress".to_string(),
-                request: Some(ApiRequest::json_type("DownloadModelBody")),
-                response: ApiResponse::Binary, // SSE streaming for progress
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            // Download status check
-            Endpoint {
-                id: "GetDownloadStatus".to_string(),
-                method: RestMethod::Post,
-                path: "/api/v1/models/download/status".to_string(),
-                description: "Check the status of a download job".to_string(),
-                request: Some(ApiRequest::json_type("DownloadStatusBody")),
-                response: ApiResponse::json_type("DownloadStatusResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-        ],
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        env_mapping: Some(EnvMapping::default()),
-        cross_origin: CrossOrigin::same_origin(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    }
+    module_group().expect("valid lmstudio definitions").apis.remove(0)
+}
+
+fn build_lmstudio_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
+    let endpoints = vec![
+
+            Endpoint::post("Chat", "/api/v1/chat")
+                .describes("Chat completion with SSE streaming support")
+                .request_json::<ChatBody>(ctx)
+                .returns_binary()
+                .build()?,
+
+            Endpoint::get("ListModels", "/api/v1/models")
+                .describes("List available models")
+                .returns_json::<ListModelsResponse>(ctx)
+                .build()?,
+
+            Endpoint::post("LoadModel", "/api/v1/models/load")
+                .describes("Load a model into memory")
+                .request_json::<LoadModelBody>(ctx)
+                .returns_json::<LoadModelResponse>(ctx)
+                .build()?,
+
+            Endpoint::post("UnloadModel", "/api/v1/models/unload")
+                .describes("Unload a model from memory")
+                .request_json::<UnloadModelBody>(ctx)
+                .returns_json::<UnloadModelResponse>(ctx)
+                .build()?,
+
+            Endpoint::post("DownloadModel", "/api/v1/models/download")
+                .describes("Download a model from HuggingFace with SSE progress")
+                .request_json::<DownloadModelBody>(ctx)
+                .returns_binary()
+                .build()?,
+
+            Endpoint::post("GetDownloadStatus", "/api/v1/models/download/status")
+                .describes("Check the status of a download job")
+                .request_json::<DownloadStatusBody>(ctx)
+                .returns_json::<DownloadStatusResponse>(ctx)
+                .build()?,
+        ];
+    RestApi::builder(ctx, "LmStudio", "http://localhost:1234")
+        .describes("LM Studio v1 native REST API for local LLM inference and model management")
+        .authentication(AuthStrategy::BearerToken { header: None }, vec!["LM_API_TOKEN".to_string()])
+        .docs_url("https://lmstudio.ai/docs/developer/rest")
+        .endpoints(endpoints)
+        .env_mapping(EnvMapping::default())
+        .build()
+}
+
+/// Assemble sibling APIs and their ordered nominal schemas in one context.
+pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+    assemble_module_group("::schematic_definitions::lmstudio", |ctx| {
+        ctx.register::<ChatBody>()?;
+        ctx.register::<LoadModelBody>()?;
+        ctx.register::<UnloadModelBody>()?;
+        ctx.register::<DownloadModelBody>()?;
+        ctx.register::<DownloadStatusBody>()?;
+        ctx.register::<ListModelsResponse>()?;
+        ctx.register::<ModelInfo>()?;
+        ctx.register::<Quantization>()?;
+        ctx.register::<Capabilities>()?;
+        ctx.register::<LoadedInstance>()?;
+        ctx.register::<Stats>()?;
+        ctx.register::<LoadModelResponse>()?;
+        ctx.register::<UnloadModelResponse>()?;
+        ctx.register::<DownloadStatusResponse>()?;
+        ctx.register::<OutputItem>()?;
+        Ok(vec![
+            build_lmstudio_api(ctx)?,
+        ])
+    })
 }
 
 #[cfg(test)]
@@ -327,4 +292,18 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn module_group_preserves_endpoint_and_registry_inventory() {
+        let group = module_group().unwrap();
+        assert_eq!(
+            group.apis.iter().flat_map(|api| api.endpoints.iter().map(|endpoint| endpoint.id.as_str())).collect::<Vec<_>>(),
+            vec!["Chat", "ListModels", "LoadModel", "UnloadModel", "DownloadModel", "GetDownloadStatus"]
+        );
+        assert_eq!(group.registry.names().collect::<Vec<_>>(), vec!["ChatBody", "LoadModelBody", "UnloadModelBody", "DownloadModelBody", "DownloadStatusBody", "ListModelsResponse", "ModelInfo", "Quantization", "Capabilities", "LoadedInstance", "Stats", "LoadModelResponse", "UnloadModelResponse", "DownloadStatusResponse", "OutputItem"]);
+        for api in &group.apis {
+            assert!(group.registry.validate_completeness(api).is_ok());
+        }
+    }
+
 }

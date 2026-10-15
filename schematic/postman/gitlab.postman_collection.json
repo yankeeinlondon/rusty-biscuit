@@ -160,7 +160,7 @@
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/projects/:id/repository/files/:file_path?ref=:git_ref",
+              "raw": "{{baseUrl}}/projects/:id/repository/files/:file_path",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -169,7 +169,12 @@
                 ":id",
                 "repository",
                 "files",
-                ":file_path}?ref={git_ref"
+                ":file_path"
+              ],
+              "query": [
+                {
+                  "key": "ref"
+                }
               ],
               "variable": [
                 {
@@ -179,10 +184,6 @@
                 {
                   "key": "file_path",
                   "value": "<file_path>"
-                },
-                {
-                  "key": "git_ref",
-                  "value": "<git_ref>"
                 }
               ]
             },

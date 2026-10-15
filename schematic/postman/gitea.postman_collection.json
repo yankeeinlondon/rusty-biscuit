@@ -133,46 +133,10 @@
                 "trees",
                 ":sha"
               ],
-              "variable": [
+              "query": [
                 {
-                  "key": "owner",
-                  "value": "<owner>"
-                },
-                {
-                  "key": "repo",
-                  "value": "<repo>"
-                },
-                {
-                  "key": "sha",
-                  "value": "<sha>"
+                  "key": "recursive"
                 }
-              ]
-            },
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "description": "Get a Git tree (non-recursive, single level)"
-          }
-        },
-        {
-          "name": "GetGitTreeRecursive",
-          "request": {
-            "method": "GET",
-            "url": {
-              "raw": "{{baseUrl}}/repos/:owner/:repo/git/trees/:sha?recursive=true",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "repos",
-                ":owner",
-                ":repo",
-                "git",
-                "trees",
-                "{sha}?recursive=true"
               ],
               "variable": [
                 {
@@ -195,7 +159,7 @@
                 "value": "application/json"
               }
             ],
-            "description": "Get a Git tree recursively (may be paginated for large repos)"
+            "description": "Get a Git tree; set recursive to include nested entries"
           }
         },
         {

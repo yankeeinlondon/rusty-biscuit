@@ -14,6 +14,13 @@ use serde::{Deserialize, Serialize};
 pub struct StatusResponse {
     pub status: i32,
 }
+impl schematic_define::Registration for StatusResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("StatusResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 // =============================================================================
 // Device
@@ -55,6 +62,13 @@ pub struct GetModelResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub has_eq_setting: Option<bool>,
 }
+impl schematic_define::Registration for GetModelResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("GetModelResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 // =============================================================================
 // Music / State
@@ -92,6 +106,13 @@ pub struct GetStateResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub volume_data: Option<VolumeData>,
 }
+impl schematic_define::Registration for GetStateResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("GetStateResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Metadata for the currently playing track.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -152,6 +173,13 @@ pub struct InputOutputListResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_index: Option<i32>,
 }
+impl schematic_define::Registration for InputOutputListResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("InputOutputListResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// An available audio input.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -190,6 +218,13 @@ pub struct PowerOptionsResponse {
     pub status: i32,
     pub data: Vec<PowerOption>,
 }
+impl schematic_define::Registration for PowerOptionsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("PowerOptionsResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// A power action option (e.g., poweroff, reboot, screen, timeshutdown).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -220,6 +255,13 @@ pub struct BrightnessResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max: Option<i32>,
 }
+impl schematic_define::Registration for BrightnessResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("BrightnessResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// List of available display modes (VU or spectrum).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -230,6 +272,13 @@ pub struct DisplayModeListResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_index: Option<i32>,
 }
+impl schematic_define::Registration for DisplayModeListResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("DisplayModeListResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// A display mode entry.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]

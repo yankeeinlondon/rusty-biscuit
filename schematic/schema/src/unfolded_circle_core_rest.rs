@@ -111,36 +111,40 @@ impl Default for UnfoldedCircleCoreRest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::unfolded_circle_core_rest::{LoginCoreRestRequest, LoginRequest};
+/// use schematic_schema::unfolded_circle_core_rest::LoginCoreRestRequest;
 ///
-/// let body = LoginRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::unfolded_circle::core_rest::LoginRequest = Default::default();
 /// let request = LoginCoreRestRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LoginCoreRestRequest {
     /// Request body
-    pub body: LoginRequest,
+    pub body: ::schematic_definitions::unfolded_circle::core_rest::LoginRequest,
 }
 impl LoginCoreRestRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: LoginRequest) -> Self {
+    pub fn new(
+        body: ::schematic_definitions::unfolded_circle::core_rest::LoginRequest,
+    ) -> Self {
         Self { body }
     }
 }
-impl From<LoginRequest> for LoginCoreRestRequest {
-    fn from(body: LoginRequest) -> Self {
+impl From<::schematic_definitions::unfolded_circle::core_rest::LoginRequest>
+for LoginCoreRestRequest {
+    fn from(
+        body: ::schematic_definitions::unfolded_circle::core_rest::LoginRequest,
+    ) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for LoginCoreRestRequest {
     type Api = UnfoldedCircleCoreRestApi;
-    type Success = ApiResponseMessage;
+    type Success = ::schematic_definitions::unfolded_circle::core_rest::ApiResponseMessage;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ApiResponseMessage>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::unfolded_circle::core_rest::ApiResponseMessage,
+    >;
     const ENDPOINT_ID: &'static str = "Login";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -213,9 +217,11 @@ impl schematic_runtime::EndpointSpec for LogoutCoreRestRequest {
 pub struct GetSystemInfoCoreRestRequest {}
 impl schematic_runtime::EndpointSpec for GetSystemInfoCoreRestRequest {
     type Api = UnfoldedCircleCoreRestApi;
-    type Success = SystemInfo;
+    type Success = ::schematic_definitions::unfolded_circle::core_rest::SystemInfo;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<SystemInfo>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::unfolded_circle::core_rest::SystemInfo,
+    >;
     const ENDPOINT_ID: &'static str = "GetSystemInfo";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -315,9 +321,15 @@ impl From<RestoreBackupForm> for RestoreBackupCoreRestRequest {
 }
 impl schematic_runtime::EndpointSpec for RestoreBackupCoreRestRequest {
     type Api = UnfoldedCircleCoreRestApi;
-    type Success = BackupRestoreReportItems;
+    type Success = ::std::vec::Vec<
+        ::schematic_definitions::unfolded_circle::core_rest::BackupRestoreReportItem,
+    >;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<BackupRestoreReportItems>;
+    type Decoder = schematic_runtime::Json<
+        ::std::vec::Vec<
+            ::schematic_definitions::unfolded_circle::core_rest::BackupRestoreReportItem,
+        >,
+    >;
     const ENDPOINT_ID: &'static str = "RestoreBackup";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::PUT;
     fn into_parts(
@@ -383,9 +395,15 @@ impl UploadResourceCoreRestRequest {
 }
 impl schematic_runtime::EndpointSpec for UploadResourceCoreRestRequest {
     type Api = UnfoldedCircleCoreRestApi;
-    type Success = ResourceItems;
+    type Success = ::std::vec::Vec<
+        ::schematic_definitions::unfolded_circle::core_rest::ResourceItem,
+    >;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ResourceItems>;
+    type Decoder = schematic_runtime::Json<
+        ::std::vec::Vec<
+            ::schematic_definitions::unfolded_circle::core_rest::ResourceItem,
+        >,
+    >;
     const ENDPOINT_ID: &'static str = "UploadResource";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -507,9 +525,11 @@ impl From<InstallCustomIntegrationForm> for InstallCustomIntegrationCoreRestRequ
 }
 impl schematic_runtime::EndpointSpec for InstallCustomIntegrationCoreRestRequest {
     type Api = UnfoldedCircleCoreRestApi;
-    type Success = IntegrationDriverInfo;
+    type Success = ::schematic_definitions::unfolded_circle::core_rest::IntegrationDriverInfo;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<IntegrationDriverInfo>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::unfolded_circle::core_rest::IntegrationDriverInfo,
+    >;
     const ENDPOINT_ID: &'static str = "InstallCustomIntegration";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -575,9 +595,11 @@ impl UploadCustomIrCodeSetCoreRestRequest {
 }
 impl schematic_runtime::EndpointSpec for UploadCustomIrCodeSetCoreRestRequest {
     type Api = UnfoldedCircleCoreRestApi;
-    type Success = CodeSetUploadResult;
+    type Success = ::schematic_definitions::unfolded_circle::core_rest::CodeSetUploadResult;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<CodeSetUploadResult>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::unfolded_circle::core_rest::CodeSetUploadResult,
+    >;
     const ENDPOINT_ID: &'static str = "UploadCustomIrCodeSet";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -648,9 +670,11 @@ impl InstallCustomComponentCoreRestRequest {
 }
 impl schematic_runtime::EndpointSpec for InstallCustomComponentCoreRestRequest {
     type Api = UnfoldedCircleCoreRestApi;
-    type Success = CustomInstall;
+    type Success = ::schematic_definitions::unfolded_circle::core_rest::CustomInstall;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<CustomInstall>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::unfolded_circle::core_rest::CustomInstall,
+    >;
     const ENDPOINT_ID: &'static str = "InstallCustomComponent";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -1331,8 +1355,11 @@ impl UnfoldedCircleCoreRest {
     ///
     /// ## Arguments
     ///
-    /// - `body: LoginRequest`: the request body
-    pub fn login(&self, body: LoginRequest) -> LoginCoreRestCall<'_> {
+    /// - `body: ::schematic_definitions::unfolded_circle::core_rest::LoginRequest`: the request body
+    pub fn login(
+        &self,
+        body: ::schematic_definitions::unfolded_circle::core_rest::LoginRequest,
+    ) -> LoginCoreRestCall<'_> {
         LoginCoreRestCall(self.0.send(LoginCoreRestRequest::new(body)))
     }
     /// Invalidate the active cookie session created by Login. Typical usage is explicit sign-out in long-running admin tools.

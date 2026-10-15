@@ -11,6 +11,13 @@ pub struct OpenAIMessage {
     pub content: String,
 }
 
+impl schematic_define::Registration for OpenAIMessage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("OpenAIMessage");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Request body for the `/v1/chat/completions` endpoint.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct OpenAIChatCompletionRequest {
@@ -49,6 +56,13 @@ pub struct OpenAIChatCompletionRequest {
     pub frequency_penalty: Option<f64>,
 }
 
+impl schematic_define::Registration for OpenAIChatCompletionRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("OpenAIChatCompletionRequest");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// A choice in the chat completion response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpenAIChatCompletionChoice {
@@ -74,6 +88,13 @@ pub struct OpenAIUsage {
 
     /// Total tokens used.
     pub total_tokens: u32,
+}
+
+impl schematic_define::Registration for OpenAIUsage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("OpenAIUsage");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// Response from the `/v1/chat/completions` endpoint.
@@ -133,6 +154,13 @@ pub struct OpenAICompletionRequest {
     pub echo: Option<bool>,
 }
 
+impl schematic_define::Registration for OpenAICompletionRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("OpenAICompletionRequest");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// A choice in the completion response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpenAICompletionChoice {
@@ -180,6 +208,13 @@ pub struct OpenAIEmbeddingRequest {
     pub input: String,
 }
 
+impl schematic_define::Registration for OpenAIEmbeddingRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("OpenAIEmbeddingRequest");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// An embedding object in the response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct OpenAIEmbeddingData {
@@ -191,6 +226,13 @@ pub struct OpenAIEmbeddingData {
 
     /// The embedding vector.
     pub embedding: Vec<f64>,
+}
+
+impl schematic_define::Registration for OpenAIEmbeddingData {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("OpenAIEmbeddingData");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// Response from the `/v1/embeddings` endpoint.
@@ -210,6 +252,13 @@ pub struct OpenAIEmbeddingResponse {
     pub usage: Option<OpenAIUsage>,
 }
 
+impl schematic_define::Registration for OpenAIEmbeddingResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("OpenAIEmbeddingResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// A model in the OpenAI-compatible list.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct OpenAIModel {
@@ -226,6 +275,13 @@ pub struct OpenAIModel {
     pub owned_by: String,
 }
 
+impl schematic_define::Registration for OpenAIModel {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("OpenAIModel");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Response from the `/v1/models` endpoint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct OpenAIListModelsResponse {
@@ -234,6 +290,13 @@ pub struct OpenAIListModelsResponse {
 
     /// List of available models.
     pub data: Vec<OpenAIModel>,
+}
+
+impl schematic_define::Registration for OpenAIListModelsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("OpenAIListModelsResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// Delta content in OpenAI streaming format.

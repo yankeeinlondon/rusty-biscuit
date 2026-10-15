@@ -32,8 +32,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::github::RepositoryInfo",
+                    "schema_name": "RepositoryInfo"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "RepositoryInfo"
+              "type_name": "::schematic_definitions::github::RepositoryInfo"
             }
           }
         }
@@ -91,8 +100,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::github::GitTreeResponse",
+                    "schema_name": "GitTreeResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "GitTreeResponse"
+              "type_name": "::schematic_definitions::github::GitTreeResponse"
             }
           }
         }
@@ -262,7 +280,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<PullRequestSummary>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PullRequestSummary"
+                  }
                 }
               }
             }
@@ -271,8 +292,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::github::PullRequestSummary",
+                      "schema_name": "PullRequestSummary"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<PullRequestSummary>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::github::PullRequestSummary>"
             }
           }
         }
@@ -331,7 +363,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<PullRequestFile>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PullRequestFile"
+                  }
                 }
               }
             }
@@ -340,8 +375,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::github::PullRequestFile",
+                      "schema_name": "PullRequestFile"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<PullRequestFile>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::github::PullRequestFile>"
             }
           }
         }
@@ -453,7 +499,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<IssueSummary>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IssueSummary"
+                  }
                 }
               }
             }
@@ -462,8 +511,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::github::IssueSummary",
+                      "schema_name": "IssueSummary"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<IssueSummary>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::github::IssueSummary>"
             }
           }
         }
@@ -509,8 +569,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::github::IssueSummary",
+                    "schema_name": "IssueSummary"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "IssueSummary"
+              "type_name": "::schematic_definitions::github::IssueSummary"
             }
           }
         }
@@ -578,7 +647,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<IssueComment>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IssueComment"
+                  }
                 }
               }
             }
@@ -587,8 +659,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::github::IssueComment",
+                      "schema_name": "IssueComment"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<IssueComment>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::github::IssueComment>"
             }
           }
         }
@@ -656,7 +739,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<TimelineEvent>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TimelineEvent"
+                  }
                 }
               }
             }
@@ -665,8 +751,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::github::TimelineEvent",
+                      "schema_name": "TimelineEvent"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<TimelineEvent>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::github::TimelineEvent>"
             }
           }
         }
@@ -734,7 +831,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<RepoTag>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RepoTag"
+                  }
                 }
               }
             }
@@ -743,8 +843,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::github::RepoTag",
+                      "schema_name": "RepoTag"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<RepoTag>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::github::RepoTag>"
             }
           }
         }
@@ -803,7 +914,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<Release>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Release"
+                  }
                 }
               }
             }
@@ -812,8 +926,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::github::Release",
+                      "schema_name": "Release"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<Release>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::github::Release>"
             }
           }
         }
@@ -859,8 +984,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::github::GitRef",
+                    "schema_name": "GitRef"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "GitRef"
+              "type_name": "::schematic_definitions::github::GitRef"
             }
           }
         }
@@ -915,8 +1049,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::github::GitRef",
+                    "schema_name": "GitRef"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "GitRef"
+              "type_name": "::schematic_definitions::github::GitRef"
             }
           }
         }
@@ -971,8 +1114,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::github::AnnotatedTagObject",
+                    "schema_name": "AnnotatedTagObject"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "AnnotatedTagObject"
+              "type_name": "::schematic_definitions::github::AnnotatedTagObject"
             }
           }
         }
@@ -1095,8 +1247,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::github::WorkflowRunsResponse",
+                    "schema_name": "WorkflowRunsResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "WorkflowRunsResponse"
+              "type_name": "::schematic_definitions::github::WorkflowRunsResponse"
             }
           }
         }
@@ -1203,7 +1364,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<RepositoryInfo>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RepositoryInfo"
+                  }
                 }
               }
             }
@@ -1212,8 +1376,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::github::RepositoryInfo",
+                      "schema_name": "RepositoryInfo"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<RepositoryInfo>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::github::RepositoryInfo>"
             }
           }
         }
@@ -1608,17 +1783,6 @@
           "name"
         ]
       },
-      "Vec<PullRequestSummary>": {
-        "title": "Array_of_PullRequestSummary",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/PullRequestSummary"
-            }
-          ]
-        }
-      },
       "PullRequestFile": {
         "title": "PullRequestFile",
         "description": "A file changed in a pull request.",
@@ -1676,17 +1840,6 @@
           "filename",
           "status"
         ]
-      },
-      "Vec<PullRequestFile>": {
-        "title": "Array_of_PullRequestFile",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/PullRequestFile"
-            }
-          ]
-        }
       },
       "IssueSummary": {
         "title": "IssueSummary",
@@ -1819,17 +1972,6 @@
           "state"
         ]
       },
-      "Vec<IssueSummary>": {
-        "title": "Array_of_IssueSummary",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/IssueSummary"
-            }
-          ]
-        }
-      },
       "IssueComment": {
         "title": "IssueComment",
         "description": "A comment on an issue.",
@@ -1872,17 +2014,6 @@
           "updated_at"
         ]
       },
-      "Vec<IssueComment>": {
-        "title": "Array_of_IssueComment",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/IssueComment"
-            }
-          ]
-        }
-      },
       "TimelineEvent": {
         "title": "TimelineEvent",
         "description": "A timeline event on an issue.",
@@ -1904,17 +2035,6 @@
             "type": "integer",
             "format": "uint64"
           }
-        }
-      },
-      "Vec<TimelineEvent>": {
-        "title": "Array_of_TimelineEvent",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/TimelineEvent"
-            }
-          ]
         }
       },
       "RepoTag": {
@@ -1966,17 +2086,6 @@
           "sha",
           "url"
         ]
-      },
-      "Vec<RepoTag>": {
-        "title": "Array_of_RepoTag",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/RepoTag"
-            }
-          ]
-        }
       },
       "Release": {
         "title": "Release",
@@ -2080,17 +2189,6 @@
           "id",
           "name"
         ]
-      },
-      "Vec<Release>": {
-        "title": "Array_of_Release",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/Release"
-            }
-          ]
-        }
       },
       "GitRef": {
         "title": "GitRef",
@@ -2338,17 +2436,6 @@
         "required": [
           "id"
         ]
-      },
-      "Vec<RepositoryInfo>": {
-        "title": "Array_of_RepositoryInfo",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/RepositoryInfo"
-            }
-          ]
-        }
       }
     },
     "securitySchemes": {

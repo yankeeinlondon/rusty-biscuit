@@ -26,9 +26,12 @@ mod types;
 
 pub use types::*;
 
-use crate::registry::SchemaRegistry;
+use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
+use schematic_define::{DefinitionContext, DefinitionError};
+#[cfg(test)]
+use schematic_define::{ApiResponse, AuthStrategy, RestMethod};
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EnvMapping, RestApi, RestMethod,
+    Endpoint, EnvMapping, RestApi,
 };
 
 /// Creates a schema registry containing all Ollama response types.
@@ -56,39 +59,7 @@ use schematic_define::{
 /// ```
 #[must_use]
 pub fn openapi_registry() -> SchemaRegistry {
-    SchemaRegistry::new()
-        // Native API request body types
-        .register::<GenerateBody>("GenerateBody")
-        .register::<ChatBody>("ChatBody")
-        .register::<EmbeddingsBody>("EmbeddingsBody")
-        .register::<ShowModelBody>("ShowModelBody")
-        .register::<PullModelBody>("PullModelBody")
-        .register::<PushModelBody>("PushModelBody")
-        .register::<CopyModelBody>("CopyModelBody")
-        .register::<DeleteModelBody>("DeleteModelBody")
-        .register::<CreateModelBody>("CreateModelBody")
-        // Native API nested types
-        .register::<Message>("Message")
-        // Native API response types
-        .register::<EmbeddingsResponse>("EmbeddingsResponse")
-        .register::<ListModelsResponse>("ListModelsResponse")
-        .register::<ModelInfo>("ModelInfo")
-        .register::<ModelDetails>("ModelDetails")
-        .register::<ShowModelResponse>("ShowModelResponse")
-        .register::<ListRunningModelsResponse>("ListRunningModelsResponse")
-        .register::<RunningModel>("RunningModel")
-        // OpenAI-compatible API request body types
-        .register::<OpenAIChatCompletionRequest>("OpenAIChatCompletionRequest")
-        .register::<OpenAICompletionRequest>("OpenAICompletionRequest")
-        .register::<OpenAIEmbeddingRequest>("OpenAIEmbeddingRequest")
-        // OpenAI-compatible API nested types
-        .register::<OpenAIMessage>("OpenAIMessage")
-        // OpenAI-compatible API response types
-        .register::<OpenAIEmbeddingResponse>("OpenAIEmbeddingResponse")
-        .register::<OpenAIEmbeddingData>("OpenAIEmbeddingData")
-        .register::<OpenAIUsage>("OpenAIUsage")
-        .register::<OpenAIListModelsResponse>("OpenAIListModelsResponse")
-        .register::<OpenAIModel>("OpenAIModel")
+    module_group().expect("valid ollama definitions").registry
 }
 
 /// Creates the native Ollama API definition.
@@ -122,158 +93,76 @@ pub fn openapi_registry() -> SchemaRegistry {
 /// assert_eq!(api.endpoints.len(), 11);
 /// ```
 pub fn define_ollama_native_api() -> RestApi {
-    RestApi {
-        name: "OllamaNative".to_string(),
-        description: "Ollama native REST API for local LLM inference and model management"
-            .to_string(),
-        base_url: "http://localhost:11434".to_string(),
-        docs_url: Some("https://github.com/ollama/ollama/blob/main/docs/api.md".to_string()),
-        auth: AuthStrategy::None,
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        headers: vec![],
-        endpoints: vec![
-            // Generation endpoints
-            Endpoint {
-                id: "Generate".to_string(),
-                method: RestMethod::Post,
-                path: "/api/generate".to_string(),
-                description: "Generate text completion from a prompt (streaming NDJSON by default)"
-                    .to_string(),
-                request: Some(ApiRequest::json_type("GenerateBody")),
-                response: ApiResponse::Binary, // Streaming NDJSON
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "Chat".to_string(),
-                method: RestMethod::Post,
-                path: "/api/chat".to_string(),
-                description: "Generate chat completion from messages (streaming NDJSON by default)"
-                    .to_string(),
-                request: Some(ApiRequest::json_type("ChatBody")),
-                response: ApiResponse::Binary, // Streaming NDJSON
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "Embeddings".to_string(),
-                method: RestMethod::Post,
-                path: "/api/embeddings".to_string(),
-                description: "Generate embeddings for text".to_string(),
-                request: Some(ApiRequest::json_type("EmbeddingsBody")),
-                response: ApiResponse::json_type("EmbeddingsResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            // Model management endpoints
-            Endpoint {
-                id: "ListModels".to_string(),
-                method: RestMethod::Get,
-                path: "/api/tags".to_string(),
-                description: "List locally available models".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ListModelsResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "ShowModel".to_string(),
-                method: RestMethod::Post,
-                path: "/api/show".to_string(),
-                description: "Show detailed information about a model".to_string(),
-                request: Some(ApiRequest::json_type("ShowModelBody")),
-                response: ApiResponse::json_type("ShowModelResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "PullModel".to_string(),
-                method: RestMethod::Post,
-                path: "/api/pull".to_string(),
-                description:
-                    "Pull a model from the Ollama registry (streaming progress by default)"
-                        .to_string(),
-                request: Some(ApiRequest::json_type("PullModelBody")),
-                response: ApiResponse::Binary, // Streaming progress
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "PushModel".to_string(),
-                method: RestMethod::Post,
-                path: "/api/push".to_string(),
-                description: "Push a model to the Ollama registry (streaming progress by default)"
-                    .to_string(),
-                request: Some(ApiRequest::json_type("PushModelBody")),
-                response: ApiResponse::Binary, // Streaming progress
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "CopyModel".to_string(),
-                method: RestMethod::Post,
-                path: "/api/copy".to_string(),
-                description: "Copy a model to a new name".to_string(),
-                request: Some(ApiRequest::json_type("CopyModelBody")),
-                response: ApiResponse::Empty,
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "DeleteModel".to_string(),
-                method: RestMethod::Delete,
-                path: "/api/delete".to_string(),
-                description: "Delete a model".to_string(),
-                request: Some(ApiRequest::json_type("DeleteModelBody")),
-                response: ApiResponse::Empty,
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "CreateModel".to_string(),
-                method: RestMethod::Post,
-                path: "/api/create".to_string(),
-                description: "Create a model from a Modelfile (streaming progress by default)"
-                    .to_string(),
-                request: Some(ApiRequest::json_type("CreateModelBody")),
-                response: ApiResponse::Binary, // Streaming progress
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "ListRunningModels".to_string(),
-                method: RestMethod::Get,
-                path: "/api/ps".to_string(),
-                description: "List models currently loaded in memory".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ListRunningModelsResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-        ],
-        module_path: Some("ollama".to_string()),
-        request_suffix: Some("NativeRequest".to_string()),
-        version: None,
-        env_mapping: Some(EnvMapping::default()),
-        cross_origin: CrossOrigin::same_origin(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    }
+    module_group().expect("valid ollama definitions").apis.remove(0)
+}
+
+fn build_ollama_native_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
+    let endpoints = vec![
+
+            Endpoint::post("Generate", "/api/generate")
+                .describes("Generate text completion from a prompt (streaming NDJSON by default)")
+                .request_json::<GenerateBody>(ctx)
+                .returns_binary()
+                .build()?,
+            Endpoint::post("Chat", "/api/chat")
+                .describes("Generate chat completion from messages (streaming NDJSON by default)")
+                .request_json::<ChatBody>(ctx)
+                .returns_binary()
+                .build()?,
+            Endpoint::post("Embeddings", "/api/embeddings")
+                .describes("Generate embeddings for text")
+                .request_json::<EmbeddingsBody>(ctx)
+                .returns_json::<EmbeddingsResponse>(ctx)
+                .build()?,
+
+            Endpoint::get("ListModels", "/api/tags")
+                .describes("List locally available models")
+                .returns_json::<ListModelsResponse>(ctx)
+                .build()?,
+            Endpoint::post("ShowModel", "/api/show")
+                .describes("Show detailed information about a model")
+                .request_json::<ShowModelBody>(ctx)
+                .returns_json::<ShowModelResponse>(ctx)
+                .build()?,
+            Endpoint::post("PullModel", "/api/pull")
+                .describes("Pull a model from the Ollama registry (streaming progress by default)")
+                .request_json::<PullModelBody>(ctx)
+                .returns_binary()
+                .build()?,
+            Endpoint::post("PushModel", "/api/push")
+                .describes("Push a model to the Ollama registry (streaming progress by default)")
+                .request_json::<PushModelBody>(ctx)
+                .returns_binary()
+                .build()?,
+            Endpoint::post("CopyModel", "/api/copy")
+                .describes("Copy a model to a new name")
+                .request_json::<CopyModelBody>(ctx)
+                .returns_empty()
+                .build()?,
+            Endpoint::delete("DeleteModel", "/api/delete")
+                .describes("Delete a model")
+                .request_json::<DeleteModelBody>(ctx)
+                .returns_empty()
+                .build()?,
+            Endpoint::post("CreateModel", "/api/create")
+                .describes("Create a model from a Modelfile (streaming progress by default)")
+                .request_json::<CreateModelBody>(ctx)
+                .returns_binary()
+                .build()?,
+            Endpoint::get("ListRunningModels", "/api/ps")
+                .describes("List models currently loaded in memory")
+                .returns_json::<ListRunningModelsResponse>(ctx)
+                .build()?,
+        ];
+    RestApi::builder(ctx, "OllamaNative", "http://localhost:11434")
+        .describes("Ollama native REST API for local LLM inference and model management")
+        .no_auth()
+        .docs_url("https://github.com/ollama/ollama/blob/main/docs/api.md")
+        .module_path("ollama")
+        .request_suffix("NativeRequest")
+        .env_mapping(EnvMapping::default())
+        .endpoints(endpoints)
+        .build()
 }
 
 /// Creates the OpenAI-compatible Ollama API definition.
@@ -300,73 +189,76 @@ pub fn define_ollama_native_api() -> RestApi {
 /// assert_eq!(api.endpoints.len(), 4);
 /// ```
 pub fn define_ollama_openai_api() -> RestApi {
-    RestApi {
-        name: "OllamaOpenAI".to_string(),
-        description: "Ollama OpenAI-compatible REST API for drop-in replacement of OpenAI clients"
-            .to_string(),
-        base_url: "http://localhost:11434".to_string(),
-        docs_url: Some("https://github.com/ollama/ollama/blob/main/docs/openai.md".to_string()),
-        auth: AuthStrategy::None, // Ollama ignores API keys but accepts them
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        headers: vec![],
-        endpoints: vec![
-            Endpoint {
-                id: "ChatCompletions".to_string(),
-                method: RestMethod::Post,
-                path: "/v1/chat/completions".to_string(),
-                description: "Create chat completion (SSE streaming when stream=true)".to_string(),
-                request: Some(ApiRequest::json_type("OpenAIChatCompletionRequest")),
-                response: ApiResponse::Binary, // SSE streaming
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "Completions".to_string(),
-                method: RestMethod::Post,
-                path: "/v1/completions".to_string(),
-                description: "Create text completion (SSE streaming when stream=true)".to_string(),
-                request: Some(ApiRequest::json_type("OpenAICompletionRequest")),
-                response: ApiResponse::Binary, // SSE streaming
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "Embeddings".to_string(),
-                method: RestMethod::Post,
-                path: "/v1/embeddings".to_string(),
-                description: "Generate embeddings for text".to_string(),
-                request: Some(ApiRequest::json_type("OpenAIEmbeddingRequest")),
-                response: ApiResponse::json_type("OpenAIEmbeddingResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "ListModels".to_string(),
-                method: RestMethod::Get,
-                path: "/v1/models".to_string(),
-                description: "List available models in OpenAI format".to_string(),
-                request: None,
-                response: ApiResponse::json_type("OpenAIListModelsResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-        ],
-        module_path: Some("ollama".to_string()),
-        request_suffix: Some("OaiRequest".to_string()),
-        version: None,
-        env_mapping: Some(EnvMapping::default()),
-        cross_origin: CrossOrigin::same_origin(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    }
+    module_group().expect("valid ollama definitions").apis.remove(1)
+}
+
+fn build_ollama_openai_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
+    let endpoints = vec![
+            Endpoint::post("ChatCompletions", "/v1/chat/completions")
+                .describes("Create chat completion (SSE streaming when stream=true)")
+                .request_json::<OpenAIChatCompletionRequest>(ctx)
+                .returns_binary()
+                .build()?,
+            Endpoint::post("Completions", "/v1/completions")
+                .describes("Create text completion (SSE streaming when stream=true)")
+                .request_json::<OpenAICompletionRequest>(ctx)
+                .returns_binary()
+                .build()?,
+            Endpoint::post("Embeddings", "/v1/embeddings")
+                .describes("Generate embeddings for text")
+                .request_json::<OpenAIEmbeddingRequest>(ctx)
+                .returns_json::<OpenAIEmbeddingResponse>(ctx)
+                .build()?,
+            Endpoint::get("ListModels", "/v1/models")
+                .describes("List available models in OpenAI format")
+                .returns_json::<OpenAIListModelsResponse>(ctx)
+                .build()?,
+        ];
+    RestApi::builder(ctx, "OllamaOpenAI", "http://localhost:11434")
+        .describes("Ollama OpenAI-compatible REST API for drop-in replacement of OpenAI clients")
+        .no_auth()
+        .docs_url("https://github.com/ollama/ollama/blob/main/docs/openai.md")
+        .module_path("ollama")
+        .request_suffix("OaiRequest")
+        .env_mapping(EnvMapping::default())
+        .endpoints(endpoints)
+        .build()
+}
+
+/// Assemble sibling APIs and their ordered nominal schemas in one context.
+pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+    assemble_module_group("::schematic_definitions::ollama", |ctx| {
+        ctx.register::<GenerateBody>()?;
+        ctx.register::<ChatBody>()?;
+        ctx.register::<EmbeddingsBody>()?;
+        ctx.register::<ShowModelBody>()?;
+        ctx.register::<PullModelBody>()?;
+        ctx.register::<PushModelBody>()?;
+        ctx.register::<CopyModelBody>()?;
+        ctx.register::<DeleteModelBody>()?;
+        ctx.register::<CreateModelBody>()?;
+        ctx.register::<Message>()?;
+        ctx.register::<EmbeddingsResponse>()?;
+        ctx.register::<ListModelsResponse>()?;
+        ctx.register::<ModelInfo>()?;
+        ctx.register::<ModelDetails>()?;
+        ctx.register::<ShowModelResponse>()?;
+        ctx.register::<ListRunningModelsResponse>()?;
+        ctx.register::<RunningModel>()?;
+        ctx.register::<OpenAIChatCompletionRequest>()?;
+        ctx.register::<OpenAICompletionRequest>()?;
+        ctx.register::<OpenAIEmbeddingRequest>()?;
+        ctx.register::<OpenAIMessage>()?;
+        ctx.register::<OpenAIEmbeddingResponse>()?;
+        ctx.register::<OpenAIEmbeddingData>()?;
+        ctx.register::<OpenAIUsage>()?;
+        ctx.register::<OpenAIListModelsResponse>()?;
+        ctx.register::<OpenAIModel>()?;
+        Ok(vec![
+            build_ollama_native_api(ctx)?,
+            build_ollama_openai_api(ctx)?,
+        ])
+    })
 }
 
 #[cfg(test)]
@@ -668,4 +560,18 @@ mod tests {
 
         assert_eq!(native.module_path, openai.module_path);
     }
+
+    #[test]
+    fn module_group_preserves_endpoint_and_registry_inventory() {
+        let group = module_group().unwrap();
+        assert_eq!(
+            group.apis.iter().flat_map(|api| api.endpoints.iter().map(|endpoint| endpoint.id.as_str())).collect::<Vec<_>>(),
+            vec!["Generate", "Chat", "Embeddings", "ListModels", "ShowModel", "PullModel", "PushModel", "CopyModel", "DeleteModel", "CreateModel", "ListRunningModels", "ChatCompletions", "Completions", "Embeddings", "ListModels"]
+        );
+        assert_eq!(group.registry.names().collect::<Vec<_>>(), vec!["GenerateBody", "ChatBody", "EmbeddingsBody", "ShowModelBody", "PullModelBody", "PushModelBody", "CopyModelBody", "DeleteModelBody", "CreateModelBody", "Message", "EmbeddingsResponse", "ListModelsResponse", "ModelInfo", "ModelDetails", "ShowModelResponse", "ListRunningModelsResponse", "RunningModel", "OpenAIChatCompletionRequest", "OpenAICompletionRequest", "OpenAIEmbeddingRequest", "OpenAIMessage", "OpenAIEmbeddingResponse", "OpenAIEmbeddingData", "OpenAIUsage", "OpenAIListModelsResponse", "OpenAIModel"]);
+        for api in &group.apis {
+            assert!(group.registry.validate_completeness(api).is_ok());
+        }
+    }
+
 }

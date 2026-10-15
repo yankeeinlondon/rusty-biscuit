@@ -32,8 +32,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::gitea::RepositoryInfo",
+                    "schema_name": "RepositoryInfo"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "RepositoryInfo"
+              "type_name": "::schematic_definitions::gitea::RepositoryInfo"
             }
           }
         }
@@ -61,9 +70,20 @@
     },
     "/repos/{owner}/{repo}/git/trees/{sha}": {
       "get": {
-        "summary": "Get a Git tree (non-recursive, single level)",
-        "description": "Get a Git tree (non-recursive, single level)",
+        "summary": "Get a Git tree; set recursive to include nested entries",
+        "description": "Get a Git tree; set recursive to include nested entries",
         "operationId": "GetGitTree",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "recursive",
+            "schema": {
+              "type": "boolean"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -79,64 +99,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::gitea::GitTreeResponse",
+                    "schema_name": "GitTreeResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "GitTreeResponse"
-            }
-          }
-        }
-      },
-      "parameters": [
-        {
-          "in": "path",
-          "name": "owner",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "repo",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "sha",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        }
-      ]
-    },
-    "/repos/{owner}/{repo}/git/trees/{sha}?recursive=true": {
-      "get": {
-        "summary": "Get a Git tree recursively (may be paginated for large repos)",
-        "description": "Get a Git tree recursively (may be paginated for large repos)",
-        "operationId": "GetGitTreeRecursive",
-        "responses": {
-          "200": {
-            "description": "Successful JSON response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GitTreeResponse"
-                }
-              }
-            }
-          }
-        },
-        "x-schematic": {
-          "response": {
-            "Json": {
-              "module_path": null,
-              "type_name": "GitTreeResponse"
+              "type_name": "::schematic_definitions::gitea::GitTreeResponse"
             }
           }
         }
@@ -288,7 +261,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<PullRequestSummary>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PullRequestSummary"
+                  }
                 }
               }
             }
@@ -297,8 +273,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::gitea::PullRequestSummary",
+                      "schema_name": "PullRequestSummary"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<PullRequestSummary>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::gitea::PullRequestSummary>"
             }
           }
         }
@@ -357,7 +344,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<PullRequestFile>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PullRequestFile"
+                  }
                 }
               }
             }
@@ -366,8 +356,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::gitea::PullRequestFile",
+                      "schema_name": "PullRequestFile"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<PullRequestFile>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::gitea::PullRequestFile>"
             }
           }
         }
@@ -465,7 +466,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<IssueSummary>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IssueSummary"
+                  }
                 }
               }
             }
@@ -474,8 +478,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::gitea::IssueSummary",
+                      "schema_name": "IssueSummary"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<IssueSummary>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::gitea::IssueSummary>"
             }
           }
         }
@@ -521,8 +536,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::gitea::IssueSummary",
+                    "schema_name": "IssueSummary"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "IssueSummary"
+              "type_name": "::schematic_definitions::gitea::IssueSummary"
             }
           }
         }
@@ -590,7 +614,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<IssueComment>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IssueComment"
+                  }
                 }
               }
             }
@@ -599,8 +626,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::gitea::IssueComment",
+                      "schema_name": "IssueComment"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<IssueComment>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::gitea::IssueComment>"
             }
           }
         }
@@ -668,7 +706,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<TimelineEvent>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TimelineEvent"
+                  }
                 }
               }
             }
@@ -677,8 +718,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::gitea::TimelineEvent",
+                      "schema_name": "TimelineEvent"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<TimelineEvent>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::gitea::TimelineEvent>"
             }
           }
         }
@@ -746,7 +798,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<RepoTag>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RepoTag"
+                  }
                 }
               }
             }
@@ -755,8 +810,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::gitea::RepoTag",
+                      "schema_name": "RepoTag"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<RepoTag>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::gitea::RepoTag>"
             }
           }
         }
@@ -835,7 +901,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<Release>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Release"
+                  }
                 }
               }
             }
@@ -844,8 +913,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::gitea::Release",
+                      "schema_name": "Release"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<Release>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::gitea::Release>"
             }
           }
         }
@@ -891,8 +971,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::gitea::Branch",
+                    "schema_name": "Branch"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Branch"
+              "type_name": "::schematic_definitions::gitea::Branch"
             }
           }
         }
@@ -938,7 +1027,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<GitRef>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GitRef"
+                  }
                 }
               }
             }
@@ -947,8 +1039,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::gitea::GitRef",
+                      "schema_name": "GitRef"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<GitRef>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::gitea::GitRef>"
             }
           }
         }
@@ -1003,8 +1106,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::gitea::AnnotatedTagObject",
+                    "schema_name": "AnnotatedTagObject"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "AnnotatedTagObject"
+              "type_name": "::schematic_definitions::gitea::AnnotatedTagObject"
             }
           }
         }
@@ -1072,7 +1184,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<RepositoryInfo>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RepositoryInfo"
+                  }
                 }
               }
             }
@@ -1081,8 +1196,19 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Vec": {
+                    "Named": {
+                      "rust_path": "::schematic_definitions::gitea::RepositoryInfo",
+                      "schema_name": "RepositoryInfo"
+                    }
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Vec<RepositoryInfo>"
+              "type_name": "::std::vec::Vec<::schematic_definitions::gitea::RepositoryInfo>"
             }
           }
         }
@@ -1403,17 +1529,6 @@
           }
         }
       },
-      "Vec<PullRequestSummary>": {
-        "title": "Array_of_PullRequestSummary",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/PullRequestSummary"
-            }
-          ]
-        }
-      },
       "PullRequestFile": {
         "title": "PullRequestFile",
         "description": "A file changed in a pull request.",
@@ -1442,17 +1557,6 @@
             "description": "Change status: \"added\", \"removed\", \"modified\", \"renamed\".",
             "type": "string"
           }
-        }
-      },
-      "Vec<PullRequestFile>": {
-        "title": "Array_of_PullRequestFile",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/PullRequestFile"
-            }
-          ]
         }
       },
       "IssueSummary": {
@@ -1520,17 +1624,6 @@
           }
         }
       },
-      "Vec<IssueSummary>": {
-        "title": "Array_of_IssueSummary",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/IssueSummary"
-            }
-          ]
-        }
-      },
       "IssueComment": {
         "title": "IssueComment",
         "description": "A comment on an issue.",
@@ -1558,17 +1651,6 @@
           }
         }
       },
-      "Vec<IssueComment>": {
-        "title": "Array_of_IssueComment",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/IssueComment"
-            }
-          ]
-        }
-      },
       "TimelineEvent": {
         "title": "TimelineEvent",
         "description": "A timeline event on an issue.",
@@ -1587,17 +1669,6 @@
             "description": "Event type.",
             "type": "string"
           }
-        }
-      },
-      "Vec<TimelineEvent>": {
-        "title": "Array_of_TimelineEvent",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/TimelineEvent"
-            }
-          ]
         }
       },
       "RepoTag": {
@@ -1637,17 +1708,6 @@
           "sha": {
             "description": "Commit SHA."
           }
-        }
-      },
-      "Vec<RepoTag>": {
-        "title": "Array_of_RepoTag",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/RepoTag"
-            }
-          ]
         }
       },
       "Release": {
@@ -1695,17 +1755,6 @@
             "description": "Tag name associated with the release.",
             "type": "string"
           }
-        }
-      },
-      "Vec<Release>": {
-        "title": "Array_of_Release",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/Release"
-            }
-          ]
         }
       },
       "Branch": {
@@ -1782,17 +1831,6 @@
           }
         }
       },
-      "Vec<GitRef>": {
-        "title": "Array_of_GitRef",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/GitRef"
-            }
-          ]
-        }
-      },
       "AnnotatedTagObject": {
         "title": "AnnotatedTagObject",
         "description": "An annotated tag object from `GET /repos/{owner}/{repo}/git/tags/{sha}`.",
@@ -1814,17 +1852,6 @@
             "description": "API URL.",
             "type": "string"
           }
-        }
-      },
-      "Vec<RepositoryInfo>": {
-        "title": "Array_of_RepositoryInfo",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/RepositoryInfo"
-            }
-          ]
         }
       }
     },

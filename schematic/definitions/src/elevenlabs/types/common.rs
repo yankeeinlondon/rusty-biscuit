@@ -244,6 +244,13 @@ pub struct VoiceSettings {
     #[serde(default = "default_true")]
     pub use_speaker_boost: bool,
 }
+impl schematic_define::Registration for VoiceSettings {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("VoiceSettings");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 fn default_stability() -> f64 {
     0.5
@@ -295,6 +302,13 @@ pub struct WebSocketAlignment {
 pub struct StatusResponse {
     pub status: String,
 }
+impl schematic_define::Registration for StatusResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("StatusResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct GenerationConfig {

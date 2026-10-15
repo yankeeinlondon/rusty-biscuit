@@ -40,7 +40,7 @@
 //! | Category | Endpoints |
 //! |----------|-----------|
 //! | Repository | `GetRepository` |
-//! | Git Trees | `GetGitTree`, `GetGitTreeRecursive` |
+//! | Git Trees | `GetGitTree` |
 //! | Contents | `GetRepositoryContentRaw` |
 //! | Pull Requests | `ListPullRequests`, `ListPullRequestFiles` |
 //! | Issues | `ListIssues`, `GetIssue`, `ListIssueComments`, `ListIssueTimeline` |
@@ -52,11 +52,11 @@ mod types;
 
 pub use types::*;
 
-use crate::registry::SchemaRegistry;
+use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
 use schematic_define::{
-    ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod,
-    pagination::{Collection, MoreSignal, PageSize, PaginationException, Strategy, ValueSource},
-    params::{EndpointParams, PaginationStyle, QueryParamType},
+    AuthStrategy, DefinitionError, Endpoint, EndpointParams, ParamDef,
+    RestApi, QueryParamType,
+    pagination::{Collection, MoreSignal, PageSize, Strategy, ValueSource},
 };
 
 /// Creates a schema registry containing all Gitea response types.
@@ -82,29 +82,7 @@ use schematic_define::{
 /// ```
 #[must_use]
 pub fn openapi_registry() -> SchemaRegistry {
-    SchemaRegistry::new()
-        .register::<RepositoryInfo>("RepositoryInfo")
-        .register::<GitTreeResponse>("GitTreeResponse")
-        .register::<PullRequestSummary>("PullRequestSummary")
-        .register::<Vec<PullRequestSummary>>("Vec<PullRequestSummary>")
-        .register::<PullRequestFile>("PullRequestFile")
-        .register::<Vec<PullRequestFile>>("Vec<PullRequestFile>")
-        .register::<IssueSummary>("IssueSummary")
-        .register::<Vec<IssueSummary>>("Vec<IssueSummary>")
-        .register::<IssueComment>("IssueComment")
-        .register::<Vec<IssueComment>>("Vec<IssueComment>")
-        .register::<TimelineEvent>("TimelineEvent")
-        .register::<Vec<TimelineEvent>>("Vec<TimelineEvent>")
-        .register::<Label>("Label")
-        .register::<RepoTag>("RepoTag")
-        .register::<Vec<RepoTag>>("Vec<RepoTag>")
-        .register::<Release>("Release")
-        .register::<Vec<Release>>("Vec<Release>")
-        .register::<Branch>("Branch")
-        .register::<GitRef>("GitRef")
-        .register::<Vec<GitRef>>("Vec<GitRef>")
-        .register::<AnnotatedTagObject>("AnnotatedTagObject")
-        .register::<Vec<RepositoryInfo>>("Vec<RepositoryInfo>")
+    module_group().expect("valid gitea definition").registry
 }
 
 /// Gitea's page-number pagination: a 1-based `page`, a `limit` size the
@@ -141,8 +119,7 @@ fn gitea_page_number() -> Strategy {
 /// | ID | Method | Path | Description |
 /// |----|--------|------|-------------|
 /// | GetRepository | GET | /repos/{owner}/{repo} | Get repository metadata |
-/// | GetGitTree | GET | /repos/{owner}/{repo}/git/trees/{sha} | Get tree (non-recursive) |
-/// | GetGitTreeRecursive | GET | /repos/{owner}/{repo}/git/trees/{sha}?recursive=true | Get tree recursively |
+/// | GetGitTree | GET | /repos/{owner}/{repo}/git/trees/{sha} | Get tree (optionally recursive) |
 /// | GetRepositoryContentRaw | GET | /repos/{owner}/{repo}/raw/{filepath} | Get raw file content |
 /// | ListPullRequests | GET | /repos/{owner}/{repo}/pulls | List pull requests |
 /// | ListPullRequestFiles | GET | /repos/{owner}/{repo}/pulls/{index}/files | List PR files |
@@ -164,92 +141,53 @@ fn gitea_page_number() -> Strategy {
 ///
 /// let api = define_gitea_api();
 /// assert_eq!(api.name, "Gitea");
-/// assert_eq!(api.endpoints.len(), 16);
+/// assert_eq!(api.endpoints.len(), 15);
 /// ```
 pub fn define_gitea_api() -> RestApi {
-    RestApi {
-        name: "Gitea".to_string(),
-        description: "Gitea REST API v1.25+ for repository, PR, issue, and release workflows"
-            .to_string(),
-        base_url: "https://gitea.example.com/api/v1".to_string(),
-        docs_url: Some("https://docs.gitea.com/api/1.25/".to_string()),
-        auth: AuthStrategy::ApiKey {
-            header: "Authorization".to_string(),
-            value_prefix: Some("token ".to_string()),
-        },
-        auth_policy: None,
-        env_auth: vec!["GITEA_TOKEN".to_string()],
-        env_username: None,
-        headers: vec![("Accept".to_string(), "application/json".to_string())],
-        endpoints: vec![
-            // =================================================================
-            // Repository Metadata
-            // =================================================================
-            Endpoint {
-                id: "GetRepository".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}".to_string(),
-                description: "Get repository metadata including default branch".to_string(),
-                request: None,
-                response: ApiResponse::json_type("RepositoryInfo"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            // =================================================================
-            // Git Trees (for file discovery)
-            // =================================================================
-            Endpoint {
-                id: "GetGitTree".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/git/trees/{sha}".to_string(),
-                description: "Get a Git tree (non-recursive, single level)".to_string(),
-                request: None,
-                response: ApiResponse::json_type("GitTreeResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "GetGitTreeRecursive".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/git/trees/{sha}?recursive=true".to_string(),
-                description: "Get a Git tree recursively (may be paginated for large repos)"
-                    .to_string(),
-                request: None,
-                response: ApiResponse::json_type("GitTreeResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            // =================================================================
-            // Repository Contents (raw file access)
-            // =================================================================
-            Endpoint {
-                id: "GetRepositoryContentRaw".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/raw/{+filepath}".to_string(),
-                description: "Get raw file content from repository".to_string(),
-                request: None,
-                response: ApiResponse::Text,
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            // =================================================================
-            // Pull Requests
-            // =================================================================
-            Endpoint {
-                id: "ListPullRequests".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/pulls".to_string(),
-                description: "List pull requests with metadata".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("PullRequestSummary"),
-                headers: vec![],
-                params: Some(
-                    EndpointParams::default()
-                        .with_pagination(PaginationStyle::gitea())
+    module_group().expect("valid gitea definition").apis.remove(0)
+}
+
+/// Assemble the API and its schemas from one ordered registration context.
+pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+    assemble_module_group("::schematic_definitions::gitea", |ctx| {
+        ctx.register::<RepositoryInfo>()?;
+        ctx.register::<GitTreeResponse>()?;
+        ctx.register::<PullRequestSummary>()?;
+        ctx.register::<PullRequestFile>()?;
+        ctx.register::<IssueSummary>()?;
+        ctx.register::<IssueComment>()?;
+        ctx.register::<TimelineEvent>()?;
+        ctx.register::<Label>()?;
+        ctx.register::<RepoTag>()?;
+        ctx.register::<Release>()?;
+        ctx.register::<Branch>()?;
+        ctx.register::<GitRef>()?;
+        ctx.register::<AnnotatedTagObject>()?;
+        let endpoints = vec![
+
+            Endpoint::get("GetRepository", "/repos/{owner}/{repo}")
+                .describes("Get repository metadata including default branch")
+                .returns_json::<RepositoryInfo>(ctx)
+                .build()?,
+
+            Endpoint::get("GetGitTree", "/repos/{owner}/{repo}/git/trees/{sha}")
+                .describes("Get a Git tree; set recursive to include nested entries")
+                .returns_json::<GitTreeResponse>(ctx)
+                .query(ParamDef::new("recursive", QueryParamType::Boolean))
+                .pagination(Collection::at("tree").item_type("GitTreeEntry").unpaginated())
+                .build()?,
+
+            Endpoint::get("GetRepositoryContentRaw", "/repos/{owner}/{repo}/raw/{+filepath}")
+                .describes("Get raw file content from repository")
+                .returns_text()
+                .build()?,
+
+            Endpoint::get("ListPullRequests", "/repos/{owner}/{repo}/pulls")
+                .describes("List pull requests with metadata")
+                .returns_json::<Vec<PullRequestSummary>>(ctx)
+                .params(EndpointParams::default()
+                        .with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("limit", QueryParamType::Integer, false, Some("Items per page (default: 50, max: 100)"))
                         .with_query_param(
                             "state",
                             QueryParamType::Enum(vec![
@@ -272,35 +210,21 @@ pub fn define_gitea_api() -> RestApi {
                             ]),
                             false,
                             Some("Sort order for results"),
-                        ),
-                ),
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "ListPullRequestFiles".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/pulls/{index}/files".to_string(),
-                description: "List files changed in a pull request".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("PullRequestFile"),
-                headers: vec![],
-                params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitea())),
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            // =================================================================
-            // Issues
-            // =================================================================
-            Endpoint {
-                id: "ListIssues".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/issues".to_string(),
-                description: "List issues (use type=issues to exclude PRs)".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("IssueSummary"),
-                headers: vec![],
-                params: Some(
-                    EndpointParams::default()
-                        .with_pagination(PaginationStyle::gitea())
+                        ),)
+                .build()?,
+            Endpoint::get("ListPullRequestFiles", "/repos/{owner}/{repo}/pulls/{index}/files")
+                .describes("List files changed in a pull request")
+                .returns_json::<Vec<PullRequestFile>>(ctx)
+                .params(EndpointParams::default().with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("limit", QueryParamType::Integer, false, Some("Items per page (default: 50, max: 100)")))
+                .build()?,
+
+            Endpoint::get("ListIssues", "/repos/{owner}/{repo}/issues")
+                .describes("List issues (use type=issues to exclude PRs)")
+                .returns_json::<Vec<IssueSummary>>(ctx)
+                .params(EndpointParams::default()
+                        .with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("limit", QueryParamType::Integer, false, Some("Items per page (default: 50, max: 100)"))
                         .with_query_param(
                             "state",
                             QueryParamType::Enum(vec![
@@ -320,68 +244,37 @@ pub fn define_gitea_api() -> RestApi {
                             ]),
                             false,
                             Some("Filter by type (issues, pulls, or all)"),
-                        ),
-                ),
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "GetIssue".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/issues/{index}".to_string(),
-                description: "Get a single issue by index".to_string(),
-                request: None,
-                response: ApiResponse::json_type("IssueSummary"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "ListIssueComments".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/issues/{index}/comments".to_string(),
-                description: "List comments on an issue".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("IssueComment"),
-                headers: vec![],
-                params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitea())),
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "ListIssueTimeline".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/issues/{index}/timeline".to_string(),
-                description: "List timeline events for an issue".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("TimelineEvent"),
-                headers: vec![],
-                params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitea())),
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            // =================================================================
-            // Tags and Releases
-            // =================================================================
-            Endpoint {
-                id: "ListTags".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/tags".to_string(),
-                description: "List repository tags".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("RepoTag"),
-                headers: vec![],
-                params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitea())),
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "ListReleases".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/releases".to_string(),
-                description: "List releases (linked to tags via tag_name)".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("Release"),
-                headers: vec![],
-                params: Some(
-                    EndpointParams::default()
-                        .with_pagination(PaginationStyle::gitea())
+                        ),)
+                .build()?,
+            Endpoint::get("GetIssue", "/repos/{owner}/{repo}/issues/{index}")
+                .describes("Get a single issue by index")
+                .returns_json::<IssueSummary>(ctx)
+                .build()?,
+            Endpoint::get("ListIssueComments", "/repos/{owner}/{repo}/issues/{index}/comments")
+                .describes("List comments on an issue")
+                .returns_json::<Vec<IssueComment>>(ctx)
+                .params(EndpointParams::default().with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("limit", QueryParamType::Integer, false, Some("Items per page (default: 50, max: 100)")))
+                .build()?,
+            Endpoint::get("ListIssueTimeline", "/repos/{owner}/{repo}/issues/{index}/timeline")
+                .describes("List timeline events for an issue")
+                .returns_json::<Vec<TimelineEvent>>(ctx)
+                .params(EndpointParams::default().with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("limit", QueryParamType::Integer, false, Some("Items per page (default: 50, max: 100)")))
+                .build()?,
+
+            Endpoint::get("ListTags", "/repos/{owner}/{repo}/tags")
+                .describes("List repository tags")
+                .returns_json::<Vec<RepoTag>>(ctx)
+                .params(EndpointParams::default().with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("limit", QueryParamType::Integer, false, Some("Items per page (default: 50, max: 100)")))
+                .build()?,
+            Endpoint::get("ListReleases", "/repos/{owner}/{repo}/releases")
+                .describes("List releases (linked to tags via tag_name)")
+                .returns_json::<Vec<Release>>(ctx)
+                .params(EndpointParams::default()
+                        .with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("limit", QueryParamType::Integer, false, Some("Items per page (default: 50, max: 100)"))
                         .with_query_param(
                             "draft",
                             QueryParamType::Boolean,
@@ -393,97 +286,52 @@ pub fn define_gitea_api() -> RestApi {
                             QueryParamType::Boolean,
                             false,
                             Some("Include pre-releases"),
-                        ),
-                ),
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            // =================================================================
-            // Branches
-            // =================================================================
-            Endpoint {
-                id: "GetBranch".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/branches/{branch}".to_string(),
-                description: "Get a branch (commit.id is the branch head commit)".to_string(),
-                request: None,
-                response: ApiResponse::json_type("Branch"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            // Note: Gitea's /git/refs/{ref} returns an ARRAY, unlike GitHub's single object
-            // Path uses {git_ref} instead of {ref} to avoid Rust keyword collision
-            Endpoint {
-                id: "GetTagReference".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/git/refs/{git_ref}".to_string(),
-                description:
-                    "Get tag reference (returns array; check object.type: 'commit' vs 'tag')"
-                        .to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("GitRef"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "GetAnnotatedTag".to_string(),
-                method: RestMethod::Get,
-                path: "/repos/{owner}/{repo}/git/tags/{sha}".to_string(),
-                description: "Get annotated tag object details (message, tagger)".to_string(),
-                request: None,
-                response: ApiResponse::json_type("AnnotatedTagObject"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            // =================================================================
-            // Organization Repositories
-            // =================================================================
-            Endpoint {
-                id: "ListOrgRepos".to_string(),
-                method: RestMethod::Get,
-                path: "/orgs/{org}/repos".to_string(),
-                description: "List repositories for an organization".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("RepositoryInfo"),
-                headers: vec![],
-                params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitea())),
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-        ],
-        module_path: Some("gitea".to_string()),
-        request_suffix: None,
-        version: None,
-        env_mapping: None,
-        cross_origin: CrossOrigin::same_origin(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: Some(gitea_page_number()),
-        pagination_exceptions: vec![
-            // Unverified: the tree is believed to page by `page`/`per_page`
-            // and report `truncated`, but no source confirms it.
-            PaginationException::new(
-                "GetGitTree",
-                Collection::at("tree")
-                    .item_type("GitTreeEntry")
-                    .unpaginated(),
-            ),
-            PaginationException::new(
-                "GetGitTreeRecursive",
-                Collection::at("tree")
-                    .item_type("GitTreeEntry")
-                    .unpaginated(),
-            ),
-            // A ref-prefix lookup, not a list the server pages.
-            PaginationException::new("GetTagReference", Collection::root().unpaginated()),
-        ],
-    }
+                        ),)
+                .build()?,
+
+            Endpoint::get("GetBranch", "/repos/{owner}/{repo}/branches/{branch}")
+                .describes("Get a branch (commit.id is the branch head commit)")
+                .returns_json::<Branch>(ctx)
+                .build()?,
+
+            Endpoint::get("GetTagReference", "/repos/{owner}/{repo}/git/refs/{git_ref}")
+                .describes("Get tag reference (returns array; check object.type: 'commit' vs 'tag')")
+                .returns_json::<Vec<GitRef>>(ctx)
+                .pagination(Collection::root().unpaginated())
+                .build()?,
+            Endpoint::get("GetAnnotatedTag", "/repos/{owner}/{repo}/git/tags/{sha}")
+                .describes("Get annotated tag object details (message, tagger)")
+                .returns_json::<AnnotatedTagObject>(ctx)
+                .build()?,
+
+            Endpoint::get("ListOrgRepos", "/orgs/{org}/repos")
+                .describes("List repositories for an organization")
+                .returns_json::<Vec<RepositoryInfo>>(ctx)
+                .params(EndpointParams::default().with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("limit", QueryParamType::Integer, false, Some("Items per page (default: 50, max: 100)")))
+                .build()?,
+        ];
+        let api = RestApi::builder(ctx, "Gitea", "https://gitea.example.com/api/v1")
+            .describes("Gitea REST API v1.25+ for repository, PR, issue, and release workflows")
+            .authentication(AuthStrategy::ApiKey {
+            header: "Authorization".to_string(),
+            value_prefix: Some("token ".to_string()),
+        }, vec!["GITEA_TOKEN".to_string()])
+            .docs_url("https://docs.gitea.com/api/1.25/")
+            .module_path("gitea".to_string())
+            .default_pagination(gitea_page_number())
+            .header("Accept".to_string(), "application/json".to_string())
+            .endpoints(endpoints)
+            .build()?;
+        Ok(vec![api])
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use schematic_define::{ApiResponse, RestMethod};
+    use schematic_define::pagination::{resolve, Resolution};
 
     // =============================================
     // openapi_registry() tests
@@ -496,13 +344,13 @@ mod tests {
         assert!(registry.get("RepositoryInfo").is_some());
         assert!(registry.get("GitTreeResponse").is_some());
         assert!(registry.get("PullRequestSummary").is_some());
-        assert!(registry.get("Vec<PullRequestSummary>").is_some());
+        assert!(!registry.get("Vec<PullRequestSummary>").is_some());
         assert!(registry.get("IssueSummary").is_some());
-        assert!(registry.get("Vec<IssueSummary>").is_some());
+        assert!(!registry.get("Vec<IssueSummary>").is_some());
         assert!(registry.get("Label").is_some());
         assert!(registry.get("RepoTag").is_some());
         assert!(registry.get("Release").is_some());
-        assert_eq!(registry.len(), 22);
+        assert_eq!(registry.len(), 13);
     }
 
     #[test]
@@ -520,13 +368,13 @@ mod tests {
         let openapi_schemas = registry.to_openapi_schemas();
 
         assert!(
-            openapi_schemas.len() >= 21,
-            "expected at least 21 schemas, got {}",
+            openapi_schemas.len() >= 13,
+            "expected at least 13 schemas, got {}",
             openapi_schemas.len()
         );
         assert!(openapi_schemas.contains_key("RepositoryInfo"));
         assert!(openapi_schemas.contains_key("PullRequestSummary"));
-        assert!(openapi_schemas.contains_key("Vec<PullRequestSummary>"));
+        assert!(!openapi_schemas.contains_key("Vec<PullRequestSummary>"));
         assert!(openapi_schemas.contains_key("IssueSummary"));
         assert!(openapi_schemas.contains_key("Label"));
     }
@@ -574,9 +422,9 @@ mod tests {
     }
 
     #[test]
-    fn api_has_sixteen_endpoints() {
+    fn api_has_fifteen_endpoints() {
         let api = define_gitea_api();
-        assert_eq!(api.endpoints.len(), 16);
+        assert_eq!(api.endpoints.len(), 15);
     }
 
     #[test]
@@ -595,19 +443,18 @@ mod tests {
     }
 
     #[test]
-    fn git_tree_endpoints() {
+    fn git_tree_endpoint_has_optional_recursive_query() {
         let api = define_gitea_api();
-
         let tree = api.endpoints.iter().find(|e| e.id == "GetGitTree").unwrap();
         assert_eq!(tree.path, "/repos/{owner}/{repo}/git/trees/{sha}");
-        assert!(!tree.path.contains("recursive"));
-
-        let recursive = api
-            .endpoints
-            .iter()
-            .find(|e| e.id == "GetGitTreeRecursive")
-            .unwrap();
-        assert!(recursive.path.contains("recursive=true"));
+        assert!(api.endpoints.iter().all(|e| e.id != "GetGitTreeRecursive"));
+        let recursive = tree.params.as_ref().unwrap().query.iter().find(|p| p.name == "recursive").unwrap();
+        assert!(!recursive.required);
+        assert_eq!(recursive.param_type, QueryParamType::Boolean);
+        let resolved = resolve(&api, tree);
+        assert!(matches!(resolved, Resolution::Unpaginated { .. }));
+        assert_eq!(resolved.list().unwrap().item_type.as_deref(), Some("GitTreeEntry"));
+        assert!(schematic_define::pagination::caller_knobs(&resolved).is_empty());
     }
 
     #[test]
@@ -640,7 +487,7 @@ mod tests {
             .params
             .as_ref()
             .expect("ListPullRequests should have params");
-        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "page"));
         assert!(params.query.iter().any(|p| p.name == "page"));
         assert!(params.query.iter().any(|p| p.name == "limit"));
         assert!(params.query.iter().any(|p| p.name == "state"));
@@ -658,7 +505,7 @@ mod tests {
             .params
             .as_ref()
             .expect("ListPullRequestFiles should have params");
-        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "page"));
     }
 
     #[test]
@@ -670,7 +517,7 @@ mod tests {
         assert_eq!(list.path, "/repos/{owner}/{repo}/issues");
         // Pagination and filters in params field
         let params = list.params.as_ref().expect("ListIssues should have params");
-        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "page"));
         assert!(params.query.iter().any(|p| p.name == "state"));
         // Gitea-specific: type param filters out PRs
         assert!(params.query.iter().any(|p| p.name == "issue_type"));
@@ -691,7 +538,7 @@ mod tests {
             .params
             .as_ref()
             .expect("ListIssueComments should have params");
-        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "page"));
 
         let timeline = api
             .endpoints
@@ -704,7 +551,7 @@ mod tests {
             .params
             .as_ref()
             .expect("ListIssueTimeline should have params");
-        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "page"));
     }
 
     #[test]
@@ -715,7 +562,7 @@ mod tests {
         // Clean path without hardcoded query params
         assert_eq!(tags.path, "/repos/{owner}/{repo}/tags");
         let params = tags.params.as_ref().expect("ListTags should have params");
-        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "page"));
 
         let releases = api
             .endpoints
@@ -728,7 +575,7 @@ mod tests {
             .params
             .as_ref()
             .expect("ListReleases should have params");
-        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "page"));
         // Gitea-specific: draft and pre-release filters as explicit params
         assert!(params.query.iter().any(|p| p.name == "draft"));
         assert!(params.query.iter().any(|p| p.name == "pre_release"));
@@ -766,7 +613,7 @@ mod tests {
         match &endpoint.response {
             ApiResponse::Json(schema) => {
                 assert!(
-                    schema.type_name.starts_with("Vec<"),
+                    schema.type_name.starts_with("::std::vec::Vec<"),
                     "GetTagReference should return Vec<GitRef>, got {}",
                     schema.type_name
                 );
@@ -787,9 +634,8 @@ mod tests {
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/repos/{owner}/{repo}/branches/{branch}");
         assert!(endpoint.request.is_none());
-        assert!(endpoint.oauth_scopes.is_none());
         match &endpoint.response {
-            ApiResponse::Json(schema) => assert_eq!(schema.type_name, "Branch"),
+            ApiResponse::Json(schema) => assert!(schema.type_name.ends_with("::Branch")),
             _ => panic!("Expected JSON response"),
         }
         assert!(matches!(api.auth, AuthStrategy::ApiKey { .. }));
@@ -829,7 +675,7 @@ mod tests {
             match &endpoint.response {
                 ApiResponse::Json(schema) => {
                     assert!(
-                        schema.type_name.starts_with("Vec<"),
+                        schema.type_name.starts_with("::std::vec::Vec<"),
                         "Endpoint {} should return Vec type, got {}",
                         id,
                         schema.type_name
@@ -847,7 +693,6 @@ mod tests {
         let single_endpoints = [
             "GetRepository",
             "GetGitTree",
-            "GetGitTreeRecursive",
             "GetIssue",
             "GetBranch",
             "GetAnnotatedTag",
@@ -859,7 +704,7 @@ mod tests {
             // assert single-item shape for JSON responses.
             if let ApiResponse::Json(schema) = &endpoint.response {
                 assert!(
-                    !schema.type_name.starts_with("Vec<"),
+                    !schema.type_name.starts_with("::std::vec::Vec<"),
                     "Endpoint {} should return single item, not Vec",
                     id
                 );
@@ -875,8 +720,6 @@ mod tests {
 
     #[test]
     fn all_list_endpoints_use_gitea_pagination() {
-        use schematic_define::params::PaginationStyle;
-
         let api = define_gitea_api();
 
         // All endpoints that return Vec types should use Gitea pagination
@@ -900,30 +743,18 @@ mod tests {
                 .unwrap_or_else(|| panic!("Endpoint {} should have params", id));
 
             assert!(
-                params.has_pagination(),
+                params.query.iter().any(|p| p.name == "page"),
                 "Endpoint {} should use pagination",
                 id
             );
 
             // Verify it's Gitea-style pagination (page + limit)
-            match &params.pagination {
-                Some(PaginationStyle::PageNumber {
-                    page_param,
-                    per_page_param,
-                    default_per_page,
-                    max_per_page,
-                }) => {
-                    assert_eq!(page_param, "page", "Endpoint {} page param", id);
-                    assert_eq!(
-                        per_page_param, "limit",
-                        "Endpoint {} should use 'limit' not 'per_page'",
-                        id
-                    );
-                    assert_eq!(*default_per_page, 50, "Endpoint {} default_per_page", id);
-                    assert_eq!(*max_per_page, 100, "Endpoint {} max_per_page", id);
-                }
-                _ => panic!("Endpoint {} should use PageNumber pagination style", id),
-            }
+            assert!(params.query.iter().any(|p| p.name == "limit"));
+            let resolution = resolve(&api, endpoint);
+            assert!(matches!(resolution, Resolution::Paginated { .. }));
+            let knobs = schematic_define::pagination::caller_knobs(&resolution);
+            assert!(knobs.iter().any(|k| matches!(k, schematic_define::pagination::Knob::StartPage { .. })));
+            assert!(knobs.iter().any(|k| matches!(k, schematic_define::pagination::Knob::PageSize { param, .. } if param == "limit")));
         }
     }
 
@@ -942,7 +773,7 @@ mod tests {
         match &endpoint.response {
             ApiResponse::Json(schema) => {
                 assert!(
-                    schema.type_name.starts_with("Vec<"),
+                    schema.type_name.starts_with("::std::vec::Vec<"),
                     "ListOrgRepos should return Vec type, got {}",
                     schema.type_name
                 );
@@ -951,7 +782,7 @@ mod tests {
         }
 
         let params = endpoint.params.as_ref().expect("should have params");
-        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "page"));
     }
 
     #[test]
@@ -959,10 +790,6 @@ mod tests {
         let api = define_gitea_api();
 
         for endpoint in &api.endpoints {
-            // GetGitTreeRecursive is allowed to have ?recursive=true (behavior flag, not pagination)
-            if endpoint.id == "GetGitTreeRecursive" {
-                continue;
-            }
 
             assert!(
                 !endpoint.path.contains("limit="),
@@ -972,4 +799,15 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn typed_module_group_preserves_endpoint_order_and_completeness() {
+        let group = module_group().unwrap();
+        assert_eq!(group.apis.len(), 1);
+        let api = &group.apis[0];
+        assert_eq!(api.endpoints.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["GetRepository", "GetGitTree", "GetRepositoryContentRaw", "ListPullRequests", "ListPullRequestFiles", "ListIssues", "GetIssue", "ListIssueComments", "ListIssueTimeline", "ListTags", "ListReleases", "GetBranch", "GetTagReference", "GetAnnotatedTag", "ListOrgRepos"]);
+        assert_eq!(group.registry.names().collect::<Vec<_>>(), vec!["RepositoryInfo", "GitTreeResponse", "PullRequestSummary", "PullRequestFile", "IssueSummary", "IssueComment", "TimelineEvent", "Label", "RepoTag", "Release", "Branch", "GitRef", "AnnotatedTagObject"]);
+        group.registry.validate_completeness(api).unwrap();
+        assert!(api.endpoints.iter().all(|e| !e.path.contains('?')));
+    }
+
 }

@@ -1,22 +1,18 @@
+use super::super::*;
 use schematic_define::{
-    ApiResponse, Endpoint,
-    params::{EndpointParams, PaginationStyle, QueryParamType},
+    Endpoint,
+    params::{EndpointParams, QueryParamType},
 };
 
 /// Returns all project-related endpoints (repository tree, files, project metadata, group projects).
-pub fn all() -> Vec<Endpoint> {
-    vec![
-        Endpoint {
-            id: "ListRepositoryTree".to_string(),
-            method: schematic_define::RestMethod::Get,
-            path: "/projects/{id}/repository/tree".to_string(),
-            description: "List repository tree recursively (files and directories)".to_string(),
-            request: None,
-            response: ApiResponse::json_vec_type("TreeItem"),
-            headers: vec![],
-            params: Some(
-                EndpointParams::default()
-                    .with_pagination(PaginationStyle::gitlab())
+pub fn all(ctx: &mut schematic_define::DefinitionContext) -> Result<Vec<Endpoint>, schematic_define::DefinitionError> {
+    Ok(vec![
+        Endpoint::get("ListRepositoryTree", "/projects/{id}/repository/tree")
+                .describes("List repository tree recursively (files and directories)")
+                .returns_json::<Vec<TreeItem>>(ctx)
+                .params(EndpointParams::default()
+                    .with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("per_page", QueryParamType::Integer, false, Some("Items per page (default: 100, max: 100)"))
                     .with_query_param(
                         "recursive",
                         QueryParamType::Boolean,
@@ -34,44 +30,24 @@ pub fn all() -> Vec<Endpoint> {
                         QueryParamType::String,
                         false,
                         Some("Subdirectory path to list"),
-                    ),
-            ),
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "GetRepositoryFile".to_string(),
-            method: schematic_define::RestMethod::Get,
-            path: "/projects/{id}/repository/files/{file_path}?ref={git_ref}".to_string(),
-            description: "Get file content (Base64 encoded, provide git_ref for branch/tag)"
-                .to_string(),
-            request: None,
-            response: ApiResponse::json_type("FileContent"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "GetProject".to_string(),
-            method: schematic_define::RestMethod::Get,
-            path: "/projects/{id}".to_string(),
-            description: "Get project metadata (use URL-encoded path or numeric ID)".to_string(),
-            request: None,
-            response: ApiResponse::json_type("Project"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "ListGroupProjects".to_string(),
-            method: schematic_define::RestMethod::Get,
-            path: "/groups/{id}/projects".to_string(),
-            description: "List projects in a group".to_string(),
-            request: None,
-            response: ApiResponse::json_vec_type("Project"),
-            headers: vec![],
-            params: Some(
-                EndpointParams::default()
-                    .with_pagination(PaginationStyle::gitlab())
+                    ),)
+                .pagination(Collection::root().or_paginate("keyset", super::super::gitlab_keyset()))
+                .build()?,
+        Endpoint::get("GetRepositoryFile", "/projects/{id}/repository/files/{file_path}")
+                .describes("Get file content (Base64 encoded, provide git_ref for branch/tag)")
+                .returns_json::<FileContent>(ctx)
+                .query(schematic_define::ParamDef::new("ref", QueryParamType::String).required().rust_name("git_ref"))
+                .build()?,
+        Endpoint::get("GetProject", "/projects/{id}")
+                .describes("Get project metadata (use URL-encoded path or numeric ID)")
+                .returns_json::<Project>(ctx)
+                .build()?,
+        Endpoint::get("ListGroupProjects", "/groups/{id}/projects")
+                .describes("List projects in a group")
+                .returns_json::<Vec<Project>>(ctx)
+                .params(EndpointParams::default()
+                    .with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("per_page", QueryParamType::Integer, false, Some("Items per page (default: 100, max: 100)"))
                     .with_query_param(
                         "archived",
                         QueryParamType::Boolean,
@@ -112,9 +88,8 @@ pub fn all() -> Vec<Endpoint> {
                         QueryParamType::Boolean,
                         false,
                         Some("Include projects from subgroups"),
-                    ),
-            ),
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-    ]
+                    ),)
+                .pagination(Collection::root().or_paginate("keyset", super::super::gitlab_keyset()))
+                .build()?,
+    ])
 }

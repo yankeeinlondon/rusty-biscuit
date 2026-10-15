@@ -96,28 +96,25 @@ impl Default for LmStudio {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::lmstudio::{ChatRequest, ChatBody};
+/// use schematic_schema::lmstudio::ChatRequest;
 ///
-/// let body = ChatBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::lmstudio::ChatBody = Default::default();
 /// let request = ChatRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ChatRequest {
     /// Request body
-    pub body: ChatBody,
+    pub body: ::schematic_definitions::lmstudio::ChatBody,
 }
 impl ChatRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: ChatBody) -> Self {
+    pub fn new(body: ::schematic_definitions::lmstudio::ChatBody) -> Self {
         Self { body }
     }
 }
-impl From<ChatBody> for ChatRequest {
-    fn from(body: ChatBody) -> Self {
+impl From<::schematic_definitions::lmstudio::ChatBody> for ChatRequest {
+    fn from(body: ::schematic_definitions::lmstudio::ChatBody) -> Self {
         Self { body }
     }
 }
@@ -164,9 +161,11 @@ impl schematic_runtime::EndpointSpec for ChatRequest {
 pub struct ListModelsRequest {}
 impl schematic_runtime::EndpointSpec for ListModelsRequest {
     type Api = LmStudioApi;
-    type Success = ListModelsResponse;
+    type Success = ::schematic_definitions::lmstudio::ListModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListModelsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::lmstudio::ListModelsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListModels";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -189,36 +188,35 @@ impl schematic_runtime::EndpointSpec for ListModelsRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::lmstudio::{LoadModelRequest, LoadModelBody};
+/// use schematic_schema::lmstudio::LoadModelRequest;
 ///
-/// let body = LoadModelBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::lmstudio::LoadModelBody = Default::default();
 /// let request = LoadModelRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LoadModelRequest {
     /// Request body
-    pub body: LoadModelBody,
+    pub body: ::schematic_definitions::lmstudio::LoadModelBody,
 }
 impl LoadModelRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: LoadModelBody) -> Self {
+    pub fn new(body: ::schematic_definitions::lmstudio::LoadModelBody) -> Self {
         Self { body }
     }
 }
-impl From<LoadModelBody> for LoadModelRequest {
-    fn from(body: LoadModelBody) -> Self {
+impl From<::schematic_definitions::lmstudio::LoadModelBody> for LoadModelRequest {
+    fn from(body: ::schematic_definitions::lmstudio::LoadModelBody) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for LoadModelRequest {
     type Api = LmStudioApi;
-    type Success = LoadModelResponse;
+    type Success = ::schematic_definitions::lmstudio::LoadModelResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<LoadModelResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::lmstudio::LoadModelResponse,
+    >;
     const ENDPOINT_ID: &'static str = "LoadModel";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -248,36 +246,35 @@ impl schematic_runtime::EndpointSpec for LoadModelRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::lmstudio::{UnloadModelRequest, UnloadModelBody};
+/// use schematic_schema::lmstudio::UnloadModelRequest;
 ///
-/// let body = UnloadModelBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::lmstudio::UnloadModelBody = Default::default();
 /// let request = UnloadModelRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UnloadModelRequest {
     /// Request body
-    pub body: UnloadModelBody,
+    pub body: ::schematic_definitions::lmstudio::UnloadModelBody,
 }
 impl UnloadModelRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: UnloadModelBody) -> Self {
+    pub fn new(body: ::schematic_definitions::lmstudio::UnloadModelBody) -> Self {
         Self { body }
     }
 }
-impl From<UnloadModelBody> for UnloadModelRequest {
-    fn from(body: UnloadModelBody) -> Self {
+impl From<::schematic_definitions::lmstudio::UnloadModelBody> for UnloadModelRequest {
+    fn from(body: ::schematic_definitions::lmstudio::UnloadModelBody) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for UnloadModelRequest {
     type Api = LmStudioApi;
-    type Success = UnloadModelResponse;
+    type Success = ::schematic_definitions::lmstudio::UnloadModelResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<UnloadModelResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::lmstudio::UnloadModelResponse,
+    >;
     const ENDPOINT_ID: &'static str = "UnloadModel";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -307,28 +304,26 @@ impl schematic_runtime::EndpointSpec for UnloadModelRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::lmstudio::{DownloadModelRequest, DownloadModelBody};
+/// use schematic_schema::lmstudio::DownloadModelRequest;
 ///
-/// let body = DownloadModelBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::lmstudio::DownloadModelBody = Default::default();
 /// let request = DownloadModelRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DownloadModelRequest {
     /// Request body
-    pub body: DownloadModelBody,
+    pub body: ::schematic_definitions::lmstudio::DownloadModelBody,
 }
 impl DownloadModelRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: DownloadModelBody) -> Self {
+    pub fn new(body: ::schematic_definitions::lmstudio::DownloadModelBody) -> Self {
         Self { body }
     }
 }
-impl From<DownloadModelBody> for DownloadModelRequest {
-    fn from(body: DownloadModelBody) -> Self {
+impl From<::schematic_definitions::lmstudio::DownloadModelBody>
+for DownloadModelRequest {
+    fn from(body: ::schematic_definitions::lmstudio::DownloadModelBody) -> Self {
         Self { body }
     }
 }
@@ -366,36 +361,36 @@ impl schematic_runtime::EndpointSpec for DownloadModelRequest {
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::lmstudio::{GetDownloadStatusRequest, DownloadStatusBody};
+/// use schematic_schema::lmstudio::GetDownloadStatusRequest;
 ///
-/// let body = DownloadStatusBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
+/// let body: ::schematic_definitions::lmstudio::DownloadStatusBody = Default::default();
 /// let request = GetDownloadStatusRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetDownloadStatusRequest {
     /// Request body
-    pub body: DownloadStatusBody,
+    pub body: ::schematic_definitions::lmstudio::DownloadStatusBody,
 }
 impl GetDownloadStatusRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: DownloadStatusBody) -> Self {
+    pub fn new(body: ::schematic_definitions::lmstudio::DownloadStatusBody) -> Self {
         Self { body }
     }
 }
-impl From<DownloadStatusBody> for GetDownloadStatusRequest {
-    fn from(body: DownloadStatusBody) -> Self {
+impl From<::schematic_definitions::lmstudio::DownloadStatusBody>
+for GetDownloadStatusRequest {
+    fn from(body: ::schematic_definitions::lmstudio::DownloadStatusBody) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for GetDownloadStatusRequest {
     type Api = LmStudioApi;
-    type Success = DownloadStatusResponse;
+    type Success = ::schematic_definitions::lmstudio::DownloadStatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<DownloadStatusResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::lmstudio::DownloadStatusResponse,
+    >;
     const ENDPOINT_ID: &'static str = "GetDownloadStatus";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -727,8 +722,11 @@ impl LmStudio {
     ///
     /// ## Arguments
     ///
-    /// - `body: ChatBody`: the request body
-    pub fn chat(&self, body: ChatBody) -> ChatCall<'_> {
+    /// - `body: ::schematic_definitions::lmstudio::ChatBody`: the request body
+    pub fn chat(
+        &self,
+        body: ::schematic_definitions::lmstudio::ChatBody,
+    ) -> ChatCall<'_> {
         ChatCall(self.0.send(ChatRequest::new(body)))
     }
     /// List available models
@@ -747,8 +745,11 @@ impl LmStudio {
     ///
     /// ## Arguments
     ///
-    /// - `body: LoadModelBody`: the request body
-    pub fn load_model(&self, body: LoadModelBody) -> LoadModelCall<'_> {
+    /// - `body: ::schematic_definitions::lmstudio::LoadModelBody`: the request body
+    pub fn load_model(
+        &self,
+        body: ::schematic_definitions::lmstudio::LoadModelBody,
+    ) -> LoadModelCall<'_> {
         LoadModelCall(self.0.send(LoadModelRequest::new(body)))
     }
     /// Unload a model from memory
@@ -759,8 +760,11 @@ impl LmStudio {
     ///
     /// ## Arguments
     ///
-    /// - `body: UnloadModelBody`: the request body
-    pub fn unload_model(&self, body: UnloadModelBody) -> UnloadModelCall<'_> {
+    /// - `body: ::schematic_definitions::lmstudio::UnloadModelBody`: the request body
+    pub fn unload_model(
+        &self,
+        body: ::schematic_definitions::lmstudio::UnloadModelBody,
+    ) -> UnloadModelCall<'_> {
         UnloadModelCall(self.0.send(UnloadModelRequest::new(body)))
     }
     /// Download a model from HuggingFace with SSE progress
@@ -771,8 +775,11 @@ impl LmStudio {
     ///
     /// ## Arguments
     ///
-    /// - `body: DownloadModelBody`: the request body
-    pub fn download_model(&self, body: DownloadModelBody) -> DownloadModelCall<'_> {
+    /// - `body: ::schematic_definitions::lmstudio::DownloadModelBody`: the request body
+    pub fn download_model(
+        &self,
+        body: ::schematic_definitions::lmstudio::DownloadModelBody,
+    ) -> DownloadModelCall<'_> {
         DownloadModelCall(self.0.send(DownloadModelRequest::new(body)))
     }
     /// Check the status of a download job
@@ -783,10 +790,10 @@ impl LmStudio {
     ///
     /// ## Arguments
     ///
-    /// - `body: DownloadStatusBody`: the request body
+    /// - `body: ::schematic_definitions::lmstudio::DownloadStatusBody`: the request body
     pub fn get_download_status(
         &self,
-        body: DownloadStatusBody,
+        body: ::schematic_definitions::lmstudio::DownloadStatusBody,
     ) -> GetDownloadStatusCall<'_> {
         GetDownloadStatusCall(self.0.send(GetDownloadStatusRequest::new(body)))
     }

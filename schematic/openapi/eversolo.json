@@ -32,8 +32,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::GetModelResponse",
+                    "schema_name": "GetModelResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "GetModelResponse"
+              "type_name": "::schematic_definitions::eversolo::GetModelResponse"
             }
           }
         }
@@ -72,8 +81,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::eversolo::StatusResponse"
             }
           }
         }
@@ -112,8 +130,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::eversolo::StatusResponse"
             }
           }
         }
@@ -139,8 +166,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::GetStateResponse",
+                    "schema_name": "GetStateResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "GetStateResponse"
+              "type_name": "::schematic_definitions::eversolo::GetStateResponse"
             }
           }
         }
@@ -166,8 +202,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::eversolo::StatusResponse"
             }
           }
         }
@@ -193,8 +238,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::eversolo::StatusResponse"
             }
           }
         }
@@ -220,8 +274,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::eversolo::StatusResponse"
             }
           }
         }
@@ -260,8 +323,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::eversolo::StatusResponse"
             }
           }
         }
@@ -287,8 +359,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::InputOutputListResponse",
+                    "schema_name": "InputOutputListResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "InputOutputListResponse"
+              "type_name": "::schematic_definitions::eversolo::InputOutputListResponse"
             }
           }
         }
@@ -327,8 +408,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::InputOutputListResponse",
+                    "schema_name": "InputOutputListResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "InputOutputListResponse"
+              "type_name": "::schematic_definitions::eversolo::InputOutputListResponse"
             }
           }
         }
@@ -367,8 +457,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::InputOutputListResponse",
+                    "schema_name": "InputOutputListResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "InputOutputListResponse"
+              "type_name": "::schematic_definitions::eversolo::InputOutputListResponse"
             }
           }
         }
@@ -407,8 +506,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::eversolo::StatusResponse"
             }
           }
         }
@@ -447,8 +555,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::eversolo::StatusResponse"
             }
           }
         }
@@ -474,8 +591,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::PowerOptionsResponse",
+                    "schema_name": "PowerOptionsResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "PowerOptionsResponse"
+              "type_name": "::schematic_definitions::eversolo::PowerOptionsResponse"
             }
           }
         }
@@ -514,8 +640,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::eversolo::StatusResponse"
             }
           }
         }
@@ -541,8 +676,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::BrightnessResponse",
+                    "schema_name": "BrightnessResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "BrightnessResponse"
+              "type_name": "::schematic_definitions::eversolo::BrightnessResponse"
             }
           }
         }
@@ -581,8 +725,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::eversolo::StatusResponse"
             }
           }
         }
@@ -608,8 +761,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::BrightnessResponse",
+                    "schema_name": "BrightnessResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "BrightnessResponse"
+              "type_name": "::schematic_definitions::eversolo::BrightnessResponse"
             }
           }
         }
@@ -648,8 +810,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::eversolo::StatusResponse"
             }
           }
         }
@@ -675,8 +846,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::DisplayModeListResponse",
+                    "schema_name": "DisplayModeListResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "DisplayModeListResponse"
+              "type_name": "::schematic_definitions::eversolo::DisplayModeListResponse"
             }
           }
         }
@@ -715,8 +895,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::eversolo::StatusResponse"
             }
           }
         }
@@ -742,8 +931,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::DisplayModeListResponse",
+                    "schema_name": "DisplayModeListResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "DisplayModeListResponse"
+              "type_name": "::schematic_definitions::eversolo::DisplayModeListResponse"
             }
           }
         }
@@ -782,8 +980,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::eversolo::StatusResponse"
             }
           }
         }
@@ -822,8 +1029,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::eversolo::StatusResponse",
+                    "schema_name": "StatusResponse"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "StatusResponse"
+              "type_name": "::schematic_definitions::eversolo::StatusResponse"
             }
           }
         }

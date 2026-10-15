@@ -38,10 +38,13 @@ mod types;
 
 pub use types::*;
 
-use crate::registry::SchemaRegistry;
+use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
+use schematic_define::{DefinitionContext, DefinitionError};
+#[cfg(test)]
+use schematic_define::RestMethod;
 use schematic_define::{
-    ApiKeyEnv, ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping,
-    RestApi, RestMethod,
+    ApiKeyEnv, AuthStrategy, Endpoint, EnvList, EnvMapping,
+    RestApi,
     params::{EndpointParams, QueryParamType},
 };
 
@@ -52,194 +55,135 @@ use schematic_define::{
 /// not the typed response of any endpoint.
 #[must_use]
 pub fn openapi_registry() -> SchemaRegistry {
-    SchemaRegistry::new()
-        // Shared
-        .register::<ModelCreator>("ModelCreator")
-        .register::<CategoryBreakdown>("CategoryBreakdown")
-        // LLM
-        .register::<LlmEvaluations>("LlmEvaluations")
-        .register::<LlmPricing>("LlmPricing")
-        .register::<LlmModel>("LlmModel")
-        .register::<PromptOptions>("PromptOptions")
-        .register::<LlmModelsResponse>("LlmModelsResponse")
-        // Media
-        .register::<MediaModel>("MediaModel")
-        .register::<MediaModelsResponse>("MediaModelsResponse")
-        // CritPt
-        .register::<CritPtMessage>("CritPtMessage")
-        .register::<CritPtSubmission>("CritPtSubmission")
-        .register::<CritPtEvaluateBody>("CritPtEvaluateBody")
-        .register::<CritPtEvaluateResponse>("CritPtEvaluateResponse")
+    module_group().expect("valid artificial_analysis definitions").registry
 }
 
 /// The free-tier data API: 6 GET endpoints for LLM and media-model benchmarks.
 pub fn define_artificial_analysis_data_api() -> RestApi {
-    RestApi {
-        name: "ArtificialAnalysisData".to_string(),
-        description: "Artificial Analysis free data API: LLM and media-model benchmark \
+    module_group().expect("valid artificial_analysis definitions").apis.remove(0)
+}
+
+fn build_artificial_analysis_data_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
+    let endpoints = vec![
+            Endpoint::get("ListLlmModels", "/data/llms/models")
+                .describes("Returns primary metrics from independent LLM benchmarks: \
+                     intelligence, speed, and pricing.")
+                .returns_json::<LlmModelsResponse>(ctx)
+                .build()?,
+            Endpoint::get("ListTextToImageModels", "/data/media/text-to-image")
+                .describes("Returns Elo ratings for text-to-image models.")
+                .returns_json::<MediaModelsResponse>(ctx)
+                .params(EndpointParams::default().with_query_param(
+                    "include_categories",
+                    QueryParamType::Boolean,
+                    false,
+                    Some("Include a breakdown of Elo scores by category."),
+                ))
+                .build()?,
+            Endpoint::get("ListImageEditingModels", "/data/media/image-editing")
+                .describes("Returns Elo ratings for image-editing models.")
+                .returns_json::<MediaModelsResponse>(ctx)
+                .build()?,
+            Endpoint::get("ListTextToSpeechModels", "/data/media/text-to-speech")
+                .describes("Returns Elo ratings for text-to-speech models.")
+                .returns_json::<MediaModelsResponse>(ctx)
+                .build()?,
+            Endpoint::get("ListTextToVideoModels", "/data/media/text-to-video")
+                .describes("Returns Elo ratings for text-to-video models.")
+                .returns_json::<MediaModelsResponse>(ctx)
+                .params(EndpointParams::default().with_query_param(
+                    "include_categories",
+                    QueryParamType::Boolean,
+                    false,
+                    Some("Include a breakdown of Elo scores by category."),
+                ))
+                .build()?,
+            Endpoint::get("ListImageToVideoModels", "/data/media/image-to-video")
+                .describes("Returns Elo ratings for image-to-video models.")
+                .returns_json::<MediaModelsResponse>(ctx)
+                .params(EndpointParams::default().with_query_param(
+                    "include_categories",
+                    QueryParamType::Boolean,
+                    false,
+                    Some("Include a breakdown of Elo scores by category."),
+                ))
+                .build()?,
+        ];
+    RestApi::builder(ctx, "ArtificialAnalysisData", "https://artificialanalysis.ai/api/v2")
+        .describes("Artificial Analysis free data API: LLM and media-model benchmark \
              catalogs. Attribution: as required by the Artificial Analysis API terms, all \
-             usage must include attribution to https://artificialanalysis.ai/."
-            .to_string(),
-        base_url: "https://artificialanalysis.ai/api/v2".to_string(),
-        docs_url: Some("https://artificialanalysis.ai/api-reference".to_string()),
-        auth: AuthStrategy::ApiKey {
+             usage must include attribution to https://artificialanalysis.ai/.")
+        .authentication(AuthStrategy::ApiKey {
             header: "x-api-key".to_string(),
             value_prefix: None,
-        },
-        auth_policy: None,
-        env_auth: vec!["ARTIFICIAL_ANALYSIS_API_KEY".to_string()],
-        env_username: None,
-        headers: vec![],
-        endpoints: vec![
-            Endpoint {
-                id: "ListLlmModels".to_string(),
-                method: RestMethod::Get,
-                path: "/data/llms/models".to_string(),
-                description: "Returns primary metrics from independent LLM benchmarks: \
-                     intelligence, speed, and pricing."
-                    .to_string(),
-                request: None,
-                response: ApiResponse::json_type("LlmModelsResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "ListTextToImageModels".to_string(),
-                method: RestMethod::Get,
-                path: "/data/media/text-to-image".to_string(),
-                description: "Returns Elo ratings for text-to-image models.".to_string(),
-                request: None,
-                response: ApiResponse::json_type("MediaModelsResponse"),
-                headers: vec![],
-                params: Some(EndpointParams::default().with_query_param(
-                    "include_categories",
-                    QueryParamType::Boolean,
-                    false,
-                    Some("Include a breakdown of Elo scores by category."),
-                )),
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "ListImageEditingModels".to_string(),
-                method: RestMethod::Get,
-                path: "/data/media/image-editing".to_string(),
-                description: "Returns Elo ratings for image-editing models.".to_string(),
-                request: None,
-                response: ApiResponse::json_type("MediaModelsResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "ListTextToSpeechModels".to_string(),
-                method: RestMethod::Get,
-                path: "/data/media/text-to-speech".to_string(),
-                description: "Returns Elo ratings for text-to-speech models.".to_string(),
-                request: None,
-                response: ApiResponse::json_type("MediaModelsResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "ListTextToVideoModels".to_string(),
-                method: RestMethod::Get,
-                path: "/data/media/text-to-video".to_string(),
-                description: "Returns Elo ratings for text-to-video models.".to_string(),
-                request: None,
-                response: ApiResponse::json_type("MediaModelsResponse"),
-                headers: vec![],
-                params: Some(EndpointParams::default().with_query_param(
-                    "include_categories",
-                    QueryParamType::Boolean,
-                    false,
-                    Some("Include a breakdown of Elo scores by category."),
-                )),
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "ListImageToVideoModels".to_string(),
-                method: RestMethod::Get,
-                path: "/data/media/image-to-video".to_string(),
-                description: "Returns Elo ratings for image-to-video models.".to_string(),
-                request: None,
-                response: ApiResponse::json_type("MediaModelsResponse"),
-                headers: vec![],
-                params: Some(EndpointParams::default().with_query_param(
-                    "include_categories",
-                    QueryParamType::Boolean,
-                    false,
-                    Some("Include a breakdown of Elo scores by category."),
-                )),
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-        ],
-        module_path: Some("artificial_analysis".to_string()),
-        request_suffix: None,
-        version: None,
-        env_mapping: Some(EnvMapping {
+        }, vec!["ARTIFICIAL_ANALYSIS_API_KEY".to_string()])
+        .docs_url("https://artificialanalysis.ai/api-reference")
+        .module_path("artificial_analysis")
+        .env_mapping(EnvMapping {
             api_key: Some(ApiKeyEnv {
                 names: EnvList::single("ARTIFICIAL_ANALYSIS_API_KEY"),
                 header: "x-api-key".to_string(),
             }),
             ..Default::default()
-        }),
-        cross_origin: CrossOrigin::same_origin(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    }
+        })
+        .endpoints(endpoints)
+        .build()
 }
 
 /// The CritPt benchmark evaluation API: a single POST endpoint.
 pub fn define_artificial_analysis_critpt_api() -> RestApi {
-    RestApi {
-        name: "ArtificialAnalysisCritPt".to_string(),
-        description: "Artificial Analysis CritPt benchmark: submit code-generation results for \
+    module_group().expect("valid artificial_analysis definitions").apis.remove(1)
+}
+
+fn build_artificial_analysis_critpt_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
+    let endpoints = vec![Endpoint::post("EvaluateCritPt", "/critpt/evaluate")
+                .describes("Submit a batch of code-generation submissions for evaluation against \
+                 the CritPt benchmark.")
+                .request_json::<CritPtEvaluateBody>(ctx)
+                .returns_json::<CritPtEvaluateResponse>(ctx)
+                .build()?];
+    RestApi::builder(ctx, "ArtificialAnalysisCritPt", "https://artificialanalysis.ai/api/v2")
+        .describes("Artificial Analysis CritPt benchmark: submit code-generation results for \
              evaluation. Attribution: as required by the Artificial Analysis API terms, all \
-             usage must include attribution to https://artificialanalysis.ai/."
-            .to_string(),
-        base_url: "https://artificialanalysis.ai/api/v2".to_string(),
-        docs_url: Some("https://artificialanalysis.ai/api-reference".to_string()),
-        auth: AuthStrategy::ApiKey {
+             usage must include attribution to https://artificialanalysis.ai/.")
+        .authentication(AuthStrategy::ApiKey {
             header: "x-api-key".to_string(),
             value_prefix: None,
-        },
-        auth_policy: None,
-        env_auth: vec!["ARTIFICIAL_ANALYSIS_API_KEY".to_string()],
-        env_username: None,
-        headers: vec![],
-        endpoints: vec![Endpoint {
-            id: "EvaluateCritPt".to_string(),
-            method: RestMethod::Post,
-            path: "/critpt/evaluate".to_string(),
-            description: "Submit a batch of code-generation submissions for evaluation against \
-                 the CritPt benchmark."
-                .to_string(),
-            request: Some(ApiRequest::json_type("CritPtEvaluateBody")),
-            response: ApiResponse::json_type("CritPtEvaluateResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        }],
-        module_path: Some("artificial_analysis".to_string()),
-        request_suffix: None,
-        version: None,
-        env_mapping: Some(EnvMapping {
+        }, vec!["ARTIFICIAL_ANALYSIS_API_KEY".to_string()])
+        .docs_url("https://artificialanalysis.ai/api-reference")
+        .module_path("artificial_analysis")
+        .env_mapping(EnvMapping {
             api_key: Some(ApiKeyEnv {
                 names: EnvList::single("ARTIFICIAL_ANALYSIS_API_KEY"),
                 header: "x-api-key".to_string(),
             }),
             ..Default::default()
-        }),
-        cross_origin: CrossOrigin::same_origin(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    }
+        })
+        .endpoints(endpoints)
+        .build()
+}
+
+/// Assemble sibling APIs and their ordered nominal schemas in one context.
+pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+    assemble_module_group("::schematic_definitions::artificial_analysis", |ctx| {
+        ctx.register::<ModelCreator>()?;
+        ctx.register::<CategoryBreakdown>()?;
+        ctx.register::<LlmEvaluations>()?;
+        ctx.register::<LlmPricing>()?;
+        ctx.register::<LlmModel>()?;
+        ctx.register::<PromptOptions>()?;
+        ctx.register::<LlmModelsResponse>()?;
+        ctx.register::<MediaModel>()?;
+        ctx.register::<MediaModelsResponse>()?;
+        ctx.register::<CritPtMessage>()?;
+        ctx.register::<CritPtSubmission>()?;
+        ctx.register::<CritPtEvaluateBody>()?;
+        ctx.register::<CritPtEvaluateResponse>()?;
+        Ok(vec![
+            build_artificial_analysis_data_api(ctx)?,
+            build_artificial_analysis_critpt_api(ctx)?,
+        ])
+    })
 }
 
 #[cfg(test)]
@@ -361,4 +305,18 @@ mod tests {
         let registry = openapi_registry();
         assert!(registry.get("RateLimitError").is_none());
     }
+
+    #[test]
+    fn module_group_preserves_endpoint_and_registry_inventory() {
+        let group = module_group().unwrap();
+        assert_eq!(
+            group.apis.iter().flat_map(|api| api.endpoints.iter().map(|endpoint| endpoint.id.as_str())).collect::<Vec<_>>(),
+            vec!["ListLlmModels", "ListTextToImageModels", "ListImageEditingModels", "ListTextToSpeechModels", "ListTextToVideoModels", "ListImageToVideoModels", "EvaluateCritPt"]
+        );
+        assert_eq!(group.registry.names().collect::<Vec<_>>(), vec!["ModelCreator", "CategoryBreakdown", "LlmEvaluations", "LlmPricing", "LlmModel", "PromptOptions", "LlmModelsResponse", "MediaModel", "MediaModelsResponse", "CritPtMessage", "CritPtSubmission", "CritPtEvaluateBody", "CritPtEvaluateResponse"]);
+        for api in &group.apis {
+            assert!(group.registry.validate_completeness(api).is_ok());
+        }
+    }
+
 }

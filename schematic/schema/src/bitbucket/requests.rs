@@ -31,9 +31,11 @@ impl GetRepositoryRequest {
 }
 impl schematic_runtime::EndpointSpec for GetRepositoryRequest {
     type Api = BitbucketApi;
-    type Success = Repository;
+    type Success = ::schematic_definitions::bitbucket::Repository;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Repository>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::bitbucket::Repository,
+    >;
     const ENDPOINT_ID: &'static str = "GetRepository";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -188,9 +190,15 @@ impl ListPullRequestsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListPullRequestsRequest {
     type Api = BitbucketApi;
-    type Success = PaginatedResponse<PullRequest>;
+    type Success = schematic_definitions::bitbucket::PaginatedResponse<
+        schematic_definitions::bitbucket::PullRequest,
+    >;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<PaginatedResponse<PullRequest>>;
+    type Decoder = schematic_runtime::Json<
+        schematic_definitions::bitbucket::PaginatedResponse<
+            schematic_definitions::bitbucket::PullRequest,
+        >,
+    >;
     const ENDPOINT_ID: &'static str = "ListPullRequests";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -252,9 +260,11 @@ impl GetPullRequestRequest {
 }
 impl schematic_runtime::EndpointSpec for GetPullRequestRequest {
     type Api = BitbucketApi;
-    type Success = PullRequest;
+    type Success = ::schematic_definitions::bitbucket::PullRequest;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<PullRequest>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::bitbucket::PullRequest,
+    >;
     const ENDPOINT_ID: &'static str = "GetPullRequest";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -320,9 +330,15 @@ impl ListPullRequestCommentsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListPullRequestCommentsRequest {
     type Api = BitbucketApi;
-    type Success = PaginatedResponse<PullRequestComment>;
+    type Success = schematic_definitions::bitbucket::PaginatedResponse<
+        schematic_definitions::bitbucket::PullRequestComment,
+    >;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<PaginatedResponse<PullRequestComment>>;
+    type Decoder = schematic_runtime::Json<
+        schematic_definitions::bitbucket::PaginatedResponse<
+            schematic_definitions::bitbucket::PullRequestComment,
+        >,
+    >;
     const ENDPOINT_ID: &'static str = "ListPullRequestComments";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -384,9 +400,15 @@ impl ListIssuesRequest {
 }
 impl schematic_runtime::EndpointSpec for ListIssuesRequest {
     type Api = BitbucketApi;
-    type Success = PaginatedResponse<Issue>;
+    type Success = schematic_definitions::bitbucket::PaginatedResponse<
+        schematic_definitions::bitbucket::Issue,
+    >;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<PaginatedResponse<Issue>>;
+    type Decoder = schematic_runtime::Json<
+        schematic_definitions::bitbucket::PaginatedResponse<
+            schematic_definitions::bitbucket::Issue,
+        >,
+    >;
     const ENDPOINT_ID: &'static str = "ListIssues";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -445,9 +467,9 @@ impl GetIssueRequest {
 }
 impl schematic_runtime::EndpointSpec for GetIssueRequest {
     type Api = BitbucketApi;
-    type Success = Issue;
+    type Success = ::schematic_definitions::bitbucket::Issue;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Issue>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::bitbucket::Issue>;
     const ENDPOINT_ID: &'static str = "GetIssue";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -513,9 +535,15 @@ impl ListIssueCommentsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListIssueCommentsRequest {
     type Api = BitbucketApi;
-    type Success = PaginatedResponse<IssueComment>;
+    type Success = schematic_definitions::bitbucket::PaginatedResponse<
+        schematic_definitions::bitbucket::IssueComment,
+    >;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<PaginatedResponse<IssueComment>>;
+    type Decoder = schematic_runtime::Json<
+        schematic_definitions::bitbucket::PaginatedResponse<
+            schematic_definitions::bitbucket::IssueComment,
+        >,
+    >;
     const ENDPOINT_ID: &'static str = "ListIssueComments";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -584,9 +612,15 @@ impl ListIssueChangesRequest {
 }
 impl schematic_runtime::EndpointSpec for ListIssueChangesRequest {
     type Api = BitbucketApi;
-    type Success = PaginatedResponse<IssueChange>;
+    type Success = schematic_definitions::bitbucket::PaginatedResponse<
+        schematic_definitions::bitbucket::IssueChange,
+    >;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<PaginatedResponse<IssueChange>>;
+    type Decoder = schematic_runtime::Json<
+        schematic_definitions::bitbucket::PaginatedResponse<
+            schematic_definitions::bitbucket::IssueChange,
+        >,
+    >;
     const ENDPOINT_ID: &'static str = "ListIssueChanges";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -646,9 +680,9 @@ impl GetBranchRequest {
 }
 impl schematic_runtime::EndpointSpec for GetBranchRequest {
     type Api = BitbucketApi;
-    type Success = Branch;
+    type Success = ::schematic_definitions::bitbucket::Branch;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Branch>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::bitbucket::Branch>;
     const ENDPOINT_ID: &'static str = "GetBranch";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -707,9 +741,15 @@ impl ListTagsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListTagsRequest {
     type Api = BitbucketApi;
-    type Success = PaginatedResponse<Tag>;
+    type Success = schematic_definitions::bitbucket::PaginatedResponse<
+        schematic_definitions::bitbucket::Tag,
+    >;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<PaginatedResponse<Tag>>;
+    type Decoder = schematic_runtime::Json<
+        schematic_definitions::bitbucket::PaginatedResponse<
+            schematic_definitions::bitbucket::Tag,
+        >,
+    >;
     const ENDPOINT_ID: &'static str = "ListTags";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -768,9 +808,9 @@ impl GetTagRequest {
 }
 impl schematic_runtime::EndpointSpec for GetTagRequest {
     type Api = BitbucketApi;
-    type Success = Tag;
+    type Success = ::schematic_definitions::bitbucket::Tag;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<Tag>;
+    type Decoder = schematic_runtime::Json<::schematic_definitions::bitbucket::Tag>;
     const ENDPOINT_ID: &'static str = "GetTag";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -829,9 +869,15 @@ impl ListDownloadsRequest {
 }
 impl schematic_runtime::EndpointSpec for ListDownloadsRequest {
     type Api = BitbucketApi;
-    type Success = PaginatedResponse<Download>;
+    type Success = schematic_definitions::bitbucket::PaginatedResponse<
+        schematic_definitions::bitbucket::Download,
+    >;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<PaginatedResponse<Download>>;
+    type Decoder = schematic_runtime::Json<
+        schematic_definitions::bitbucket::PaginatedResponse<
+            schematic_definitions::bitbucket::Download,
+        >,
+    >;
     const ENDPOINT_ID: &'static str = "ListDownloads";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -964,9 +1010,15 @@ impl From<String> for ListWorkspaceReposRequest {
 }
 impl schematic_runtime::EndpointSpec for ListWorkspaceReposRequest {
     type Api = BitbucketApi;
-    type Success = PaginatedResponse<Repository>;
+    type Success = schematic_definitions::bitbucket::PaginatedResponse<
+        schematic_definitions::bitbucket::Repository,
+    >;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<PaginatedResponse<Repository>>;
+    type Decoder = schematic_runtime::Json<
+        schematic_definitions::bitbucket::PaginatedResponse<
+            schematic_definitions::bitbucket::Repository,
+        >,
+    >;
     const ENDPOINT_ID: &'static str = "ListWorkspaceRepos";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(

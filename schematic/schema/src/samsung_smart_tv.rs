@@ -104,9 +104,11 @@ impl Default for SamsungSmartTv {
 pub struct GetDeviceInfoRequest {}
 impl schematic_runtime::EndpointSpec for GetDeviceInfoRequest {
     type Api = SamsungSmartTvApi;
-    type Success = SamsungDeviceInfoResponse;
+    type Success = ::schematic_definitions::samsung_smart_tv::SamsungDeviceInfoResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<SamsungDeviceInfoResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::samsung_smart_tv::SamsungDeviceInfoResponse,
+    >;
     const ENDPOINT_ID: &'static str = "GetDeviceInfo";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -303,9 +305,11 @@ impl From<String> for GetAppStatusRequest {
 }
 impl schematic_runtime::EndpointSpec for GetAppStatusRequest {
     type Api = SamsungSmartTvApi;
-    type Success = SamsungAppStatusResponse;
+    type Success = ::schematic_definitions::samsung_smart_tv::SamsungAppStatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<SamsungAppStatusResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::samsung_smart_tv::SamsungAppStatusResponse,
+    >;
     const ENDPOINT_ID: &'static str = "GetAppStatus";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(

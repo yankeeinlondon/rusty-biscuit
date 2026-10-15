@@ -32,8 +32,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::bitbucket::Repository",
+                    "schema_name": "Repository"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Repository"
+              "type_name": "::schematic_definitions::bitbucket::Repository"
             }
           }
         }
@@ -194,8 +203,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: PullRequest >",
+                    "schema_name": "PaginatedResponse<PullRequest>"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "PaginatedResponse<PullRequest>"
+              "type_name": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: PullRequest >"
             }
           }
         }
@@ -241,8 +259,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::bitbucket::PullRequest",
+                    "schema_name": "PullRequest"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "PullRequest"
+              "type_name": "::schematic_definitions::bitbucket::PullRequest"
             }
           }
         }
@@ -319,8 +346,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: PullRequestComment >",
+                    "schema_name": "PaginatedResponse<PullRequestComment>"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "PaginatedResponse<PullRequestComment>"
+              "type_name": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: PullRequestComment >"
             }
           }
         }
@@ -397,8 +433,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: Issue >",
+                    "schema_name": "PaginatedResponse<Issue>"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "PaginatedResponse<Issue>"
+              "type_name": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: Issue >"
             }
           }
         }
@@ -444,8 +489,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::bitbucket::Issue",
+                    "schema_name": "Issue"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Issue"
+              "type_name": "::schematic_definitions::bitbucket::Issue"
             }
           }
         }
@@ -522,8 +576,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: IssueComment >",
+                    "schema_name": "PaginatedResponse<IssueComment>"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "PaginatedResponse<IssueComment>"
+              "type_name": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: IssueComment >"
             }
           }
         }
@@ -600,8 +663,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: IssueChange >",
+                    "schema_name": "PaginatedResponse<IssueChange>"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "PaginatedResponse<IssueChange>"
+              "type_name": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: IssueChange >"
             }
           }
         }
@@ -656,8 +728,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::bitbucket::Branch",
+                    "schema_name": "Branch"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Branch"
+              "type_name": "::schematic_definitions::bitbucket::Branch"
             }
           }
         }
@@ -734,8 +815,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: Tag >",
+                    "schema_name": "PaginatedResponse<Tag>"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "PaginatedResponse<Tag>"
+              "type_name": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: Tag >"
             }
           }
         }
@@ -781,8 +871,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "::schematic_definitions::bitbucket::Tag",
+                    "schema_name": "Tag"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "Tag"
+              "type_name": "::schematic_definitions::bitbucket::Tag"
             }
           }
         }
@@ -859,8 +958,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: Download >",
+                    "schema_name": "PaginatedResponse<Download>"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "PaginatedResponse<Download>"
+              "type_name": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: Download >"
             }
           }
         }
@@ -980,8 +1088,17 @@
         "x-schematic": {
           "response": {
             "Json": {
+              "descriptor": {
+                "shape": {
+                  "Named": {
+                    "rust_path": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: Repository >",
+                    "schema_name": "PaginatedResponse<Repository>"
+                  }
+                },
+                "structure": null
+              },
               "module_path": null,
-              "type_name": "PaginatedResponse<Repository>"
+              "type_name": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: Repository >"
             }
           }
         }

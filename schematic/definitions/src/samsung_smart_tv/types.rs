@@ -28,6 +28,13 @@ pub struct SamsungDeviceInfoResponse {
     pub extra: BTreeMap<String, serde_json::Value>,
 }
 
+impl schematic_define::Registration for SamsungDeviceInfoResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("SamsungDeviceInfoResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Nested device information block within the Smart View info response.
 ///
 /// All fields are optional because firmware revisions may omit or rename
@@ -91,6 +98,13 @@ pub struct SamsungDeviceInfo {
     pub extra: BTreeMap<String, serde_json::Value>,
 }
 
+impl schematic_define::Registration for SamsungDeviceInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("SamsungDeviceInfo");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Response from the app status endpoint (`GET /api/v2/applications/{app_id}`).
 ///
 /// Returns running state, version, and other metadata for a specific app.
@@ -119,6 +133,13 @@ pub struct SamsungAppStatusResponse {
     /// Additional app metadata not covered by typed fields.
     #[serde(flatten)]
     pub extra: BTreeMap<String, serde_json::Value>,
+}
+
+impl schematic_define::Registration for SamsungAppStatusResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("SamsungAppStatusResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 #[cfg(test)]

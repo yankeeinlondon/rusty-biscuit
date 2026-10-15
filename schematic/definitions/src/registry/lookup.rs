@@ -37,26 +37,16 @@ use super::SchemaRegistry;
 /// ```
 #[must_use]
 pub fn get_registry(api_name: &str) -> Option<SchemaRegistry> {
-    match api_name.to_lowercase().as_str() {
-        "anthropic" => Some(crate::anthropic::openapi_registry()),
-        "bitbucket" => Some(crate::bitbucket::openapi_registry()),
-        "elevenlabs" => Some(crate::elevenlabs::openapi_registry()),
-        "artificial-analysis-data" | "artificial-analysis-critpt" => {
-            Some(crate::artificial_analysis::openapi_registry())
-        }
-        "emqx-basic" | "emqx-bearer" => Some(crate::emqx::openapi_registry()),
-        "eversolo" => Some(crate::eversolo::openapi_registry()),
-        "gitea" => Some(crate::gitea::openapi_registry()),
-        "github" => Some(crate::github::openapi_registry()),
-        "gitlab" => Some(crate::gitlab::openapi_registry()),
-        "huggingface" => Some(crate::huggingface::openapi_registry()),
-        "lmstudio" => Some(crate::lmstudio::openapi_registry()),
-        "ollama-native" | "ollama-openai" => Some(crate::ollama::openapi_registry()),
-        "openai" => Some(crate::openai::openapi_registry()),
-        "samsung-smart-tv" => Some(crate::samsung_smart_tv::openapi_registry()),
-        "unfolded-circle-core-rest" => Some(crate::unfolded_circle::core_rest::openapi_registry()),
-        _ => None,
-    }
+    let key = api_name.to_lowercase();
+    let module = match key.as_str() {
+        "artificial-analysis-data" | "artificial-analysis-critpt" => "artificial_analysis",
+        "emqx-basic" | "emqx-bearer" => "emqx",
+        "ollama-native" | "ollama-openai" => "ollama",
+        "samsung-smart-tv" => "samsung_smart_tv",
+        "unfolded-circle-core-rest" => "unfolded_circle_core_rest",
+        other => other,
+    };
+    get_module_group(module).map(|group| group.registry)
 }
 
 /// Returns the canonical registry-lookup key for a given API name.
@@ -110,12 +100,8 @@ pub fn registry_key_for(api_name: &str) -> String {
 ///
 /// Module-grouped OpenAPI export emits a single document per resolved module
 /// path (e.g. `ollama.json` covers both `OllamaNative` and `OllamaOpenAI`).
-/// This helper looks up each member API's per-API registry and merges them
-/// into one [`SchemaRegistry`] suitable for that grouped export.
-///
-/// The merge uses `IndexMap` insertion semantics: identical schemas
-/// registered under the same name collapse to a single entry, while distinct
-/// schemas are unioned in insertion order.
+/// The module is assembled once, yielding the registry from the same context
+/// that validated all of its APIs.
 ///
 /// ## Returns
 ///
@@ -139,25 +125,32 @@ pub fn registry_key_for(api_name: &str) -> String {
 /// ```
 #[must_use]
 pub fn get_registries_for_module(module_name: &str) -> Option<SchemaRegistry> {
-    let normalized = module_name.to_lowercase();
-    let grouped = crate::apis_by_module();
-
-    // Find the matching module bucket case-insensitively.
-    let module_apis = grouped
-        .iter()
-        .find(|(name, _)| name.to_lowercase() == normalized)
-        .map(|(_, apis)| apis)?;
-
-    let mut merged = SchemaRegistry::new();
-    let mut found_any = false;
-
-    for api in module_apis {
-        let key = registry_key_for(&api.name);
-        if let Some(reg) = get_registry(&key) {
-            merged.extend(reg);
-            found_any = true;
-        }
-    }
-
-    if found_any { Some(merged) } else { None }
+    get_module_group(module_name).map(|group| group.registry)
 }
+
+/// Assemble the definition and registry together for a known generated module.
+pub fn get_module_group(module: &str) -> Option<super::ModuleGroup> {
+    let key = module.to_lowercase();
+    MODULES.iter().find(|(name, _)| *name == key)
+        .map(|(_, assemble)| assemble().expect("valid shipped module group"))
+}
+
+type Assemble = fn() -> Result<super::ModuleGroup, schematic_define::DefinitionError>;
+
+pub(crate) const MODULES: &[(&str, Assemble)] = &[
+    ("anthropic", crate::anthropic::module_group),
+    ("artificial_analysis", crate::artificial_analysis::module_group),
+    ("bitbucket", crate::bitbucket::module_group),
+    ("openai", crate::openai::module_group),
+    ("elevenlabs", crate::elevenlabs::module_group),
+    ("gitea", crate::gitea::module_group),
+    ("github", crate::github::module_group),
+    ("gitlab", crate::gitlab::module_group),
+    ("huggingface", crate::huggingface::module_group),
+    ("lmstudio", crate::lmstudio::module_group),
+    ("ollama", crate::ollama::module_group),
+    ("emqx", crate::emqx::module_group),
+    ("eversolo", crate::eversolo::module_group),
+    ("samsung_smart_tv", crate::samsung_smart_tv::module_group),
+    ("unfolded_circle_core_rest", crate::unfolded_circle::core_rest::module_group),
+];

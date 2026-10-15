@@ -270,8 +270,11 @@ fn mismatch(api: &RestApi, endpoint: &schematic_define::Endpoint, row: Option<&R
                 problems.push(format!("items {items:?}, want {want_items:?}"));
             }
             let got_type = list.and_then(|list| list.item_type.as_deref());
-            if got_type != Some(*item_type) {
-                problems.push(format!("item type {got_type:?}, want {item_type:?}"));
+            let expected_type = if endpoint.pagination.as_ref().and_then(|collection| collection.item_type.as_ref()).is_none() {
+                format!("::schematic_definitions::{}::{item_type}", api.module_path.clone().unwrap_or_else(|| api.name.to_lowercase()))
+            } else { (*item_type).to_owned() };
+            if got_type != Some(expected_type.as_str()) {
+                problems.push(format!("item type {got_type:?}, want {expected_type:?}"));
             }
             let described = describe(got);
             if described != *strategy {
@@ -455,7 +458,6 @@ fn every_unverified_list_names_its_recalled_strategy_and_needed_source() {
         "ElevenLabs.ListVoices",
         "GitLab.ListIssueParticipants",
         "Gitea.GetGitTree",
-        "Gitea.GetGitTreeRecursive",
     ]
     .into_iter()
     .map(str::to_owned)
