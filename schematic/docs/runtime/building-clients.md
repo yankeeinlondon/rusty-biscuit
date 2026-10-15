@@ -72,7 +72,7 @@ validates again on its next use, and clones made earlier keep theirs.
 | `basic_auth(user, password)` | an HTTP Basic client credential; exists only on APIs that accept Basic |
 | `credentials(credential)` | the client credential in its general form |
 | `env_order([..])` | replace the order of the environment variables the fallback reads |
-| `cross_origin(policy)` | tighten the API's [cross-origin policy](./origins-and-redirects.md) |
+| `cross_origin(policy)` | tighten the API default and endpoint [cross-origin policies](./origins-and-redirects.md) |
 | `transport(&shared)` | take connections from a `SharedTransport` |
 | `pre_response_json(hook)`, `mutate_response::<R, _>(hook)` | register [response hooks](./hooks.md) |
 | `build()` | validate now; returns the same client or the `BuildError` |
@@ -162,7 +162,7 @@ carried by `TransportErrorKind::InvalidClient` when the first call finds it:
 | --- | --- |
 | `InvalidBaseUrl { reason }` | the base URL is not absolute, not HTTP(S), has no host, or carries user information |
 | `InvalidAllowedOrigin { reason }` | an `allow_origins` entry is not a bare HTTP(S) origin (it has a path, query, fragment, or user information) |
-| `OriginPolicyNotPermitted { definition, requested }` | `cross_origin(..)` would loosen the API's policy |
+| `OriginPolicyNotPermitted { definition, requested }` | `cross_origin(..)` would loosen the API default or an endpoint policy |
 | `TransportOptionConflict { option }` | a transport-owned setting was set on a client attached to a `SharedTransport` |
 | `AuthBearingDefaultHeader { name }` | a default header would carry a credential (for example `Authorization`, `Cookie`, or the API's key header); set a credential instead |
 | `InvalidHeader { name }` | a default header name or value is not valid HTTP |

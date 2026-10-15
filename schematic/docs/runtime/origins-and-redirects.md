@@ -2,7 +2,7 @@
 
 A redirect or a next-page link can point anywhere, including a host that
 should never see your API key. The runtime therefore checks every URL a send
-is about to request against the API's **cross-origin policy**, and decides
+is about to request against the endpoint's effective **cross-origin policy**, and decides
 separately whether the credential may go with it.
 
 ## Origins
@@ -22,7 +22,10 @@ The client's **base origin** is the origin of its base URL.
 ## Policies
 
 Each API definition sets one policy (`CrossOrigin` in `schematic-define`,
-`OriginPolicy` at run time); the default is `same_origin`.
+`OriginPolicy` at run time); the default is `same_origin`. An endpoint's
+`cross_origin(policy)` replaces that policy for its redirects and followed links.
+For example, a download endpoint can allow `https://files.example.com` while
+its sibling endpoints retain `same_origin`.
 
 | Policy | Redirect to base | Redirect elsewhere | Link to base | Link elsewhere |
 | --- | --- | --- | --- | --- |
@@ -43,7 +46,8 @@ Each API definition sets one policy (`CrossOrigin` in `schematic-define`,
 
 A caller can only **tighten** the policy, with
 `cross_origin(..)`: `deny` over anything, `same_origin` over anything but
-`deny`, and an `allow_origins` list that is a subset of the API's own list.
+`deny`, and an `allow_origins` list that is a subset of the definition's own list.
+The caller setting must tighten the API default and every endpoint override.
 Anything else is refused with `BuildError::OriginPolicyNotPermitted`, at
 `build()` or else on the client's first call:
 

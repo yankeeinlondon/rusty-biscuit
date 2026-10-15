@@ -6,8 +6,9 @@ kind: canonical-documentation
 
 Use `schematic_define::DefinitionContext` to collect the types for one generated
 module. Registration returns a `TypeDesc` with separate component and Rust names.
-The typed API is additive; shipped API factories still use their existing
-literal definitions and registry lookups.
+OpenAI imports use a single typed module-group assembly for the API and
+ordered registry. Other shipped API factories retain their existing literal
+definitions and registry lookups during migration.
 
 ```rust
 use schematic_define::{definition_type, DefinitionContext};

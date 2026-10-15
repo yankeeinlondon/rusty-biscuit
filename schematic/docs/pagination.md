@@ -788,3 +788,17 @@ cover 32 endpoints. A few more lists are unpaginated by design: Gitea's
 `GetTagReference` is a prefix lookup that returns every matching ref,
 OpenAI's `ListModels` reply has no continuation, and ElevenLabs'
 `ListModels` is a root array with no evidence of paging.
+
+### Endpoint collections for imported APIs
+
+An endpoint can state its collection with `.pagination(Collection::at("data")
+.item_type("Item").paginate(strategy))`. Its collection takes precedence over
+an older API exception row. Without an endpoint collection, the existing
+exception/default/root-array resolution remains in effect.
+
+OpenAI's importer leaves pagination to its hand-written overlay. The overlay
+finds each named imported endpoint, assigns its collection, and rejects an
+unknown ID. Its seven beta Responses operations share their ordinary endpoint
+IDs with optional `beta` query inputs. `ListInputItems` uses `BetaItemResource`
+for its compatible superset. The serialized resolution origin remains
+`Exception` during the migration of other providers.

@@ -106,3 +106,15 @@ YAML is not a separate definition-loading interface.
 A present `pager_managed: true` without matching strategy input and caller control
 is an error, including when no strategy resolves. A matching required input with
 no sent default reports `pager-managed-required-without-default`.
+
+Imported definition modules use these builders too. Their public
+`module_group()` returns a fallible assembly containing the API and registry
+from one ordered context; the catalog factory and registry helper unwrap it.
+The importer emits nominal Registration implementations beside generated
+models. Aliases reuse their underlying registration; containers and inline
+primitive/JSON types do not become extra components. See
+[OpenAPI imports](io/import-openapi.md) for normalization and overlay behavior.
+
+Use `.pagination(Collection)` on an endpoint to declare its collection or
+pagination override. It takes precedence over legacy API exception rows;
+OpenAI's overlay uses this form while other providers finish migration.

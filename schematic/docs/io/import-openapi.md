@@ -1,8 +1,9 @@
 # Importing OpenAPI into Schematic
 
-This document proposes an ergonomic, self-documenting design for importing OpenAPI 3.0.x
-specifications into Schematic by introducing new primitives in `schematic-define` and
-leveraging the `openapiv3` crate for parsing.
+Use `OpenApiImport` or `schematic-gen import` to turn OpenAPI 3.0.x JSON or YAML
+into Schematic definitions and generated Rust clients. The importer resolves
+references, normalizes query-bearing routes, and reports unsupported input with
+context. Definitions-crate output uses typed builders and ordered registration.
 
 ## Goals
 
@@ -426,15 +427,23 @@ that path. The importer never reads or writes it; it only emits the call, so
 the factory every client and exporter uses returns the augmented definition:
 
 ```rust
-pub fn define_openai_api() -> RestApi {
-    let endpoints = Vec::from([/* imported endpoints */]);
-    let api = RestApi {
-        // imported fields; `default_pagination: None`,
-        // `pagination_exceptions: vec![]`
-    };
-    crate::openai_pagination::apply(api)
+fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
+    let endpoints = Vec::from([/* typed endpoint builders, each ending in build()? */]);
+    let api = RestApi::builder(ctx, "OpenAI", "https://api.openai.com/v1")
+        .describes("OpenAI API")
+        .bearer_env(Vec::<String>::new())
+        .endpoints(endpoints)
+        .build()?;
+    Ok(crate::openai_pagination::apply(api))
 }
 ```
+
+Generated `module_group()` registers models in source order and assembles both
+the API and registry from that context. The infallible catalog factory and
+`openapi_registry()` unwrap this checked assembly. Nominal models implement
+`Registration` beside their declarations; aliases reuse their underlying type,
+and containers, primitives, and free-form JSON remain inline.
+
 
 ```mermaid
 flowchart LR
@@ -451,7 +460,7 @@ Rules:
   rejected before anything is written.
 - `--overlay` requires `--definitions-out`; a standalone client has no
   definitions factory to call it from, so the combination is rejected.
-- Without `--overlay` the factory ends with the `RestApi` literal itself.
+- Without `--overlay` the fallible assembly returns the built API directly.
 - The module docs' regeneration hint includes the `--overlay` argument, so the
   emitted file records how to reproduce it. `just import-openai` passes
   `--overlay crate::openai_pagination::apply`.
@@ -508,3 +517,25 @@ Endpoint {
 - Multi-response modeling and error response mapping.
 - Request examples and sample generation in Rustdoc.
 - OpenAPI export from Schematic using the same `openapiv3` types.
+
+### Query expressions in imported paths
+
+The shared importer normalizes query-bearing paths before source emission. A
+path such as `/items?beta=true` becomes `/items` plus an optional Boolean `beta`
+query parameter. Callers select it with `.beta(true)`; omitting it preserves the
+ordinary URL. A supported placeholder such as `/files?ref={git_ref}` becomes a
+caller query input with wire name `ref` and Rust name `git_ref`.
+
+If an operation already exists on the same method and base path, normalization
+keeps the ordinary operation ID and order and uses the suffixed operation's
+request and response only after both flattened schemas pass the compatibility
+gate. Malformed expressions, duplicate query keys, conflicting declarations,
+unsupported placeholders, and imported GET request bodies produce contextual
+errors. The seven OpenAI beta operations are exposed through their ordinary
+twins; the vendored source remains unchanged.
+
+The changed input boundary rejects explicit null or malformed paths and
+parameter declarations. Omitted parameters mean no declarations; an empty
+array explicitly declares none. JSON and YAML both reject duplicate authored
+keys and trailing invalid content. Metadata-only foundation imports can be empty. The normal `schematic-gen import`
+invocation rejects an API with no usable endpoints before writing output.
