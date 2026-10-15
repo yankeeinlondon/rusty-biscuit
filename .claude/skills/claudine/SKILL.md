@@ -18,14 +18,13 @@ inline-compose, sequence, provider wrapper) owns one deferred
 is cancelled on drop. Its gates read only the user's bridged settings
 (`tts_prewarm`); each submission also carries the settings of the speech path
 that plays it, and each candidate is prepared and keyed (`PrewarmKey`) with
-that path's `TtsConfig`. Document lifecycles play with the user's settings;
-sequence task `setup:`/`teardown:` stacks play with
-`sequence::task::task_playback_settings()`, which `run_step_task` and
-preflight both use. Its `PrewarmHandle` travels on `InvocationContext`
+that path's `TtsConfig`. Document and container lifecycles play with the user's settings.
+Internal legacy task stages retain `sequence::task::task_playback_settings()`;
+those model fields do not authorize retired task YAML. Its `PrewarmHandle` travels on `InvocationContext`
 (`with_prewarm`; `DocumentEpoch::prewarm`). Every preparation site calls
 `prewarm::collect_and_submit`: the pipeline's lifecycle phase, the staged
 bootstrap, the loop bootstrap, and harness re-materialization. Sequence
-preflight calls `submit_sequence_preflight`; a task's `setup:`/`teardown:` is
+preflight calls `submit_sequence_preflight`; internal legacy task stages are
 reconsidered by `submit_task_stacks` wherever the task's context is
 established (`run_step_task`, `open_member_run`, `open_leg_run` in
 `cli/src/commands/wrap/sequence/task_run.rs`), against the step's effective
@@ -59,8 +58,8 @@ it to `GlobalSettings { tts, tts_prewarm }`; read the switch only through
 
 Full table and validation rules: [Configuring Actions → `tts`](topics/configuring-actions.md#text-to-speech-settings-tts).
 
-**Lifecycle grammar.** Each lifecycle stack (the six events, the `loop:`
-block's loose verbs or `gate:` list, and a task's `setup:`/`teardown:`) parses
+**Lifecycle grammar.** Each lifecycle stack (the seven events, the `loop:`
+block's loose verbs or `gate:` list, and container events) parses
 into ordered `LifecycleNode`s — a leaf `LifecycleAction` or a
 `LifecycleConditional` (`when` + `then`/`else` bodies, at most five levels) —
 and every node carries its authored `LifecyclePath`
@@ -311,9 +310,9 @@ same document epoch (`PromptTaskRequest::document_epoch`), so context capture
 and epoch accounting stay coherent. Referenced prompt lifecycle `shell` and whole-value `set` sites retain
 `PrepareOptions::deferred_shell_roots` and lexical `lifecycle_group`; the passive
 `validate_document_shell_late_values` probe returns their condition-blind lifecycle
-for approval before setup. `DocumentShellValues` keys freeze their late holes
+for approval before start. `DocumentShellValues` keys freeze their late holes
 for JIT preparation as well as document directives. Deferred holes use the step-entry snapshot
-before setup; ordinary holes read at command entry. `TaskShellRunner::run_structured` refuses by
+before start; ordinary holes read at command entry. `TaskShellRunner::run_structured` refuses by
 default; `SystemTaskShell` shares the existing owned-tree process epilogue
 with exact execution. Whole-chain policy and direct-target validation precede
 the first spawn. Shared redirection targets identify original destinations:
@@ -321,17 +320,17 @@ the first spawn. Shared redirection targets identify original destinations:
 stderr's own capture channel. Native `native_task_` and `native_lifecycle_`
 CLI regressions prove routing and downstream output on every OS. See [Pre-flight Checks](topics/pre-flight-checks.md).
 
-Audit limits: the current late root is `outputs`, not `seq.outputs`. Both group
-schedulers validate all members before member setup, retaining `LateValues`,
-prompt `DocumentShellValues`, epoch/context and lexical group scope through
-dispatch; ordinary values remain current per command. Nested sequences and
-group terminal events have no runtime surface. First-task primary `shell:` and task stacks
-with only known values support either exact or shape approval. Graph candidates
-retain both modes; task entry settles shape membership before byte stamping
-and environment reapproval. Do not infer full container coverage from later-task tests.
-The shell runtime rejection chain omits rejected values; earlier document
-schema validation can disclose them. Approval is separate from result caching:
-current membership, validators, blacklists, and direct targets still apply.
+Late roots are `seq`, `loop`, and `group`; sequence and container terminal
+event shells participate in the same closed graph audit. Both group schedulers
+validate all members before member start, retaining `LateValues`, prompt
+`DocumentShellValues`, epoch/context, and lexical group scope through dispatch.
+First-task commands with known values support exact or shape approval; terminal
+event placeholders require templates. Membership is checked before filling and
+before policy evaluation, so `--yolo` cannot authorize a command introduced by a
+reread after execution begins. The shell runtime rejection chain omits rejected
+values; earlier document schema validation can disclose them. Approval is
+separate from result caching: current membership, validators, blacklists, and
+direct targets still apply.
 
 ## Initialization shell boundary
 
@@ -419,6 +418,12 @@ of a topic doc.
 - [Traces and Logging](topics/traces-and-logging.md), [Log Reporting](topics/log-reporting.md)
 - [CLI Pre-Parsing](topics/cli-pre-parsing.md) — argv normalization pipeline; rule-by-rule reference in [argv-normalization.md](topics/argv-normalization.md)
 - [Shell Completions](topics/completions/shell-completions.md) — dynamic completion engine, per-mode pipelines, shared `@`/`&`/`^`/implicit file-reference resolution, and completion after the file through type-aware ownership (`composition::owner_of_last_argument`; nothing for the agent's words, never a prompt)
+
+Research fleet entrypoints (`docs/research/<topic>/_fleet.md`) are sequence
+coordinators. Shared formal task rosters add a prompt executable to each
+canonical provider/runner row; parity tests keep their data and order aligned.
+Per-row `_research.md` documents own freshness checks and success validation.
+See [Research Contracts](research-contracts.md) before changing this workflow.
 
 ## Research on Agentic CLI Platforms
 

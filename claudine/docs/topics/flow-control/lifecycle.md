@@ -35,16 +35,16 @@ Seven frontmatter properties are lifecycle events. An eighth, `loop`, is the
 loop's configuration, and can carry lifecycle actions of its own (see
 [Loop Gate Concerns](#loop-gate-concerns)).
 
-| Property | Emitted when |
-|----------|-------------|
-| `initialize` | After shell-free frontmatter bootstrap, before body discovery, shell preflight, and the schema verdict for live staged documents |
-| `start` | Pre-flight checks have passed; immediately before provider invocation |
-| `success` | The provider session completed without error **and** the composition satisfied its completion verdict |
-| `blocked` | Composition exited before the provider child was spawned (e.g., pre-flight denial, launch schema validation failure) |
-| `failure` | The provider session exited with an error, or the completion verdict failed |
-| `cancelled` | Cleanup after a sibling failure cancels an opted-in group leg, or after Ctrl-C interrupts execution |
-| `finalize` | Once per iteration, immediately after `success`/`blocked`/`failure`/`cancelled` |
-| `loop` | The loop's configuration. Its lifecycle actions run at the loop gate, after `finalize`, when the `while`/`until` condition is checked |
+| Property | Document | Sequence or group container |
+|----------|----------|-----------------------------|
+| `initialize` | After shell-free frontmatter bootstrap, before body discovery, shell preflight, and schema validation | When reached, before preparation; the root sequence initializes before static preflight. Shell-free. |
+| `start` | Pre-flight checks passed; immediately before provider invocation | Preparation passed; immediately before children start. |
+| `success` | The provider completed and the completion verdict passed | Children settled with a successful container outcome. |
+| `blocked` | Preparation failed before the provider spawned | Container preparation failed before children started. |
+| `failure` | Provider or completion verdict failed | An unhandled child failure reached this container. |
+| `cancelled` | Cleanup after sibling-failure cancellation or Ctrl-C | Descendants settled after cancellation, before owner cleanup. |
+| `finalize` | Once after the terminal event, unless skipped or transferred by recovery | Once after the final attempt; successful results publish afterward. |
+| `loop` | Loop configuration and lifecycle gate after `finalize` | Group loops are rejected; general container loop support is planned. |
 
 `cancelled` accepts communications (`say`/`speak`, `effect`, `message`,
 `notify`, `stdout`, `stderr`, `info`, `warn`, `success`), expression side
@@ -384,8 +384,8 @@ declaration:
 | `blocked`, `failure` | the failure | available | current sequence, or standalone outputs | inside a group only | inside a loop only |
 | `cancelled` | the cancellation cause | available | current sequence, or standalone outputs | inside a group only | inside a loop only |
 | `finalize` | the failure, or `null` | available | current sequence, or standalone outputs | inside a group only | inside a loop only |
-| a sequence's own events (dispatch planned) | follows the event above | available | own outputs/run ID; null child position | enclosing group only | enclosing loop only |
-| a group's own events (dispatch planned) | follows the event above | available | enclosing sequence | own variables and event-timed results | enclosing loop only |
+| a sequence's own events (implemented) | follows the event above | available | own outputs/run ID; null child position | enclosing group only | enclosing loop only |
+| a group's own events (implemented) | follows the event above | available | enclosing sequence | own variables and event-timed results | enclosing loop only |
 | a lifecycle shell command at approval | unavailable | unavailable | unavailable | unavailable | the iteration's values inside a loop |
 | a sequence task's commands at sequence-wide approval | unavailable | unavailable | unavailable | unavailable | unavailable |
 
@@ -602,17 +602,17 @@ the phrase text.
 #### Sequence values are left for their step
 
 Inside a sequence, values that a step receives from the sequence are treated as
-late even though they are read through `fm`: the per-step overlay keys
-(`state`, `previous`, `next`, `outputs`, `sequence_id`), keys set by the
-caller with `--set`, and a prompt task's `params`. A phrase reading one of them,
-by a bare name, `fm.key`, or `fm['key']`, is not pre-warmed; nor is a phrase
+late: the lexical `seq`, `group`, and `loop` roots, keys set by the
+caller with `--set`, and a prompt task's `params`. A phrase reading a lexical
+root, or reading a late property by bare name, `fm.key`, or `fm['key']`, is not
+pre-warmed; nor is a phrase
 whose computed index (`fm[name]`) or whole-`fm` read could reach one. During
 preflight, Claudine also leaves late any frontmatter value that still holds
 `{{`, `$(`, or a backtick (resolving it would mean evaluating it) and any read
 of `ctx` or `env`, because the step has not captured its own yet. Those
 phrases are reconsidered when their document is prepared. For example,
 `say: "{{ env.NAME }}"` is skipped by preflight and prepared from the prompt's
-captured `NAME` when the prompt is prepared. The per-step overlay keys,
+captured `NAME` when the prompt is prepared. Lexical runtime roots,
 `--set` keys, and runtime writes stay late there too.
 
 #### Configuration and when it is off
@@ -1089,7 +1089,7 @@ failure:
 ```
 
 Printing the answer will not repair the failed transaction. Existing recovery
-directives and sequence/loop `fail_fast` policy will govern subsequent work.
+directives and enclosing container failure policy will govern subsequent work.
 A confirmed successful provider result with delayed presentation will remain
 success and will not fire this failure handler. See
 [planned completion behavior](../timeouts.md#planned-delayed-claudine-completion).
@@ -1101,11 +1101,11 @@ answer and inspect the resulting state before choosing `retry`, which repeats
 the transaction. Retained provider text is data; do not execute it as a shell
 command or treat it as authored lifecycle instructions.
 
-Sequence continuation uses `fail_fast: false` on the sequence document, with
-no overriding `--fail-fast` flag. The failed step stays failed and the overall
-sequence returns failure even though later steps run. The default is
-`fail_fast: true`, which stops later steps. Loop continuation uses the loop's
-own `fail_fast: false`. `no_error` only covers lifecycle side-effect failures;
+A sequence stops on an unhandled failure. To continue, wrap optional work in
+a one-leg group with `fail_fast: false`; that group handles its leg failure
+and publishes its result, allowing later sequence steps to run. The group can
+report the failed leg through `group.failed`. Loop continuation still uses the
+loop's own `fail_fast: false`. `no_error` only covers lifecycle side-effect failures;
 it does not repair an unconfirmed provider transaction. The diagnostic-specific
 sequence example and recovery checks remain planned until populated detail
 reaches both `failure` and `finalize`.
@@ -1542,6 +1542,31 @@ initializes before static preflight. Nested sources are reread before start;
 preparation errors run blocked and finalize with shell execution disabled.
 A body-only sequence step composes its source body without running the source
 lifecycle again.
+
+```mermaid
+stateDiagram-v2
+    [*] --> initialize
+    initialize --> skipped: skip
+    initialize --> preparation
+    preparation --> blocked: fails
+    preparation --> start: passes
+    start --> children
+    children --> success: successful outcome
+    children --> failure: unhandled failure
+    children --> cancelled: descendants settle after cancellation
+    failure --> preparation: accepted retry; no finalize
+    success --> finalize
+    blocked --> finalize
+    failure --> finalize: no recovery
+    cancelled --> finalize
+    finalize --> [*]: publish only on success
+    skipped --> [*]: no finalize
+```
+
+A `proxy` transfers the container's place to a target without any remaining
+source events. A `retry` in `finalize` does not re-enter that finalization;
+it starts a new attempt. Recovery is prohibited after cancellation.
+
 
 Container retry starts another attempt without repeating initialize or running
 the abandoned attempt's finalize. It clears child results while retaining

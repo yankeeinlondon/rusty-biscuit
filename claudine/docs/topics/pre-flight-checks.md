@@ -77,7 +77,7 @@ same function the preparation that executes the document uses:
 
 - the document's own frontmatter defaults and derived values;
 - the immediate `proxy` `with:` overlay of a handed-off document;
-- caller values (`--set`, `key=value`) and run-produced values (loop values, lifecycle `set`, `outputs`);
+- caller values (`--set`, `key=value`) and run-produced values (loop values, lifecycle `set`, `seq.outputs`);
 - the reserved sequence inputs (`state`, `previous`, `next`);
 - the same document environment and the same source-relative base directory (see [Composition — One Environment per Document](composition.md#one-environment-per-document)).
 
@@ -187,9 +187,9 @@ Each command is checked against Claudine's shell policy:
 
 Commands that match the whitelist are marked as approved. Commands that match a blacklist are rejected immediately with a clear error. Everything else is presented to the user.
 
-A document command with a placeholder is also matched by its shape. When no `exact` rule covers its bytes but a `template` rule covers its shape, the command is approved by that shape: an `exact` rule wins, then a `template` rule, then a `prefix` rule. Its bytes are still checked against both blacklists. A document command (`::shell`, `::shell-block`, or a frontmatter `$( … )`) approved by its shape runs as a template: each placeholder is checked against its declared type and fills exactly one argument, the filled command meets both blacklists again before it starts, and its program must run without a shell. See Darkmatter's [Running a command as a template](../../../darkmatter/docs/inline/preflight-checks.md#running-a-command-as-a-template). A lifecycle `shell` action or `set` value approved by its shape runs as a template the same way (see [Phase 2](#phase-2-lifecycle-shell-commands)). Sequence task commands (`shell:` and `setup:`/`teardown:` stacks) use the same template validation. Late holes are checked before setup and retained for dispatch, while ordinary holes read current task state at command entry. Structured task dispatch retains process-tree ownership, output capture, timeout, cancellation, and runaway guards.
+A document command with a placeholder is also matched by its shape. When no `exact` rule covers its bytes but a `template` rule covers its shape, the command is approved by that shape: an `exact` rule wins, then a `template` rule, then a `prefix` rule. Its bytes are still checked against both blacklists. A document command (`::shell`, `::shell-block`, or a frontmatter `$( … )`) approved by its shape runs as a template: each placeholder is checked against its declared type and fills exactly one argument, the filled command meets both blacklists again before it starts, and its program must run without a shell. See Darkmatter's [Running a command as a template](../../../darkmatter/docs/inline/preflight-checks.md#running-a-command-as-a-template). A lifecycle `shell` action or `set` value approved by its shape runs as a template the same way (see [Phase 2](#phase-2-lifecycle-shell-commands)). Sequence task commands and container lifecycle commands use the same template validation. Late holes are checked at task entry and retained for dispatch, while ordinary holes read current task state at command entry. Structured task dispatch retains process-tree ownership, output capture, timeout, cancellation, and runaway guards.
 
-A command whose value is produced later in the run has no bytes at pre-flight and is approved only by its shape: a `template` rule, `prefix` rules for each of its programs, or a decision for that shape. An `exact` rule or an earlier exact decision never covers it. Discovery reports such a command when its host declares the late root to Darkmatter (`ComposeOptions::with_deferred_shell_roots`); a sequence declares `outputs`, `loop`, and `group` this way (see [Sequence Execution](#sequence-execution)).
+A command whose value is produced later in the run has no bytes at pre-flight and is approved only by its shape: a `template` rule, `prefix` rules for each of its programs, or a decision for that shape. An `exact` rule or an earlier exact decision never covers it. Discovery reports such a command when its host declares the late root to Darkmatter (`ComposeOptions::with_deferred_shell_roots`); a sequence declares `seq.outputs`, `loop`, and `group` this way (see [Sequence Execution](#sequence-execution)).
 
 ### Shape Matching and Dispatch
 
@@ -343,7 +343,7 @@ approval set before executing the current bytes or filling the current shape.
 
 #### The first task and later tasks
 
-Upfront graph approval includes: every task's `shell:` commands, the `shell` actions and whole-value `set` `$( … )` values of its `setup:`/`teardown:` stacks (in every branch), and the `::shell` directives of every document a `prompt:` task names. How a command with a placeholder is approved depends on where its task sits:
+Upfront graph approval includes every task's `shell:` commands, container lifecycle `shell` actions and shell-valued `set` actions (in every branch), and the commands of every document a `prompt:` task names. How a command with a placeholder is approved depends on where its task sits:
 
 - **The first task** — the first step's task, or every leg of a first-step group — has known values resolved to bytes. All commands with valid placeholders, including task `shell:`, setup/teardown, and shell-valued `set`, offer both exact and shape approval. Exact rules retain priority; a saved shape or shape choice selects template execution.
 - **Every later task** has each command with a placeholder approved only by its typed shape, even when its values are known now, because an earlier task may change them. "Allow this exact command" is not offered, and an `exact` rule for today's bytes does not cover it. A later command with no placeholder is approved as its literal bytes.
@@ -366,7 +366,7 @@ sequence:
 
 Run with `out=dist`, a whitelist holding `exact just clean --out dist/build` does not approve `clean`: without a terminal, pre-flight fails naming `just clean --out {{ out }}/build` before `build` runs. `template just clean --out {{ string }}/build` approves it without asking.
 
-**Late values.** A placeholder reading a value an earlier step produces — `outputs`, `loop`, or, inside a group, `group` — is late. It is not read at pre-flight, and its command is approved only by its shape, in any task (a `group.*` reader is a template even in a first group). Deferral follows step values and task `params` derived from a late root: with `latest: "{{ last(outputs) }}"` in the sequence's frontmatter, `{{ latest }}` is late, not missing. A prompt task's document reads such a `param` as late too; the task's other `params` are read now and carried into the document's discovery. `err`, `timing`, and `current` are not late values: a sequence command reading one is refused (`SequenceShellLateBinding`), even beside a late root, and so is `group` outside a group.
+**Late values.** A placeholder reading a value an earlier step produces — `seq.outputs`, `loop`, or, inside a group, `group` — is late. It is not read at pre-flight, and its command is approved only by its shape, in any task (a `group.*` reader is a template even in a first group). Deferral follows step values and task `params` derived from a late root: with `latest: "{{ last(seq.outputs) }}"` in the sequence's frontmatter, `{{ latest }}` is late, not missing. A prompt task's document reads such a `param` as late too; the task's other `params` are read now and carried into the document's discovery. `err`, `timing`, and `current` are not late values: a sequence command reading one is refused (`SequenceShellLateBinding`), even beside a late root, and so is `group` outside a group.
 
 ```mermaid
 flowchart TD
@@ -384,20 +384,21 @@ flowchart TD
     P -- shape --> K
     P -- bytes --> Q[task reached:<br/>verify approved bytes under task environment]
     C --> Q
-    Q --> R[run setup, approved bytes, teardown]
-    K --> L[step-entry barrier:<br/>read and validate all late holes<br/>before setup]
-    L --> M[setup runs]
+    Q --> R[dispatch approved commands]
+    K --> L[step-entry barrier:<br/>read and validate all late holes<br/>before dispatch]
+    L --> M[task ready]
     M --> N[command entry:<br/>read ordinary holes from current state<br/>and retain checked late holes]
     N --> O[validate, check filled chain<br/>and direct targets, then dispatch]
 ```
 
-**Missing values.** Every value a command reads that exists at pre-flight — the sequence's frontmatter, caller values (`key=value`, `--set`), step values, `ctx.*`, `env.*` — is checked in every task, later ones included: a `null` fails pre-flight before step 1, naming the command and the value. A late value is checked when its task is reached, before any of that task's commands run (its `setup:` included): a `null`, an array or object, or a value its type refuses fails the task with `SequenceShellLateValue`, which never shows the value. Effects of earlier steps stand. A group checks every member before any member setup or command runs.
+**Missing values.** Every value a command reads that exists at pre-flight — the sequence's frontmatter, caller values (`key=value`, `--set`), step values, `ctx.*`, `env.*` — is checked in every task, later ones included: a `null` fails pre-flight before step 1, naming the command and the value. A late value is checked when its task is reached, before any of that task's commands run: a `null`, an array or object, or a value its type refuses fails the task with `SequenceShellLateValue`, which never shows the value. Effects of earlier steps stand. A group checks every member before any member command runs.
 
-Both serial and parallel groups validate every member's task stacks and referenced
-document commands at group entry and retain those late inputs for execution.
-An earlier serial member can change ordinary values for a later command; it
-cannot replace a late input already checked by the group barrier. Nested sequences and group terminal lifecycle events are not supported.
-The current late output root is `outputs`; `seq.outputs` is not available.
+Concurrent groups validate member commands at group entry and retain checked
+late inputs for execution. Nested sequences and group lifecycle events are
+included in transitive discovery. The late output root is `seq.outputs`;
+container terminal-event placeholders and commands reading `group.*` require
+templates, including in a first group. Approval remains closed across rereads,
+retries, and proxy handoffs.
 
 The sequence graph audits referenced lifecycle commands before the first task.
 A referenced prompt task carries its sequence position into every lifecycle

@@ -335,19 +335,38 @@ claudine sequence @research.md topic="async traits"
 claudine sequence @pipeline.yaml dir=features/my-feature
 ```
 
-**Execution is two-phase.** *Static preflight* walks the entire task graph before anything runs: dynamic sources resolve exactly once (the step list is a snapshot), every referenced group/task/prompt document loads transitively, schemas aggregate their missing properties into one interactive pass, and every shell command — including those in branches that never run — is approved byte-for-byte under an early-binding-only lookup and the launch environment. A preflight failure aborts regardless of `fail_fast`. *Just-in-time composition* then composes each step **at its turn** under the environment that step (or group leg) captured, refusing an approved command whose text that environment changes (`SequenceShellApprovalChanged`) and re-reading the live source from disk, so an earlier step's inline-compose write-back or `set` mutation is visible to later steps.
+**Execution is two-phase.** Root `initialize` runs shell-free before static
+preflight walks the entire task graph, including referenced prompts and container
+event stacks. The audit fixes exact bytes or typed template shapes before the
+first child. Just-in-time composition rereads each source at its turn, using its
+captured environment and the closed approval membership; a reread cannot grant
+new shell authority.
 
-**One executable per task.** A step declares at most one of `prompt` (a file reference), `shell`, `side_effect`, `group`, or `task`; a step with none composes the source document's body. Steps accumulate their final stdout into the reserved `outputs` array — `{{ last(outputs) }}` is the previous task's output, and it behaves identically in standalone `compose`/`inline-compose`.
+**One executable per task.** Choose at most one of `prompt` (a file reference),
+`shell`, `side_effect`, `group`, `task`, or `sequence`. A step with none composes
+the source body without repeating its root lifecycle. Nested sequences have their
+own `seq.outputs`; successful children publish one string, nested array, or named
+group dictionary after finalization. `{{ last(seq.outputs) }}` reads the previous
+result in a sequence and works in standalone composition too.
 
-**Groups** bundle tasks under a name, inline or via a `kind: group` / `kind: group-catalog` file, and run `serial` (default) or `parallel` with an optional `max_parallel` cap. Parallel members take one state snapshot, merge mutations in declaration order, and render with attributed color bars. Group `loop` is rejected pending ratified commit semantics.
+**Groups run concurrently.** Use named legs, optionally capped by `max_parallel`.
+`fail_fast: true` (default) withholds every leg's mutations and result if any leg
+fails. `false` handles leg failures and merges completed leg mutations in
+declaration order. Cancellation opt-in is the presence of a `cancelled` stack,
+including `cancelled: []`. Snapshot isolation covers in-memory state only; shell
+and agent filesystem effects are never rolled back. `execution:` and task
+`setup:`/`teardown:` are removed grammar; use lifecycle events. Container loops
+remain planned.
 
-> **`prompt` means two things.** At the document root it is *prose* that flips the sequence to inline-compose; on a step or task it is a *file reference* to a prompt document. They never co-occur at the same level.
+Unhandled failures propagate through enclosing containers and stop subsequent
+sequence steps. `fail_fast` is accepted only on groups; `--fail-fast` and
+`CLAUDINE_FAIL_FAST` are removed. Exit `0` for a successful run (including an
+empty sequence), `1` for an unhandled failure, and `130` for Ctrl-C.
 
-Full user contract: `claudine/docs/topics/flow-control/sequences.md`.
+> **`prompt` means two things.** At the document root it is prose that selects
+> inline-compose; on a step or task it is a file reference to a prompt document.
 
-#### `--fail-fast <BOOL>`
-
-Overrides the document's `fail_fast`. Precedence: CLI → document → default `true`. The effective value reaches child processes as `CLAUDINE_FAIL_FAST`. Exit `0` when every executed step succeeded (or a dynamic source resolved to 0 steps), `1` on any step failure, `130` on Ctrl+C.
+Full user contract: [Sequences](topics/flow-control/sequences.md).
 
 ### `--dry-run`
 
@@ -362,7 +381,7 @@ Runs composition through provider/model resolution, then emits the composed resu
 - **stdout** = composed body; **stderr** = highlighted YAML frontmatter + a metadata table (Document as a blue OSC8 link, Description, Agent, Model, YOLO, Session mode/source, and Area when inside a monorepo). So `compose --dry-run doc.md > body.md` captures only the body.
 - `--quiet` / `--silent` have **no effect** under `--dry-run`.
 - **Non-TTY shell gate:** an unapproved shell command in a non-TTY environment exits non-zero with `Cannot dry-run: shell command 'X' requires interactive approval. Run with --yolo to auto-approve, or pre-approve the command in your configuration.` In a TTY the normal interactive approval prompt fires. Bypass with `--yolo`.
-- **`sequence --dry-run`** performs the full static preflight, then just-in-time-composes every step against the *initial* state (empty `outputs`, no runtime mutations), concatenating step bodies to stdout in order with each step's metadata on stderr. No provider launches and no inline-compose write-back occurs. Shell work is **not** suppressed: `$( … )` expansions and `shell:` tasks execute for real, so a dry run of a sequence containing `shell: just commit` will commit.
+- **`sequence --dry-run`** performs the full static preflight, then just-in-time-composes every step against the *initial* state (empty `seq.outputs`, no runtime mutations), concatenating step bodies to stdout in order with each step's metadata on stderr. No lifecycle events fire, no provider launches, and no inline-compose write-back occurs. Shell work is **not** suppressed: `$( … )` expansions and `shell:` tasks execute for real, so a dry run of a sequence containing `shell: just commit` will commit.
 
 See [Composition — Dry Run](topics/composition.md#dry-run) for the full reference.
 

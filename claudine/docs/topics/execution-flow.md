@@ -583,7 +583,7 @@ well as `inline-compose`. See
 ##### 9d. Summary Emission
 
 The agent's final response is the run summary shown to the caller and stored as
-the run output for `{{ last(outputs) }}`. It is never written to the document.
+the run output for `{{ last(seq.outputs) }}`. It is never written to the document.
 It is emitted after the closure's validation messages (unlike compose, which
 emits immediately), so the section separator does not split the validation
 block.
@@ -602,60 +602,40 @@ block.
 
 ### `claudine sequence` — Full Execution Flow
 
-Sequence composition runs a single source document multiple times, once per step in a defined list, with step-specific state injected into the composition context on each run.
+Sequence composition executes ordered tasks, including document bodies, prompt
+references, shell work, side effects, groups, and nested sequences. Every
+container owns a lifecycle and publishes its result only after successful
+finalization. See [Sequences](flow-control/sequences.md) for runnable examples.
 
 ```sh
 claudine sequence @deploy.md
-claudine sequence --fail-fast false @batch.md
+claudine sequence --dry-run @batch.md
 ```
 
-#### Step 3: Sequence Plan Resolution (sequence — unique)
+#### Step 3: Sequence Plan Resolution
 
-`composition::resolve_sequence_plan(&source)` parses the sequence definition:
-
-1. Reads `sequence` frontmatter key
-2. Parses `fail_fast` frontmatter (defaults to `true`)
-3. If `sequence` is an array: normalizes via `normalize_inline_list()` → `SequenceStep` array (scalar strings or objects with required `name`)
-4. If `sequence` is a string: resolves as external YAML file reference via `resolve_sequence_reference()`:
-
-    - Supports `@`, `&`, `^`, `vault:`, `%`, `{{ENV}}`, `~`, absolute, and relative paths
-    - External file form 1: `{ sequence: [...] }`
-    - External file form 2: `{ kind: "sequence", list: [...], template?: {...} }` with `{{key}}` template rendering
-
-**Returns:** `SequencePlan { source, steps, document_fail_fast }`
-
-**Affected by:**
-
-| Input                   | Impact                                                        |
-|-------------------------|---------------------------------------------------------------|
-| Frontmatter `sequence`  | Required; array of steps or string path to external YAML file |
-| Frontmatter `fail_fast` | Document-level default; `true` when absent                    |
-| `--fail-fast`           | CLI override for document default                             |
+`composition::resolve_sequence_plan` reads an inline step list or resolves a
+sequence file reference. External files accept `{ sequence: [...] }` or
+`{ kind: sequence, sequence: [...], template: {...} }`. A task's `sequence:` accepts
+an inline list or a reference using the same source grammar. Groups execute
+concurrently; ordered work belongs in a sequence. Document-level `fail_fast`
+and the CLI `--fail-fast` option are rejected.
 
 #### Step 4: Execute Sequence
 
-`execute_sequence()` runs the full orchestration in three phases:
+##### Phase 1a: Discover the task graph and close shell approval
 
-##### Phase 1a: Build Overlays and Prepare Each Step
+The root enters `initialize`, then static preflight walks all nested tasks,
+validates container events, checks transitive write-back collisions, and
+collects shell commands before executable work begins. Discovered membership
+is frozen for this invocation. A reread or proxy cannot introduce an
+unapproved command, even with `--yolo`; concurrent descendants never prompt.
 
-For each step (0..total_steps):
-
-1. **Build step overlay** via `build_step_overlay(&plan, step_index)` — computes `state`, `previous_state`, `next_state`, `is_first`, `is_last`, `step`, `total_steps`
-2. **Build set overrides**: overlay keys (reserved per-step variables) merged with user overrides; reserved keys always win
-3. **Inject `FAIL_FAST` env var** into env overrides
-4. **Template pre-flight**: `resolve_shell_approvals()` for `::shell` directives using step-specific overrides
-5. **Prepare composition**: `composition::prepare_direct(source, prepare_options)` with step-specific overrides and cumulative approved commands
-6. **Harness pre-flight** (if applicable): parse harness plan and resolve shell approvals for harness commands
-7. **Accumulate approved commands** in `cumulative_approved` set (shared across steps)
-8. Store in `StepContext { env_overrides, prepared }`
-
-**Affected by:**
-
-| Input                                          | Impact                                                                           |
-|------------------------------------------------|----------------------------------------------------------------------------------|
-| Step overlay variables (`state`, `step`, etc.) | Injected as set overrides; cannot be overridden by `--set` or `key=value`        |
-| `FAIL_FAST` env var                            | Injected per step so `{{env.FAIL_FAST}}` and `::shell` directives see the policy |
-| `--set` / `key=value` setters                  | Override template variables but lose to reserved overlay keys                    |
+`seq`, `group`, and `loop` are separate read-only runtime roots, not setter
+overrides. Authored frontmatter remains available through `fm`. Only tasks
+along an all-first ancestry qualify for resolved-value shell approval: all
+legs of a first group, but only the first child of a first nested sequence.
+Container terminal-event placeholders and `group.*` reads require templates.
 
 ##### Phase 1a.5: Aggregate Schema Validation Across Steps
 
@@ -724,57 +704,49 @@ Emits preflight-complete status for all steps. Shell approvals were already coll
 
 ##### Phase 2: Execute Each Step
 
-For each step in `step_contexts`:
+Each child is prepared when reached: Claudine captures its environment,
+rereads its live source, layers runtime mutations and the current lexical
+roots, composes, validates, and executes it. The task graph stays frozen, but
+later children can observe earlier file edits. Group legs use private
+in-memory branches and merge in declaration order; the filesystem is shared.
 
-1. **Check interrupt flag** — if SIGINT observed, break
-2. **Print step start status**: `[1/N] starting step-name`
-3. Clone prepared composition from step context
-4. Get pre-resolved target from Phase 1b
-5. Build `CompositionExecutionRequest` with:
+A completed child publishes one native result after successful `finalize`.
+Nested sequences return arrays and groups return dictionaries keyed by leg
+name. An unhandled child failure stops its sequence and propagates outward;
+only groups accept `fail_fast` (default `true`). A failed atomic group
+publishes neither results nor leg mutations. File edits are never rolled back.
+Container `retry` restarts children with empty accumulators and retained
+runtime writes; `proxy` hands off without finalizing the source container.
 
-    - `mode: ChainedDocument`
-    - `resolved_target`: pre-resolved (avoids re-resolution)
-    - `sequence: true` (suppresses per-step preflight messaging)
-    - `env_overrides`: includes `FAIL_FAST`
-    - `shared_approval_cache`: shared across all steps
-
-6. Execute step via `execute_composition_request_inner()` — the same full pipeline as compose Steps 6a–6l
-7. Handle result:
-
-    - **Success (exit 0)**: increment succeeded, record `SequenceStepResult`
-    - **Interrupted (exit 130)**: record failure, set interrupt flag, break
-    - **Failure (non-zero)**: increment failed, record result; if `effective_fail_fast`, break
-    - **Error from executor**: record failure; if `effective_fail_fast`, break
+Ctrl-C stops admission and interrupts every active descendant. Cleanup finishes
+from children to parents (`cancelled`, then `finalize`) before exit `130`.
+Ordinary task timeouts follow `failure`, not `cancelled`.
 
 ##### Final Summary
 
-1. Prints "Sequence finished: X succeeded, Y failed"
-2. Emits perf report if `--perf` (aggregated across all steps)
-3. Returns exit code: 0 if all succeeded, 130 if interrupted, 1 if any failed
+The command reports task outcomes and returns `0` on success, `1` on an
+unhandled failure, or `130` on interruption. `--perf` adds aggregated timing;
+`--silent` suppresses per-step status messages.
 
-**Affected by:**
+`--dry-run` performs preflight and composes against initial state without
+provider launches, lifecycle dispatch, or inline write-back. Shell tasks and
+composition shell expansions still run with real effects.
 
-| Input                   | Impact                                                   |
-|-------------------------|----------------------------------------------------------|
-| `--fail-fast`           | CLI override; stops on first failure when true (default) |
-| Frontmatter `fail_fast` | Document default when `--fail-fast` not specified        |
-| SIGINT                  | Tracked across all phases; aborts between steps          |
-| `--perf`                | Aggregated report covering all steps                     |
-| `--silent`              | Suppresses per-step status messages                      |
+### Per-step runtime bindings
 
-### Per-step Template Variables
+| Binding | Meaning |
+| --- | --- |
+| `seq.name`, `seq.id` | Current step's name and stable step identifier |
+| `seq.run_id` | Invocation token shared by nested sequences |
+| `seq.index`, `seq.count` | One-based step position and number of steps |
+| `seq.is_first`, `seq.is_last` | Step boundary flags |
+| `seq.previous`, `seq.next` | Adjacent step objects, or null at the boundaries |
+| `seq.outputs` | Completed results in the innermost sequence |
+| `group.legs`, `group.succeeded`, `group.failed`, `group.cancelled` | Innermost group's settled outcomes and name lists |
 
-Each step runs the source document through Darkmatter with these reserved variables injected as overrides:
-
-| Variable         | Type                    | Description                                           |
-|------------------|-------------------------|-------------------------------------------------------|
-| `state`          | string or object        | The current step value                                |
-| `previous_state` | string, object, or null | The previous step's value, or null for the first step |
-| `next_state`     | string, object, or null | The next step's value, or null for the last step      |
-| `is_first`       | boolean                 | `true` when this is the first step                    |
-| `is_last`        | boolean                 | `true` when this is the last step                     |
-| `step`           | integer                 | One-based index of the current step                   |
-| `total_steps`    | integer                 | Total number of steps                                 |
+`{{ seq }}` renders the step name in text; a whole-value expression retains
+the object. Nested containers restore the enclosing roots on return, and an
+empty inner accumulator never falls back to outer results.
 
 ## Provider Selection
 
@@ -1029,13 +1001,11 @@ For `sequence`, the report is aggregated across all steps: launches and total ex
 
 Sequence Phase 1a calls `prepare_direct()` for every step, which means Darkmatter's full composition pipeline (transclusion, interpolation, shell expansion) runs N times during pre-flight even though the source document is the same. A hash-keyed cache of the base composition (keyed on source file + overrides) could avoid redundant work when steps differ only in overlay variables that are injected late in the pipeline.
 
-### 2. Parallel Sequence Execution
+### Concurrent work
 
-The sequence orchestrator runs steps strictly serially. For workloads where steps are independent (no `previous_state`/`next_state` dependency), an opt-in `parallel: N` frontmatter property could execute steps concurrently with a configurable concurrency limit, dramatically reducing wall-clock time for large batches.
-
-### 3. Lazy Shell Approval for Sequence
-
-Shell approval currently runs during Phase 1a for every step, which means the user must approve all commands before any step starts. A lazy approval model that prompts only when a step is about to run (and caches approvals across steps) would reduce upfront latency for long sequences with diverse shell commands.
+Use a group for independent tasks, with `max_parallel` to cap concurrency.
+Sequence children stay ordered. Shell approval closes before execution;
+concurrent legs never prompt for new approvals.
 
 ### 4. Inline Closure Diff Preview
 

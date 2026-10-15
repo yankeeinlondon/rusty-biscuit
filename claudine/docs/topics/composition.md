@@ -357,7 +357,7 @@ Steps:
 
 The composed prompt is sent to the provider. Output streams to the terminal with Markdown-to-terminal rendering in non-interactive mode.
 
-> **Deferred lifecycle keys.** The Prepare stage composes every frontmatter key *except* the seven lifecycle event keys (`initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, `loop`). Those keep their authored `{{ … }}` spans raw in `effective_frontmatter`; Claudine interpolates them through Darkmatter a **second time, at event-time**, so they can read the runtime globals (`err`, `timing`, `current`) and the live document state. See [lifecycle.md — When Lifecycle Properties Interpolate](flow-control/lifecycle.md#when-lifecycle-properties-interpolate). The single exception is `shell` commands (positional `shell: "…"` or key/value `command:`), resolved against early-binding surfaces at pre-flight so the approved command is byte-identical to the executed one.
+> **Deferred lifecycle keys.** The Prepare stage composes every frontmatter key *except* the seven lifecycle event keys and the loop configuration (`initialize`, `start`, `success`, `blocked`, `failure`, `cancelled`, `finalize`, `loop`). Those keep their authored `{{ … }}` spans raw in `effective_frontmatter`; Claudine interpolates them through Darkmatter a **second time, at event-time**, so they can read the runtime globals (`err`, `timing`, `current`) and the live document state. See [lifecycle.md — When Lifecycle Properties Interpolate](flow-control/lifecycle.md#when-lifecycle-properties-interpolate). Shell commands (positional `shell: "…"` or key/value `command:`) also undergo condition-blind preflight: exact approvals freeze resolved bytes; typed template approvals preserve the authored shape and fill values at dispatch.
 
 ## Inline Composition
 
@@ -640,7 +640,7 @@ instead.
 
 ```yaml
 prompt: |-
-  How do you say "{{state.name}}" in Italian?
+  How do you say "{{seq.name}}" in Italian?
 sequence:
   - name: Hello
   - name: Goodbye
@@ -686,7 +686,7 @@ effective frontmatter as raw expansion syntax.
   successfully. A parse failure (e.g. the malformed `spec_path: "{{ dirname(review) + '/spec.md') }}"`)
   or an evaluation failure aborts composition with a precise
   `Interpolation parse failed` / `Interpolation evaluation failed` diagnostic
-  naming the frontmatter key — **even when `fail_fast` is off**. An absent
+  naming the frontmatter key — **regardless of enclosing group failure policy**. An absent
   document property is not a failure: a bare `{{ missing }}` resolves to
   `null`, and no `||` fallback is needed to make it legal.
 - **Whole-value `$(...)` shell expansion** must parse and expand when
@@ -702,9 +702,8 @@ effective frontmatter as raw expansion syntax.
 
 This strictness is scoped to whole-value expansion only. **Mixed strings**
 (`"prefix {{ x }} suffix"`, `"literal $(echo ok)"`) and **body prose**
-interpolation are unchanged: when `fail_fast` is off they keep their lenient
-behavior, leaving an unresolved span in place and recording a warning rather
-than aborting. The enforcement lives in Darkmatter composition; see
+interpolation use the default strict behavior; a group’s `fail_fast: false`
+handles leg failures and does not relax interpolation validation. The enforcement lives in Darkmatter composition; see
 [Frontmatter Interpolation](../../../darkmatter/docs/inline/fm-interpolation.md)
 and [Frontmatter Shell Expansion](../../../darkmatter/docs/inline/fm-shell-expansion.md).
 
@@ -903,7 +902,7 @@ Session interactivity is resolved from (highest to lowest precedence):
 
 ## Dry Run
 
-`--dry-run` runs the **composition pipeline through provider/model resolution**, then emits the composed result instead of sending it to an agentic CLI. It is available on `compose`, `inline-compose`, and `sequence`, and is the gate to use for CI rehearsal.
+`--dry-run` runs the **composition pipeline through provider/model resolution**, then emits the composed result instead of sending it to an agentic CLI. It is available on `compose`, `inline-compose`, and `sequence`, and lets you inspect the composed result before launching a provider. Shell work still has real effects.
 
 ### Pipeline Scope
 
@@ -918,9 +917,9 @@ Everything up to the seam runs normally:
 
 The seam sits in `wrap::composition::pipeline::execute_composition_request_inner_with_guard`, immediately after provider/model selection resolves. Everything past it is skipped: selected-executable validation/path resolution, provider-overlay planning and materialization, argv and system-prompt overlay construction, the child-CWD switch, the lifecycle runtime, and the provider spawn. Installed-provider inventory may still run when agent selection or the rendered resolution breakdown needs it; that inventory never makes the selected executable a dry-run prerequisite.
 
-**Dry run fires no lifecycle events and has no filesystem side effects of its own.** Because the seam is ahead of lifecycle dispatch, `initialize`/`blocked`/`finalize` never fire, so a stack carrying `append_line`, `set_frontmatter`, or `shell` cannot touch the workspace during a run the user asked to be a rehearsal, and no dynamic `proxy` route can be traversed. For `inline-compose` the source file is likewise **never mutated** (`last_updated` is untouched).
+**Dry run fires no lifecycle events.** Because the seam is ahead of lifecycle dispatch, `initialize`/`blocked`/`finalize` never fire, so a stack carrying `append_line`, `set_frontmatter`, or `shell` cannot touch the workspace during a run the user asked to be a rehearsal, and no dynamic `proxy` route can be traversed. For `inline-compose` the source file is likewise **never mutated** (`last_updated` is untouched).
 
-Turning dry run into lifecycle simulation is an explicit non-goal. The one caveat to "no side effects" is the bullet above: `::shell` spans inside the document graph are part of *composition*, not the lifecycle, and do run for real.
+Turning dry run into lifecycle simulation is an explicit non-goal. **Shell work runs for real:** `::shell` directives, `$( … )` expansions, and sequence `shell:` tasks can edit files, send messages, or perform other external work. For example, a sequence dry-run containing `shell: just commit` can commit. Use a disposable directory and commands safe to execute when inspecting a sequence.
 
 ### Output Split
 
@@ -1073,18 +1072,20 @@ caller-owned value merely because it declares a different file mode.
 Composition runs execute the full seven-event lifecycle declared in the prompt's frontmatter:
 
 ```
-initialize → start → (success | blocked | failure) → finalize → loop
+initialize → preparation → start → (success | failure | cancelled) → finalize
+                         ↘ blocked → finalize
+looping documents: finalize → loop gate (except after cancellation)
 ```
 
 - **`initialize`** fires after the prompt file is resolved and frontmatter has parsed, before body discovery, shell preflight, and the schema verdict. Shell actions and bootstrap frontmatter shell expansion are forbidden regardless of approval. A `skip` control action here opts the whole document out cleanly.
 - **`start`** fires after schema validation and the lifecycle shell-audit pass succeed, immediately before provider invocation.
-- **`success`/`blocked`/`failure`** are the terminal events. Schema-validation failures and shell-audit denials produce `blocked`; provider errors produce `failure`.
-- **`finalize`** fires once per iteration, immediately after the terminal event.
+- **`success`/`blocked`/`failure`/`cancelled`** are the terminal events. Cancellation bypasses failure recovery and the loop gate; cleanup waits for descendants and Ctrl-C exits 130. Schema-validation failures and shell-audit denials produce `blocked`; provider errors produce `failure`.
+- **`finalize`** fires after the terminal event, unless `skip` ended the run or an accepted `retry`, `resume`, or `proxy` transferred control. It is never re-entered for the same attempt.
 - **`loop`** is the post-`finalize` gate. Lifecycle concerns authored inside the `loop:` block run first, then the `while`/`until` condition is evaluated, then per-iteration mutations are applied only when continuing. The gate follows every iteration, including the first, so a loop always runs at least once.
 
 Legacy prompts that only declare `start`, `success`, `blocked`, and `failure` continue to behave the same way. See [lifecycle.md](flow-control/lifecycle.md) for the full lifecycle reference, including stacks, control actions, the `err`/`timing`/`current` globals, and examples.
 
-Each lifecycle property interpolates **when its event fires**, not during the initial compose — Darkmatter defers the seven lifecycle keys from compose-time resolution (so their `{{ … }}` spans survive raw in `effective_frontmatter`) and Claudine re-interpolates each property/action string through Darkmatter just-in-time, against the live document state plus the in-scope late-binding globals. Resolution fails closed before any side effect dispatches. See [lifecycle.md — Binding Time: Early vs Late](flow-control/lifecycle.md#binding-time-early-vs-late).
+Each lifecycle property interpolates **when its event fires**, not during the initial compose — Darkmatter defers the seven lifecycle event keys and the loop configuration from compose-time resolution (so their `{{ … }}` spans survive raw in `effective_frontmatter`) and Claudine re-interpolates each property/action string through Darkmatter just-in-time, against the live document state plus the in-scope late-binding globals. Resolution fails closed before any side effect dispatches. See [lifecycle.md — Binding Time: Early vs Late](flow-control/lifecycle.md#binding-time-early-vs-late).
 
 ### Loop vs lifecycle interpolation
 
@@ -1197,7 +1198,7 @@ Each widget renders inline, directly below the status report, in a viewport size
 
 ### Provided Partial File References
 
-A `file`/`file[]` property declared with a `match(...)` glob accepts more than a literal path. When the user **provides** a value (via `key=value` or `--set`) that does not resolve to an existing file, that value is treated as a **partial** — a substring to match against the property's `match(...)` glob candidates — rather than an immediate hard abort. The comparison is case-insensitive and made in portable (`/`-separated) spelling on every platform, so `spec=fixes/2026-09-10-local` finds the same file on Windows as on macOS, and a partial typed with `\` is accepted as well.
+A `file`/`file[]` property declared with a `match(...)` glob accepts more than a literal path. When the user **provides** a value (via `key=value` or `--set`) that does not resolve to an existing file, that value is treated as a **partial** — a substring to match against the property's `match(...)` glob candidates — rather than an immediate hard abort. The comparison is case-insensitive and made in portable (`/`-separated) spelling on every platform, so `spec=documents/review` finds the same file on Windows as on macOS, and a partial typed with `\` is accepted as well.
 
 ```yaml
 $schema:
@@ -1329,7 +1330,7 @@ Plain `ctx.*` in a composed document describes the caller's **launch context** �
 - **One owner.** The launch anchor and the launch repository/topology/host evidence are paired as a single operation on `InvocationContext` (`capture_launch_context` for a fresh document epoch, `extend_launch_context` for a same-epoch reread), together with the environment of the document that context is a view of (see [One Environment per Document](#one-environment-per-document)). A caller cannot combine a launch directory with prompt-derived evidence, so moving a prompt, task, group, overlay, or system-prompt file cannot change launch-facing `ctx.*` values (`ctx.area`, `ctx.repo_root`, `ctx.current_packages`, …). A source stored in another repository never substitutes that repository for the launch repository.
 - **`ctx.cwd` is invocation state.** Darkmatter exposes the absolute, portable launch directory through its no-I/O `Invocation` context group. Supplied invocation evidence never rediscovers the process CWD; ambient compatibility capture reports `null` with a partial-capture diagnostic if its one boundary read fails.
 - **Caller file parameters retain their authoring anchor.** Darkmatter materializes only overrides whose selected effective schema arm is `file` or `file(eager)`. Lazy local values retain the first unprobed candidate, eager values select the first existing file, recursive lazy values are rejected, and remote lazy values remain URLs. The raw override stays in the input layer while effective frontmatter and expressions receive the anchored absolute value, so later document handoffs cannot reinterpret the caller's relative text.
-- **`ctx` is evaluated once for each composition run.** A composition run is one document being composed and executed: a document invoked directly or adopted through `proxy`, each sequence step (each task of a serial group; a parallel group shares one capture until a sibling re-enters), each loop iteration, and each retry or resume attempt. Transclusion does not start a run: a document and every file it includes share one `ctx`. `current` is observed once per lifecycle event. Each run prepares one target-adjusted early-binding snapshot after provider/model resolution — a new document epoch — and reuses that exact snapshot through shell preflight, body and effective-frontmatter composition, schema evaluation, loop conditions, and every lifecycle event of the run. Only the groups the run's composed tree names are captured, so a run that names no Git fact observes no Git state.
+- **`ctx` is evaluated once for each composition run.** A composition run is one document being composed and executed: a document invoked directly or adopted through `proxy`, each sequence step (a concurrent group shares one capture until a sibling re-enters), each loop iteration, and each retry or resume attempt. Transclusion does not start a run: a document and every file it includes share one `ctx`. `current` is observed once per lifecycle event. Each run prepares one target-adjusted early-binding snapshot after provider/model resolution — a new document epoch — and reuses that exact snapshot through shell preflight, body and effective-frontmatter composition, schema evaluation, loop conditions, and every lifecycle event of the run. Only the groups the run's composed tree names are captured, so a run that names no Git fact observes no Git state.
 - **Git working state belongs to the run; everything else to the invocation.** Git working state — `branch`, `worktree`, `merge_conflicts`, the staged, dirty, and untracked file keys, and `recent_commits` — can change between runs, including by another process, so each run observes it once, on the run's first request for it, and holds it for the rest of the run. Which run first mentioned a property has no effect on what a later run sees. The launch directory, repository identity, package topology, area, host facts, languages, and documents are observed once per invocation and never rediscovered, so a hop cannot move `ctx.cwd` or `ctx.repo_root`. The environment sits between the two: each document captures it once and every run of that document reuses it (see [One Environment per Document](#one-environment-per-document)).
 
   ```md
@@ -1365,7 +1366,6 @@ These are documents, and each captures its own map before its `initialize`:
 | --- | --- |
 | The launched document (`claudine compose`, `inline-compose`, `sequence`) | once, at launch |
 | Each sequence step and its task | when the step starts |
-| Each serial group leg | when the leg starts |
 | Each parallel group leg | before any leg of the group starts, in declaration order |
 | Each `proxy` target | after the target is resolved, before it is prepared |
 
@@ -1397,7 +1397,7 @@ Every consumer in a document reads its map:
 - env-expanded file references, schema roots (`SCHEMAS_DIR`), and transclusion;
 - model selection, loop settings, and shell approval;
 - shell children: `::shell`, `::shell-block`, frontmatter `$( … )`, lifecycle
-  `shell` actions, and a task's `shell:`, `setup:`, and `teardown:` commands.
+  `shell` actions, and a task's `shell:` commands.
   A child starts from the document's map, not from Claudine's process, and only
   the variables the document's map changes relative to the launch map are
   rewritten; the home variables are never rewritten.
@@ -1424,10 +1424,10 @@ flowchart TD
 
 ### Approval under a later document's map
 
-Sequence preflight approves every `shell:`, `setup:`, and `teardown:` command
-before any step runs, so it resolves those whose values exist then under the
-launch map. When a later task captures its own map, it resolves each such
-command again under that map, before any of its stages runs:
+Sequence preflight audits task `shell:` commands and lifecycle shells, including
+container events, before any step runs. First-position commands without late
+values can receive exact byte approval. Before a task executes, each such
+byte-approved command resolves again under its captured map:
 
 - identical text runs as approved;
 - changed text is refused with `CompositionError::SequenceShellApprovalChanged`,
@@ -1436,7 +1436,7 @@ command again under that map, before any of its stages runs:
 
 ```text
 preflight (launch map TARGET=staging):  shell: deploy {{ env.TARGET }}  approved as "deploy staging"
-step 2 (its map TARGET=prod):           resolves to "deploy prod"  refused: changed TARGET
+step 1 (its map TARGET=prod):           resolves to "deploy prod"  refused: changed TARGET
 ```
 
 Resolved text covers only itself. A later task's command with a placeholder
@@ -1445,7 +1445,7 @@ is approved by its typed shape rather than its text (see
 it runs as a template filled from the task's current state. Prompt and step
 documents preserve the same static position and late inputs: a later document
 uses its preflight shape approval, with ordinary values read at command entry.
-Before task setup, a passive walk checks every deferred document hole,
+Before task execution, a passive walk checks every deferred document hole,
 including transcluded documents, and retains those values for that execution.
 Sequence validation discovers document shells without executing them.
 
@@ -1502,7 +1502,7 @@ State is owned in four layers, which is what makes "what survives a handoff" ans
 
 A failed handoff never half-activates the target: the source stays active for diagnostic attribution, the failure follows the normal event-aware routing, and no duplicate terminal or `finalize` event is synthesized.
 
-**The chain records handoffs, not requests.** A request refused because its target does not resolve, its `with:` overlay fails to evaluate, it would revisit a document already in the chain, or it would exceed the hop limit adds nothing to the chain, so a later legitimate request is never refused against it. A committed handoff adds exactly one entry, and every owner adopts what it commits. Adoption does not depend on the target succeeding: a target that then fails its `initialize` or validation stays in the chain. For example, a looping source whose iteration 1 proxies to itself is refused as a cycle; under `fail_fast: false`, iteration 2 can still proxy to `target.md`, and the chain reads `loop.md -> target.md`.
+**The chain records handoffs, not requests.** A request refused because its target does not resolve, its `with:` overlay fails to evaluate, it would revisit a document already in the chain, or it would exceed the hop limit adds nothing to the chain, so a later legitimate request is never refused against it. A committed handoff adds exactly one entry, and every owner adopts what it commits. Adoption does not depend on the target succeeding: a target that then fails its `initialize` or validation stays in the chain. For example, a looping source whose iteration 1 proxies to itself is refused as a cycle; under `loop.fail_fast: false`, iteration 2 can still proxy to `target.md`, and the chain reads `loop.md -> target.md`.
 
 ### Entry reasons and the stage matrix
 
@@ -1575,8 +1575,8 @@ The coordinator is nested **inside** the command's own ownership — a handoff c
 - **`inline-compose`** stays inline mode across a handoff, but only the **final** target is eligible for the inline closure. The document that proxied away is not rewritten.
 - **`compose --loop`** (any looping document) ends the loop on a proxy from any event that can raise one — `initialize`, `start`, `success`, `failure`, or `finalize` — and hands the target to the command's coordinator. No further source iteration runs, and the loop gate does not fire for the abandoned iteration. The target is not an extra iteration.
 - **`sequence`** contains a proxy within its current step: no step advance, no restart, and the step keeps its scoped inputs and timing identity. There is no cross-step handoff. This holds for a step that runs the document body and for a `prompt:` task, whichever event raised the proxy:
-    - the target reads the step's inputs (the user's setters, a task's `params`, `state`/`previous`/`next`) and sees the step's environment (a task's `operation` as `OPERATION`, and `CLAUDINE_FAIL_FAST`), while `AGENT`, `MODEL`, and `YOLO` describe the target's own provider; it writes `set` and `outputs` into the step's runtime state, so later steps see them;
-    - a `prompt:` task's `setup` and `teardown` run once around the whole chain, and the task publishes one `outputs` entry: the final target's. A target that fails fails the task, and `fail_fast` decides what runs next;
+    - the target reads the step's inputs (the user's setters, a task's `params`, and the lexical `seq` root) and sees the step's environment (a task's `operation` as `OPERATION`), while `AGENT`, `MODEL`, and `YOLO` describe the target's own provider; runtime `set` writes and committed `seq.outputs` remain visible to later steps;
+    - the task publishes one `seq.outputs` entry after successful finalization: the final target's. A target that fails fails the task and propagates to the enclosing container's failure handler; an unhandled failure stops the sequence;
     - each task owns its chain, so two parallel siblings may both proxy to the same target, while a cycle within one task's chain is still refused;
     - a step that runs the document body publishes every completed provider run, as a `retry` does, so a proxy from `success` leaves the source's entry and the target's.
 - **`--dry-run`** never traverses a dynamic proxy route, and this follows structurally rather than from a per-route check: the dry-run seam returns *before* the lifecycle runtime is constructed, so `initialize` never fires and no `proxy` control can be produced. A dry run always reports the document named on the command line. See [Dry Run](#dry-run).
@@ -1758,8 +1758,9 @@ diagnostic is not yet available. The planned
 lets a handler inspect retained response data before choosing recovery.
 `retry` repeats the provider transaction, including side effects that may
 already have happened. Printing an answer will not make the failed step
-successful. To run later sequence steps while retaining a failed step, use
-`fail_fast: false`; the sequence still exits with failure.
+successful. To continue after optional work fails, place it in a one-leg group
+with `fail_fast: false`. That group handles leg failure and can report it
+through `group.failed`; a sequence otherwise stops on an unhandled failure.
 
 ### Shell Policy
 
@@ -1785,14 +1786,14 @@ The following interfaces have been removed and replaced by the two canonical com
 
 ## Sequence Composition
 
-Sequences use one unified step/task model. A task declares exactly one executable: a prompt file reference, shell command, side effect, group, or task file reference. A step with no executable composes the source document body.
+Sequences use one unified step/task model. A task declares exactly one executable: a prompt file reference, shell command, side effect, group, nested sequence, or task file reference. A step with no executable composes the source document body.
 
 Execution has two phases:
 
-1. **Static preflight** walks the complete task graph before any task runs. Dynamic sources resolve once, referenced documents load transitively with cycle detection, schemas collect into one validation pass, and every reachable shell command is resolved under the launch environment and approved byte-for-byte.
+1. **Static preflight** walks the complete task graph before any task runs. Dynamic sources resolve once, referenced documents load transitively with cycle detection, schemas collect into one validation pass, and every reachable shell command is audited. First-position commands with known values can be approved byte-for-byte; later tasks, late values, and container terminal-event placeholders require typed shape approval. Retries and newly prepared sources must stay within the invocation’s original approval set.
 2. **Just-in-time execution** captures each step's (or group leg's) own environment, then re-reads and composes each task when its turn begins, so prior inline writes and runtime mutations are visible. A task whose approved command resolves to different text under its own environment is refused before it runs (see [One Environment per Document](#one-environment-per-document)).
 
-`outputs` is the sole task-output accumulator. Groups may run serially or in parallel with bounded `max_parallel`, snapshot isolation, declaration-ordered mutation merge, and all-siblings-complete failure handling. Parallel groups reject write-back collisions during preflight; group-level loops remain unsupported until commit semantics are defined.
+`seq.outputs` holds committed native child results: strings for primitive tasks, arrays for nested sequences, and dictionaries keyed by group leg name. Groups run concurrently with optional `max_parallel`; ordered work uses `sequence:`. Each leg has a private in-memory snapshot and mutations merge in declaration order. Default group `fail_fast: true` withholds leg results and mutations on failure; `false` handles leg failures and publishes after successful finalization. **This is not a filesystem transaction:** siblings share files, and performed shell/provider work is never rolled back. Groups reject inline write-back collisions during preflight. Group loops and persisted checkpoint/resume remain planned.
 
 A root `prompt` property selects inline closure behavior for the final active target. Step/task `prompt` values are file references; the two meanings occur at different levels. External YAML uses `sequence:` directly or kinded `task`/`group` documents. The retired external `kind: sequence` plus `list:` form is not accepted.
 
@@ -1858,7 +1859,7 @@ Repository observations are request-local, not a process-global cache, and are k
 
 Shell execution follows workspace intent rather than source location. Composition documents and system prompts run `::shell` from the launch repository root; for a launch outside a repository, the explicit launch CWD is used. A prompt or harness stored in another directory or repository does not move the agent's shell working directory.
 
-A sequence step's explicit task stack is the one exception to "the document a step composes and runs owns its `SourceContext`": `setup`, `teardown`, and the primary `side_effect` action derive their `SourceContext` from the document that authored the task, not the document the step composes and runs. `set_frontmatter` and other file-touching effects in that stack therefore target files next to the task's origin document, including when an externalized `task:`/`group:` file lives in a different repository from the step's `prompt:` document. Prompt-task `params` retain that same authoring origin when the target schema selects a file value; immutable CLI caller records remain a separate, higher-precedence layer with the invocation's launch origin.
+A sequence task’s primary `side_effect` action derives its `SourceContext` from the document that authored the task. File-touching effects therefore target files next to that origin document, including when an externalized `task:` or `group:` file is referenced from another repository. Task `setup:`/`teardown:` are removed grammar; prompt documents or inline containers own lifecycle work. Prompt-task `params` retain that same authoring origin when the target schema selects a file value; immutable CLI caller records remain a separate, higher-precedence layer with the invocation's launch origin.
 
 ## Performance Reporting
 

@@ -284,16 +284,18 @@ yet.
 ### Optional inputs and open metadata
 
 Every Claudine property is optional, and the schema reads an explicit `null`
-as absent. Some readers are stricter: `loop`, the four timeouts, `fail_fast`,
+as absent. Some readers are stricter: `loop`, the four timeouts,
 and `prompt` reject an explicit `null` when the document is parsed. A few
 properties are declared only so the editor
 can describe them:
 
 - `operation` and `yolo` are set by a flag (or, for `operation`, a sequence
   task), never read from a document.
-- `state`, `previous`, `next`, `outputs`, and `sequence_id` are declared
-  `unknown`. Claudine injects them into sequence steps; in a standalone prompt
-  they are ordinary application data.
+- `seq`, `group`, and `loop` are lexical runtime roots, separate from the
+  document's schema instance. Older injected names such as `state` and
+  `outputs` are ordinary authored frontmatter properties; they are no longer
+  declared as generated overlays. Group `fail_fast` is a boolean on the group
+  schema; document-level `fail_fast` is rejected.
 - `metadata` (linking) and the `with:` overlays of `proxy` and `retry` are
   open mappings.
 

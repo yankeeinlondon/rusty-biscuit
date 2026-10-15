@@ -117,7 +117,7 @@ Work on {{ seq.topic }}.
 
 ## Step state
 
-Every step gets a `state` object. A bare string is shorthand for `{name: <string>}`:
+Every step gets a row exposed through `seq`. A bare string is shorthand for `{name: <string>}`:
 
 ```yaml
 sequence:
@@ -353,7 +353,8 @@ Sequence execution is two phases.
 
 ### Phase 1 — Static preflight
 
-Before anything runs, Claudine walks the **entire task graph**:
+After the root sequence’s shell-free `initialize`, and before children start,
+Claudine walks the **entire task graph**:
 
 - **Dynamic sources resolve exactly once.** The resulting step list is a
   snapshot; it never re-evaluates mid-run, even if the environment changes.
@@ -510,7 +511,9 @@ step*: recorded in the summary and routed to the enclosing container
 
 Every completed child publishes one native result to `seq.outputs`, in execution
 order, after its `finalize` succeeds.
-The previous task's output is `{{ last(seq.outputs) }}`.
+The previous task's output is `{{ last(seq.outputs) }}`. A skipped child publishes nothing.
+Every group leg remains present by name in a successful group result; skipped
+or unadmitted legs map to `null`, and failed legs retain partial output.
 
 - A task with no stdout pushes an empty string, so entries stay aligned with
   executed tasks.
@@ -543,13 +546,13 @@ concatenated in declaration order; for a side effect, its returned text or an
 empty string. One trailing transport newline is removed; other whitespace is
 preserved.
 
-**Lifecycle timing.** `initialize` and `start` see only prior entries. `success`
-sees this run's output appended. `failure` sees no new entry — it has `err`
-instead. `finalize` sees whatever has accumulated at that point.
-
-Failed and interrupted tasks append no entry, except that each slot of a
-completed parallel group stays positionally present and holds whatever partial
-stdout that task captured.
+**Lifecycle timing.** A sequence container's own `seq.outputs` starts empty and gains
+one entry after each successful child finalizes. Its `success` and `finalize`
+see those completed children. Its enclosing sequence receives the complete
+container array or dictionary only after the container's finalization succeeds.
+A failing container publishes nothing, even when its private child accumulator
+contains partial results. A successful tolerant group's dictionary retains
+failed legs' partial outputs; `group.legs` also exposes their errors.
 
 ## Mutating state with `set`
 
@@ -784,15 +787,15 @@ An unhandled step failure stops the sequence. Document `fail_fast:` and the
 | `130` | Ctrl+C interrupted the sequence, or `Esc`/Ctrl+C left the provider review screen before any step started |
 
 `--dry-run` performs the **full preflight**, then just-in-time-composes every
-step against the *initial* state — empty `outputs`, no runtime mutations —
+step against the *initial* state — empty `seq.outputs`, no runtime mutations —
 without launching a provider and without inline-compose write-back.
 Late-binding references render exactly as a first-step composition would see
 them.
 
 > **`--dry-run` still executes shell work.** `$( … )` expansions and `shell:`
 > tasks run for real, because their output is what composition needs. A dry-run
-> of a sequence containing `shell: just commit` will commit. This is inherited
-> behavior, called out here because it is genuinely surprising.
+> of a sequence containing `shell: just commit` can commit. Use commands safe
+> to execute when rehearsing; dry-run does not provide filesystem isolation.
 
 ## Requiring caller input
 
@@ -829,8 +832,9 @@ switch sets, and a reportable field in Claudine's logs.
 
 ## Remaining planned behavior
 
-Group `loop` remains rejected.
-Persisted checkpoint/resume is not available.
+**Planned:** generalized container loops and persisted checkpoint/resume.
+Group `loop` is currently rejected. Recursive containers, their lifecycle
+events, cancellation, and native array/dictionary results are implemented.
 
 
 ## Container lifecycle and recovery
@@ -850,11 +854,15 @@ flowchart TD
     P -->|error| B[blocked]
     S --> C[children]
     C --> T[success or failure]
+    C -->|cancelled; descendants settle| K[cancelled]
+    K --> F
     T -->|retry| P
     T -->|proxy| H[target lifecycle]
     T --> F[finalize]
     B --> F
-    F --> R[publish successful result]
+    F --> R{final outcome}
+    R -->|success| O[publish native result]
+    R -->|failure or cancellation| E[publish nothing]
 ```
 
 `retry.max_attempts` counts additional attempts. Initialize runs once; a retry
@@ -875,10 +883,16 @@ and exits with status 1. Logging or `stop` in a failure handler does not recover
 it. Timeouts follow this failure path, never cancellation.
 
 ```mermaid
-flowchart LR
-    D[document failure and finalize] --> G[group failure and finalize]
-    G --> S[sequence failure and finalize]
-    S --> E[exit 1]
+flowchart TD
+    D[Unhandled child failure after child finalize] --> G{Enclosing group?}
+    G -->|fail_fast false| T[Handle leg failure; settle all legs]
+    T --> U[Group success; finalize; publish dictionary]
+    U --> N[Next sequence step]
+    G -->|fail_fast true| A[Stop admission; cancel opted-in legs; settle all]
+    A --> F[Group failure handler]
+    G -->|No group| S[Sequence failure handler]
+    F -->|unrecovered; finalize| S
+    S -->|unrecovered; finalize| E[Propagate outward; root exits 1]
 ```
 
 Dry-run fires no lifecycle events recursively and launches no provider or

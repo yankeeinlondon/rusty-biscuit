@@ -790,109 +790,45 @@ start:
 
 ## Orchestration
 
-Up to now we've talked Markdown documents as being the unit of execution but Claudine's got another trick up her sleeve called **sequences** and **execution-groups**.
-
-### Execution Groups
-
-Execution Groups help us to produce two desirable sequence patterns:
-
-- **Concurrency** - _run multiple things concurrently_
-- **Conditional Looping** - _loop over a serial set of steps until a condition is met_
-
-Execution Groups are defined in YAML files and take the following parameters:
-
-- To choose a **concurrent** execution group set `kind` to `concurrent`
-- To choose a **looping** execution group set `kind` to `loop`
-- an execution must be one of the two types and never both
-
-#### Concurrent Execution
-
-> **Note:** this feature is still a work in progress but will be arriving soon; just need to sort out best UX for concurrent threads; likely to result in a TUI.
+Run ordered work with `claudine sequence workflow.md`. Each task may run a
+prompt, shell command, side effect, nested sequence, or concurrent group:
 
 ```yaml
-kind: "execution-group"
-type: "concurrent"
-fail_fast: false
-nodes:
-    - compose: "foobar.md"
-    - inline-compose: "research-something.md"
-    - prompt: "why are you such a nancy?"
-    - sequence: "abc.yaml"
-    - shell: "git status"
+---
+sequence:
+  - name: inspect
+    shell: git status --short
+  - name: checks
+    group:
+      name: checks
+      tasks:
+        - name: lint
+          shell: just lint
+        - name: tests
+          shell: just test
+finalize:
+  - info: Workflow settled
+---
 ```
 
-- In this example you see the various "node types" (e.g., prompt, compose, inline-compose, sequence, shell) which characterize the task and make up the _concurrent_ activity that this groups.
-    - **compose** - composes a Markdown document and uses it as an LLM prompt
-    - **inline-compose** - uses the Frontmatter `prompt` as an prompt for an LLM and directs it's output to the body of the same document
-    - **prompt** - a direct prompt to be passed to an LLM
-    - **sequence** - kicks off a sequence (next section)
-    - **shell** - runs a shell command
-- The `fail_fast` boolean flag determines whether:
-    - `true` - when one task fails, all tasks fail
-    - `false` - all tasks are completed successful or not
+Groups run concurrently and default to `fail_fast: true`: an unhandled leg
+failure stops admission and cancels running legs that declare `cancelled`.
+Other running legs finish, and the failed group publishes no result or leg
+mutations. Set `fail_fast: false` on the group to collect failed-leg results
+and continue. A sequence stops at an unhandled child failure; its `failure`
+handler can use `retry` or `proxy` for recovery.
 
-    > default is `false`
+Use `seq.outputs` to read completed results and `seq.name` for the current
+step. Nested sequences have their own accumulators; group results are keyed
+by leg name. Lifecycle events surround each container, with cleanup from
+children to parents. Group loops and uniform loops on nested containers are
+planned; document loops are described in [Looping](../topics/flow-control/looping.md).
 
-While this example was good at showing _breadth_ it hasn't yet shown a type of _depth_ that will be important in some cases:
-
-- all of the node types can be represented in _short-hand_ form as a single string value but if you need to pass parameters then you can do that
-
-    ```yaml
-    kind: "execution-group"
-    type: "concurrent"
-    nodes: 
-        - compose: "foobar.md"
-          yolo: true
-          agent: claude
-        - inline-compose: "research-something.md"
-          plan: "@features/do-it/plan.md"
-    ```
-
-#### Looping Groups
-
-Looping groups contain 1:M steps which are executed serially and then _loop_ until a condition is met:
-
-```mermaid
-flowchart TB;
-
-    subgraph Group
-    A(Task 1) --> B(Task 2) --> C(Task 3)
-    end
-
-    Group --> Condition
-    Condition -->|false| Group
-    Condition -->|true| Done((Done))
-```
-
-
-
-
-
-
-### Sequences
-
-Claudine provides you a simple way of specifying a **sequence** either in the frontmatter of your Markdown files or as a separate YAML file. This opens up the ability to run long-running meta-agents that can call into any of the Agents you are using for parts of the sequence.
-
-```mermaid
-flowchart LR
-
-Clarify(Clarify Spec)
-Design[Technical Design]
-Plan[Plan]
-Implement[Implement]
-Review[Review]
-C1((Prod Ready?))
-Suggest(Implement Suggestions)
-
-Clarify --> Design --> Plan --> Implement --> Review --> C1
-
-C1 -->|no| Suggest
-C1 -->|yes| Done
-
-Suggest --> Review
-```
-
-Steps along this process can be _interactive_ or _non-interactive_ but the goal is typically to load any interactive prompts to the front of the process so user involvement can be done once and then the remaining process
+A group's isolation applies to in-memory values. Filesystem edits and shell
+side effects are shared and never rolled back. `--dry-run` still executes
+shell tasks and composition shell expansions with real effects. See
+[Sequences](../topics/flow-control/sequences.md) for the complete grammar and
+[the executable example](../examples/sequence-containers.md) for nesting.
 
 ## Communication
 
