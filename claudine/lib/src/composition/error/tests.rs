@@ -1020,12 +1020,17 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
     let mut approved = HashSet::new();
     approved.insert(approved_command);
     let options = PrepareOptions {
+        lifecycle_group: None,
         defer_schema_verdict: false,
         set_overrides: None,
         data_override_keys: Default::default(),
+        sequence_binding: None,
         proxy_overlay: Default::default(),
         caller_input_records: Default::default(),
-        pre_approved_commands: Some(approved),
+        pre_approved_commands: Some(approved.into()),
+        deferred_shell_roots: Default::default(),
+        validate_deferred_shell_values: false,
+        document_shell_values: None,
         env_overrides: BTreeMap::new(),
         perf_enabled: false,
         source_repo_root: None,

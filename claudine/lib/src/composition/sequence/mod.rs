@@ -3,7 +3,7 @@
 //! [`resolve_sequence_plan`] detects whether a resolved composition source
 //! defines a `sequence`, and if so normalizes it into a typed [`SequencePlan`]
 //! of generated [`StepState`]s. [`build_step_overlay`] constructs the reserved
-//! per-step overlay (`state`/`previous`/`next`/`sequence_id`) injected
+//! per-step binding used to build the lexical `seq` root, carried
 //! into each composition run.
 //!
 //! The module is split by responsibility:
@@ -22,7 +22,7 @@
 //! - [`preflight`] — the recursive task graph: external task/group/catalog/
 //!   prompt loading, cycle detection, and early-binding shell resolution;
 //! - [`source`] — file-reference resolution and referenced-source loading;
-//! - [`task`] — atomic task execution: the setup/primary/teardown contract and
+//! - [`task`] — recursive task execution, container lifecycles, and
 //!   the one [`task::TaskOutcome`] every task variant reports;
 //! - [`reserved`] — the canonical reserved-key catalog shared by every layer.
 //!
@@ -46,7 +46,6 @@ use biscuit_file::classify_list;
 use serde_json::{Map, Value};
 
 use super::authored_order::AuthoredOrder;
-use super::json_util::json_type_name;
 use super::types::ResolvedCompositionSource;
 
 pub use grammar::{SequenceReference, SequenceSourceSpec, SourceOperator};
@@ -93,7 +92,7 @@ impl<'a> SequenceSourceOptions<'a> {
 /// ## Errors
 ///
 /// Returns `Err` for invalid sequence definitions: wrong types, missing `name`
-/// on object steps, empty lists, more than one executable field, reserved-key
+/// on object steps, more than one executable field, reserved-key
 /// collisions, or external file load failures.
 pub fn resolve_sequence_plan(
     source: &ResolvedCompositionSource,
@@ -119,16 +118,10 @@ pub fn resolve_sequence_plan_with(
         None => return Ok(None),
     };
 
-    let fail_fast = match fm.as_map().get("fail_fast") {
-        Some(Value::Bool(b)) => *b,
-        Some(other) => {
-            return Err(CompositionError::SequenceInvalid(format!(
-                "`fail_fast` must be a boolean, got {}",
-                json_type_name(other)
-            )));
-        }
-        None => true,
-    };
+    if let Some(value) = fm.as_map().get("fail_fast") {
+        return Err(grammar::removed_task_key("fail_fast", value, &source.resolved_path));
+    }
+    let fail_fast = true;
 
     // The frontmatter's insertion-ordered map is projected into a plain JSON
     // object once here: expression lookups only ever read it by key, and the
@@ -257,10 +250,8 @@ fn classify_string_items(text: &str) -> Vec<Value> {
 
 /// Build the reserved overlay for `step_index` within `plan`.
 ///
-/// `state` is always the current step's [`StepState`]; `previous`/`next` are the
-/// neighboring states, or `None` on the boundaries (they render as `null`, never
-/// an empty-named state). `outputs` is *not* part of this overlay: it belongs to
-/// the runtime layer beneath it, so the accumulator survives from step to step.
+/// Neighbor rows are absent at the boundaries. `SequenceBinding` projects
+/// this position into `seq`; the runtime snapshot supplies its live outputs.
 pub fn build_step_overlay(plan: &SequencePlan, step_index: usize) -> SequenceStepOverlay {
     let total = plan.steps.len();
     SequenceStepOverlay {

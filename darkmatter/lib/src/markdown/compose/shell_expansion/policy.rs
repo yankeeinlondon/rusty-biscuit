@@ -2,6 +2,7 @@
 //!
 //! Implements built-in blacklists, whitelist checking, and command normalization.
 
+use super::template::{FilledChain, FilledSegment, ShapeArg, ShapePart, TemplateShape};
 use super::types::{BlacklistRule, ShellRuleSet};
 
 /// Built-in blacklist rules that are always enforced.
@@ -158,6 +159,42 @@ const BUILTIN_BLACKLIST: &[BlacklistRule] = &[
 /// assert!(reason.is_none());
 /// ```
 pub fn check_builtin_blacklist(executable: &str, args: &[String]) -> Option<String> {
+    let args: Vec<KnownArg<'_>> = args.iter().map(|arg| KnownArg::Literal(arg)).collect();
+    check_builtin_blacklist_known(executable, &args)
+}
+
+/// What preflight knows about one argument of a template.
+#[derive(Debug, Clone, Copy)]
+enum KnownArg<'a> {
+    /// The whole argument is literal.
+    Literal(&'a str),
+    /// The argument holds a hole; only its leading literal run is known. It
+    /// keeps its position, so later words never shift into a subcommand slot.
+    Partial { leading: &'a str },
+}
+
+impl<'a> KnownArg<'a> {
+    fn of(arg: &'a ShapeArg) -> Self {
+        match arg.parts.as_slice() {
+            [ShapePart::Literal(text)] => Self::Literal(text),
+            [ShapePart::Literal(leading), ..] => Self::Partial { leading },
+            _ => Self::Partial { leading: "" },
+        }
+    }
+
+    fn equals(self, expected: &str) -> bool {
+        matches!(self, Self::Literal(text) if text == expected)
+    }
+
+    fn known_prefix(self) -> &'a str {
+        match self {
+            Self::Literal(text) => text,
+            Self::Partial { leading } => leading,
+        }
+    }
+}
+
+fn check_builtin_blacklist_known(executable: &str, args: &[KnownArg<'_>]) -> Option<String> {
     for rule in BUILTIN_BLACKLIST {
         match rule {
             BlacklistRule::Executable(cmd) => {
@@ -186,7 +223,7 @@ pub fn check_builtin_blacklist(executable: &str, args: &[String]) -> Option<Stri
                 executable: cmd,
                 arg,
             } => {
-                if executable == *cmd && args.iter().any(|a| a == *arg) {
+                if executable == *cmd && args.iter().any(|a| a.equals(arg)) {
                     return Some(format!("'{} {}' is a dangerous operation", cmd, arg));
                 }
             }
@@ -194,10 +231,12 @@ pub fn check_builtin_blacklist(executable: &str, args: &[String]) -> Option<Stri
                 executable: cmd,
                 arg_prefix,
             } => {
+                // A partly known argument is refused when its known leading run
+                // already starts with the prefix.
                 if executable == *cmd
                     && args
                         .iter()
-                        .any(|a| a.to_uppercase().starts_with(&arg_prefix.to_uppercase()))
+                        .any(|a| a.known_prefix().to_uppercase().starts_with(&arg_prefix.to_uppercase()))
                 {
                     return Some(format!(
                         "'{} {}...' is a dangerous operation",
@@ -206,7 +245,7 @@ pub fn check_builtin_blacklist(executable: &str, args: &[String]) -> Option<Stri
                 }
             }
             BlacklistRule::RawToken(token) => {
-                if executable == *token || args.iter().any(|a| a == *token) {
+                if executable == *token || args.iter().any(|a| a.equals(token)) {
                     return Some(format!("Token '{}' is not allowed", token));
                 }
             }
@@ -215,7 +254,53 @@ pub fn check_builtin_blacklist(executable: &str, args: &[String]) -> Option<Stri
     None
 }
 
-/// Checks if a command matches the user blacklist.
+/// Checks a template's fixed program words and known literal arguments
+/// against the built-in blacklist, then the user blacklist, before any
+/// whitelist or cache approval.
+///
+/// A hole's position is kept, never deleted: `git {{ string }} reset` is not
+/// read as `git reset`. Holes are judged at run time by
+/// [`check_filled_chain`]. User `exact` rules apply to segments with no holes,
+/// `prefix` rules to every program, and `template` rules by shape alone.
+///
+/// ## Returns
+///
+/// `Some(reason)` when the template is blacklisted.
+pub fn check_template_blacklist(shape: &TemplateShape, user_blacklist: &ShellRuleSet) -> Option<String> {
+    for segment in &shape.segments {
+        let args: Vec<KnownArg<'_>> = segment.args.iter().map(KnownArg::of).collect();
+        if let Some(reason) = check_builtin_blacklist_known(&segment.program, &args) {
+            return Some(reason);
+        }
+    }
+    let blocked = shape.segments.iter().any(|segment| {
+        let literal_args: Option<Vec<String>> =
+            segment.args.iter().map(|arg| arg.as_literal().map(str::to_string)).collect();
+        user_blacklist.matches_prefix(&segment.program)
+            || literal_args.is_some_and(|args| user_blacklist.matches_exact(&normalize_command(&segment.program, &args)))
+    }) || user_blacklist.template_blocks_shape(shape);
+    blocked.then(|| "user blacklist".to_string())
+}
+
+/// Checks every segment of a filled command chain against the built-in
+/// blacklist, then the user blacklist (`exact`, `prefix`, and `template`
+/// rules). Call it after every hole of every segment is filled and before the
+/// first segment starts, even when `&&`/`||` would skip a segment.
+///
+/// ## Returns
+///
+/// `Some(reason)` when any segment is blacklisted.
+pub fn check_filled_chain(chain: &FilledChain, user_blacklist: &ShellRuleSet) -> Option<String> {
+    chain
+        .segments
+        .iter()
+        .find_map(|FilledSegment { program, args, .. }| check_builtin_blacklist(program, args))
+        .or_else(|| user_blacklist.blocks_filled(chain).then(|| "user blacklist".to_string()))
+}
+
+/// Checks if a command matches the user blacklist: an `exact` rule for
+/// `normalized`, a `prefix` rule for `executable`, or a single-segment
+/// `template` rule matching the command's arguments.
 ///
 /// ## Examples
 ///
@@ -233,10 +318,18 @@ pub fn check_builtin_blacklist(executable: &str, args: &[String]) -> Option<Stri
 pub fn check_user_blacklist(
     ruleset: &ShellRuleSet,
     executable: &str,
-    _args: &[String],
+    args: &[String],
     normalized: &str,
 ) -> bool {
-    ruleset.matches_exact(normalized) || ruleset.matches_prefix(executable)
+    let command = FilledChain {
+        segments: vec![FilledSegment {
+            operator: super::types::ChainOperator::None,
+            program: executable.to_string(),
+            args: args.to_vec(),
+            redirection: Default::default(),
+        }],
+    };
+    ruleset.matches_exact(normalized) || ruleset.matches_prefix(executable) || ruleset.blocks_filled(&command)
 }
 
 /// Checks if a command matches the whitelist.
@@ -299,14 +392,14 @@ fn needs_quoting(arg: &str) -> bool {
         .any(|ch| ch.is_whitespace() || ch == '"' || ch == '\'' || ch == '\\')
 }
 
-/// Returns true if args start with the given prefix.
-fn args_start_with(args: &[String], prefix: &[&str]) -> bool {
+/// Returns true if args start with the given prefix of literal words.
+fn args_start_with(args: &[KnownArg<'_>], prefix: &[&str]) -> bool {
     if args.len() < prefix.len() {
         return false;
     }
     args.iter()
         .zip(prefix.iter())
-        .all(|(arg, expected)| arg == *expected)
+        .all(|(arg, expected)| arg.equals(expected))
 }
 
 #[cfg(test)]
@@ -518,29 +611,30 @@ mod tests {
         assert!(needs_quoting(r"path\to\file"));
     }
 
+    fn known<'a>(args: &[&'a str]) -> Vec<KnownArg<'a>> {
+        args.iter().map(|arg| KnownArg::Literal(arg)).collect()
+    }
+
     #[test]
     fn args_start_with_empty_prefix() {
-        assert!(args_start_with(&["a".to_string()], &[]));
+        assert!(args_start_with(&known(&["a"]), &[]));
     }
 
     #[test]
     fn args_start_with_matching_prefix() {
-        assert!(args_start_with(
-            &["reset".to_string(), "--hard".to_string()],
-            &["reset"]
-        ));
-        assert!(args_start_with(
-            &["push".to_string(), "--force".to_string()],
-            &["push", "--force"]
-        ));
+        assert!(args_start_with(&known(&["reset", "--hard"]), &["reset"]));
+        assert!(args_start_with(&known(&["push", "--force"]), &["push", "--force"]));
     }
 
     #[test]
     fn args_start_with_non_matching() {
-        assert!(!args_start_with(&["status".to_string()], &["reset"]));
-        assert!(!args_start_with(
-            &["push".to_string()],
-            &["push", "--force"]
-        ));
+        assert!(!args_start_with(&known(&["status"]), &["reset"]));
+        assert!(!args_start_with(&known(&["push"]), &["push", "--force"]));
+    }
+
+    #[test]
+    fn a_hole_keeps_its_position_and_never_matches_a_literal_word() {
+        assert!(!args_start_with(&[KnownArg::Partial { leading: "" }, KnownArg::Literal("reset")], &["reset"]));
+        assert!(!args_start_with(&[KnownArg::Partial { leading: "reset" }], &["reset"]));
     }
 }

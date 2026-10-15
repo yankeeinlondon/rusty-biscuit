@@ -168,9 +168,11 @@ fn build_non_control_positional_action(
     if verb == "shell" {
         check_exact_positional_arity(verb, &args, 1, source_file, property_name)?;
         return Ok(LifecycleActionKind::Shell(ShellAction {
+            authored_command: None,
             command: args.into_iter().next().expect("arity checked"),
             on_error: None,
             pre_resolved: false,
+            template: None,
         }));
     }
 
@@ -430,9 +432,11 @@ pub(super) fn build_action_from_params(
         let on_error = params_map.remove("on_error");
         reject_extra_params(verb, &params_map, property, source_file)?;
         return Ok(LifecycleActionKind::Shell(ShellAction {
+            authored_command: None,
             command,
             on_error,
             pre_resolved: false,
+            template: None,
         }));
     }
 

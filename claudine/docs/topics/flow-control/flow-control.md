@@ -31,9 +31,9 @@ The pieces:
 | Directive | What it does |
 |-----------|--------------|
 | [`stop`](#stop) | Ends this event. The run carries on with the outcome it already has. |
-| [`skip`](#skip) | Skips the whole document before the agent runs. Only valid in `initialize`. |
+| [`skip`](#skip) | Skips the whole document or container before work starts. Only valid in `initialize`. |
 | [`error`](#error) | Fails the run with a reason. |
-| [`retry`](#retry) | Runs the prompt again from the beginning with a fresh agent session. |
+| [`retry`](#retry) | Runs the prompt with a fresh session, or reruns a container from its first child. |
 | [`resume`](#resume) | Sends a follow-up message to the same agent session. |
 | [`proxy`](#proxy) | Hands the run to a different prompt document as _proxy_ for itself. |
 | [`defer`](#defer) | **Planned:** suspends the whole run and schedules it to resume later, typically after a rate-limit window passes. |
@@ -56,11 +56,11 @@ failure:
 
 **Only the first directive reached fires.** Items run in order, and once one directive runs, later items are not reached. Put more specific conditions first.
 
-**Any event can use any directive, except `skip`.** A directive reacts to *state*: an error, a missing file, an environment variable, a frontmatter value. An error is just one kind of state, so `retry` or `resume` works in `success` as well as in `failure`. The one exception is `skip`, which only makes sense before anything has run and is therefore limited to `initialize`. Claudine checks this placement rule when it parses the document.
+**Ordinary events accept directives; cancellation is cleanup-only.** `cancelled` accepts only `stop` from the directive set; recovery in the following `finalize` is refused. Outside cancellation, `skip` is restricted to `initialize`. A directive reacts to *state*: an error, a missing file, an environment variable, a frontmatter value. An error is just one kind of state, so `retry` or `resume` works in `success` as well as in `failure`. `skip` only makes sense before anything has run and is therefore limited to `initialize`. Claudine checks this placement rule when it parses the document.
 
 **Some directives need something that may not exist yet.** An event can accept a directive and still be unable to carry it out. `resume` needs a live agent session, so it fails in `initialize`, where no agent has started. `break` needs an enclosing loop, which a document cannot know about until it runs, since the loop may belong to the group or sequence that placed it. `defer` needs the scheduler. The [Flow Control Reference](flow-control-reference.md#what-each-event-can-do-at-runtime) lists these cases. When they happen you get a clear, typed error at the moment the directive fires instead of a silent no-op.
 
-**`--dry-run` fires no lifecycle events.** A dry run never runs an event, so it never exercises a directive. It does parse and validate every event, so a malformed directive is still reported.
+**`--dry-run` fires no lifecycle events.** A dry run never runs an event, so it never exercises a directive. It does parse and validate every event, so a malformed directive is still reported. Composition shell expansions and sequence `shell:` tasks still run with real effects; dry-run is not a filesystem sandbox.
 
 ## Writing a directive
 
@@ -129,7 +129,7 @@ If neither `failure` nor `finalize` recovers the run with `retry`, `resume`, or 
 | Where the document runs | Outcome |
 |-------------------------|---------|
 | `compose` / `inline-compose` | Exits `1` and prints `Error: <reason>` once. |
-| A `sequence` step | The step fails; `fail_fast` decides whether later steps run. |
+| A `sequence` step | The failure reaches the enclosing container. Without recovery the sequence stops. |
 | A `loop:` iteration | The iteration fails; `fail_fast` decides whether the loop continues. |
 
 A recovery that works reports the recovered attempt's outcome, so a `retry` that succeeds exits `0` with no error left over from the earlier attempt. Messages that already fired, such as a `success` `info:` line, are kept. Without a reason, the error reads `lifecycle success error`.
@@ -140,7 +140,7 @@ A recovery that works reports the recovered attempt's outcome, so a `retry` that
 
 ## `retry`
 
-Runs the prompt again with a **fresh** agent session. The agent starts over and does not remember the previous attempt.
+Runs the prompt again with a **fresh** agent session. The agent starts over and does not remember the previous attempt. On a sequence or group, `retry` reruns all children after the old children settle; it preserves runtime mutations but clears abandoned child results. It does not repeat `initialize` or run the abandoned attempt’s `finalize`. Container `retry.with` values become runtime writes for the new attempt. Disk edits and external effects remain. See [Container lifecycle and recovery](sequences.md#container-lifecycle-and-recovery).
 
 ```yaml
 finalize:
@@ -310,7 +310,7 @@ initialize:
       - skip
 ```
 
-What comes back: only what the target wrote to disk. `prep` does not merge the target's frontmatter or runtime state into the caller; the caller reads any result the same way it reads any file. Inside a sequence the target's final output is appended to `outputs`, so `{{ last(outputs) }}` also works.
+What comes back: only what the target wrote to disk. `prep` does not merge the target's frontmatter or runtime state into the caller; the caller reads any result the same way it reads any file. Inside a sequence the target's final output is appended to `seq.outputs`, so `{{ last(seq.outputs) }}` also works.
 
 The target is prepared exactly as a `proxy` target is: its own `initialize`, its own validation, its own shell approval. Inside a sequence that approval happens at the sequence's preflight along with every other referenced document. A `prep` from `initialize` is allowed even though `initialize` itself is shell-free, because any shell runs inside the target under the target's approval.
 

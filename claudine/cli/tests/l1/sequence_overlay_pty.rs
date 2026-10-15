@@ -119,7 +119,7 @@ fn pty_sequence_prompt_dedupes_and_launches_all_steps() {
             "  - alpha\n",
             "  - beta\n",
             "---\n",
-            "Step {{state}} about {{topic}}.\n",
+            "Step {{seq}} about {{topic}}.\n",
         ),
     )
     .unwrap();
@@ -199,22 +199,10 @@ fn pty_sequence_prompt_dedupes_and_launches_all_steps() {
 }
 
 #[test]
-fn pty_sequence_step_overlay_satisfies_required_property() {
-    // The reserved overlay key `state` is set to each step's generated
-    // `step_state` **object** (`name`/`id`/`index`/`count`/…). A schema that
-    // requires `state` is therefore satisfied by every step's overlay, so the
-    // interactive prompt should NOT fire for `state` — only for the
-    // genuinely-missing `topic`.
-    //
-    // The schema declares `state` as `object`, not `string`: the
-    // string-coercion rule (`{{state}}` renders `state.name`) is a *render*
-    // contract, so the body below still composes "Step alpha", but the value
-    // being validated is the object itself.
-    //
-    // This exercises the review-5 contract that the per-step status
-    // report must honor the per-step effective override map: `state`
-    // must appear as Valid for every step (because the overlay supplies
-    // it) even while the user is being prompted for the missing `topic`.
+fn pty_sequence_authored_row_projection_satisfies_required_property() {
+    // Runtime roots do not satisfy a frontmatter schema implicitly. This
+    // document explicitly projects the typed row into its own `state` field;
+    // only the still-missing `topic` should be collected interactively.
     expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let fixture = CliProcessFixture::named("sequence-overlay-pty");
@@ -248,11 +236,12 @@ exit 0
             "$schema:\n",
             "  state: 'object(required)'\n",
             "  topic: 'string(required)'\n",
+            "state: '{{ seq }}'\n",
             "sequence:\n",
             "  - alpha\n",
             "  - beta\n",
             "---\n",
-            "Step {{state}}: topic={{topic}}\n",
+            "Step {{seq}}: topic={{topic}}\n",
         ),
     )
     .unwrap();
@@ -347,7 +336,7 @@ fn pty_sequence_status_report_honors_setter_supplied_required() {
             "  - alpha\n",
             "  - beta\n",
             "---\n",
-            "Step {{state}}: topic={{topic}} tier={{tier}}\n",
+            "Step {{seq}}: topic={{topic}} tier={{tier}}\n",
         ),
     )
     .unwrap();
@@ -477,7 +466,7 @@ fn pty_sequence_invalid_agent_shows_preprompt_before_review() {
             "  - alpha\n",
             "  - beta\n",
             "---\n",
-            "Step {{state}}.\n",
+            "Step {{seq}}.\n",
         ),
     )
     .unwrap();
@@ -535,7 +524,7 @@ fn pty_sequence_zero_installed_list_shows_preprompt_before_review() {
             "  - alpha\n",
             "  - beta\n",
             "---\n",
-            "Step {{state}}.\n",
+            "Step {{seq}}.\n",
         ),
     )
     .unwrap();
@@ -592,7 +581,7 @@ fn pty_sequence_stderr_tty_with_stdout_redirected_prompts() {
             "sequence:\n",
             "  - alpha\n",
             "---\n",
-            "Step {{state}}.\n",
+            "Step {{seq}}.\n",
         ),
     )
     .unwrap();

@@ -19,7 +19,6 @@ description: |-
     repairs under `repair_agent`; commits use the commit prompt's own default.
     Do not pass a `--<provider>` flag when running this sequence: a command-line
     provider overrides every step's agent.
-fail_fast: true
 sequence:
     # Implements the plan when the spec is not yet marked `implemented`. The
     # target commits each phase itself, so no stage/commit step follows it.

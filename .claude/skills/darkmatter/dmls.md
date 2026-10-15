@@ -125,6 +125,17 @@ DMLS projects Darkmatter's typed surfaces into LSP:
 - Expression completion, hover, and parse diagnostics inside
   expression-typed frontmatter.
 - Hover/documentation from typed descriptor catalogs.
+- Matching trigger payloads feed completion and hover as well as
+  diagnostics. The editor's property shape is
+  `EffectiveSchema::property_shape` (base → extensions → matching trigger
+  payloads in registry order → authored `$schema`, whole top-level property
+  replacement, as validation merges); `providers/frontmatter.rs::known_shape`
+  and `overlay/schema.rs::effective_shape` both call it. Trigger payload
+  shapes are retained at registry-scan time (`ResolvedPayload::shape`);
+  `EffectiveSchema::simplified` stays the authored `$schema` alone, which is
+  what "authored parameters" consumers (expression property-name completion,
+  Claudine's prompt parameters) read. DMLS reads triggers from disk only; it
+  registers no embedded bundle.
 - Workspace dependency tracking for referenced schemas and documents.
 
 Completion and validation must call the same schema-arm selection and parser

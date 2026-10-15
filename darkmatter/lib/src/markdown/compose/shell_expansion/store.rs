@@ -1,12 +1,15 @@
 //! Policy file discovery, loading, and persistence.
 
+use super::template::TemplateShape;
 use super::types::{
     ShellExpansionError, ShellExpansionOptions, ShellPolicyPaths, ShellRuleEntry, ShellRuleSet,
 };
 use crate::markdown::compose::ComposeSource;
 use biscuit_file::FileResolutionContext;
+use std::collections::HashSet;
+use std::fmt;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Resolves the paths to whitelist and blacklist policy files.
 ///
@@ -62,17 +65,33 @@ pub fn resolve_policy_paths(
     })
 }
 
-/// Loads a ruleset from a policy file.
-///
-/// The file format is line-based:
-/// - `exact <command>` - exact command match
-/// - `prefix <command>` - executable prefix match
-/// - Lines starting with `#` are comments
-/// - Blank lines are ignored
-/// - Malformed lines are ignored and emitted as `tracing::warn!` diagnostics
-/// - Malformed non-comment lines are skipped and logged with `tracing::warn!`
-///
-/// If the file does not exist, returns an empty ruleset (not an error).
+/// A policy line the loader skipped, with where it was.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PolicyLineWarning {
+    pub path: PathBuf,
+    /// 1-based line number.
+    pub line: usize,
+    /// The trimmed line as written.
+    pub text: String,
+    pub reason: String,
+}
+
+impl fmt::Display for PolicyLineWarning {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Ignoring malformed policy line at {}:{}: {} ('{}')",
+            self.path.display(),
+            self.line,
+            self.reason,
+            self.text
+        )
+    }
+}
+
+/// Loads a ruleset from a policy file, emitting each skipped line as a
+/// `tracing::warn!` diagnostic. See [`load_ruleset_with_warnings`] for the
+/// format.
 ///
 /// ## Examples
 ///
@@ -83,9 +102,36 @@ pub fn resolve_policy_paths(
 /// let ruleset = load_ruleset(Path::new("/path/to/whitelist")).unwrap();
 /// ```
 pub fn load_ruleset(path: &Path) -> Result<ShellRuleSet, ShellExpansionError> {
-    // If file doesn't exist, return empty ruleset
+    let (ruleset, warnings) = load_ruleset_with_warnings(path)?;
+    for warning in &warnings {
+        tracing::warn!("{warning}");
+    }
+    Ok(ruleset)
+}
+
+/// Loads a ruleset from a policy file and returns the lines it skipped.
+///
+/// The file format is line-based UTF-8:
+/// - `exact <command>` - exact command match
+/// - `prefix <command>` - executable prefix match
+/// - `template <shape>` - argument-list shape with typed `{{ type }}` holes
+///   (see [`TemplateShape::parse_rule`])
+/// - Lines starting with `#` are comments
+/// - Blank lines are ignored
+/// - Any other line, and a `template` line whose shape is rejected, is skipped
+///   and reported with its file and line; the other rules still load
+///
+/// A repeated rule loads once; `template` rules compare as parsed shapes.
+///
+/// ## Errors
+///
+/// A missing file is an empty ruleset. An unreadable file or invalid UTF-8 is
+/// [`ShellExpansionError::PolicyIo`], never an empty ruleset.
+pub fn load_ruleset_with_warnings(
+    path: &Path,
+) -> Result<(ShellRuleSet, Vec<PolicyLineWarning>), ShellExpansionError> {
     if !path.exists() {
-        return Ok(ShellRuleSet::default());
+        return Ok((ShellRuleSet::default(), Vec::new()));
     }
 
     let content = std::fs::read_to_string(path).map_err(|e| ShellExpansionError::PolicyIo {
@@ -94,40 +140,44 @@ pub fn load_ruleset(path: &Path) -> Result<ShellRuleSet, ShellExpansionError> {
     })?;
 
     let mut entries = Vec::new();
+    let mut seen = HashSet::new();
+    let mut warnings = Vec::new();
 
-    for line in content.lines() {
+    for (index, line) in content.lines().enumerate() {
         let trimmed = line.trim();
 
-        // Skip blank lines and comments
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
 
-        // Parse "exact <command>" or "prefix <command>"
-        if let Some(command) = trimmed.strip_prefix("exact ") {
-            entries.push(ShellRuleEntry::Exact(command.to_string()));
+        let entry = if let Some(command) = trimmed.strip_prefix("exact ") {
+            Ok(ShellRuleEntry::Exact(command.to_string()))
         } else if let Some(command) = trimmed.strip_prefix("prefix ") {
-            entries.push(ShellRuleEntry::Prefix(command.to_string()));
+            Ok(ShellRuleEntry::Prefix(command.to_string()))
+        } else if let Some(shape) = trimmed.strip_prefix("template ") {
+            TemplateShape::parse_rule(shape.trim())
+                .map(ShellRuleEntry::Template)
+                .map_err(|error| error.to_string())
         } else {
-            // Warn about malformed lines that don't match expected format
-            tracing::warn!(
-                "Ignoring malformed policy line in {}: '{}'",
-                path.display(),
-                trimmed
-            );
+            Err("expected 'exact <command>', 'prefix <executable>', or 'template <shape>'".to_string())
+        };
+
+        match entry {
+            Ok(entry) => {
+                if seen.insert(entry.clone()) {
+                    entries.push(entry);
+                }
+            }
+            Err(reason) => warnings.push(PolicyLineWarning {
+                path: path.to_path_buf(),
+                line: index + 1,
+                text: trimmed.to_string(),
+                reason,
+            }),
         }
     }
 
-    // Deduplicate entries
-    entries.sort_by(|a, b| match (a, b) {
-        (ShellRuleEntry::Exact(a), ShellRuleEntry::Exact(b)) => a.cmp(b),
-        (ShellRuleEntry::Prefix(a), ShellRuleEntry::Prefix(b)) => a.cmp(b),
-        (ShellRuleEntry::Exact(_), ShellRuleEntry::Prefix(_)) => std::cmp::Ordering::Less,
-        (ShellRuleEntry::Prefix(_), ShellRuleEntry::Exact(_)) => std::cmp::Ordering::Greater,
-    });
-    entries.dedup();
-
-    Ok(ShellRuleSet { entries })
+    Ok((ShellRuleSet { entries }, warnings))
 }
 
 /// Appends an exact-match rule to the whitelist file.
@@ -219,6 +269,49 @@ pub fn append_blacklist_prefix(
     executable: &str,
 ) -> Result<(), ShellExpansionError> {
     append_rule(&paths.blacklist, "prefix", executable)
+}
+
+/// Appends a `template` rule to the whitelist file unless an equal shape is
+/// already there.
+///
+/// ## Errors
+///
+/// [`ShellExpansionError::PolicyIo`] when the file cannot be read or written,
+/// or when the shape's rule text would not read back as the same shape.
+pub fn append_whitelist_template(
+    paths: &ShellPolicyPaths,
+    shape: &TemplateShape,
+) -> Result<(), ShellExpansionError> {
+    append_template_rule(&paths.whitelist, shape)
+}
+
+/// Appends a `template` rule to the blacklist file unless an equal shape is
+/// already there. Errors as [`append_whitelist_template`].
+pub fn append_blacklist_template(
+    paths: &ShellPolicyPaths,
+    shape: &TemplateShape,
+) -> Result<(), ShellExpansionError> {
+    append_template_rule(&paths.blacklist, shape)
+}
+
+/// Writes the canonical rule text, deduplicated by parsed shape. Only the
+/// shape is written: approval types, never a placeholder's value.
+fn append_template_rule(path: &Path, shape: &TemplateShape) -> Result<(), ShellExpansionError> {
+    let text = shape.canonical_text();
+    if TemplateShape::parse_rule(&text).as_ref() != Ok(shape) {
+        return Err(ShellExpansionError::PolicyIo {
+            path: path.to_path_buf(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("template rule '{text}' would not read back as the approved shape"),
+            ),
+        });
+    }
+    let (existing, _) = load_ruleset_with_warnings(path)?;
+    if existing.entries.iter().any(|entry| matches!(entry, ShellRuleEntry::Template(rule) if rule == shape)) {
+        return Ok(());
+    }
+    append_rule(path, "template", &text)
 }
 
 /// Internal helper to append a rule to a policy file.

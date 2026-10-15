@@ -527,7 +527,12 @@ impl ResolvingLookup<'_> {
     ) -> Option<
         Result<super::super::expression::ResolvedBinding, super::super::expression::ExpressionError>,
     > {
-        self.resolution_context.host_globals.as_ref()?.resolve(path)
+        let globals = self.resolution_context.host_globals.as_ref()?;
+        let root = path.split('.').next().unwrap_or(path);
+        if globals.prefers_document(root) && self.state.data().contains_key(root) {
+            return None;
+        }
+        globals.resolve(path)
     }
 }
 
@@ -555,11 +560,7 @@ impl super::super::expression::EvaluationLookup for ResolvingLookup<'_> {
     }
 
     fn format_resolved(&self, path: &str, value: &Value) -> String {
-        let root = path.split('.').next().unwrap_or(path);
-        match &self.resolution_context.host_globals {
-            Some(globals) if globals.declares(root) => super::super::expression::default_format(value),
-            _ => super::super::expression::EvaluationLookup::format_resolved(self.state, path, value),
-        }
+        super::super::expression::EvaluationLookup::format_resolved(self.state, path, value)
     }
 
     fn get_string(&self, path: &str) -> String {

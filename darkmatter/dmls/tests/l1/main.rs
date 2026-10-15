@@ -9,6 +9,7 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+mod claudine_schema_discovery;
 mod content_policy_baseline;
 mod context_construction_guard;
 mod core_schema_types;

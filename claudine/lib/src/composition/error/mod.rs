@@ -289,6 +289,10 @@ pub enum CompositionError {
     #[error("frontmatter `interactive` must be a boolean (true/false), got {0}")]
     InteractiveHintWrongType(String),
 
+    /// The `yolo` frontmatter property is not a boolean.
+    #[error("frontmatter `yolo` must be a boolean (true/false), got {0}")]
+    YoloHintWrongType(String),
+
     /// The `agent` frontmatter hint matches multiple providers.
     #[error("agent hint `{hint}` is ambiguous; matches: {matches}")]
     AgentHintAmbiguous {
@@ -678,13 +682,13 @@ pub enum CompositionError {
         replacement: String,
     },
 
-    /// A frontmatter document uses lifecycle or loop grammar that has been
-    /// removed.
+    /// A frontmatter document uses removed lifecycle, loop, or container grammar.
     ///
     /// One variant covers every retired spelling: the `stack:` key, the
     /// `action:` item aggregator (including the `{action: verb, …}`
     /// discriminator map), `say_first`, the communication `message`/`sound`/
-    /// `route` parameters, and reads of the five `_loop_*` names. It is not
+    /// `route` parameters, task `setup`/`teardown`, group `execution`, sequence
+    /// `fail_fast`, misplaced container events, and reads of the five `_loop_*` names. It is not
     /// `Lifecycle*`-prefixed because a `_loop_*` read in a document body is not
     /// lifecycle grammar. There is no acceptance period: the old spelling never
     /// runs.
@@ -1209,6 +1213,43 @@ pub enum CompositionError {
         /// registered Claudine diagnostic, so it never changes the rendering.
         #[source]
         source: Option<Box<MarkdownError>>,
+    },
+
+    /// A lifecycle `shell` command or `set` value approved by its typed shape
+    /// was refused when its action executed, before anything started: a
+    /// placeholder's value was missing or rejected by its declared type, the
+    /// filled command matched a blacklist, or a program needs an interpreter.
+    ///
+    /// An input and authorization error, not a command failure, so `no_error`
+    /// never suppresses it. The message names the placeholder, its type, and
+    /// the authored command, never a value.
+    #[error(
+        "lifecycle shell command `{command}` at `{property}` was refused before it ran: {message} \
+         ({source_path})",
+        source_path = biscuit_file::to_portable_string(source_path)
+    )]
+    LifecycleShellTemplateRefused {
+        /// The prompt file whose lifecycle held the command.
+        source_path: PathBuf,
+        /// Authored lifecycle path, e.g. `"start[0].shell"`.
+        property: String,
+        /// The command as authored, placeholders included.
+        command: String,
+        /// Why it was refused, without any value.
+        message: String,
+        /// Darkmatter's typed `MissingValue`, `TemplateValueRejected`,
+        /// `Blacklisted`, or `TemplateTarget`.
+        #[source]
+        source: Box<MarkdownError>,
+    },
+
+    /// Cancellation cleanup cannot start a new attempt or transfer ownership.
+    #[error("lifecycle `{action}` cannot recover a cancelled primitive ({source_path})", source_path = biscuit_file::to_portable_string(source_path))]
+    LifecycleCancellationRecovery {
+        /// Document whose cleanup requested recovery.
+        source_path: PathBuf,
+        /// Refused recovery directive.
+        action: String,
     },
 
     /// A `failure` stack requested `resume(...)` but the agentic loop did
@@ -1742,10 +1783,10 @@ pub enum CompositionError {
 
     /// A `prompt:` task referenced a document that itself declares `sequence:`.
     ///
-    /// Nested sequences are out of scope in v1 (spec → *Static Preflight*).
+    /// A sequence document needs an explicit container executable.
     #[error(
-        "nested sequences are not supported: `{path}` declares `sequence:` but is \
-         referenced as a prompt task from `{referenced_from}`"
+        "`{path}` declares `sequence:` but is referenced as a prompt task from \
+         `{referenced_from}`; use `sequence: <file>` instead"
     )]
     SequenceNestedSequence {
         /// The referenced prompt document.
@@ -1857,18 +1898,22 @@ pub enum CompositionError {
         second: String,
     },
 
-    /// A task's shell command references a value that does not exist at
-    /// preflight, so its approved bytes could never equal its executed bytes.
+    /// A task's shell command reads a value no approval can cover: `err`,
+    /// `timing`, or `current`, which exist only once an event fires, or
+    /// `group` outside any group. The late values a sequence produces
+    /// (`outputs`, `loop`, and `group` inside a group) are approved as
+    /// templates instead.
     #[error(
-        "shell command `{command}` in {task} references `{root}`, which is not available at \
-         preflight; shell commands are approved before the sequence starts, so only \
-         early-binding values (`state`, `params`, `fm.*`, `ctx.*`, `env.*`) may be used. \
-         Route work that consumes prior output through a `prompt` or `side_effect` task"
+        "shell command `{command}` in {task} references `{root}`, which is not available to a \
+         sequence shell command; shell commands are approved before the sequence starts, so \
+         they may read early-binding values (`state`, `params`, `fm.*`, `ctx.*`, `env.*`) and \
+         the values earlier steps produce (`outputs`, `loop`, and `group` inside a group)"
     )]
     SequenceShellLateBinding {
         /// The authored command.
         command: String,
-        /// The offending root (`outputs`, `err`, `timing`, `group`, `current`).
+        /// The offending root (`err`, `timing`, `current`, or `group` outside
+        /// a group).
         root: String,
         /// A label locating the task.
         task: String,
@@ -1900,8 +1945,9 @@ pub enum CompositionError {
         task: String,
     },
 
-    /// A task's shell command failed early-binding resolution at preflight.
-    #[error("shell command `{command}` in {task} could not be resolved at preflight: {message}")]
+    /// A task's shell command failed approval-time resolution or runtime
+    /// template preparation. A typed lower-layer refusal remains its source.
+    #[error("shell command `{command}` in {task} could not be prepared: {message}")]
     SequenceShellResolution {
         /// The authored command.
         command: String,
@@ -1914,13 +1960,29 @@ pub enum CompositionError {
         source: Option<Box<MarkdownError>>,
     },
 
+    /// A late value a task's shell command reads was missing or invalid when
+    /// the task was reached, so the task failed before any of its commands
+    /// ran. Earlier steps' effects stand. The value is never shown.
+    #[error("shell command `{command}` in {task} cannot run: {message}")]
+    SequenceShellLateValue {
+        /// The authored command.
+        command: String,
+        /// A label locating the task.
+        task: String,
+        /// Which placeholder failed and why, without its value.
+        message: String,
+        /// Darkmatter's typed `MissingValue` or `TemplateValueRejected`.
+        #[source]
+        source: Box<MarkdownError>,
+    },
+
     /// A task's preflight-approved shell command resolves to different text
     /// under the environment its own document captured.
     ///
-    /// Sequence preflight approves exact text resolved under the launch
-    /// environment, before any later task captures its own. A task whose
-    /// captured environment changes that text is refused before it runs: an
-    /// approval authorizes only the text it approved.
+    /// Sequence preflight resolves a command whose values all exist at
+    /// approval under the launch environment, before any later task captures
+    /// its own. A task whose captured environment changes that text is refused
+    /// before it runs: resolved text never authorizes other text.
     #[error(
         "shell command `{command}` in {task} was approved at sequence preflight as `{approved}`, \
          but this task's environment resolves it to `{resolved}` ({changed}); a preflight \
@@ -2078,8 +2140,8 @@ pub enum CompositionError {
 
     /// A task parameter targets a reserved key.
     #[error(
-        "parameter `{key}` in {task} targets a reserved key; `state`, `previous`, `next`, \
-         `outputs`, and `sequence_id` are executor-owned views"
+        "parameter `{key}` in {task} targets a reserved key; \
+         `seq`, `group`, and `loop` are executor-owned views"
     )]
     SequenceTaskParamReserved {
         /// A label locating the task.
@@ -3414,6 +3476,9 @@ impl CompositionError {
             }
             CompositionError::ModelHintWrongType(_) => {
                 Some(FrontmatterHighlight::Property("model".to_string()))
+            }
+            CompositionError::YoloHintWrongType(_) => {
+                Some(FrontmatterHighlight::Property("yolo".to_string()))
             }
             CompositionError::InteractiveHintWrongType(_) => {
                 Some(FrontmatterHighlight::Property("interactive".to_string()))

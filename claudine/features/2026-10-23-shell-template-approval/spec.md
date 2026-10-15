@@ -28,7 +28,8 @@ $schema:
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
-review_iterations: 0
+review_iterations: 4
+completed: true
 human_review: false
 pipeline_step: 13
 depends-on:
@@ -36,6 +37,7 @@ depends-on:
 related:
     - 2026-10-24-sequence-containers
     - 2026-10-25-loops-and-flow-control
+implemented: true
 ---
 
 # Shell template approval

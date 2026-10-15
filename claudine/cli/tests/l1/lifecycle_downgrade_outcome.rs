@@ -364,14 +364,12 @@ fn downgrading_step(fixture: &CliProcessFixture) {
     );
 }
 
-fn sequence_doc(fail_fast: bool) -> String {
-    format!(
-        "---\nfail_fast: {fail_fast}\nsequence:\n    - name: first\n      prompt: \"./step.md\"\n    - name: second\n      side_effect: {{ append_line: [\"events.log\", \"second step\"] }}\n---\n"
-    )
+fn sequence_doc(_fail_fast: bool) -> String {
+    "---\nsequence:\n    - name: first\n      prompt: \"./step.md\"\n    - name: second\n      side_effect: { append_line: [\"events.log\", \"second step\"] }\n---\n".to_string()
 }
 
 #[test]
-fn sequence_step_downgrade_halts_under_fail_fast_true() {
+fn sequence_step_downgrade_halts_on_unhandled_failure() {
     let fixture = fixture("downgrade-sequence-fail-fast");
     downgrading_step(&fixture);
     let doc = write_doc(&fixture, "sequence.md", &sequence_doc(true));
@@ -390,30 +388,6 @@ fn sequence_step_downgrade_halts_under_fail_fast_true() {
     assert_eq!(run.code, Some(1), "{}", run.output);
     // The step-failure block is the one canonical rendering: it appears once,
     // carries the reason once, and no separate `Error:` line repeats it.
-    assert_eq!(run.count("step 1/2 failed"), 1, "{}", run.output);
-    assert_eq!(run.error_line_count(), 0, "{}", run.output);
-    assert_eq!(run.reason_count(), 1, "{}", run.output);
-}
-
-#[test]
-fn sequence_step_downgrade_continues_and_fails_under_fail_fast_false() {
-    let fixture = fixture("downgrade-sequence-continue");
-    downgrading_step(&fixture);
-    let doc = write_doc(&fixture, "sequence.md", &sequence_doc(false));
-
-    let run = run(
-        &fixture,
-        &["sequence", "--claude", doc.to_str().expect("UTF-8 path")],
-    );
-
-    assert_eq!(
-        lines_of(&fixture.cwd().join("events.log")),
-        ["step success", "second step"],
-        "the second step still runs: {}",
-        run.output
-    );
-    assert_eq!(run.count("1 succeeded, 1 failed"), 1, "{}", run.output);
-    assert_eq!(run.code, Some(1), "{}", run.output);
     assert_eq!(run.count("step 1/2 failed"), 1, "{}", run.output);
     assert_eq!(run.error_line_count(), 0, "{}", run.output);
     assert_eq!(run.reason_count(), 1, "{}", run.output);

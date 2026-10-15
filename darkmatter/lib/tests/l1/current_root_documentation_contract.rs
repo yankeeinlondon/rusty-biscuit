@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 
 /// Claudine's per-composition-run rule, which every Claudine page that
 /// explains binding time states in exactly these words.
-const RUN_RULE: &str = "**`ctx` is evaluated once for each composition run.** A composition run is one document being composed and executed: a document invoked directly or adopted through `proxy`, each sequence step (each task of a serial group; a parallel group shares one capture until a sibling re-enters), each loop iteration, and each retry or resume attempt. Transclusion does not start a run: a document and every file it includes share one `ctx`. `current` is observed once per lifecycle event.";
+const RUN_RULE: &str = "**`ctx` is evaluated once for each composition run.** A composition run is one document being composed and executed: a document invoked directly or adopted through `proxy`, each sequence step (a concurrent group shares one capture until a sibling re-enters), each loop iteration, and each retry or resume attempt. Transclusion does not start a run: a document and every file it includes share one `ctx`. `current` is observed once per lifecycle event.";
 
 /// Workspace-relative `/`-separated page path, phrases it must contain.
 const PAGES: &[(&str, &[&str])] = &[

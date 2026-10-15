@@ -556,10 +556,14 @@ fn run_action(
         ReadStrategy::Separate { stdout, stderr } => {
             let stdout_bytes = join_output_thread_raw(stdout, "stdout", ctx)?;
             let stderr_bytes = join_output_thread_raw(stderr, "stderr", ctx)?;
-            (
-                String::from_utf8_lossy(&stdout_bytes).to_string(),
-                String::from_utf8_lossy(&stderr_bytes).to_string(),
-            )
+            let stdout = String::from_utf8_lossy(&stdout_bytes).into_owned();
+            let stderr = String::from_utf8_lossy(&stderr_bytes).into_owned();
+            match (action.redirection.stdout, action.redirection.stderr) {
+                (StdoutTarget::ToStderr, StderrTarget::ToStdout) => (stderr, stdout),
+                (StdoutTarget::ToStderr, _) => (String::new(), stdout),
+                (_, StderrTarget::ToStdout) => (stderr, String::new()),
+                _ => (stdout, stderr),
+            }
         }
     };
 
@@ -608,16 +612,16 @@ struct CaptureHandles {
 
 /// Configures the child's stdout and stderr based on the redirection.
 ///
-/// For `2>&1` and `>&2` we create a single pipe and wire both child streams
-/// to it so the OS preserves emission order. For all other redirections we
-/// fall back to separate `Stdio::piped()` / `Stdio::null()` channels.
+/// Streams sharing an original destination use one pipe to preserve emission
+/// order. A later null redirect leaves its sibling on that original destination;
+/// separate pipes retain that routing without reconnecting the nulled stream.
 fn configure_streams(
     cmd: &mut Command,
     redir: &RedirectionConfig,
 ) -> std::io::Result<CaptureHandles> {
     let merge = match (redir.stdout, redir.stderr) {
-        (StdoutTarget::ToStderr, _) => Some(MergeTarget::Stderr),
-        (_, StderrTarget::ToStdout) => Some(MergeTarget::Stdout),
+        (StdoutTarget::ToStderr, StderrTarget::Capture) => Some(MergeTarget::Stderr),
+        (StdoutTarget::Capture, StderrTarget::ToStdout) => Some(MergeTarget::Stdout),
         _ => None,
     };
 
@@ -633,23 +637,21 @@ fn configure_streams(
     }
 
     match redir.stdout {
-        StdoutTarget::Capture => {
+        StdoutTarget::Capture | StdoutTarget::ToStderr => {
             cmd.stdout(std::process::Stdio::piped());
         }
         StdoutTarget::Null => {
             cmd.stdout(std::process::Stdio::null());
         }
-        StdoutTarget::ToStderr => unreachable!("handled by merge branch"),
     }
 
     match redir.stderr {
-        StderrTarget::Capture => {
+        StderrTarget::Capture | StderrTarget::ToStdout => {
             cmd.stderr(std::process::Stdio::piped());
         }
         StderrTarget::Null => {
             cmd.stderr(std::process::Stdio::null());
         }
-        StderrTarget::ToStdout => unreachable!("handled by merge branch"),
     }
 
     Ok(CaptureHandles {

@@ -1,16 +1,16 @@
-//! Just-in-time serial execution (Phase 2) for the sequence orchestrator.
+//! Just-in-time ordered execution for the sequence orchestrator.
 //!
 //! Each step is composed **at its turn**, against the live file on disk and the
 //! runtime layers as they stand at that moment. That ordering is the contract:
 //! step 3 sees step 2's inline-compose write-back, step 2's `set` mutations, and
-//! step 2's committed `outputs` entry, none of which exist when the sequence
+//! step 2's committed `seq.outputs` entry, none of which exist when the sequence
 //! starts. Nothing here re-resolves the *step list* — dynamic sources snapshot
 //! once during static preflight.
 //!
 //! A step either runs the source document's own body (the default) or the one
 //! executable its declaration named, which replaces the body entirely. Both
-//! paths report the same [`SequenceStepResult`], so `fail_fast`, the summary,
-//! and the interrupt story do not branch on task kind.
+//! paths report the same [`SequenceStepResult`] for container failure handling,
+//! summaries, and interruption.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -67,7 +67,7 @@ pub(super) struct SequenceRunContext<'a> {
     pub(super) compose: &'a StepComposeContext<'a>,
     /// Every command approved during the sequence-wide validation pass, so a
     /// step's just-in-time prepare never stops to prompt.
-    pub(super) approved: HashSet<String>,
+    pub(super) approved: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
     /// User `--set` overrides after the single interactive collection pass.
     pub(super) user_set_overrides: Option<Value>,
     pub(super) interrupted: &'a Arc<AtomicBool>,
@@ -145,6 +145,7 @@ pub(super) enum StepOutcome {
 pub(super) fn run_sequence_steps(
     run: &SequenceRunContext<'_>,
     perf_accumulator: &mut Option<crate::perf::SequencePerfAccumulator>,
+    runtime_state: &Arc<RuntimeState>,
 ) -> Result<(SequenceRunSummary, bool)> {
     let total_steps = run.plan.steps.len();
     let mut summary = SequenceRunSummary {
@@ -154,13 +155,9 @@ pub(super) fn run_sequence_steps(
         steps: Vec::with_capacity(total_steps),
     };
 
-    // One cell for the whole sequence: `outputs` accumulates across steps and a
-    // `set` from step 1 is still visible in step 5.
-    let runtime_state = std::sync::Arc::new(RuntimeState::new());
 
     let mut interrupt_observed = false;
     for step_index in 0..total_steps {
-        crate::budget::enter_stage(&run.plan.steps[step_index].name);
         if run.interrupted.load(Ordering::SeqCst) {
             interrupt_observed = true;
             if let Some(acc) = perf_accumulator.as_mut() {
@@ -169,6 +166,9 @@ pub(super) fn run_sequence_steps(
             break;
         }
         let step = &run.plan.steps[step_index];
+        runtime_state.set_sequence_binding(claudine::composition::lifecycle::bindings::SequenceBinding::step(
+            &claudine::composition::sequence::build_step_overlay(run.plan, step_index), Vec::new(),
+        ).to_value());
 
         // Dry-run: separate each document's rendered metadata block with a
         // full-width horizontal rule on stderr. The per-document render happens
@@ -202,7 +202,7 @@ pub(super) fn run_sequence_steps(
         }
 
         let start = std::time::Instant::now();
-        let outcome = run_one_step(run, step_index, &runtime_state);
+        let outcome = run_one_step(run, step_index, runtime_state);
         let duration = start.elapsed();
         let interrupted_step = matches!(outcome, StepOutcome::Interrupted { .. });
 
@@ -235,11 +235,7 @@ pub(super) fn run_sequence_steps(
                 tasks,
             } => (
                 false,
-                Some(if crate::budget::stopped_by_exhaustion() {
-                    "stopped: execution budget exhausted".to_string()
-                } else {
-                    "interrupted by SIGINT".to_string()
-                }),
+                Some("interrupted by SIGINT".to_string()),
                 None,
                 None,
                 agent_perf,
@@ -324,7 +320,7 @@ fn run_one_step(
     // Dry-run composes against the *initial* state so late-binding references
     // render exactly as a first-step composition would see them.
     let snapshot = (!run.shared.dry_run).then(|| runtime_state.snapshot());
-    let set_overrides = jit::step_set_overrides(
+    let mut set_overrides = jit::step_set_overrides(
         run.plan,
         step_index,
         run.user_set_overrides.as_ref(),
@@ -339,13 +335,27 @@ fn run_one_step(
         .steps
         .get(step_index)
         .is_some_and(|step| step.task.is_some());
+    if !has_executable {
+        super::container::mask_body_events(&mut set_overrides);
+    }
     // Each step is a document of its own: it captures its environment here,
     // once, before anything of it is prepared, and every stage of it — its
     // composition, `initialize`, task, prompt document, loop iterations,
     // retry/resume, handlers, and `finalize` — reads that one map. The run
     // context below carries the step's view, so nothing downstream reaches
     // back to the launch document's.
-    let step_invocation = run.prep_context.invocation.capture_document();
+    // Caller layers and lexical sequence bindings differ per step, so pre-warm
+    // treats their keys as late in every document the step prepares.
+    let step_invocation = run
+        .prep_context
+        .invocation
+        .capture_document()
+        .with_prewarm_injected_keys(
+            claudine::composition::sequence::reserved::ROOT_OVERLAY_KEYS
+                .iter()
+                .map(|key| (*key).to_string())
+                .chain(set_overrides.values().keys().cloned()),
+        );
     // The planned target as this step's own map selects its model.
     let target = run
         .resolved_targets
@@ -374,7 +384,12 @@ fn run_one_step(
     // One composition run per step: the step's composition of this document,
     // its task, and the task's prompt document observe one view of Git state.
     let step_run = claudine::invocation_context::RunEvidence::default();
+    let deferred = super::jit::sequence_shell_roots(step_index);
     let step_compose = StepComposeContext {
+        lifecycle_group: None,
+        prepared_context: None,
+        document_epoch: None,
+        deferred_shell_roots: deferred,
         run_evidence: Some(&step_run),
         invocation: &step_prep_context.invocation,
         file_resolution_context: step_prep_context.source_context.file_resolution_context(),
@@ -435,6 +450,8 @@ fn run_one_step(
     );
     // The step's own scope, kept by any document a handoff adopts within it.
     let step_scope = StepScope {
+        shell_approvals: Some(run.approved.clone()),
+        lifecycle_group: None,
         caller_overrides: set_overrides,
         runtime_state: Arc::clone(runtime_state),
         suppress_output_commit: false,
@@ -508,9 +525,8 @@ fn run_one_step(
 ///
 /// This is the mid-sequence human-in-the-loop case the spec warns authors to
 /// design away, and it behaves exactly like direct compose: interactive
-/// collection on a TTY, a typed failure otherwise. The failure is a failure of
-/// *this step* — preflight already passed, so `fail_fast` governs what happens
-/// next rather than the abort-all rule.
+/// collection on a TTY, a typed failure otherwise. A failure enters the
+/// enclosing container's failure lifecycle and stops the sequence if unhandled.
 #[allow(clippy::result_large_err)]
 fn compose_with_late_collection(
     run: &SequenceRunContext<'_>,
@@ -613,6 +629,7 @@ fn build_body_request(
         silent: shared.silent,
         env_overrides,
         shared_approval_cache: Some(Arc::clone(&run.compose.approval_cache)),
+        closed_shell_approvals: Some(run.approved.clone()),
         installed_snapshot: Some(run.prep_context.installed_snapshot.clone()),
         invocation_context: Some(run.prep_context.invocation.clone()),
         source_context: Some(run.prep_context.source_context.clone()),

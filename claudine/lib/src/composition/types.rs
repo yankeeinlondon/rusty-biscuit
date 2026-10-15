@@ -1,6 +1,6 @@
 //! Core types for composition workflows.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -15,12 +15,14 @@ use super::launch_workspace::LaunchWorkspaceContext;
 use super::lifecycle::LifecycleConfig;
 use crate::diagnostics::DiagnosticSnapshot;
 use crate::harness::shell::CachedApprovalDecision;
+use darkmatter::markdown::compose::shell_expansion::template::{ApprovalKey, ShellPreApprovals};
 use crate::provider::Provider;
 
 /// Shared approval cache that can be reused across composition runs
 /// (e.g. steps of one sequence) so that previously approved commands
-/// do not prompt again.
-pub type SharedApprovalCache = Arc<Mutex<HashMap<String, CachedApprovalDecision>>>;
+/// do not prompt again. Keys are tagged with their execution mode and
+/// policy root.
+pub type SharedApprovalCache = Arc<Mutex<HashMap<ApprovalKey, CachedApprovalDecision>>>;
 
 /// Which composition mode to use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -472,6 +474,8 @@ pub struct EffectiveSelectionHints {
     /// `None` means absent or explicitly `null`, preserving today's default
     /// non-interactive behavior.
     pub interactive: Option<bool>,
+    /// Provider permission bypass requested by this document.
+    pub yolo: Option<bool>,
     /// `agent` strings that did not match the known provider catalog.
     ///
     /// Kept separate from [`Self::agent`] so existing resolution code can
@@ -486,6 +490,13 @@ pub struct EffectiveSelectionHints {
     /// this to route a single-entry all-invalid list to the zero-installed
     /// list state rather than the single-invalid state.
     pub agent_was_list: bool,
+}
+
+impl EffectiveSelectionHints {
+    /// Explicit CLI/environment intent wins over the document's default.
+    pub fn yolo_enabled(&self, cli_yolo: bool) -> bool {
+        cli_yolo || self.yolo.unwrap_or(false)
+    }
 }
 
 /// The caller's input layers, reapplied at every canonical preparation of
@@ -509,6 +520,8 @@ pub struct CallerInputLayers {
     /// Top-level keys of [`set_overrides`](Self::set_overrides) that are data
     /// (see [`PrepareOptions::data_override_keys`][super::PrepareOptions]).
     pub data_override_keys: std::collections::BTreeSet<String>,
+    /// Complete lexical sequence root, carried outside frontmatter.
+    pub sequence_binding: Option<serde_json::Value>,
     /// Immutable raw caller overrides paired with their launch-time origins.
     pub caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
     /// Launch-area directory that anchors caller-supplied file references.
@@ -516,13 +529,13 @@ pub struct CallerInputLayers {
     /// The request's file-resolution context, captured before the first
     /// source is resolved.
     pub file_resolution_context: biscuit_file::FileResolutionContext,
-    /// Shell commands approved during the original pre-flight discovery.
-    /// Shell commands approved so far in this invocation.
+    /// Shell commands approved so far in this invocation: resolved bytes and
+    /// template shapes.
     ///
     /// Grows as a fresh document's own pre-flight approves its own commands
-    /// (see [`add_approved_commands`][Self::add_approved_commands]); an exact
-    /// already-approved command never re-prompts.
-    pub pre_approved_commands: Option<HashSet<String>>,
+    /// (see [`add_approved_commands`][Self::add_approved_commands]); an
+    /// already-approved command or shape never re-prompts.
+    pub pre_approved_commands: Option<ShellPreApprovals>,
     /// Composition env overrides (e.g. `AGENT`, `MODEL`, `YOLO`) injected into
     /// the [`ComposeContext`][darkmatter::markdown::compose::ComposeContext] for
     /// the run.
@@ -546,6 +559,7 @@ impl CallerInputLayers {
         Self {
             set_overrides: None,
             data_override_keys: Default::default(),
+            sequence_binding: None,
             caller_input_records: Default::default(),
             file_ref_fallback_dir: None,
             file_resolution_context,
@@ -593,6 +607,7 @@ impl CallerInputLayers {
         Self {
             set_overrides: options.set_overrides.clone(),
             data_override_keys: options.data_override_keys.clone(),
+            sequence_binding: options.sequence_binding.clone(),
             caller_input_records: options.caller_input_records.clone(),
             file_ref_fallback_dir: options.file_ref_fallback_dir.clone(),
             file_resolution_context: options.file_resolution_context.clone(),
@@ -605,10 +620,12 @@ impl CallerInputLayers {
     /// The overrides with the origin of each key.
     pub fn layered_overrides(&self) -> super::LayeredOverrides {
         super::LayeredOverrides::from_parts(self.set_overrides.as_ref(), &self.data_override_keys)
+            .with_sequence_value(self.sequence_binding.clone())
     }
 
     /// Replace the overrides and their origins together.
     pub fn set_layered_overrides(&mut self, overrides: super::LayeredOverrides) {
+        self.sequence_binding = overrides.sequence_value().cloned();
         self.data_override_keys = overrides.data_keys().clone();
         self.set_overrides = Some(overrides.to_value());
     }
@@ -618,6 +635,7 @@ impl CallerInputLayers {
     pub fn apply_to(&self, mut options: super::PrepareOptions) -> super::PrepareOptions {
         options.set_overrides = self.set_overrides.clone();
         options.data_override_keys = self.data_override_keys.clone();
+        options.sequence_binding = self.sequence_binding.clone();
         options.caller_input_records = self.caller_input_records.clone();
         options.file_ref_fallback_dir = self.file_ref_fallback_dir.clone();
         options.file_resolution_context = self.file_resolution_context.clone();
@@ -627,15 +645,14 @@ impl CallerInputLayers {
         options
     }
 
-    /// Fold commands a document's own pre-flight just approved into the
+    /// Fold approvals a document's own pre-flight just granted into the
     /// invocation-wide approved set.
-    pub fn add_approved_commands(&mut self, commands: impl IntoIterator<Item = String>) {
-        let mut commands = commands.into_iter().peekable();
-        if commands.peek().is_none() {
+    pub fn add_approved_commands(&mut self, commands: ShellPreApprovals) {
+        if commands.is_empty() {
             return;
         }
         self.pre_approved_commands
-            .get_or_insert_with(HashSet::new)
+            .get_or_insert_with(ShellPreApprovals::new)
             .extend(commands);
     }
 }
@@ -837,7 +854,7 @@ pub struct CompositionExecutionRequest {
     pub explicit_provider: Option<Provider>,
     /// Providers to exclude from automatic selection.
     pub excluded: BTreeSet<Provider>,
-    /// Enable provider-specific YOLO/auto-approval mode.
+    /// CLI/environment YOLO intent; document defaults are resolved separately.
     pub yolo: bool,
     /// Preserve these env vars even when they match sensitive-name filters.
     pub include: Vec<String>,
@@ -894,6 +911,8 @@ pub struct CompositionExecutionRequest {
     /// cache instead of prompting again. Used by sequence execution to
     /// honour "allow once" for the whole run, not just one step.
     pub shared_approval_cache: Option<SharedApprovalCache>,
+    /// Sequence invocation approvals; descendants may reuse membership but never extend it.
+    pub closed_shell_approvals: Option<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals>,
     /// Whether this request is part of a sequence run. When `true`, the
     /// execution header shows a `Sequence` badge.
     pub sequence: bool,
@@ -1007,7 +1026,7 @@ pub struct CompositionExecutionRequest {
 /// Options for sequence execution at the CLI level.
 #[derive(Debug, Clone)]
 pub struct SequenceExecutionOptions {
-    /// CLI `--fail-fast` override. `None` means use the document default.
+    /// Internal execution override; the CLI no longer accepts `--fail-fast`.
     pub fail_fast_override: Option<bool>,
 }
 
@@ -1071,4 +1090,11 @@ pub struct SequenceTaskResult {
     pub interrupted: bool,
     /// Wall-clock duration of the task.
     pub duration: std::time::Duration,
+}
+
+impl CompositionExecutionRequest {
+    /// Provider bypass intent, including the active document's default.
+    pub fn provider_yolo(&self) -> bool {
+        self.prepared.selection_hints.yolo_enabled(self.yolo)
+    }
 }

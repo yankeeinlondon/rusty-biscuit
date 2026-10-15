@@ -16,7 +16,8 @@
 //!   scanning.
 //!
 //! Bare-name resolution (Phase 3) and effective-schema assembly (Phase 4)
-//! build on top of these.
+//! build on top of these. A host may add an [`EmbeddedSchemaBundle`] as a
+//! last-resort trigger location after the five roots.
 //!
 //! The user-facing contract is the "Repository Trigger Schemas" section of
 //! `darkmatter/docs/topics/schemas/definition.md`.
@@ -32,7 +33,10 @@ pub use assemble::{
     TriggerArmTrace, TriggerEvaluation, TriggerTrace, TriggerTraceEntry, evaluate_registry,
     matched_triggers, trace_registry,
 };
-pub use discovery::{LoadedTrigger, ShadowedFile, TriggerRegistry, scan};
+pub use crate::markdown::schemas::embedded::EmbeddedSchemaBundle;
+pub use discovery::{
+    LoadedTrigger, ShadowedFile, TriggerRegistry, TriggerSource, scan, scan_with_embedded,
+};
 pub use envelope::{TriggerEnvelope, parse_trigger_envelope, parse_trigger_envelope_from_str};
 pub use grammar::{
     COMBINATOR_KEYS, PATH_KEY, MatchArms, MatchExpr, PathGlobs, is_match_safe_constraint,

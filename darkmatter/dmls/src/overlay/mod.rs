@@ -1500,8 +1500,6 @@ mod tests {
     fn shipped_schema_corpus_uses_content_classification() {
         let root = biscuit_test_harness::manifest_dir!().join("../docs/schemas");
         let expected = std::collections::BTreeMap::from([
-            ("claudine-types.yaml".to_string(), "ready"),
-            ("claudine.yaml".to_string(), "ready"),
             ("darkmatter.yaml".to_string(), "ready"),
             ("env.yaml".to_string(), "ready"),
             ("err.yaml".to_string(), "error"),

@@ -7,7 +7,8 @@
 //!
 //! 1. Caller-configured baseline.
 //! 2. Matching trigger payloads — first schema root first,
-//!    filename-lexicographic within a root (the registry's built-in order).
+//!    filename-lexicographic within a root, then registered embedded bundles
+//!    (the registry's built-in order).
 //! 3. Document `$schema` (always wins on conflict).
 //!
 //! Shadowing is applied **before** matching (a shadowed trigger file is never
@@ -27,7 +28,9 @@ use crate::markdown::schemas::resolve::{self, ResolvedSchema, validate_simple_ob
 
 use crate::markdown::schemas::roots::SchemaRoots;
 
-use super::discovery::{LoadedTrigger, TriggerRegistry};
+use crate::markdown::schemas::embedded::EmbeddedSchemaBundle;
+
+use super::discovery::{LoadedTrigger, TriggerRegistry, TriggerSource};
 use super::envelope::parse_trigger_envelope_from_str;
 use super::matcher::{self, PathSubject};
 
@@ -60,8 +63,8 @@ pub struct TriggerTrace {
 /// One trigger's arm-by-arm trace.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct TriggerTraceEntry {
-    /// Trigger envelope path.
-    pub source: PathBuf,
+    /// The trigger envelope's schema-root file or bundle document.
+    pub source: TriggerSource,
     /// Whether any arm matched.
     pub matched: bool,
     /// Results in authored arm order.
@@ -202,10 +205,15 @@ pub fn matched_triggers<'a>(
 /// A resolved trigger payload ready for layering.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ResolvedPayload {
-    /// The resolved JSON Schema (guaranteed simple-object by the gate).
-    pub json_schema: Value,
+    /// The resolved JSON Schema (guaranteed simple-object by the gate),
+    /// shared by every effective schema layered from it.
+    pub json_schema: std::sync::Arc<Value>,
+    /// The payload's SimplifiedSchema object shape, retained so editor
+    /// projections see the properties validation layers in. `None` for a raw
+    /// JSON Schema payload, which has no SimplifiedSchema projection.
+    pub shape: Option<std::sync::Arc<crate::markdown::schemas::SchemaShape>>,
     /// Dependency edges: the payload file + its imports + its examples
-    /// (sorted, deduplicated).
+    /// (sorted, deduplicated). Empty for an embedded trigger.
     pub dependencies: Vec<PathBuf>,
     /// Non-fatal findings produced while resolving payload references.
     pub advisories: Vec<super::super::SchemaAdvisory>,
@@ -226,30 +234,45 @@ pub(crate) struct ResolvedPayload {
 /// through an import chain) is a hard load error. Directly referencing a
 /// `*.trigger.yaml` as a payload is always wrong — the payload should reference
 /// the schema file, not the activation metadata.
+///
+/// ## Embedded triggers
+///
+/// An embedded trigger's payload resolves inside its bundle only (see
+/// [`resolve_embedded_payload`]); `schema_roots` and `context` are not
+/// consulted, and the result has no dependency edges.
 pub(crate) fn resolve_trigger_payload(
     trigger: &LoadedTrigger,
     schema_roots: &[PathBuf],
     context: &biscuit_file::FileResolutionContext,
 ) -> Result<ResolvedPayload, SchemaError> {
+    let source = match (&trigger.source, trigger.bundle) {
+        (TriggerSource::File(path), _) => path,
+        (TriggerSource::Embedded { name, .. }, Some(bundle)) => {
+            return resolve_embedded_payload(trigger, bundle, name);
+        }
+        (TriggerSource::Embedded { bundle, name }, None) => {
+            return Err(SchemaError::EmbeddedBundle {
+                bundle: bundle.clone(),
+                message: format!("trigger `{name}` was loaded without its bundle"),
+            });
+        }
+    };
     let payload = trigger.envelope.payload.as_ref().ok_or_else(|| {
         SchemaError::TriggerPayloadNotMergeable {
-            path: trigger.source.clone(),
+            path: source.clone(),
             payload: "<none>".into(),
             reason: "trigger envelope has no `$schema:` payload".into(),
         }
     })?;
 
-    let base_dir = trigger
-        .source
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
+    let base_dir = source.parent().unwrap_or_else(|| Path::new("."));
     let resolved = resolve::resolve_yaml_schema_with_roots(payload, base_dir, schema_roots, context)?;
 
     // Cycle detection: the payload must not resolve to a trigger envelope.
-    check_payload_cycles(trigger, &resolved)?;
+    check_payload_cycles(source, &resolved)?;
 
     // Merge-compatibility gate: must be a simple-object schema.
-    enforce_merge_compatible(&trigger.source, payload, &resolved.json_schema)?;
+    enforce_merge_compatible(source, payload, &resolved.json_schema)?;
 
     // Collect dependency edges: the payload file(s) + imports + examples.
     let mut deps: Vec<PathBuf> = resolved
@@ -263,8 +286,104 @@ pub(crate) fn resolve_trigger_payload(
     deps.dedup();
 
     Ok(ResolvedPayload {
-        json_schema: resolved.json_schema,
+        shape: payload_shape(resolved.simplified),
+        json_schema: std::sync::Arc::new(resolved.json_schema),
         dependencies: deps,
+        advisories: resolved.advisories,
+    })
+}
+
+/// The object shape of a payload that passed the merge-compatibility gate.
+/// A gated payload is never a root union, so only a single-object projection
+/// is kept.
+fn payload_shape(
+    simplified: Option<crate::markdown::schemas::SimplifiedSchema>,
+) -> Option<std::sync::Arc<crate::markdown::schemas::SchemaShape>> {
+    match simplified? {
+        crate::markdown::schemas::SimplifiedSchema::Single(shape) => Some(std::sync::Arc::new(shape)),
+        crate::markdown::schemas::SimplifiedSchema::Union(_) => None,
+    }
+}
+
+/// [`resolve_trigger_payload`] for an embedded trigger, which needs neither
+/// schema roots nor a document context.
+pub(crate) fn resolve_embedded_trigger_payload(trigger: &LoadedTrigger) -> Result<ResolvedPayload, SchemaError> {
+    match (&trigger.source, trigger.bundle) {
+        (TriggerSource::Embedded { name, .. }, Some(bundle)) => resolve_embedded_payload(trigger, bundle, name),
+        (source, _) => Err(SchemaError::EmbeddedBundle {
+            bundle: String::new(),
+            message: format!("trigger `{source}` is not an embedded bundle trigger"),
+        }),
+    }
+}
+
+/// Resolves an embedded trigger's `$schema` inside `bundle`.
+///
+/// A string payload is a relative reference to another bundle document
+/// (`payload.yaml`, `./payload.yaml`); a mapping is an inline schema whose
+/// `Name@./file.yaml` imports and `@this` resolve among the bundle's
+/// documents. Nothing falls back to the disk, the schema roots, or the
+/// network. Errors carry the virtual path `{bundle}/{name}` where a
+/// [`SchemaError`] field needs a path.
+fn resolve_embedded_payload(
+    trigger: &LoadedTrigger,
+    bundle: EmbeddedSchemaBundle,
+    name: &str,
+) -> Result<ResolvedPayload, SchemaError> {
+    let importer = bundle.virtual_path(name);
+    let importer_path = PathBuf::from(&importer);
+    let payload = trigger.envelope.payload.as_ref().ok_or_else(|| {
+        SchemaError::TriggerPayloadNotMergeable {
+            path: importer_path.clone(),
+            payload: "<none>".into(),
+            reason: "trigger envelope has no `$schema:` payload".into(),
+        }
+    })?;
+    let resolved = bundle.with_documents(|documents| match payload {
+        YamlValue::String(reference) => {
+            let target = crate::markdown::schemas::embedded::resolve_bundle_path(
+                bundle.name(),
+                &importer,
+                reference,
+            )
+            .map_err(|reason| SchemaError::SchemaDocument {
+                path: importer_path.clone(),
+                message: format!("embedded `$schema` `{}`: {reason}", reference.trim()),
+            })?;
+            let claims_trigger = crate::markdown::schemas::embedded::find(documents, &target)
+                .is_some_and(|document| matches!(parse_trigger_envelope_from_str(document.text), Ok(Some(_))));
+            if target == importer || claims_trigger {
+                let suffix = if target == importer { " (self-reference)" } else { "" };
+                return Err(SchemaError::TriggerPayloadCycle {
+                    trigger: importer_path.clone(),
+                    payload_path: PathBuf::from(&target),
+                    chain: format!("{importer} -> {target}{suffix}"),
+                });
+            }
+            resolve::prepare_embedded_schema_in(&target, documents, bundle.name())
+        }
+        YamlValue::Mapping(_) => {
+            resolve::prepare_embedded_inline_schema(payload, &importer, documents, bundle.name())
+        }
+        YamlValue::Sequence(_) => Err(SchemaError::TriggerPayloadNotMergeable {
+            path: importer_path.clone(),
+            payload: describe_payload(payload),
+            reason: "a root union is not an object schema. Root unions and non-object schemas \
+                     are rejected as trigger payloads"
+                .into(),
+        }),
+        other => Err(SchemaError::FrontmatterShape {
+            message: format!(
+                "$schema must be a mapping, sequence, or string; got {}",
+                resolve::describe_yaml(other)
+            ),
+        }),
+    })?;
+    enforce_merge_compatible(&importer_path, payload, &resolved.json_schema)?;
+    Ok(ResolvedPayload {
+        shape: payload_shape(resolved.simplified),
+        json_schema: std::sync::Arc::new(resolved.json_schema),
+        dependencies: Vec::new(),
         advisories: resolved.advisories,
     })
 }
@@ -302,29 +421,29 @@ fn enforce_merge_compatible(
 /// Checks whether any file the payload resolved to is a trigger-schema
 /// envelope (direct self-reference or referencing another trigger file).
 fn check_payload_cycles(
-    trigger: &LoadedTrigger,
+    trigger: &Path,
     resolved: &ResolvedSchema,
 ) -> Result<(), SchemaError> {
-    let trigger_canonical = canonicalize(&trigger.source);
+    let trigger_canonical = canonicalize(trigger);
     for ref_path in &resolved.referenced_files {
         if *ref_path == trigger_canonical {
             return Err(SchemaError::TriggerPayloadCycle {
-                trigger: trigger.source.clone(),
+                trigger: trigger.to_path_buf(),
                 payload_path: ref_path.clone(),
                 chain: format!(
                     "{} -> {} (self-reference)",
-                    trigger.source.display(),
+                    trigger.display(),
                     ref_path.display()
                 ),
             });
         }
         if file_claims_trigger_envelope(ref_path)? {
             return Err(SchemaError::TriggerPayloadCycle {
-                trigger: trigger.source.clone(),
+                trigger: trigger.to_path_buf(),
                 payload_path: ref_path.clone(),
                 chain: format!(
                     "{} -> {}",
-                    trigger.source.display(),
+                    trigger.display(),
                     ref_path.display()
                 ),
             });
@@ -446,9 +565,10 @@ mod tests {
             .expect("envelope should parse")
             .expect("content should claim trigger-schema");
         LoadedTrigger {
-            source: source.to_path_buf(),
+            source: TriggerSource::File(source.to_path_buf()),
             envelope,
             pattern_cwd: source.parent().and_then(Path::parent).unwrap_or(source).to_path_buf(),
+            bundle: None,
         }
     }
 
@@ -477,7 +597,7 @@ mod tests {
         let fm = frontmatter(&[("prompt", Value::String("x".into()))]);
         let matched = matched_triggers(&registry, &fm, Some(&doc));
         assert_eq!(matched.len(), 1);
-        assert!(matched[0].source.ends_with("a.trigger.yaml"));
+        assert!(matched[0].source.path().unwrap().ends_with("a.trigger.yaml"));
     }
 
     #[test]

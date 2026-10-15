@@ -1,4 +1,4 @@
-//! End-to-end coverage for group execution, serial and parallel.
+//! End-to-end coverage for concurrent groups and removed container grammar.
 //!
 //! Sequence Plus phases 9 and 10 (`claudine/features/2026-07-11-sequence-plus/`).
 //!
@@ -82,10 +82,9 @@ fn trace(workspace: &Path) -> Vec<String> {
         .collect()
 }
 
-/// An inline serial group runs its tasks in declaration order and reports each
-/// one by name in the step breakdown.
+/// Root sequence tasks run in declaration order and report each task by name.
 #[test]
-fn an_inline_serial_group_runs_its_tasks_in_declaration_order() {
+fn root_sequence_tasks_run_in_declaration_order() {
     let fixture = CliProcessFixture::named("sequence-groups");
     fake_goose(&fixture);
     let md = fixture.cwd().join("seq.md");
@@ -93,14 +92,10 @@ fn an_inline_serial_group_runs_its_tasks_in_declaration_order() {
         &md,
         r#"---
 sequence:
-  - name: alpha
-    group:
-      name: bundle
-      tasks:
-        - name: first
-          shell: "printf 'one\n' >> trace.txt"
-        - name: second
-          shell: "printf 'two\n' >> trace.txt"
+  - name: first
+    shell: "printf 'one\n' >> trace.txt"
+  - name: second
+    shell: "printf 'two\n' >> trace.txt"
 ---
 
 Body.
@@ -147,7 +142,9 @@ fn a_group_file_reference_executes_the_same_bundle() {
     );
 
     assert_eq!(code, 0, "stderr:\n{stderr}");
-    assert_eq!(trace(fixture.cwd()), vec!["one", "two"]);
+    let mut ran = trace(fixture.cwd());
+    ran.sort();
+    assert_eq!(ran, vec!["one", "two"]);
 }
 
 /// A named entry in a `kind: group-catalog` file is a third spelling of the
@@ -158,7 +155,7 @@ fn a_named_catalog_entry_executes_the_same_bundle() {
     fake_goose(&fixture);
     fs::write(
         fixture.cwd().join("catalog.yaml"),
-        "kind: group-catalog\ngroups:\n  - name: other\n    tasks:\n      - shell: \"printf 'wrong\\n' >> trace.txt\"\n  - name: bundle\n    tasks:\n      - name: first\n        shell: \"printf 'one\\n' >> trace.txt\"\n      - name: second\n        shell: \"printf 'two\\n' >> trace.txt\"\n",
+        "kind: group-catalog\ngroups:\n  - name: other\n    tasks:\n      - name: unused\n        shell: \"printf 'wrong\\n' >> trace.txt\"\n  - name: bundle\n    tasks:\n      - name: first\n        shell: \"printf 'one\\n' >> trace.txt\"\n      - name: second\n        shell: \"printf 'two\\n' >> trace.txt\"\n",
     )
     .unwrap();
     let md = fixture.cwd().join("seq.md");
@@ -174,13 +171,14 @@ fn a_named_catalog_entry_executes_the_same_bundle() {
     );
 
     assert_eq!(code, 0, "stderr:\n{stderr}");
-    assert_eq!(trace(fixture.cwd()), vec!["one", "two"]);
+    let mut ran = trace(fixture.cwd());
+    ran.sort();
+    assert_eq!(ran, vec!["one", "two"]);
 }
 
-/// The first failed task stops the group and the remaining members do not run;
-/// with sequence `fail_fast: false` the *sequence* still continues.
+/// Removed document continuation flags fail before any task runs.
 #[test]
-fn a_failed_task_stops_the_group_but_fail_fast_false_continues_the_sequence() {
+fn document_fail_fast_false_is_refused_before_anything_runs() {
     let fixture = CliProcessFixture::named("sequence-groups");
     fake_goose(&fixture);
     let md = fixture.cwd().join("seq.md");
@@ -213,22 +211,14 @@ Body.
         &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
     );
 
-    assert_eq!(code, 1, "a failed group fails the run; stderr:\n{stderr}");
-    assert_eq!(
-        trace(fixture.cwd()),
-        vec!["one", "two", "later"],
-        "`never` must not run, but the next sequence step must; stderr:\n{stderr}"
-    );
-    assert!(
-        stderr.contains("1 succeeded") && stderr.contains("1 failed"),
-        "stderr:\n{stderr}"
-    );
+    assert_eq!(code, 1, "stderr:\n{stderr}");
+    assert!(stderr.contains("removed") && stderr.contains("fail_fast") && stderr.contains("failure"), "{stderr}");
+    assert!(trace(fixture.cwd()).is_empty(), "no task may run: {stderr}");
 }
 
-/// Sequence-level `fail_fast` is the only continuation control: with it on, a
-/// failed group stops the sequence immediately.
+/// Even the former default document flag is explicitly refused.
 #[test]
-fn fail_fast_true_stops_the_sequence_after_a_failed_group() {
+fn document_fail_fast_true_is_refused_before_anything_runs() {
     let fixture = CliProcessFixture::named("sequence-groups");
     fake_goose(&fixture);
     let md = fixture.cwd().join("seq.md");
@@ -258,7 +248,8 @@ Body.
     );
 
     assert_eq!(code, 1, "stderr:\n{stderr}");
-    assert_eq!(trace(fixture.cwd()), vec!["one"], "stderr:\n{stderr}");
+    assert!(stderr.contains("removed") && stderr.contains("fail_fast") && stderr.contains("failure"), "{stderr}");
+    assert!(trace(fixture.cwd()).is_empty(), "no task may run: {stderr}");
 }
 
 /// Group variables reach a member task's prompt document, and the scope ends
@@ -277,7 +268,6 @@ fn group_variables_reach_members_and_do_not_leak_to_the_next_step() {
     fs::write(
         &md,
         r#"---
-fail_fast: false
 sequence:
   - name: alpha
     group:
@@ -319,11 +309,9 @@ Body.
     );
 }
 
-/// A serial group grows `outputs` entry by entry, so a later task reads the
-/// previous task's output through `{{ last(outputs) }}` — whether that previous
-/// task was a sibling in this group or an earlier sequence step.
+/// Root sequence tasks expose the previous committed output to later tasks.
 #[test]
-fn outputs_chain_through_a_serial_group() {
+fn outputs_chain_through_root_sequence_tasks() {
     let fixture = CliProcessFixture::named("sequence-groups");
     fake_goose(&fixture);
     fs::write(
@@ -336,16 +324,12 @@ fn outputs_chain_through_a_serial_group() {
         &md,
         r#"---
 sequence:
-  - name: alpha
-    group:
-      name: bundle
-      tasks:
-        - name: producer
-          shell: "printf 'produced\n'"
-        - name: consumer
-          prompt: member.md
-          params:
-            prior: "{{ last(outputs) }}"
+  - name: producer
+    shell: "printf 'produced\n'"
+  - name: consumer
+    prompt: member.md
+    params:
+      prior: "{{ last(seq.outputs) }}"
 ---
 
 Body.
@@ -382,7 +366,8 @@ sequence:
       loop:
         while: "true"
       tasks:
-        - shell: "printf 'ran\n' >> trace.txt"
+        - name: member
+          shell: "printf 'ran\n' >> trace.txt"
 ---
 
 Body.
@@ -421,7 +406,6 @@ sequence:
   - name: alpha
     group:
       name: bundle
-      execution: parallel
       tasks:
         - name: slow-one
           shell: "touch started-one; attempts=0; while [ ! -f started-two ] || [ ! -f started-three ]; do attempts=$((attempts + 1)); [ $attempts -lt 500 ] || exit 90; sleep 0.01; done; printf 'one\n' >> trace.txt"
@@ -489,7 +473,6 @@ sequence:
   - name: alpha
     group:
       name: bundle
-      execution: parallel
       max_parallel: 2
       tasks:
         - name: a
@@ -519,10 +502,9 @@ Body.
     );
 }
 
-/// A parallel group commits one nested `outputs` entry in declaration order,
-/// even when the members finish in the opposite order.
+/// A parallel group publishes one dictionary with results keyed by leg name.
 #[test]
-fn a_parallel_group_commits_a_declaration_ordered_nested_entry() {
+fn a_parallel_group_commits_one_named_result() {
     let fixture = CliProcessFixture::named("sequence-groups");
     fake_goose(&fixture);
     fs::write(
@@ -531,9 +513,6 @@ fn a_parallel_group_commits_a_declaration_ordered_nested_entry() {
     )
     .unwrap();
     let md = fixture.cwd().join("seq.md");
-    // `first` sleeps the longest, so completion order is the reverse of
-    // declaration order. Indexing the nested entry positionally is what proves
-    // the slots follow declaration order rather than arrival order.
     fs::write(
         &md,
         r#"---
@@ -541,16 +520,15 @@ sequence:
   - name: alpha
     group:
       name: bundle
-      execution: parallel
       tasks:
         - name: first
-          shell: "sleep 1; printf 'from-first\n'"
+          shell: "printf 'from-first\n'"
         - name: second
           shell: "printf 'from-second\n'"
   - name: beta
     prompt: reader.md
     params:
-      entry: "slot0={{ last(outputs)[0] }} slot1={{ last(outputs)[1] }}"
+      entry: "slot0={{ last(seq.outputs).first }} slot1={{ last(seq.outputs).second }}"
 ---
 
 Body.
@@ -566,13 +544,11 @@ Body.
     assert_eq!(code, 0, "stderr:\n{stderr}");
     assert!(
         stderr.contains("entry is slot0=from-first slot1=from-second"),
-        "the nested entry's slots must follow declaration order, not the \
-         reversed completion order; stderr:\n{stderr}"
+        "the named entry must retain each member's result; stderr:\n{stderr}"
     );
 }
 
-/// A failing member does not cancel its siblings, and the group's failure is
-/// governed by sequence-level `fail_fast` exactly as a serial group's is.
+/// A failing member lets its siblings settle before the sequence stops.
 #[test]
 fn a_failed_parallel_member_lets_its_siblings_finish() {
     let fixture = CliProcessFixture::named("sequence-groups");
@@ -581,12 +557,10 @@ fn a_failed_parallel_member_lets_its_siblings_finish() {
     fs::write(
         &md,
         r#"---
-fail_fast: false
 sequence:
   - name: alpha
     group:
       name: bundle
-      execution: parallel
       tasks:
         - name: boom
           shell: "printf 'boom\n' >> trace.txt; exit 3"
@@ -613,25 +587,22 @@ Body.
         "the sibling must run to completion after the failure; trace: {lines:?}",
     );
     assert!(
-        lines.contains(&"later-step".to_string()),
-        "`fail_fast: false` continues the sequence past a failed group; trace: {lines:?}",
+        !lines.contains(&"later-step".to_string()),
+        "an unhandled failed group stops later sequence steps; trace: {lines:?}",
     );
 }
 
-/// Two parallel members writing the same key resolve to the later-declared one
-/// and warn on stderr naming the key and both tasks.
+/// Retired task setup cannot mutate group state or start shell tasks.
 #[test]
-fn a_contested_key_in_a_parallel_group_warns_and_resolves_by_declaration_order() {
+fn retired_group_member_setup_is_refused_before_mutation() {
     let fixture = CliProcessFixture::named("sequence-groups");
-    fake_goose(&fixture);
+    let launches = common::launch_recorder::install(&fixture, "goose", "exit 0");
     fs::write(
         fixture.cwd().join("reader.md"),
         "---\nstart:\n  info: 'shared is {{ shared }}'\n---\n\nReader body.\n",
     )
     .unwrap();
     let md = fixture.cwd().join("seq.md");
-    // The later-declared task finishes first, so a completion-order merge would
-    // leave `from-early` behind.
     fs::write(
         &md,
         r#"---
@@ -640,7 +611,6 @@ sequence:
   - name: alpha
     group:
       name: bundle
-      execution: parallel
       tasks:
         - name: early
           shell: "sleep 1; printf 'e\n'"
@@ -664,15 +634,10 @@ Body.
         &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
     );
 
-    assert_eq!(code, 0, "stderr:\n{stderr}");
-    assert!(
-        stderr.contains("shared is from-late"),
-        "the later-declared task must win regardless of completion order; stderr:\n{stderr}"
-    );
-    assert!(
-        stderr.contains("shared") && stderr.contains("early") && stderr.contains("late"),
-        "the collision must warn naming the key and both tasks; stderr:\n{stderr}"
-    );
+    assert_eq!(code, 1, "stderr:\n{stderr}");
+    assert!(stderr.contains("removed") && stderr.contains("setup") && stderr.contains("preceding"), "{stderr}");
+    assert!(!stderr.contains("shared is from-late"), "{stderr}");
+    assert!(common::launch_recorder::launches(&launches).is_empty(), "a removed setup launched a provider");
 }
 
 /// Concurrent members must be attributable without color: each announces itself
@@ -690,7 +655,6 @@ sequence:
   - name: alpha
     group:
       name: bundle
-      execution: parallel
       tasks:
         - name: fetch-data
           shell: "printf 'fetched\n'"
@@ -762,7 +726,6 @@ sequence:
   - name: alpha
     group:
       name: bundle
-      execution: parallel
       tasks:
         - name: fetch-data
           shell: "printf 'fetched\n'"
@@ -809,11 +772,10 @@ Body.
     );
 }
 
-/// Serial members share the parallel geometry with nothing drawn in the gutter,
-/// so switching modes does not shift the stream sideways.
+/// Changing the concurrency cap preserves the task header geometry.
 #[test]
-fn serial_and_parallel_group_frames_share_one_left_edge() {
-    let column_of_header = |execution: &str| -> usize {
+fn bounded_group_frames_share_one_left_edge() {
+    let column_of_header = |max_parallel: usize| -> usize {
         let fixture = CliProcessFixture::named("sequence-groups");
         fake_goose(&fixture);
         let md = fixture.cwd().join("seq.md");
@@ -825,7 +787,7 @@ sequence:
   - name: alpha
     group:
       name: bundle
-      execution: {execution}
+      max_parallel: {max_parallel}
       tasks:
         - name: only-task
           shell: "printf 'x\n'"
@@ -850,9 +812,9 @@ Body.
     };
 
     assert_eq!(
-        column_of_header("serial"),
-        column_of_header("parallel"),
-        "serial and parallel headers start at different columns"
+        column_of_header(1),
+        column_of_header(2),
+        "concurrency caps shift the task header column"
     );
 }
 
@@ -869,7 +831,6 @@ sequence:
   - name: alpha
     group:
       name: bundle
-      execution: parallel
       tasks:
         - name: first
           shell: "printf 'one\n' >> trace.txt"
@@ -907,7 +868,6 @@ sequence:
   - name: alpha
     group:
       name: bundle
-      execution: parallel
       tasks:
         - name: fetch-data
           shell: "printf 'fetched\n'"
@@ -977,7 +937,6 @@ sequence:
   - name: alpha
     group:
       name: bundle
-      execution: parallel
       tasks:
         - name: task-one
           prompt: one.md
@@ -1069,7 +1028,6 @@ sequence:
   - name: alpha
     group:
       name: bundle
-      execution: parallel
       tasks:
         - name: first
           prompt: one.md
@@ -1149,7 +1107,6 @@ sequence:
   - name: fanout
     group:
       name: bundle
-      execution: parallel
       tasks:
         - name: one
           prompt: prompts/router.md

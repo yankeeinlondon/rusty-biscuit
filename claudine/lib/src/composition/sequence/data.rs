@@ -1,6 +1,7 @@
 //! Data-file loading, offset traversal, and operator application.
 //!
-//! Every supported sequence data format (YAML, JSON, JSON5, JSONL, NDJSON) is
+//! Every supported sequence source (Markdown frontmatter, YAML, JSON, JSON5,
+//! JSONL, NDJSON) is
 //! loaded into one common [`serde_json::Value`] model so the offset and
 //! operator layers above never branch on file format. The line-delimited
 //! formats are the exception the model has to carry: their root is always the
@@ -84,6 +85,18 @@ pub struct LoadedDocument {
 /// Returns [`CompositionError::SequenceExternalLoad`] carrying the typed
 /// lower-layer parse cause.
 pub fn load_document(path: &Path) -> Result<LoadedDocument, CompositionError> {
+    if path.extension().and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("md") || extension.eq_ignore_ascii_case("markdown"))
+    {
+        let markdown = darkmatter::markdown::Markdown::try_from(path).map_err(|source| CompositionError::MarkdownLoad {
+            path: path.to_path_buf(),
+            source: super::super::error::MarkdownLoadCause::Parse(Box::new(source)),
+        })?;
+        return Ok(LoadedDocument {
+            value: super::super::prepare::frontmatter_to_value(markdown.frontmatter()),
+            orders: markdown.frontmatter().mapping_orders().clone(),
+        });
+    }
     let format = SourceFormat::for_path(path);
     let context = || biscuit_file::to_portable_string(path);
 

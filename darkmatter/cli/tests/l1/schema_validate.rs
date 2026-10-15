@@ -1500,46 +1500,65 @@ fn schema_validate_grouped_match_is_passive_in_a_single_schema() {
     assert_eq!(report["valid"], true, "{report}");
 }
 
-/// Writes `doc.md` referencing the shipped Claudine baseline, which reuses the
-/// types in `claudine-types.yaml` through cross-file and `@this` references,
-/// followed by `values`.
+/// Claudine's complete schema bundle.
+const CLAUDINE_BUNDLE: [(&str, &str); 5] = [
+    ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
+    ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
+    ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
+    ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
+    ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
+];
+
+/// Makes the fixture `cwd` a repository whose `schemas/` root holds Claudine's
+/// bundle, and writes `doc.md` there holding `values` with no `$schema`, so
+/// the `claudine.yaml` trigger (whose payload reuses `lifecycle.yaml` and
+/// `action.yaml` types through relative imports) is the schema that judges it.
 fn shipped_claudine_document(process: &CliProcessFixture, values: &str) -> PathBuf {
-    let schema = biscuit_test_harness::manifest_dir!()
-        .parent()
-        .expect("darkmatter/cli has a parent")
-        .join("docs/schemas/claudine.yaml");
-    assert!(schema.is_file(), "{} is missing", schema.display());
-    write_file(
-        process.cwd(),
-        "doc.md",
-        &format!("---\n$schema: '{}'\n{values}---\nBody\n", schema.display()),
-    )
+    assert!(process.initialize_repository(), "git init");
+    let schemas = process.cwd().join("schemas");
+    std::fs::create_dir_all(&schemas).unwrap();
+    for (name, text) in CLAUDINE_BUNDLE {
+        write_file(&schemas, name, text);
+    }
+    write_file(process.cwd(), "doc.md", &format!("---\n{values}---\nBody\n"))
+}
+
+/// Like [`validate_json`], with trigger schemas applied.
+fn validate_triggered_json(process: &CliProcessFixture, doc: &Path) -> (Option<i32>, serde_json::Value) {
+    let output = process
+        .command()
+        .args(["schema", "validate", "--format", "json"])
+        .arg(doc)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let report =
+        serde_json::from_str(&stdout).unwrap_or_else(|error| panic!("{error}: stdout {stdout:?}"));
+    (output.status.code(), report)
 }
 
 #[test]
 fn schema_validate_shipped_claudine_schema_accepts_reused_lifecycle_and_loop_types() {
     let process = CliProcessFixture::new();
-    // The baseline's `generated; required` sequence and loop properties are
-    // absent, which authored validation permits.
     let doc = shipped_claudine_document(
         &process,
         "initialize:\n  - say: hello\n  - when: 'true'\n    then:\n      notify: hi\nloop:\n  max: 3\n  action:\n    op: increment\n    prop: n\n  gate:\n    - stop\n",
     );
 
-    let (code, report) = validate_json(&process, &doc, &[]);
+    let (code, report) = validate_triggered_json(&process, &doc);
 
     assert_eq!(code, Some(0), "{report}");
     assert_eq!(report["valid"], true, "{report}");
 }
 
-/// `lifecycle-stack-item` is an open mapping with `min-keys: 1`; an empty
-/// item matches neither arm of the `lifecycle-entry` union.
+/// Every arm of an `initialize` stack item is a closed object or a bare verb,
+/// so an item naming an unknown verb matches no arm of the item union.
 #[test]
-fn schema_validate_shipped_claudine_schema_rejects_an_empty_lifecycle_item() {
+fn schema_validate_shipped_claudine_schema_rejects_an_unknown_lifecycle_verb() {
     let process = CliProcessFixture::new();
-    let doc = shipped_claudine_document(&process, "initialize:\n  - {}\n");
+    let doc = shipped_claudine_document(&process, "initialize:\n  - bogus: 1\n");
 
-    let (code, report) = validate_json(&process, &doc, &[]);
+    let (code, report) = validate_triggered_json(&process, &doc);
 
     assert_eq!(code, Some(1), "{report}");
     let found = problems(&report);
@@ -1556,7 +1575,7 @@ fn schema_validate_shipped_claudine_schema_rejects_values_inside_a_reused_loop_e
         "loop:\n  max: 0\n  action:\n    op: explode\n    prop: n\n",
     );
 
-    let (code, report) = validate_json(&process, &doc, &[]);
+    let (code, report) = validate_triggered_json(&process, &doc);
 
     assert_eq!(code, Some(1), "{report}");
     let found = problems(&report);

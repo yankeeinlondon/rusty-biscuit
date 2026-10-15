@@ -48,9 +48,9 @@ Error: missing file reference: expected exactly one file reference plus optional
   `tags='["a","b"]'` is an array.
 - `--set '{"key": "value"}'` sets several values at once. An inline setter
   wins over `--set` for the same key.
-- Setters sit above the document's frontmatter and below runtime mutations
-  and the reserved per-step keys (`state`, `previous`, `next`, `outputs`,
-  `sequence_id`). See
+- Setters sit above the document's frontmatter and below runtime mutations.
+  The read-only `seq` root carries the current row, neighbors, outputs, and
+  run ID separately from frontmatter. See
   [Phase 2 — Just-in-time composition](../topics/flow-control/sequences.md#phase-2--just-in-time-composition)
   for the full order.
 
@@ -72,11 +72,11 @@ sequence:
     - name: review
       prompt: "@prompts/review.md"
       params:
-          topic: "{{ state.topic }}"
+          topic: "{{ seq.topic }}"
     - name: stage
       shell: git add .
 ---
-Research {{ state.topic }} and write up what you find.
+Research {{ seq.topic }} and write up what you find.
 ```
 
 The `research` step has no executable, so it composes this document's body.
@@ -214,17 +214,16 @@ screen started from.
 - Shell commands are approved before the screen opens, and `--dry-run` never
   opens it.
 
-## Fail-fast and exit codes
+## Failures and exit codes
 
-A failing step stops the run when fail-fast is on. The setting comes from, in
-order: `--fail-fast <bool>` (`true`/`false`, `1`/`0`, `yes`/`no`), the
-document's `fail_fast`, and then the default, `true`.
+An unhandled failing step stops the run. The old `--fail-fast` flag and a
+sequence document's `fail_fast:` key are rejected with a replacement hint.
+Use `failure:` lifecycle handling for recovery; `fail_fast` belongs only to
+group objects. Claudine no longer injects `CLAUDINE_FAIL_FAST` into a step.
 
-The exit code is `0` when every executed step succeeded, `1` when at least one
-failed, and `130` after Ctrl+C, including `Esc` or Ctrl+C on the review
-screen, which starts no step. A preflight failure aborts the run whatever
-the fail-fast setting. See
-[Fail-fast, exit codes, and dry-run](../topics/flow-control/sequences.md#fail-fast-exit-codes-and-dry-run).
+The exit code is `0` when every executed step succeeded, `1` after an
+unhandled failure, and `130` after Ctrl+C, including cancellation on the
+provider review screen. A preflight failure starts no step.
 
 ## Interactive sessions
 
@@ -242,7 +241,6 @@ Each step's provider session gets these variables:
 
 | Variable | Value |
 |---|---|
-| `CLAUDINE_FAIL_FAST` | the effective fail-fast setting |
 | `AGENT` | the provider that launched, such as `codex` |
 | `MODEL` | the model that launched, when one was chosen |
 | `YOLO` | `true` when `--yolo` is set |
@@ -256,13 +254,6 @@ starting state, without launching a provider. **Shell work still runs**:
 sequence with `shell: git commit …` will commit.
 
 ## Flags
-
-Flags specific to `sequence`:
-
-| Flag | Effect |
-|---|---|
-| `--fail-fast <BOOL>` | overrides the document's `fail_fast` |
-| `--budget-ledger <PATH>` | enforces one shared invocation and active-time budget across every agent launch, retry, and wait in the run; see [Shared execution budgets](budget.md) |
 
 Flags shared with `compose`:
 
@@ -292,6 +283,6 @@ provider review screen.
   averaged across steps. The note line gives both the average and the
   minimum latency.
 
-An interrupted run, or one stopped by fail-fast, still prints the report,
+An interrupted run, or one stopped by a step failure, still prints the report,
 with a `partial sequence metrics` note. `--perf` overrides `--quiet` and
 `--silent`.

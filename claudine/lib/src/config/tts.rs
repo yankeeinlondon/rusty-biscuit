@@ -42,8 +42,15 @@ pub enum VoiceSelection {
 pub struct TtsConfigSettings {
     /// Which TTS provider to use (e.g., "say", "espeak", "elevenlabs").
     ///
-    /// Resolved to a `TtsProvider` variant at runtime in the dispatch runner.
-    pub provider: String,
+    /// Absent selects the default provider, exactly as `"tts": true` does;
+    /// an explicit `null` is rejected rather than read as absent. Resolved to
+    /// a `TtsProvider` variant at runtime in the dispatch runner.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub provider: Option<String>,
 
     /// Optional voice selection (single ID or gendered aliases).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -52,6 +59,28 @@ pub struct TtsConfigSettings {
     /// Preferred gender when the voice is auto-selected.
     #[serde(default = "default_gender")]
     pub gender: Gender,
+
+    /// Whether lifecycle speech is synthesized ahead of time into the audio
+    /// cache. Absent means on; `null` is rejected rather than read as absent.
+    ///
+    /// Kept as an `Option` so a load/save round trip never writes the default
+    /// into the user's file. Read it through [`TtsValue::prewarm_enabled`].
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub prewarm: Option<bool>,
+}
+
+/// Deserialize a field that may be omitted but, when written, must hold a
+/// value: `null` fails here instead of collapsing into `None` (absent).
+fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
 }
 
 // ============================================================================
@@ -60,9 +89,18 @@ pub struct TtsConfigSettings {
 
 /// TTS configuration: either a simple boolean toggle or full settings.
 ///
-/// `"tts": true` enables TTS with provider auto-detection.
-/// `"tts": false` disables TTS entirely.
-/// `"tts": { "provider": ..., "voice": ..., "gender": ... }` sets explicit options.
+/// The value governs hook `speak` actions and the configuration lifecycle
+/// `say` plays with; it never decides whether lifecycle `say` plays.
+///
+/// - `"tts": true` enables hook speech with provider auto-detection.
+/// - `"tts": false` (or absent) disables hook speech; lifecycle `say` still
+///   plays with an auto-detected configuration.
+/// - `"tts": { "provider": ..., "voice": ..., "gender": ..., "prewarm": ... }`
+///   enables hook speech with explicit options; every key is optional, and an
+///   object without `provider` uses the default provider as `true` does.
+///
+/// Pre-warm is on for every shape unless the object form says
+/// `"prewarm": false` (see [`TtsValue::prewarm_enabled`]).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum TtsValue {
@@ -75,6 +113,19 @@ pub enum TtsValue {
 impl Default for TtsValue {
     fn default() -> Self {
         TtsValue::Boolean(false)
+    }
+}
+
+impl TtsValue {
+    /// Whether lifecycle speech may be synthesized ahead of time.
+    ///
+    /// Only an object with `"prewarm": false` turns it off: pre-warm follows
+    /// lifecycle `say`, which plays under every shape, not hook speech.
+    pub fn prewarm_enabled(&self) -> bool {
+        match self {
+            TtsValue::Boolean(_) => true,
+            TtsValue::Config(settings) => settings.prewarm.unwrap_or(true),
+        }
     }
 }
 
@@ -116,7 +167,7 @@ mod tests {
         let config: ClaudineConfig = serde_json::from_value(json).unwrap();
         match &config.tts {
             TtsValue::Config(settings) => {
-                assert_eq!(settings.provider, "say");
+                assert_eq!(settings.provider.as_deref(), Some("say"));
                 assert_eq!(settings.gender, Gender::Male);
                 assert!(settings.voice.is_none());
             }

@@ -4,7 +4,7 @@
 //! `Accepted` scope as if it sat at the accepted path, applies the refresh
 //! integrity rules against the published baseline, and computes the delta.
 //! [`check_run`] records the result in the run and writes `validation.json`
-//! and `delta.json`; it runs inside the budgeted sequence as a `shell:` step.
+//! and `delta.json`; it runs inside the run's sequence as a `shell:` step.
 //!
 //! Integrity rules beyond validation: the candidate keeps the platform,
 //! `created`, and every chronology entry; removed facts, gaps, and sources are
@@ -22,7 +22,7 @@ use serde_json::Value;
 
 use super::RefreshError;
 use super::records::{EvidenceReview, SourceChecks, SourceProposal, SubjectKind, Suggestions};
-use super::state::{LedgerView, RunRecord, RunStatus, Stage, StageResult, StageStatus, StateArea, apply_ledger, write_json};
+use super::state::{RunRecord, RunStatus, Stage, StageResult, StageStatus, StateArea, write_json};
 use crate::research::canonical::text_fingerprint;
 use crate::research::delta::{self, Delta};
 use crate::research::diagnostics::Diagnostic;
@@ -47,7 +47,6 @@ pub struct Evaluation {
     pub checks: Option<SourceChecks>,
     pub proposal: Option<SourceProposal>,
     pub review: Option<EvidenceReview>,
-    pub ledger: Option<LedgerView>,
 }
 
 impl Evaluation {
@@ -114,7 +113,6 @@ pub fn evaluate(loader: &Loader, record: &RunRecord, today: &Date) -> Result<Eva
         checks: None,
         proposal: None,
         review: None,
-        ledger: state.ledger(record)?,
     };
 
     // Pass 1.
@@ -363,7 +361,6 @@ pub fn check_run(loader: &Loader, run_id: &str, through: Stage, today: &Date) ->
         });
     }
     let eval = evaluate(loader, &record, today)?;
-    apply_ledger(&mut record, eval.ledger.as_ref());
     let dir = state.run_dir(record.platform_id, &record.run_id);
     write_json(&dir.join("validation.json"), &serde_json::json!({ "diagnostics": eval.diagnostics, "stages": eval.stages }), run_id)?;
     if let Some(delta) = &eval.delta {

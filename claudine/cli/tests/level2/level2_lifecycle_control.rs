@@ -595,7 +595,7 @@ fn run_proxy_in_tmux_with_set(staged: &Staged, setters: &str, done_marker: &str)
     pane
 }
 
-/// Like [`run_in_tmux_for`] but blocks until the `echo`-ed sentinel appears in
+/// Like [`run_in_tmux_for`] but blocks until the completion sentinel appears in
 /// the captured pane (i.e. the compose command has exited, success or error),
 /// then returns the pane. Used to assert on error output that writes nothing to
 /// `events.log`.
@@ -672,7 +672,7 @@ fn run_compose_await_exit_redirected(
     let sentinel = format!("L2_CTL_EXIT_{seq}");
     let env_prefix = staged_env_prefix(staged, path);
     let cmd = format!(
-        "cd {ws} && {env_prefix}{claudine} compose {provider_flag} {md}{redirect} ; echo {sentinel}",
+        "cd {ws} && {env_prefix}{claudine} compose {provider_flag} {md}{redirect} ; printf 'L2_CTL_%s_%s\\n' EXIT {seq}",
         ws = staged.workspace.path().display(),
         md = staged.md_file.display(),
     );
@@ -684,15 +684,18 @@ fn run_compose_await_exit_redirected(
     let mut pane = String::new();
     while Instant::now() < deadline {
         pane = harness.capture().map(|f| f.plain).unwrap_or_default();
-        // The sentinel is echoed only after compose exits; ignore the command
-        // line itself (which also contains the literal token) by requiring it on
-        // its own output line.
+        // Split printf arguments keep the token out of the echoed command,
+        // even when the terminal wraps that command onto a line of its own.
         if pane.lines().any(|l| l.trim() == sentinel) {
             break;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
     kill_session_by_name(&session);
+    assert!(
+        pane.lines().any(|line| line.trim() == sentinel),
+        "compose did not reach its completion marker; pane:\n{pane}"
+    );
     pane
 }
 
@@ -6436,12 +6439,10 @@ fn level2_lifecycle_proxy_inside_sequence_step_is_contained() {
     let sequence_doc = "---\n\
          title: sequence with a proxy step\n\
          sequence:\n  \
-         - alpha\n  \
-         - beta\n\
-         initialize:\n  \
-         - {proxy: '@target.md'}\n\
+         - {name: alpha, prompt: '@router.md'}\n  \
+         - {name: beta, prompt: '@router.md'}\n\
          ---\n\
-         sequence body {{ state }}\n";
+         sequence body {{ seq }}\n";
     let target_doc = "---\n\
          title: sequence proxy target\n\
          success:\n  \
@@ -6449,6 +6450,7 @@ fn level2_lifecycle_proxy_inside_sequence_step_is_contained() {
          ---\n\
          sequence proxy target body\n";
     let staged = stage_proxy_pair(sequence_doc, target_doc, true);
+    fs::write(staged.workspace.path().join("router.md"), SEQUENCE_STEP_ROUTER).unwrap();
 
     // Two steps, each proxying to the target once: 2 `target-ran` markers.
     let pane = run_sequence_until_target_runs(&staged, 2);
@@ -6514,15 +6516,14 @@ fn run_sequence_until_target_runs(staged: &Staged, expected_runs: usize) -> Stri
 // path dropped. These two rows close that gap: a looping sequence target and a
 // target-authored `model:`, each compared against a direct invocation.
 
-/// A two-step sequence source whose every step hands its step off to the looping
-/// `target.md` at `initialize`.
+const SEQUENCE_STEP_ROUTER: &str = "---\ninitialize:\n  - {proxy: '@target.md'}\n---\nStep router\n";
+
+/// Two prompt tasks whose routing documents hand off to the looping target.
 const SEQ_LOOP_SOURCE: &str = "---\n\
      title: sequence with a looping proxy step\n\
      sequence:\n  \
-     - alpha\n  \
-     - beta\n\
-     initialize:\n  \
-     - {proxy: '@target.md'}\n\
+     - {name: alpha, prompt: '@router.md'}\n  \
+     - {name: beta, prompt: '@router.md'}\n\
      ---\n\
      sequence body\n";
 
@@ -6531,10 +6532,8 @@ const SEQ_LOOP_SOURCE: &str = "---\n\
 const SEQ_MODEL_SOURCE: &str = "---\n\
      title: sequence pinned-model launch facet\n\
      sequence:\n  \
-     - alpha\n  \
-     - beta\n\
-     initialize:\n  \
-     - {proxy: '@target.md'}\n\
+     - {name: alpha, prompt: '@router.md'}\n  \
+     - {name: beta, prompt: '@router.md'}\n\
      ---\n\
      sequence body\n";
 
@@ -6627,6 +6626,7 @@ fn level2_lifecycle_sequence_step_proxy_to_looping_target_owns_the_loop() {
     // Routed: a two-step sequence, each step proxying to the same looping target.
     // Per step: 1 target-init + 3 provider-ran + 3 target-finalize; two steps → 14.
     let routed = stage_proxy_pair(SEQ_LOOP_SOURCE, EQUIV_LOOP_TARGET, true);
+    fs::write(routed.workspace.path().join("router.md"), SEQUENCE_STEP_ROUTER).unwrap();
     let routed_pane = run_sequence_until_settled(&routed, 14);
     let routed_lines = event_lines(&routed);
 
@@ -6684,6 +6684,7 @@ fn level2_lifecycle_sequence_step_proxy_rebuilds_target_launch_bundle() {
     // Per step: sig=initialize, provider-ran, sig=success, env.MODEL, sig=finalize
     // = 5 markers; two steps → 10.
     let routed = stage_proxy_pair(SEQ_MODEL_SOURCE, EQUIV_PINNED_MODEL_TARGET, true);
+    fs::write(routed.workspace.path().join("router.md"), SEQUENCE_STEP_ROUTER).unwrap();
     let routed_pane = run_sequence_until_settled(&routed, 10);
     let routed_lines = event_lines(&routed);
 

@@ -61,6 +61,9 @@ pub fn is_direct_formal_document(source: &ResolvedCompositionSource) -> bool {
 /// Returns [`CompositionError::SequenceExternalWrongType`] when `template` is
 /// present but is not a mapping.
 pub fn formal_keys(root: &Map<String, Value>) -> Result<FormalKeys<'_>, CompositionError> {
+    if let Some(value) = root.get("fail_fast") {
+        return Err(super::grammar::removed_task_key("fail_fast", value, std::path::Path::new("<sequence>")));
+    }
     let template = match root.get("template") {
         Some(Value::Object(map)) => Some(map),
         Some(other) => {

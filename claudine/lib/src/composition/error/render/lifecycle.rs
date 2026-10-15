@@ -182,8 +182,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 .error_header(ErrorHeader::new("CompositionError", "removed grammar"))
                 .body(body)
                 .hint(
-                    "Lifecycle events are ordered action lists; see the lifecycle \
-                     documentation for the current grammar.",
+                    "See the sequence and lifecycle documentation for the current grammar.",
                 )
         }
         CompositionError::LifecycleStackInvalidShape {

@@ -27,25 +27,6 @@ pub struct SequenceArgs {
     #[arg(value_name = "ARG", num_args = 1.., required = true)]
     pub args: Vec<String>,
 
-    /// Override the document's fail-fast behavior for this run.
-    /// Accepts: true, false, 1, 0, yes, no.
-    #[arg(long = "fail-fast", value_name = "BOOL", value_parser = parse_boolish)]
-    pub fail_fast: Option<bool>,
-
-    /// Enforce the shared budget in this ledger (see `claudine budget init`)
-    /// across every agent launch, retry, and wait of this run.
-    #[arg(long = "budget-ledger", value_name = "PATH")]
-    pub budget_ledger: Option<std::path::PathBuf>,
-}
-
-fn parse_boolish(s: &str) -> Result<bool, String> {
-    match s.to_ascii_lowercase().as_str() {
-        "true" | "1" | "yes" => Ok(true),
-        "false" | "0" | "no" => Ok(false),
-        _ => Err(format!(
-            "invalid boolean value '{s}'; expected true/false, 1/0, or yes/no"
-        )),
-    }
 }
 
 /// Entry point for `claudine sequence`; returns the process exit code.
@@ -58,27 +39,13 @@ pub fn run_sequence(
     verbose: u8,
     startup_timings: Option<crate::perf::StartupTimings>,
 ) -> Result<i32> {
-    match args.budget_ledger.clone() {
-        Some(ledger) => {
-            let shared = args.shared.clone();
-            crate::budget::run_with_ledger(&ledger, &shared, || {
-                run_sequence_inner(
-                    args,
-                    verbose,
-                    startup_timings,
-                    crate::request::snapshot(),
-                    crate::request::document_environment_source(),
-                )
-            })
-        }
-        None => run_sequence_inner(
-            args,
-            verbose,
-            startup_timings,
-            crate::request::snapshot(),
-            crate::request::document_environment_source(),
-        ),
-    }
+    run_sequence_inner(
+        args,
+        verbose,
+        startup_timings,
+        crate::request::snapshot(),
+        crate::request::document_environment_source(),
+    )
 }
 
 #[allow(clippy::result_large_err)]
@@ -254,8 +221,6 @@ fn run_sequence_inner(
     let SequenceArgs {
         mut shared,
         args,
-        fail_fast,
-        budget_ledger: _,
     } = args;
 
     if shared.timeout.is_some() && shared.interactive {
@@ -279,11 +244,16 @@ fn run_sequence_inner(
     let file = super::compose::parse_composition_positionals(&args)?.file_ref.ok_or_else(|| {
         eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
     })?;
+    let _interrupt_guard = super::compose::interrupt::install_user_interrupt_guard(&file);
     let stderr_is_tty = std::io::stderr().is_terminal()
         || std::env::var_os("FORCE_COLOR").is_some();
 
+    // One TTS pre-warm worker for the whole sequence, shared by every step and
+    // task; dropping it on return cancels unfinished preparation.
+    let prewarm = claudine::composition::lifecycle::prewarm::PrewarmWorker::deferred(shared.dry_run);
     let invocation = claudine::invocation_context::InvocationContext::capture(request)?
-        .with_environment_source(documents);
+        .with_environment_source(documents)
+        .with_prewarm(prewarm.handle());
     let file_resolution_context = invocation.launch_file_resolution_context().clone();
     let source = match resolve_sequence_source(&file, &file_resolution_context) {
         Ok(source) => source,
@@ -346,9 +316,26 @@ fn run_sequence_inner(
     let _sequence_span = info_span!(
         "sequence",
         file = %source.resolved_path.display(),
-        fail_fast = ?fail_fast,
     )
     .entered();
+
+    let set_overrides =
+        super::compose::merge_set_overrides(
+            shared.set.as_deref(),
+            parsed.shorthand_setters,
+            parsed.positionals,
+        )?;
+    let mut authored_values: serde_json::Map<String, serde_json::Value> = source.markdown.frontmatter().as_map().iter()
+        .map(|(key, value)| (key.clone(), value.clone())).collect();
+    if let Some(serde_json::Value::Object(values)) = &set_overrides { authored_values.extend(values.clone()); }
+    let authored = serde_json::Value::Object(authored_values);
+    let lifecycle = composition::lifecycle::parse_lifecycle_config(&authored, &source.resolved_path)?;
+    composition::lifecycle::bindings::reject_removed_sequence_reads(
+        &source.resolved_path, composition::lifecycle::bindings::AuthoredDocument {
+            frontmatter: &authored, body: source.markdown.content(),
+            body_line_offset: source.markdown.frontmatter_line_count(),
+        }, set_overrides.as_ref(), Some(&lifecycle),
+    )?;
 
     let shell_options = super::wrap::apply_composition_shell_overrides(
         super::wrap::build_harness_shell_options_for_source(
@@ -378,20 +365,11 @@ fn run_sequence_inner(
     // Every later re-read sheds them too (`reload_composition_source`).
     let source = composition::without_formal_sequence_keys(&source);
 
-    // A dynamic source legitimately resolves to nothing — a clean repository
-    // makes `{{ ctx.dirty_files }}` empty. That is a no-op, not a failure; a
-    // static `sequence: []` is still rejected during normalization.
+    // Empty containers still enter their lifecycle and produce an empty result.
     if plan.steps.is_empty() {
         emit_empty_sequence_notice(&source.resolved_path);
-        return Ok(0);
     }
 
-    let set_overrides =
-        super::compose::merge_set_overrides(
-            shared.set.as_deref(),
-            parsed.shorthand_setters,
-            parsed.positionals,
-        )?;
     let caller_input_records =
         claudine::composition::CallerInputLayers::from_caller_overrides(
             set_overrides.clone(),
@@ -422,9 +400,7 @@ fn run_sequence_inner(
         );
     emit_dropped_optional_warnings(&dropped_optionals);
 
-    let execution_options = SequenceExecutionOptions {
-        fail_fast_override: fail_fast,
-    };
+    let execution_options = SequenceExecutionOptions { fail_fast_override: None };
 
     super::wrap::sequence::execute_sequence(
         &source,
@@ -564,8 +540,6 @@ mod tests {
         let args = SequenceArgs {
             shared: shared_args(),
             args: vec![file.to_string_lossy().into_owned()],
-            fail_fast: None,
-            budget_ledger: None,
         };
         // Launched beside the document: the test process's directory is
         // inside this checkout, whose capture would walk the whole repository.

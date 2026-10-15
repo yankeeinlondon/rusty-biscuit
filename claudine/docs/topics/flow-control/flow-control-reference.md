@@ -4,7 +4,7 @@ The detailed rules behind the lifecycle flow-control directives. Read [Flow Cont
 
 ## What each event can do at runtime
 
-Placement is checked once, at parse time: every directive is accepted in every event except `skip`, which is accepted only in `initialize` (`LifecycleControlAction::is_valid_for`). At runtime, every event hands its directive to the same event-agnostic dispatch path (`decide_control` followed by `dispatch_terminal_control`). What varies is whether the run is in a state where the directive can do anything:
+Placement is checked once, at parse time: `skip` is accepted only in `initialize`, and `cancelled` accepts only `stop` from the directive set (`LifecycleControlAction::is_valid_for`). At runtime, every event hands its directive to the same event-agnostic dispatch path (`decide_control` followed by `dispatch_terminal_control`). What varies is whether the run is in a state where the directive can do anything:
 
 | Event | `retry` | `resume` | `proxy` |
 |-------|---------|----------|---------|
@@ -13,7 +13,7 @@ Placement is checked once, at parse time: every directive is accepted in every e
 | `blocked` (from compose pre-flight) | `LifecycleSetupPhaseRecoveryUnsupported` | `LifecycleSetupPhaseRecoveryUnsupported` | `LifecycleSetupPhaseRecoveryUnsupported` |
 | `loop` (the iteration gate) | `LifecycleSetupPhaseRecoveryUnsupported` | `LifecycleSetupPhaseRecoveryUnsupported` | `LifecycleSetupPhaseRecoveryUnsupported` |
 
-`stop` and `error` work everywhere. `defer` fails with `LifecycleDeferNotImplemented` in every event until its scheduler exists.
+`stop` works in every event. `error` is rejected in `cancelled`. Recovery in the `finalize` after cancellation raises a typed cancellation-recovery error and launches no work. `defer` fails with `LifecycleDeferNotImplemented` in every event until its scheduler exists.
 
 The unsupported cells have no re-entry point to return to, so they raise a typed error instead of quietly doing nothing. Put those recoveries on `start`, `success`, `failure`, or `finalize`.
 
@@ -22,6 +22,12 @@ A `proxy` from `initialize` is a real handoff, not a reduced pre-launch path. Th
 The `loop:` iteration condition (`while`/`until`) is a separate mechanism. It does not go through directive dispatch.
 
 ## `retry` and `resume` in detail
+
+### Containers
+
+Sequences and groups have no live provider session, so `resume` raises the no-session error. `retry` reruns the container from the beginning after every old child settles, without repeating `initialize` or finalizing the abandoned attempt. Child results and outcome records reset; runtime mutations survive. A container's `retry.with` values enter its runtime state, rather than the document-only one-attempt overlay described below. Nothing rolls back disk edits or other external effects. `proxy` hands the container's position to a target and skips the source's remaining events, including `finalize`.
+
+An unhandled child failure propagates to the nearest container's `failure` event after child cleanup. A sequence stops unless recovery succeeds. A group with `fail_fast: false` handles leg failures; its own preparation/event errors and Ctrl-C still fail or cancel it. With default `fail_fast: true`, it stops admission, cancels opted-in running legs, waits for the rest, and fails atomically for in-memory results/mutations. See [Sequences](sequences.md#parallel-groups).
 
 ### Budgets
 
@@ -129,9 +135,9 @@ Nested mappings are data here. This is the only place in the lifecycle surface w
 
 #### Evaluation
 
-The whole mapping is evaluated **once, in the source document**, when the directive fires. Evaluation uses Darkmatter subtree composition against the source's live frontmatter plus the globals the event declares (`err`, `timing`, `group`, `loop`; see [Lifecycle](lifecycle.md#binding-time-early-vs-late)) and the `current` root. An absent property is `null`; a genuine evaluation error leaves no overlay at all. A `set_frontmatter` earlier in the same event is visible. The target receives resolved data, never a template: the overlay reaches the target's composition as a data layer, so a `{{ … }}` or `$( … )` inside a resolved value (for example, text an agent wrote) is kept as text and is never evaluated in the target, on its first read or on a `retry`/`resume`.
+The whole mapping is evaluated **once, in the source document**, when the directive fires. Evaluation uses Darkmatter subtree composition against the source's live frontmatter plus the globals the event declares (`seq`, `err`, `timing`, `group`, `loop`; see [Lifecycle](lifecycle.md#binding-time-early-vs-late)) and the `current` root. An absent property is `null`; a genuine evaluation error leaves no overlay at all. A `set_frontmatter` earlier in the same event is visible. The target receives resolved data, never a template: the overlay reaches the target's composition as a data layer, so a `{{ … }}` or `$( … )` inside a resolved value (for example, text an agent wrote) is kept as text and is never evaluated in the target, on its first read or on a `retry`/`resume`.
 
-A `with:` value for a lifecycle key (`initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, `loop`) is the exception. The target re-parses it as its own event or loop and evaluates those strings at event time, so a resolved value that still holds a `{{ … }}` span there fails with `LifecycleWithEvaluationFailed` instead of becoming an instruction.
+A `with:` value for a lifecycle key (`initialize`, `start`, `success`, `blocked`, `failure`, `cancelled`, `finalize`, `loop`) is the exception. The target re-parses it as its own event or loop and evaluates those strings at event time, so a resolved value that still holds a `{{ … }}` span there fails with `LifecycleWithEvaluationFailed` instead of becoming an instruction.
 
 Evaluation is atomic. The target and the whole mapping resolve before anything changes. If any value fails (a malformed expression, an unknown function, or an out-of-scope variable such as `group` outside a group), no overlay is installed, no transition happens, and the run follows the normal failure path for the event that fired: a `proxy` never touches its target and the source stays active; a `retry` starts no attempt and spends none of its budget. `no_error` does not suppress this, because it is an expression error rather than a side-effect failure. The error, `LifecycleWithEvaluationFailed`, names the event, the directive, the document the overlay was for (the `proxy` target, or the current document for `retry`), and the deepest path inside `with:` that it can identify, for example `` `failure[0].then[0].retry.with.reason` could not be resolved for the `retry` to `<current document>` ``. It never prints a resolved value, which could be a secret.
 
@@ -224,4 +230,4 @@ These guarantees hold regardless:
 
 ## `--dry-run`
 
-`--dry-run` fires no lifecycle events. It returns before the lifecycle runtime is constructed, so no event runs, no side effect touches the workspace, and no dynamic `proxy` is followed. Turning a dry run into a lifecycle simulation is an explicit non-goal. See [Composition — Dry Run](../composition.md#dry-run).
+`--dry-run` fires no lifecycle events. It returns before the lifecycle runtime is constructed, so no event runs and no dynamic `proxy` is followed. Composition shell expansions and sequence `shell:` tasks still execute and may change the filesystem or perform other real work; for example, a dry-run containing `shell: just commit` can commit. Turning a dry run into a lifecycle simulation is an explicit non-goal. See [Composition — Dry Run](../composition.md#dry-run).

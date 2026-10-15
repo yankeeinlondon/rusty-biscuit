@@ -39,6 +39,8 @@ use crate::markdown::compose::shell_expansion::policy::normalize_command;
 use crate::markdown::compose::shell_expansion::types::{
     ShellCommandEntry, ShellCommandOrigin, ShellDirective, ShellExpansionError, frontmatter_key_line,
 };
+use crate::markdown::compose::shell_expansion::template::{ModeRequirement, ShellCandidate};
+use crate::markdown::compose::shell_expansion::template::candidate::{CandidateScope, derived_deferred_keys};
 use crate::markdown::compose::nested::{NestedComposeSlot, RootSource};
 use crate::markdown::compose::transclusion;
 use crate::markdown::compose::remote_fetch;
@@ -165,8 +167,8 @@ pub fn collect_shell_commands_with_graph(
     markdown: &Markdown,
     request: &ComposeRequest,
 ) -> MarkdownResult<(Vec<ShellCommandEntry>, super::PreflightGraphNode)> {
-    let (entries, _icmp, _capabilities, graph) = collect_effects(markdown, request)?;
-    Ok((entries, graph))
+    let collected = collect_effects(markdown, request)?;
+    Ok((collected.entries, collected.graph))
 }
 
 /// Like [`collect_shell_commands_with_graph`], but also returns the ICMP
@@ -183,16 +185,12 @@ pub fn collect_shell_commands_with_graph(
 pub(crate) fn collect_effects(
     markdown: &Markdown,
     options: &crate::markdown::compose::ComposeRequest,
-) -> MarkdownResult<(
-    Vec<ShellCommandEntry>,
-    Vec<PlannedIcmpProbe>,
-    DeferredCapabilities,
-    super::PreflightGraphNode,
-)> {
+) -> MarkdownResult<CollectedEffects> {
     let extended = options.extended_for(markdown);
     let options = &*extended;
     let mut seen = HashSet::new();
     let mut entries = Vec::new();
+    let mut candidates = Vec::new();
     let mut icmp = Vec::new();
     let mut capabilities = DeferredCapabilities::default();
     let mut visited = HashSet::new();
@@ -206,6 +204,7 @@ pub(crate) fn collect_effects(
         options,
         &mut seen,
         &mut entries,
+        &mut candidates,
         &mut icmp,
         &mut capabilities,
         &mut visited,
@@ -214,7 +213,24 @@ pub(crate) fn collect_effects(
         None,
         &InheritedDiscovery::default(),
     )?;
-    Ok((entries, icmp, capabilities, graph))
+    Ok(CollectedEffects {
+        entries,
+        candidates,
+        icmp,
+        capabilities,
+        graph,
+    })
+}
+
+/// Everything one condition-blind discovery walk found.
+pub(crate) struct CollectedEffects {
+    /// Resolved-byte entries, one per unique normalized command.
+    pub entries: Vec<ShellCommandEntry>,
+    /// One candidate per command site, never merged by bytes.
+    pub candidates: Vec<ShellCandidate>,
+    pub icmp: Vec<PlannedIcmpProbe>,
+    pub capabilities: DeferredCapabilities,
+    pub graph: super::PreflightGraphNode,
 }
 
 /// Collects the frontmatter `$(...)` commands of one document, without reading
@@ -252,7 +268,7 @@ pub fn collect_frontmatter_shell_commands(
     markdown: &Markdown,
     request: &ComposeRequest,
 ) -> MarkdownResult<Vec<ShellCommandEntry>> {
-    frontmatter_shell_commands(markdown, request)
+    frontmatter_shell_commands(markdown, request).map(|(entries, _candidates)| entries)
 }
 
 /// [`collect_frontmatter_shell_commands`] over a prepared request's root
@@ -260,7 +276,7 @@ pub fn collect_frontmatter_shell_commands(
 pub(crate) fn frontmatter_shell_commands(
     markdown: &Markdown,
     options: &crate::markdown::compose::ComposeRequest,
-) -> MarkdownResult<Vec<ShellCommandEntry>> {
+) -> MarkdownResult<(Vec<ShellCommandEntry>, Vec<ShellCandidate>)> {
     let extended = options.extended_for(markdown);
     let options = &*extended;
     let source_file = match &options.source {
@@ -271,6 +287,7 @@ pub(crate) fn frontmatter_shell_commands(
     let mut seen = HashSet::new();
     let mut entries = Vec::new();
     let mut local_entries = Vec::new();
+    let mut candidates = Vec::new();
     scan_one_frontmatter(
         markdown,
         options,
@@ -278,8 +295,10 @@ pub(crate) fn frontmatter_shell_commands(
         &mut seen,
         &mut entries,
         &mut local_entries,
+        &mut candidates,
+        &HashSet::new(),
     )?;
-    Ok(entries)
+    Ok((entries, candidates))
 }
 
 /// Collects every command from one document and recurses into its referenced
@@ -306,6 +325,7 @@ fn collect_recursive(
     options: &crate::markdown::compose::ComposeRequest,
     seen: &mut HashSet<String>,
     entries: &mut Vec<ShellCommandEntry>,
+    candidates: &mut Vec<ShellCandidate>,
     icmp: &mut Vec<PlannedIcmpProbe>,
     capabilities: &mut DeferredCapabilities,
     visited: &mut HashSet<String>,
@@ -366,7 +386,21 @@ fn collect_recursive(
     *capabilities = std::mem::take(capabilities).union(&DeferredCapabilities::for_document(markdown));
 
     // ── Frontmatter commands ───────────────────────────────────────
-    scan_one_frontmatter(markdown, &discovery, &source_file, seen, entries, &mut local_entries)?;
+    let deferred_keys = derived_deferred_keys(
+        markdown.frontmatter().as_map().iter(),
+        options.deferred_shell_roots(),
+        &inherited.deferred,
+    );
+    scan_one_frontmatter(
+        markdown,
+        &discovery,
+        &source_file,
+        seen,
+        entries,
+        &mut local_entries,
+        candidates,
+        &deferred_keys,
+    )?;
 
     let authored_ctx = markdown.full_source_context_for_errors();
     let authored_pending = pending_shell_literals(
@@ -451,6 +485,7 @@ fn collect_recursive(
     let for_children = InheritedDiscovery {
         pending: pending.clone(),
         unobserved,
+        deferred: deferred_keys.clone(),
     };
     detect_dynamic_command_shape(prepared.content(), &pending, &prepared_ctx, line_offset)?;
 
@@ -466,15 +501,66 @@ fn collect_recursive(
     child_state_data.remove("$schema");
 
     // ── Body `::shell` directives ──────────────────────────────────
-    let directives = crate::markdown::compose::shell_expansion::parser::parse_directives_in(
+    let directive_lines = crate::markdown::compose::shell_expansion::parser::scan_directive_lines(
         prepared.content(),
         Some(&body_data),
         prepared_ctx.clone(),
         line_offset,
-    )?;
-    for directive in directives {
+    );
+
+    // ── Authored command sites ─────────────────────────────────────
+    // Each `::shell` and `::shell-block` command is also read as authored,
+    // before interpolation, so its placeholders stay expression nodes. A
+    // site is matched to its resolved form by document order; interpolation
+    // inserts data, never a directive, so the orders agree.
+    let site_ctx = DiscoverySiteContext::new(&prepared, &discovery, &child_state, remote_fetch);
+    let scope = CandidateScope {
+        schema: None,
+        host_globals: host_global_roots(options),
+        deferred: options.deferred_shell_roots(),
+        derived: &deferred_keys,
+        source_file: source_file.clone(),
+        owner: owner_key(options, is_nested),
+        ctx: &authored_ctx,
+    };
+    let authored_directives = crate::markdown::compose::shell_expansion::parser::authored_directive_commands(
+        markdown.content(),
+        markdown.frontmatter_line_count(),
+    );
+    let mut body_sites = Vec::with_capacity(authored_directives.len());
+    let mut body_awaiting = Vec::with_capacity(authored_directives.len());
+    for (authored, line) in &authored_directives {
+        let template = crate::markdown::compose::shell_expansion::parser::authored_template(authored);
+        body_sites.push(site_ctx.build(&scope, authored, template, ShellCommandOrigin::Body { line: *line })?);
+        body_awaiting.push(site_ctx.awaits_execution(authored));
+    }
+    let body_linked = body_sites.len() == directive_lines.len();
+
+    for (index, directive_line) in directive_lines.into_iter().enumerate() {
+        // Its value does not exist yet, so neither do its bytes; the
+        // preparation that binds the value audits the command.
+        if body_linked && body_awaiting[index] {
+            continue;
+        }
+        let site = body_linked.then(|| &mut body_sites[index]);
+        // A value holding quotes, operators, or command syntax makes the
+        // interpolated text unreadable as a command. Its site can still run
+        // as a template, but never as those bytes.
+        let (directive, site) = match (directive_line.parsed, site) {
+            (Ok(directive), site) => (directive, site),
+            (Err(_), Some(site)) if site.shape().is_some() => {
+                site.requirement = ModeRequirement::TemplateRequired;
+                continue;
+            }
+            (Err(error), _) => return Err(error.into()),
+        };
+        let directive = &directive;
         let line = directive.origin.line_number();
-        for (raw_action, exe_raw, args_raw) in directive_action_iter(&directive) {
+        let template_required = site
+            .as_ref()
+            .is_some_and(|site| site.requirement == ModeRequirement::TemplateRequired);
+        let mut site_keys = Vec::new();
+        for (raw_action, exe_raw, args_raw) in directive_action_iter(directive) {
             let (executable, args) = resolve_executable(
                 &options.alias_resolutions,
                 login_shell(options.context().env()),
@@ -482,7 +568,10 @@ fn collect_recursive(
                 &args_raw,
             );
             let normalized = normalize_command(&executable, &args);
-            if seen.insert(normalized.clone()) {
+            site_keys.push(normalized.clone());
+            // A late value has no resolved bytes: the interpolated text is not
+            // what runs, so it is never an approval candidate.
+            if !template_required && seen.insert(normalized.clone()) {
                 let entry = ShellCommandEntry {
                     raw_command: raw_action,
                     executable,
@@ -495,7 +584,20 @@ fn collect_recursive(
                 entries.push(entry);
             }
         }
+        if let Some(site) = site {
+            site.site.origin = directive.origin.clone();
+            if !template_required {
+                site.resolved = Some(site_keys);
+            }
+        }
     }
+    candidates.extend(
+        body_sites
+            .into_iter()
+            .zip(body_awaiting)
+            .filter(|(_, awaiting)| !(body_linked && *awaiting))
+            .map(|(site, _)| site),
+    );
 
     // ── Body `::shell-block` commands ──────────────────────────────
     // A malformed block (e.g. an unterminated `::block`) is surfaced richly by
@@ -506,54 +608,151 @@ fn collect_recursive(
     // failure and let the compose pass produce the real, styled error.
     let pairs = block_pairs::scan_block_pairs_in(prepared.content(), Some(&body_data))
         .unwrap_or_default();
-    for pair in pairs {
+    let authored_offset = markdown.frontmatter_line_count();
+    // The authored commands of each block, in document order, beside the
+    // site discovery built for each.
+    let mut authored_blocks: Vec<Vec<(ShellCandidate, String, usize, bool)>> = Vec::new();
+    for pair in block_pairs::scan_block_pairs_in(markdown.content(), None).unwrap_or_default() {
         if !matches!(pair.kind, block_pairs::BlockOpenKind::Shell) {
             continue;
         }
-        let body_text = &prepared.content()[pair.body_span.clone()];
-        let commands = split_logical_commands(body_text, pair.start_line + 1)
-            .map_err(|e| crate::markdown::types::MarkdownError::Transform(e.to_string()))?;
-        if body_data.intersects(&pair.body_span) {
-            super::super::shell_blocks::reject_data_shaped_commands(
-                &commands,
-                &body_data.masked(prepared.content())[pair.body_span.clone()],
-                pair.start_line + 1,
-                body_text,
-                line_offset,
-                Some(source_file.clone()),
-            )?;
-        }
+        let body_text = &markdown.content()[pair.body_span.clone()];
+        let (commands, _dangling) =
+            super::super::shell_blocks::body::group_logical_commands(body_text, pair.start_line + 1);
+        let mut block = Vec::with_capacity(commands.len());
         for command in commands {
-            for action in &command.pipeline.actions {
-                let exe_raw = action.command.executable.clone();
-                let args_raw = action.command.args.clone();
-                let raw_command = render_action(&exe_raw, &args_raw);
-                let (executable, args) = resolve_executable(
+            let template =
+                crate::markdown::compose::shell_expansion::template::parse_authored(&command.raw_command);
+            let site = site_ctx.build(
+                &scope,
+                &command.raw_command,
+                template,
+                ShellCommandOrigin::ShellBlock {
+                    start_line: pair.start_line + authored_offset,
+                    command_line: command.start_line + authored_offset,
+                },
+            )?;
+            let awaiting = site_ctx.awaits_execution(&command.raw_command);
+            block.push((site, command.raw_command, command.start_line, awaiting));
+        }
+        authored_blocks.push(block);
+    }
+    let resolved_pairs: Vec<_> = pairs
+        .into_iter()
+        .filter(|pair| matches!(pair.kind, block_pairs::BlockOpenKind::Shell))
+        .collect();
+    let blocks_linked = authored_blocks.len() == resolved_pairs.len();
+    let mut add_entries = |pipeline: &crate::markdown::compose::shell_expansion::types::ShellPipeline,
+                           origin: &ShellCommandOrigin,
+                           template_required: bool|
+     -> Vec<String> {
+        let mut site_keys = Vec::new();
+        for action in &pipeline.actions {
+            let exe_raw = action.command.executable.clone();
+            let args_raw = action.command.args.clone();
+            let raw_command = render_action(&exe_raw, &args_raw);
+            let (executable, args) = resolve_executable(
                 &options.alias_resolutions,
                 login_shell(options.context().env()),
                 &exe_raw,
                 &args_raw,
             );
-                let normalized = normalize_command(&executable, &args);
-                if !seen.insert(normalized.clone()) {
-                    continue;
+            let normalized = normalize_command(&executable, &args);
+            site_keys.push(normalized.clone());
+            if template_required || !seen.insert(normalized.clone()) {
+                continue;
+            }
+            let entry = ShellCommandEntry {
+                raw_command,
+                executable,
+                args,
+                normalized,
+                source_file: source_file.clone(),
+                origin: origin.clone(),
+            };
+            local_entries.push(entry.clone());
+            entries.push(entry);
+        }
+        site_keys
+    };
+    for (index, pair) in resolved_pairs.into_iter().enumerate() {
+        let body_text = &prepared.content()[pair.body_span.clone()];
+        let resolved = split_logical_commands(body_text, pair.start_line + 1)
+            .map_err(|e| crate::markdown::types::MarkdownError::Transform(e.to_string()))
+            .and_then(|commands| {
+                if body_data.intersects(&pair.body_span) {
+                    super::super::shell_blocks::reject_data_shaped_commands(
+                        &commands,
+                        &body_data.masked(prepared.content())[pair.body_span.clone()],
+                        pair.start_line + 1,
+                        body_text,
+                        line_offset,
+                        Some(source_file.clone()),
+                    )?;
                 }
-                let entry = ShellCommandEntry {
-                    raw_command,
-                    executable,
-                    args,
-                    normalized,
-                    source_file: source_file.clone(),
-                    origin: ShellCommandOrigin::ShellBlock {
-                        start_line: pair.start_line + line_offset,
-                        command_line: command.start_line + line_offset,
-                    },
-                };
-                local_entries.push(entry.clone());
-                entries.push(entry);
+                Ok(commands)
+            });
+        let sites = blocks_linked.then(|| &mut authored_blocks[index]);
+        let commands = match (resolved, sites) {
+            (Ok(commands), sites) => (commands, sites),
+            // A value holding command syntax makes the block's interpolated
+            // text unreadable. Its template sites can still run as templates,
+            // and a command without a placeholder is its own authored bytes.
+            (Err(_), Some(sites))
+                if sites.iter().all(|(site, raw, _, _)| {
+                    site.shape().is_some()
+                        || ExpressionFinder::scan_plain(raw).expressions.is_empty()
+                }) =>
+            {
+                for (site, raw, start_line, _) in sites.iter_mut() {
+                    if site.shape().is_some() {
+                        site.requirement = ModeRequirement::TemplateRequired;
+                        continue;
+                    }
+                    let origin = site.site.origin.clone();
+                    let mut keys = Vec::new();
+                    for command in split_logical_commands(raw, *start_line)
+                        .map_err(|e| crate::markdown::types::MarkdownError::Transform(e.to_string()))?
+                    {
+                        keys.extend(add_entries(&command.pipeline, &origin, false));
+                    }
+                    site.resolved = Some(keys);
+                }
+                continue;
+            }
+            (Err(error), _) => return Err(error),
+        };
+        let (commands, mut sites) = commands;
+        let linked = sites.as_ref().is_some_and(|sites| sites.len() == commands.len());
+        for (position, command) in commands.into_iter().enumerate() {
+            let origin = ShellCommandOrigin::ShellBlock {
+                start_line: pair.start_line + line_offset,
+                command_line: command.start_line + line_offset,
+            };
+            let awaiting = linked && sites.as_ref().is_some_and(|sites| sites[position].3);
+            let site = sites
+                .as_mut()
+                .filter(|_| linked)
+                .map(|sites| &mut sites[position].0);
+            let template_required = site
+                .as_ref()
+                .is_some_and(|site| site.requirement == ModeRequirement::TemplateRequired);
+            let keys = add_entries(&command.pipeline, &origin, template_required || awaiting);
+            if let Some(site) = site {
+                site.site.origin = origin;
+                if site.requirement == ModeRequirement::AnyMode {
+                    site.resolved = Some(keys);
+                }
             }
         }
     }
+    candidates.extend(
+        authored_blocks
+            .into_iter()
+            .flatten()
+            .filter(|(_, _, _, awaiting)| !(blocks_linked && *awaiting))
+            .map(|(site, _, _, _)| site),
+    );
 
     // ── Recurse into referenced children (condition-blind) ─────────
     let transclusion_opts = options.transclusion_options();
@@ -628,6 +827,7 @@ fn collect_recursive(
                     &child_options,
                     seen,
                     entries,
+                    candidates,
                     icmp,
                     capabilities,
                     visited,
@@ -656,6 +856,7 @@ fn collect_recursive(
                     &child_options,
                     seen,
                     entries,
+                    candidates,
                     icmp,
                     capabilities,
                     visited,
@@ -745,6 +946,7 @@ fn collect_recursive(
                     &child_options,
                     seen,
                     entries,
+                    candidates,
                     icmp,
                     capabilities,
                     visited,
@@ -764,6 +966,7 @@ fn collect_recursive(
                     &options.clone().with_source_url(url),
                     seen,
                     entries,
+                    candidates,
                     icmp,
                     capabilities,
                     visited,
@@ -802,6 +1005,7 @@ fn collect_recursive(
             &nested_options,
             seen,
             entries,
+            candidates,
             icmp,
             capabilities,
             visited,
@@ -849,6 +1053,7 @@ fn fetch_remote_child_body(
 }
 
 /// Collects the frontmatter `$(...)` commands for a single document.
+#[allow(clippy::too_many_arguments)]
 fn scan_one_frontmatter(
     markdown: &Markdown,
     options: &crate::markdown::compose::ComposeRequest,
@@ -856,6 +1061,8 @@ fn scan_one_frontmatter(
     seen: &mut HashSet<String>,
     entries: &mut Vec<ShellCommandEntry>,
     local_entries: &mut Vec<ShellCommandEntry>,
+    candidates_out: &mut Vec<ShellCandidate>,
+    deferred_keys: &HashSet<String>,
 ) -> MarkdownResult<()> {
     let mut fm_clone = markdown.clone();
     let mut provenance = prepare_frontmatter_for_compose(&mut fm_clone, options);
@@ -921,7 +1128,59 @@ fn scan_one_frontmatter(
         &preflight_exclude_keys,
     )?;
 
+    let authored_ctx = markdown.full_source_context_for_errors();
+    let mut site_ctx: Option<DiscoverySiteContext> = None;
+    let scope = CandidateScope {
+        schema: None,
+        host_globals: host_global_roots(options),
+        deferred: options.deferred_shell_roots(),
+        derived: deferred_keys,
+        source_file: source_file.to_path_buf(),
+        owner: owner_key(options, false),
+        ctx: &authored_ctx,
+    };
+
     for candidate in candidates {
+        let origin = ShellCommandOrigin::Frontmatter {
+            key: candidate.key.clone(),
+            line: candidate.line,
+        };
+        let authored = markdown
+            .frontmatter()
+            .as_map()
+            .get(&candidate.key)
+            .and_then(Value::as_str)
+            .and_then(|value| {
+                crate::markdown::compose::frontmatter_shell_expansion::authored_shell_template(
+                    value,
+                    &candidate.key,
+                    &scan_ctx,
+                )
+            });
+        let mut site = match authored {
+            Some((authored, template)) => {
+                let site_ctx = match &mut site_ctx {
+                    Some(site_ctx) => site_ctx,
+                    None => site_ctx.insert(DiscoverySiteContext::for_frontmatter(&fm_clone, options)?),
+                };
+                Some(site_ctx.build(&scope, &authored, template, origin.clone())?)
+            }
+            None => None,
+        };
+        // A value whose interpolated text does not parse has no resolved
+        // bytes: it can run only as its template.
+        if matches!(
+            candidate.ast,
+            crate::markdown::compose::frontmatter_shell_expansion::FrontmatterShellAst::Unparsed { .. }
+        ) && let Some(site) = &mut site
+        {
+            site.requirement = ModeRequirement::TemplateRequired;
+        }
+        let template_required = site
+            .as_ref()
+            .is_some_and(|site| site.requirement == ModeRequirement::TemplateRequired);
+        let mut site_keys = Vec::new();
+
         // Walk every pipeline this directive could run — for a plain pipeline
         // there is exactly one; for a ternary, every non-empty branch
         // contributes a pipeline so both reachable command sets surface. The
@@ -974,26 +1233,196 @@ fn scan_one_frontmatter(
                 &args_raw,
             );
                 let normalized = normalize_command(&executable, &args);
-                if seen.insert(normalized.clone()) {
+                site_keys.push(normalized.clone());
+                if !template_required && seen.insert(normalized.clone()) {
                     let entry = ShellCommandEntry {
                         raw_command: raw_action,
                         executable,
                         args,
                         normalized,
                         source_file: source_file.to_path_buf(),
-                        origin: ShellCommandOrigin::Frontmatter {
-                            key: candidate.key.clone(),
-                            line: candidate.line,
-                        },
+                        origin: origin.clone(),
                     };
                     local_entries.push(entry.clone());
                     entries.push(entry);
                 }
             }
         }
+        if let Some(mut site) = site.take() {
+            if !template_required {
+                site.resolved = Some(site_keys);
+            }
+            candidates_out.push(site);
+        }
     }
 
     Ok(())
+}
+
+/// The discovery state a command site's approval-time placeholders are read
+/// against, and the owner schema they are typed by. The schema is assembled
+/// only when a site has a placeholder.
+struct DiscoverySiteContext {
+    /// The host globals whose values exist only once execution supplies them
+    /// (Claudine's `loop` before the first iteration).
+    pending: Vec<String>,
+    state: crate::markdown::compose::EffectiveState,
+    resolution: crate::markdown::compose::expression::ResolutionContext,
+    markdown: Markdown,
+    options: crate::markdown::compose::ComposeRequest,
+    schema: std::cell::OnceCell<Option<crate::markdown::schemas::SimplifiedSchema>>,
+}
+
+impl DiscoverySiteContext {
+    fn new(
+        prepared: &Markdown,
+        discovery: &crate::markdown::compose::ComposeRequest,
+        state: &crate::markdown::compose::EffectiveState,
+        remote_fetch: &remote_fetch::RemoteFetchRuntime,
+    ) -> Self {
+        let pending = discovery
+            .host_globals
+            .as_ref()
+            .map(|globals| {
+                globals
+                    .view()
+                    .globals()
+                    .filter(|global| {
+                        *global.availability() == crate::markdown::compose::expression::Availability::ExecutionDependent
+                    })
+                    .map(|global| global.root().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self {
+            pending,
+            state: state.clone(),
+            resolution: discovery.expression_resolution_context(remote_fetch),
+            markdown: prepared.clone(),
+            options: discovery.clone(),
+            schema: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// The context for a document's frontmatter commands, read against its
+    /// best-effort interpolated frontmatter.
+    fn for_frontmatter(
+        frontmatter: &Markdown,
+        options: &crate::markdown::compose::ComposeRequest,
+    ) -> MarkdownResult<Self> {
+        let state = crate::markdown::compose::pipeline::document_state_builder(frontmatter, options).build()?;
+        let remote_fetch = options.remote_fetch_runtime();
+        Ok(Self::new(frontmatter, options, &state, &remote_fetch))
+    }
+
+    /// Whether `authored` reads a host global whose value does not exist
+    /// until execution supplies it. Such a body command has no bytes yet, so
+    /// this discovery leaves it to the preparation that binds the value.
+    fn awaits_execution(&self, authored: &str) -> bool {
+        let pending: Vec<&str> = self.pending.iter().map(String::as_str).collect();
+        !pending.is_empty()
+            && ExpressionFinder::scan_plain(authored).expressions.iter().any(|location| {
+                parse(&location.expression).is_ok_and(|expr| {
+                    crate::markdown::compose::shell_expansion::template::candidate::reads_global_root(&expr, &pending)
+                })
+            })
+    }
+
+    fn schema(&self) -> Option<&crate::markdown::schemas::SimplifiedSchema> {
+        self.schema
+            .get_or_init(|| {
+                crate::markdown::compose::schema_validation::prepare_schemas(
+                    &self.markdown,
+                    &self.options,
+                    &mut None,
+                )
+                .ok()
+                .and_then(|schemas| schemas.effective_for(&self.markdown))
+                .and_then(|effective| effective.simplified)
+            })
+            .as_ref()
+    }
+
+    fn build(
+        &self,
+        scope: &CandidateScope<'_>,
+        authored: &str,
+        template: Result<
+            crate::markdown::compose::shell_expansion::template::CommandTemplate,
+            crate::markdown::compose::shell_expansion::template::TemplateGrammarError,
+        >,
+        origin: ShellCommandOrigin,
+    ) -> MarkdownResult<ShellCandidate> {
+        let has_holes = template
+            .as_ref()
+            .map(|template| template.placeholders().next().is_some())
+            .unwrap_or(false);
+        let typed = CandidateScope {
+            schema: if has_holes { self.schema() } else { None },
+            host_globals: scope.host_globals.clone(),
+            deferred: scope.deferred,
+            derived: scope.derived,
+            source_file: scope.source_file.clone(),
+            owner: scope.owner.clone(),
+            ctx: scope.ctx,
+        };
+        let lookup = crate::markdown::compose::context::effective_state::ResolvingLookup::new(
+            &self.state,
+            self.resolution.clone(),
+        );
+        // A host global whose value exists only once execution supplies it is
+        // unknown here, not missing; the preparation that binds it checks its
+        // presence.
+        let pending: Vec<&str> = self.pending.iter().map(String::as_str).collect();
+        let evaluate = |expr: &Expr| {
+            if crate::markdown::compose::shell_expansion::template::candidate::reads_global_root(expr, &pending) {
+                return None;
+            }
+            crate::markdown::compose::expression::evaluate(expr, &lookup).ok()
+        };
+        let candidate = typed
+            .build(authored, template, origin.clone(), &evaluate)
+            .map_err(|error| crate::markdown::types::MarkdownError::ShellExpansion(Box::new(error)))?;
+        if self.options.validate_deferred_shell_values && let Ok(template) = &candidate.template {
+            use crate::markdown::compose::shell_expansion::template::{LookupEvaluator, resolve_late_values};
+            let late = resolve_late_values([(authored, template)], &LookupEvaluator::new(&lookup)).map_err(|error| {
+                crate::markdown::types::MarkdownError::ShellExpansion(Box::new(
+                    error.error.into_shell_error(scope.ctx, authored, &origin),
+                ))
+            })?;
+            if let (Some(snapshot), Some(values)) = (&self.options.document_shell_values, late.site(authored)) {
+                snapshot.insert(&candidate, values.clone());
+            }
+        }
+        Ok(candidate)
+    }
+}
+
+/// The host-declared global roots, typed as reserved-root fallbacks.
+fn host_global_roots(options: &crate::markdown::compose::ComposeRequest) -> Vec<String> {
+    options
+        .host_globals
+        .as_ref()
+        .map(|globals| globals.roots().map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+/// The source key of the document `options` compose: its canonical path or
+/// URL, or `None` for in-memory or nested content.
+fn owner_key(options: &crate::markdown::compose::ComposeRequest, nested: bool) -> Option<String> {
+    if nested {
+        return None;
+    }
+    match &options.source {
+        ComposeSource::File(path) => Some(
+            biscuit_file::canonicalize_simplified(path)
+                .unwrap_or_else(|_| path.clone())
+                .to_string_lossy()
+                .to_string(),
+        ),
+        ComposeSource::Url(url) => Some(url.to_string()),
+        ComposeSource::Unknown => None,
+    }
 }
 
 /// Fails with [`ShellExpansionError::DynamicCommandShape`] when a top-level
@@ -1078,6 +1507,9 @@ struct InheritedDiscovery {
     /// probe, `as_markdown`, a lazy `current` read), directly or
     /// through another such key.
     unobserved: Vec<String>,
+    /// Keys whose value reads a host-declared late root, directly or through
+    /// another such key (see `ComposeOptions::with_deferred_shell_roots`).
+    deferred: HashSet<String>,
 }
 
 /// The keys of `markdown` whose value discovery cannot observe as composition

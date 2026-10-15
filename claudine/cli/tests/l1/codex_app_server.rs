@@ -250,3 +250,23 @@ fn automatic_help_follows_the_granted_version_and_keeps_the_stop_schedule() {
         assert_eq!(stderr.matches(UNAVAILABLE_NOTICE).count(), 1, "{stderr}");
     }
 }
+
+#[test]
+fn composition_yolo_frontmatter_disables_the_codex_sandbox() {
+    let rig = Rig::new("compose-codex-yolo-frontmatter");
+    rig.fixture.seed_user_config();
+    let prompt = rig.fixture.cwd().join("prompt.md");
+    fs::write(&prompt, "---\nagent: codex\nyolo: true\n---\nReview the plan.\n").unwrap();
+    let output = rig.fixture.command()
+        .arg("compose")
+        .arg(&prompt)
+        .env("FAKE_CODEX_DIR", &rig.dir)
+        .env("FAKE_CODEX_PLAN", "ok")
+        .env_remove("CLAUDINE_YOLO")
+        .output().unwrap();
+    assert!(output.status.success(), "{}", describe(&output));
+    let messages = rig.messages(1);
+    let start = messages.iter().find(|m| m["method"] == "thread/start").expect("managed thread started");
+    assert_eq!(start["params"]["sandbox"], "danger-full-access");
+    assert_eq!(start["params"]["approvalPolicy"], "never");
+}

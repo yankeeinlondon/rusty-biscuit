@@ -57,6 +57,8 @@ use super::{COMPOSITION_SUBCOMMANDS, as_utf8, find_subcommand, looks_like_flag, 
 /// Error surfaced when composition argv cannot be partitioned deterministically.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PartitionError {
+    /// The removed sequence policy switch must never reach a provider.
+    RemovedSequenceFailFast,
     /// A non-Claudine switch appeared before the composition file.
     SwitchBeforeFile { subcommand: String, switch: String },
     /// A literal `--` appeared before the composition file.
@@ -70,6 +72,7 @@ pub(crate) enum PartitionError {
 impl std::fmt::Display for PartitionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::RemovedSequenceFailFast => write!(f, "`--fail-fast` is removed; handle sequence failures with `failure:` lifecycle events; `fail_fast` is valid only on group objects"),
             Self::SwitchBeforeFile { subcommand, switch } => write!(
                 f,
                 "provider switch '{switch}' appears before the composition file.\n\
@@ -288,6 +291,9 @@ pub(crate) fn partition_composition_tail(
         if let Some(text) = text
             && looks_like_flag(text)
         {
+            if sub_name == "sequence" && text.split('=').next() == Some("--fail-fast") {
+                return Err(PartitionError::RemovedSequenceFailFast);
+            }
             let consumed = match owned.classify(text) {
                 Ownership::ConsumesNext => 1 + usize::from(i + 1 < argv.len()),
                 Ownership::SelfContained => 1,

@@ -107,6 +107,9 @@ pub fn load_referenced_sequence(
 
     if formal {
         let root = document.as_object().expect("formal implies an object root");
+        if let Some(value) = root.get("fail_fast") {
+            return Err(super::grammar::removed_task_key("fail_fast", value, path));
+        }
         let mut plan = formal::normalize_formal_plan(
             items,
             formal::formal_keys(root)?,

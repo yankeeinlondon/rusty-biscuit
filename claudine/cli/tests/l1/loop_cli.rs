@@ -323,7 +323,7 @@ exit 0
 
 #[cfg(unix)]
 #[test]
-fn sequence_uses_claudine_fail_fast_env() {
+fn sequence_does_not_publish_a_fail_fast_env() {
     let fixture = CliProcessFixture::named("loop-cli");
     let count_path = fixture.cwd().join("call-count.txt");
     let env_path = fixture.cwd().join("child-env.txt");
@@ -337,7 +337,7 @@ sequence:
   - beta
   - gamma
 ---
-Run step {{state}}
+Run step {{seq}}
 "#,
     )
     .unwrap();
@@ -362,11 +362,10 @@ exit 0
         .env("CLAUDINE_COUNT_FILE", &count_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
         .env_remove("FAIL_FAST")
+        .env_remove("CLAUDINE_FAIL_FAST")
         .args([
             "sequence",
             "--goose",
-            "--fail-fast",
-            "false",
             md_file.to_str().unwrap(),
         ])
         .assert()
@@ -374,8 +373,8 @@ exit 0
 
     let child_env = fs::read_to_string(&env_path).unwrap();
     assert!(
-        child_env.contains("CLAUDINE_FAIL_FAST=false"),
-        "child env should expose CLAUDINE_FAIL_FAST=false; env_file: {child_env}"
+        child_env.trim() == "CLAUDINE_FAIL_FAST=",
+        "child env must not receive an injected policy; env_file: {child_env}"
     );
 }
 

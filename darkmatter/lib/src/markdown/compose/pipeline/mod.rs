@@ -347,12 +347,24 @@ impl Markdown {
             if shell_expansion_enabled {
                 let fse_start = perf.is_enabled().then(std::time::Instant::now);
                 let fse_ctx = self.full_source_context_for_errors();
+                // A `$( … )` command's placeholders are typed by the document's
+                // schema; it is assembled only when a value can hold one.
+                let fse_templates = self
+                    .frontmatter()
+                    .as_map()
+                    .values()
+                    .any(|value| value.as_str().is_some_and(|text| text.contains("$(")))
+                    .then(|| frontmatter_shell_expansion::FrontmatterTemplates {
+                        schema: prepared_schemas.effective_for(self).and_then(|effective| effective.simplified),
+                        ctx: shell_expansion::site::authored_context(self, None),
+                    });
                 let fse_report = frontmatter_shell_expansion::execute_frontmatter_shell_expansion(
                     self.frontmatter_mut(),
                     &options,
                     runtime,
                     &mut provenance,
                     &fse_ctx,
+                    fse_templates.as_ref(),
                 )?;
                 report.frontmatter_shell_expansions_applied = fse_report.replacements;
                 report.shell_approvals_used += fse_report.approvals_used;
@@ -531,6 +543,7 @@ impl Markdown {
                             &mut perf,
                             body,
                             provenance.data(),
+                            &prepared_schemas,
                         )?;
                         if let Some(start) = op_start
                             && let Some(kind) = operation.perf_metric()

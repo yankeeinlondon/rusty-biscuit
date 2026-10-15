@@ -11,8 +11,55 @@ Lifecycle `say`/`speak`/`effect` and hook `speak`/`sound_effect` audio is
 fire-and-forget after durable publication to Playa's private per-user queue.
 Lifecycle audio is published in stack order: put `effect` before `say` to hear it first.
 
-**Lifecycle grammar.** Each lifecycle stack (the six events, the `loop:`
-block's loose verbs or `gate:` list, and a task's `setup:`/`teardown:`) parses
+**TTS pre-warm** (`lifecycle/prewarm/`) prepares early `say`/`speak`
+phrases ahead of their events. Each top-level command (compose,
+inline-compose, sequence, provider wrapper) owns one deferred
+`PrewarmWorker`. The worker starts on the first submission that speaks and
+is cancelled on drop. Its gates read only the user's bridged settings
+(`tts_prewarm`); each submission also carries the settings of the speech path
+that plays it, and each candidate is prepared and keyed (`PrewarmKey`) with
+that path's `TtsConfig`. Document and container lifecycles play with the user's settings.
+Internal legacy task stages retain `sequence::task::task_playback_settings()`;
+those model fields do not authorize retired task YAML. Its `PrewarmHandle` travels on `InvocationContext`
+(`with_prewarm`; `DocumentEpoch::prewarm`). Every preparation site calls
+`prewarm::collect_and_submit`: the pipeline's lifecycle phase, the staged
+bootstrap, the loop bootstrap, and harness re-materialization. Sequence
+preflight calls `submit_sequence_preflight`; internal legacy task stages are
+reconsidered by `submit_task_stacks` wherever the task's context is
+established (`run_step_task`, `open_member_run`, `open_leg_run` in
+`cli/src/commands/wrap/sequence/task_run.rs`), against the step's effective
+frontmatter and the task's captured `ctx`/`env`. A sequence step or prompt task
+scopes the handle with `with_prewarm_injected_keys` so per-step values stay
+late. A new preparation site submits through the same entry point. CLI tests
+observe preparations through the `test-fixtures` seam
+`CLAUDINE_TEST_PREWARM=record:<path>` or `block:<path>`, with
+`PLAYA_DRY_RUN=0` and only never-firing phrases (`cli/tests/l1/tts_prewarm.rs`).
+Only phrases *ready early* are submitted: literal text, or reads of `fm`/bare
+properties, `ctx`, `env` with no function call and no `$(`/backtick
+(`prewarm/classify.rs`); late globals, sequence overlay keys, `--set` keys and
+task `params` wait for their event. A lifecycle `set` changes runtime state,
+not the reread, so a phrase reading a `set` key misses the cache (never wrong
+audio). User docs: [Lifecycle → pre-warm](topics/flow-control/lifecycle.md#speech-is-prepared-ahead-of-time-pre-warm).
+
+**`tts` in `~/.claudine/config.json`** (`config/tts.rs::TtsValue`) is `true`,
+`false`, or an object whose keys are all optional: `provider` (absent = default
+provider, as `true`), `voice` (string or `{ male, female }`), `gender`
+(`female` default), `prewarm` (default `true`). Explicit `null` is rejected
+(`present` deserializer), unknown keys are rejected. `bridge_tts_settings` maps
+it to `GlobalSettings { tts, tts_prewarm }`; read the switch only through
+`TtsValue::prewarm_enabled`.
+
+| Value | Hook `speak` | Lifecycle `say` config | Pre-warm |
+| --- | --- | --- | --- |
+| absent / `false` | off | auto-detect | on |
+| `true` | on, auto-detect | auto-detect | on |
+| object with `provider` | on, object's provider/voice | object's provider/voice | `prewarm` (default on) |
+| object without `provider` | on, as `true` | as `true` | `prewarm` (default on) |
+
+Full table and validation rules: [Configuring Actions → `tts`](topics/configuring-actions.md#text-to-speech-settings-tts).
+
+**Lifecycle grammar.** Each lifecycle stack (the seven events, the `loop:`
+block's loose verbs or `gate:` list, and container events) parses
 into ordered `LifecycleNode`s — a leaf `LifecycleAction` or a
 `LifecycleConditional` (`when` + `then`/`else` bodies, at most five levels) —
 and every node carries its authored `LifecyclePath`
@@ -79,6 +126,11 @@ Ordinary local L1 leaves `claudine-cli/daemon-tests`,
 Required-feature targets keep DuckDB, L2/L3 integration binaries, and live
 provider targets out of that compile graph. CI enables daemon and terminal
 features; explicit tier recipes enable the corresponding local targets.
+
+Run `just test`, `just lint`, and `just check-tier-coverage claudine`
+sequentially. The tier audit uses `nextest list` with default features and can
+overwrite the fixture-enabled `claudine` binary just as lint-transport can.
+Concurrent listing can remove diagnostic snapshot seams while CLI tests run.
 
 **The L1 spawn contract.** An L1 test obtains a `claudine` command from
 `CliProcessFixture` in `claudine/cli/tests/common/mod.rs` — `command()` for the
@@ -154,6 +206,132 @@ The **local control plane** is platform-native and per stable OS user: a Unix-do
 - For when/why a feature changed → [timeline.md](timeline.md)
 - For a specific subsystem → the deep topic docs under [Reference Documents](#reference-documents)
 
+## Container preflight and approval
+
+`composition/sequence/preflight/` owns the transitive walk (not the CLI).
+`containers.rs` prepares container event shells with the same site policy as
+primitive tasks; terminal event placeholders require templates. The graph's
+`root_lifecycle` is installed on the root guard after the audit. Lifecycle
+clones share settled authorization; a reread graph is settled only against the
+original invocation's approval, never by prompting. Root retries pass the same
+closed membership into graph approval; rebuilding the graph cannot reopen approval. Preserve normalized exact
+command keys, including multiple shell-value commands. Catalog cycle identity
+includes the selected group name, so distinct entries in one catalog are legal;
+diagnostics retain each entry as `catalog#name`. First position propagates to
+all legs of a first group and only the first child of a first sequence.
+
+## Container grammar boundary
+
+Sequence tasks accept an exclusive `sequence:` list or file reference (source
+suffix grammar applies). Inline list tasks alone accept container lifecycle
+keys. Nested inline and referenced sequences execute recursively; group legs
+may themselves be containers. Groups reject `execution:` (concurrency is implicit), require
+unique nonempty leg names, reject reserved variables `legs`, `succeeded`,
+`failed`, `cancelled`, and retain boolean `fail_fast` only on group objects.
+Task `setup:`/`teardown:` and sequence-document `fail_fast:` are removed
+grammar. The CLI rejects `--fail-fast` before source loading, keeps explicit
+provider `--` tails opaque, and no longer injects `CLAUDINE_FAIL_FAST`.
+`cancelled` is a cleanup-only lifecycle event. Presence, including `[]` or
+`{}`, opts running group legs into sibling-failure cancellation; null is
+invalid. Ctrl-C interrupts every running primitive regardless of opt-in.
+Cancellation stops admission and settles descendants before owner cleanup;
+an opted-in container cancels all descendants. Entered-but-not-started scopes
+still clean up with shells disabled; unadmitted legs record cancelled without
+events. Run `cancelled` then `finalize` exactly once before lexical restoration,
+never `failure` recovery. `stop` ends only the cancellation stack. Recovery in
+the following finalize raises the typed cancellation-recovery error without
+launching work; cleanup errors stay secondary and preserve cancellation/130.
+Loop initialization checks cancellation before catch controls, and cancelled
+iterations terminate before handoffs, loop gates, or mutations regardless of
+`fail_fast`. Timeouts remain failures; cleanup timeouts remain cleanup errors. Root sequence
+Ctrl-C exits 130 on every OS; native Windows provider status `0xC000013A` is
+normalized to 130. See [Sequences → Cancellation](topics/flow-control/sequences.md#cancellation).
+Sibling cancellation uses `composition.cancelled` with `err.detail.group`,
+`leg`, and the original structured failure under `cause`. Group worker threads
+explicitly inherit `lifecycle::cancellation::CancellationToken` scopes. Keep
+terminal execution on `LifecycleRunGuard::run_event_stack`: its cleanup scope
+allows terminal actions to finish after cancellation while preserving repeat
+interrupt grace. Lifecycle shell exact/template dispatch shares task shells'
+owned process trees.
+Container events use
+`lifecycle::runtime::ContainerRunner` and `LifecycleRunGuard`; root initialize
+precedes static preflight, nested preparation is just in time. Retry preserves
+mutations and clears child results, with no finalize until the final attempt.
+Native sequence arrays and group dictionaries publish only after finalize.
+Atomic failed groups withhold all leg mutations; tolerant groups merge failed
+leg mutations in declaration order. Body-only steps mask source lifecycle keys
+through data overrides so canonical rereads do not fire container events again. Internal legacy task-stage tests
+construct preflight models directly; they do not authorize old YAML syntax.
+The canonical shipped trigger schema lives in `claudine/schemas/`, not
+Darkmatter's docs tree. See [Sequences](topics/flow-control/sequences.md).
+
+## Lexical sequence bindings
+
+`lifecycle/bindings/containers.rs` owns fixture-testable `SequenceBinding`,
+`GroupBinding`, and named leg outcomes. `seq`, `group`, and `loop` shadow
+complete roots. `seq` replaces generated frontmatter overlays; authored
+`fm.seq`/`fm.group`/`fm.loop` remain ordinary data. `LayeredOverrides` carries
+its `sequence_value` separately, and `PrepareOptions`/`CallerInputLayers`
+retain `sequence_binding` across rereads and proxy adoption. Never flatten
+that channel back into setters or live frontmatter. `RuntimeSnapshot.seq`
+contains the active position; `sequence_value()` adds current committed
+outputs. The loop's condition and lifecycle gate read that same cell.
+
+`bindings/rename.rs` rejects parsed legacy root reads (including bracket
+access and both condition branches), preserving authored/supplied properties
+by presence, including null. Composition host globals retain a typed renamed
+root fallback for reads introduced by transclusion; Darkmatter's explicit
+`with_document_fallbacks` lets the reading child declare its own property.
+`seq` string presentation uses the existing name-coercion keys for `seq`,
+`seq.previous`, and `seq.next`; typed expression evaluation retains objects.
+Sequence task templates defer `seq`/`group`/`loop`, including the first task.
+Container runners use complete lexical roots for their own events and restore
+the enclosing roots on exit. `RuntimeState::replace_sequence_scope` restores
+position and outputs while keeping mutations; group workers clone the snapshot
+so in-memory writes and proxy ancestry remain isolated across branches.
+
+## Structured shell authorization
+
+Document, lifecycle and sequence shells share Darkmatter's typed template
+filler. An exact approval fixes resolved bytes; a template approval permits
+only the authored shape. Never authorize newly filled bytes to bridge modes.
+Sequence graph discovery alone grants no execution: `resolve_graph_shell_approvals`
+records the audited `ShellPreApprovals` on `PreflightGraph`, including referenced
+prompt lifecycle stacks through passive frontmatter-only preparation; task dispatch
+checks membership before filling. Later tasks retain authored text, never
+interim interpolated shell strings. Byte-eligible shell candidates retain their
+`authored_command` even when template grammar fails: authored program holes
+withdraw prefix approval, and `prompt_resolved_site` rejects unoffered grants.
+Lifecycle resolution preserves that authored text across repeated resolution.
+`task/templates.rs` installs approved
+lifecycle stack sites and fills primary commands against current runtime
+mutations. A prompt task's passive barrier and JIT composition share the
+same document epoch (`PromptTaskRequest::document_epoch`), so context capture
+and epoch accounting stay coherent. Referenced prompt lifecycle `shell` and whole-value `set` sites retain
+`PrepareOptions::deferred_shell_roots` and lexical `lifecycle_group`; the passive
+`validate_document_shell_late_values` probe returns their condition-blind lifecycle
+for approval before start. `DocumentShellValues` keys freeze their late holes
+for JIT preparation as well as document directives. Deferred holes use the step-entry snapshot
+before start; ordinary holes read at command entry. `TaskShellRunner::run_structured` refuses by
+default; `SystemTaskShell` shares the existing owned-tree process epilogue
+with exact execution. Whole-chain policy and direct-target validation precede
+the first spawn. Shared redirection targets identify original destinations:
+`2>&1 > /dev/null` retains stderr on original stdout; never collapse it to
+stderr's own capture channel. Native `native_task_` and `native_lifecycle_`
+CLI regressions prove routing and downstream output on every OS. See [Pre-flight Checks](topics/pre-flight-checks.md).
+
+Late roots are `seq`, `loop`, and `group`; sequence and container terminal
+event shells participate in the same closed graph audit. Both group schedulers
+validate all members before member start, retaining `LateValues`, prompt
+`DocumentShellValues`, epoch/context, and lexical group scope through dispatch.
+First-task commands with known values support exact or shape approval; terminal
+event placeholders require templates. Membership is checked before filling and
+before policy evaluation, so `--yolo` cannot authorize a command introduced by a
+reread after execution begins. The shell runtime rejection chain omits rejected
+values; earlier document schema validation can disclose them. Approval is
+separate from result caching: current membership, validators, blacklists, and
+direct targets still apply.
+
 ## Initialization shell boundary
 
 Loop initialization uses the full bootstrap frontmatter separately from the
@@ -173,7 +351,8 @@ cannot execute shells either, including catch evaluation-error routes, and
 `no_error` cannot suppress the prohibition. The shared runtime permits lifecycle
 shells only from `start`, after preflight, and proxy adoption resets that boundary.
 Keep parser rejection and the runtime backstop together (`DisabledShellRunner`
-refuses `run` and `run_values` alike). See the binding ruling
+refuses `run`, `run_values`, and `run_structured` alike, and its
+`ensure_permitted` answers before a template site reads any placeholder). See the binding ruling
 in `claudine/fixes/2026-09-15-initialize-after-proxy/spec.md` (R2).
 
 ## Library Module Map
@@ -227,6 +406,7 @@ of a topic doc.
 
 - [Error Architecture](topics/error-architecture.md) — the `Diagnostic`/`BlockError` pair, the discovery seam, effective-diagnostic selection and the `Semantic`/`Transparent` role contract, the snapshot boundary, typed-wrapper rules, and the lossy-boundary audit
 - [Composition](topics/composition.md) — `compose`, `inline-compose`, `sequence`, lifecycle stacks, provider selection
+- [Schemas](topics/schemas.md) — the five `claudine/schemas/` files, event/action-type permissions, what only the parser checks, disk discovery vs the embedded bundle, and DMLS's disk-only use for diagnostics, completion, and hover; the strict launch policy is in [Composition](topics/composition.md#claudines-trigger-schemas-in-the-launch-verdict)
 - [Lifecycle](topics/flow-control/lifecycle.md) — the seven events, the list/dictionary stack grammar with `when`/`then`/`else`, action forms, `err`/`timing`/`current` globals, validation errors
 - [Flow Control](topics/flow-control/flow-control.md) and [Flow Control Reference](topics/flow-control/flow-control-reference.md) — the `stop`/`skip`/`error`/`retry`/`resume`/`proxy`/`defer` directives, per-event runtime limits, retry/resume re-entry, `proxy` handoffs and the `with:` overlay
 - [Timeouts](topics/timeouts.md) — the two timeout rules, four env vars, precedence, termination path, the post-exit stream-reader wait (`stream_reader_timeout`), the single output worker that keeps a blocked terminal from stalling the parser or the wrapper (`wrap/output_worker.rs`; run output is a queued frame, and once a run creates the worker every diagnostic — `crate::log`, signal notices, `--perf`, tracing, the panic hook, the library's `render::console` lines — is one too, through `crate::terminal_gate::write`; signal handlers never write the terminal), exit reasons, and the three runaway content guards
@@ -238,6 +418,12 @@ of a topic doc.
 - [Traces and Logging](topics/traces-and-logging.md), [Log Reporting](topics/log-reporting.md)
 - [CLI Pre-Parsing](topics/cli-pre-parsing.md) — argv normalization pipeline; rule-by-rule reference in [argv-normalization.md](topics/argv-normalization.md)
 - [Shell Completions](topics/completions/shell-completions.md) — dynamic completion engine, per-mode pipelines, shared `@`/`&`/`^`/implicit file-reference resolution, and completion after the file through type-aware ownership (`composition::owner_of_last_argument`; nothing for the agent's words, never a prompt)
+
+Research fleet entrypoints (`docs/research/<topic>/_fleet.md`) are sequence
+coordinators. Shared formal task rosters add a prompt executable to each
+canonical provider/runner row; parity tests keep their data and order aligned.
+Per-row `_research.md` documents own freshness checks and success validation.
+See [Research Contracts](research-contracts.md) before changing this workflow.
 
 ## Research on Agentic CLI Platforms
 

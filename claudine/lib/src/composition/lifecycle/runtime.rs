@@ -211,7 +211,7 @@ impl LifecycleCatchProtocol {
 
         let needs_finalize = matches!(
             origin,
-            LifecycleSignal::Success | LifecycleSignal::Blocked | LifecycleSignal::Failure
+            LifecycleSignal::Success | LifecycleSignal::Blocked | LifecycleSignal::Failure | LifecycleSignal::Cancelled
         ) || (origin == LifecycleSignal::Loop && evaluation.is_some());
         (needs_finalize && !state.finalize_emitted).then(|| LifecycleCatchStep {
             signal: LifecycleSignal::Finalize,
@@ -431,7 +431,7 @@ fn terminal_or_finalize(
             }
         }
         LifecycleSignal::Loop => LifecycleTransitionDecision::Continue,
-        LifecycleSignal::Success | LifecycleSignal::Blocked | LifecycleSignal::Failure
+        LifecycleSignal::Success | LifecycleSignal::Blocked | LifecycleSignal::Failure | LifecycleSignal::Cancelled
             if !input.finalize_emitted =>
         {
             LifecycleTransitionDecision::Finalize { error }
@@ -439,6 +439,7 @@ fn terminal_or_finalize(
         LifecycleSignal::Success
         | LifecycleSignal::Blocked
         | LifecycleSignal::Failure
+        | LifecycleSignal::Cancelled
         | LifecycleSignal::Finalize => {
             let terminal = input.terminal_slot.unwrap_or(input.event);
             let error = error.or_else(|| {
@@ -450,6 +451,217 @@ fn terminal_or_finalize(
             } else {
                 LifecycleTransitionDecision::TerminalSuccess
             }
+        }
+    }
+}
+
+/// The next effect requested by a container's lifecycle driver.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ContainerEventDecision {
+    /// Preparation or child execution may proceed.
+    Continue,
+    /// Initialize opted out; no other event or result is owed.
+    Skip,
+    /// Execute the failure stack with this error before finalizing.
+    Failure { error: Option<super::context::LifecycleErrorInfo> },
+    /// Execute finalize before publishing any result.
+    Finalize { failed: bool, error: Option<super::context::LifecycleErrorInfo> },
+    /// Finalize settled. Publication also requires that the runner is not cancelled.
+    Finished { failed: bool },
+    /// Re-enter preparation with these evaluated runtime writes.
+    Retry { delay: std::time::Duration, overlay: indexmap::IndexMap<String, serde_json::Value> },
+    /// Transfer this slot without finalizing the source.
+    Proxy { target: String, overlay: indexmap::IndexMap<String, serde_json::Value> },
+    /// An unsupported recovery must become a typed caller error.
+    Abort(LifecycleTransitionAbort),
+    /// Recovery before successful preparation is unavailable.
+    SetupRecoveryUnsupported { event: LifecycleSignal, action: &'static str },
+}
+
+/// One guarded event and the next effect its outcome requests.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContainerEventResult {
+    /// Stack evidence, retained for typed diagnostics.
+    pub outcome: LifecycleEventOutcome,
+    /// The next lifecycle effect; the caller supplies its lexical context.
+    pub decision: ContainerEventDecision,
+}
+
+/// Shared lifecycle driver for sequence and group containers.
+///
+/// Callers perform preparation and children between events and publish native
+/// results only after `Finished { failed: false }` when [`Self::is_cancelled`]
+/// is false. A retry preserves the
+/// guard's initialize slot and its attempt ceiling; it does not finalize.
+/// Keeping event execution separate from preparation lets each caller rebuild
+/// lexical `seq`, `group`, and `err` values at every requested event.
+pub struct ContainerRunner<'a> {
+    guard: super::LifecycleRunGuard<'a>,
+    attempt: u32,
+    budget: u32,
+    failed: bool,
+    error: Option<super::context::LifecycleErrorInfo>,
+    secondary_errors: Vec<super::context::LifecycleErrorInfo>,
+    cancellation: Option<super::cancellation::CancellationCause>,
+}
+
+impl<'a> ContainerRunner<'a> {
+    /// Adopt a fresh guard for one container invocation.
+    pub fn new(guard: super::LifecycleRunGuard<'a>) -> Self {
+        Self { guard, attempt: 1, budget: 0, failed: false, error: None, secondary_errors: Vec::new(), cancellation: None }
+    }
+
+    /// Access the guard when adapting an existing event executor.
+    pub fn guard_mut(&mut self) -> &mut super::LifecycleRunGuard<'a> {
+        &mut self.guard
+    }
+
+    /// Current one-based attempt, including the initial attempt.
+    pub fn attempt(&self) -> u32 {
+        self.attempt
+    }
+
+    /// Execute exactly one guarded event with the caller's current bindings.
+    pub fn execute_event(
+        &mut self,
+        signal: LifecycleSignal,
+        stack: &super::executor::StackExecutionContext<'_>,
+    ) -> ContainerEventResult {
+        let outcome = if signal == LifecycleSignal::Failure
+            && self.guard.redesignate_terminal_to_failure()
+        {
+            self.guard.run_event_stack(signal, stack)
+        } else {
+            self.guard.execute_event(signal, stack)
+        };
+        let decision = self.record_outcome(signal, &outcome);
+        ContainerEventResult { outcome, decision }
+    }
+
+    /// Preserve a child/preparation failure as the error exposed to cleanup.
+    pub fn set_error(&mut self, error: super::context::LifecycleErrorInfo) {
+        self.failed = true;
+        self.error = Some(error);
+    }
+
+    /// Cancel an entered primitive after its descendants have settled.
+    /// Finalized primitives keep their original terminal outcome.
+    pub fn cancel(&mut self, cause: super::cancellation::CancellationCause) -> bool {
+        if self.guard.finalize_emitted() || self.cancellation.is_some() { return false; }
+        self.error = Some(cause.error());
+        self.cancellation = Some(cause);
+        true
+    }
+
+    /// Whether cancellation owns this primitive's terminal outcome.
+    pub fn is_cancelled(&self) -> bool { self.cancellation.is_some() }
+
+    /// The failure or cancellation cause exposed to terminal cleanup.
+    pub fn primary_error(&self) -> Option<&super::context::LifecycleErrorInfo> {
+        self.error.as_ref()
+    }
+
+    /// Cleanup diagnostics that leave the primary terminal outcome unchanged.
+    pub fn secondary_errors(&self) -> &[super::context::LifecycleErrorInfo] {
+        &self.secondary_errors
+    }
+
+    /// Route an event already executed through the guard by an adapter.
+    pub fn record_outcome(
+        &mut self,
+        signal: LifecycleSignal,
+        outcome: &LifecycleEventOutcome,
+    ) -> ContainerEventDecision {
+        use ContainerEventDecision as Decision;
+        if self.is_cancelled() {
+            self.secondary_errors.extend(outcome.evaluation_error.clone());
+            self.secondary_errors.extend(outcome.action_error.clone());
+            if let Some(StackControl::Error { reason }) = &outcome.control {
+                self.secondary_errors.push(super::context::LifecycleErrorInfo::from_action_failure(
+                    "error", reason.clone().unwrap_or_else(|| "cancellation cleanup failed".into())));
+            }
+            if let Some(control) = &outcome.control {
+                let action = match control {
+                    StackControl::Retry { .. } => Some("retry"),
+                    StackControl::Resume { .. } => Some("resume"),
+                    StackControl::Proxy { .. } => Some("proxy"),
+                    StackControl::Defer { .. } => Some("defer"),
+                    _ => None,
+                };
+                if let Some(action) = action {
+                    let error = crate::composition::error::CompositionError::LifecycleCancellationRecovery {
+                        source_path: self.guard.source_path().to_path_buf(), action: action.into(),
+                    };
+                    self.secondary_errors.push(super::context::LifecycleErrorInfo::from_composition_error(&error));
+                }
+            }
+            return if signal == LifecycleSignal::Finalize { Decision::Finished { failed: false } }
+                else { Decision::Finalize { failed: false, error: self.error.clone() } };
+        }
+        if signal == LifecycleSignal::Failure || signal == LifecycleSignal::Blocked {
+            self.failed = true;
+        }
+        let raised = outcome.evaluation_error.clone().or_else(|| outcome.action_error.clone());
+        let explicit_error = match &outcome.control {
+            Some(StackControl::Error { reason }) => Some(super::context::LifecycleErrorInfo::from_action_failure(
+                "error", reason.clone().unwrap_or_else(|| "container lifecycle error".into()),
+            )),
+            _ => None,
+        };
+        if let Some(error) = raised.or(explicit_error) {
+            self.failed = true;
+            if self.error.is_none() {
+                self.error = Some(error);
+            } else if self.error.as_ref() != Some(&error) {
+                self.secondary_errors.push(error);
+            }
+            if matches!(signal, LifecycleSignal::Initialize | LifecycleSignal::Start | LifecycleSignal::Success | LifecycleSignal::Blocked) {
+                return Decision::Failure { error: self.error.clone() };
+            }
+        } else if signal != LifecycleSignal::Finalize {
+            if let Some(control) = &outcome.control {
+                match control {
+                    StackControl::Skip => {
+                        self.guard.defuse();
+                        return Decision::Skip;
+                    }
+                    StackControl::Resume { .. } => {
+                        return Decision::Abort(LifecycleTransitionAbort::ResumeWithoutSession);
+                    }
+                    StackControl::Retry { .. } if signal == LifecycleSignal::Initialize || signal == LifecycleSignal::Blocked => {
+                        return Decision::SetupRecoveryUnsupported { event: signal, action: "retry" };
+                    }
+                    StackControl::Proxy { .. } if signal == LifecycleSignal::Blocked => {
+                        return Decision::SetupRecoveryUnsupported { event: signal, action: "proxy" };
+                    }
+                    StackControl::Retry { max_attempts, overlay, .. } => {
+                        if self.budget == 0 {
+                            self.budget = self.attempt.saturating_add(*max_attempts);
+                        }
+                        if let ControlDispatch::Retry { delay, .. } = decide_control(control, self.attempt, self.budget, false, false) {
+                            self.attempt = self.attempt.saturating_add(1);
+                            self.failed = false;
+                            self.error = None;
+                            self.secondary_errors.clear();
+                            self.guard.reset_for_next_iteration();
+                            return Decision::Retry { delay, overlay: overlay.clone() };
+                        }
+                    }
+                    StackControl::Proxy { target, overlay, .. } => {
+                        self.guard.defuse();
+                        return Decision::Proxy { target: target.clone(), overlay: overlay.clone() };
+                    }
+                    StackControl::Defer { .. } => {
+                        return Decision::Abort(LifecycleTransitionAbort::DeferredExecutionUnsupported);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        match signal {
+            LifecycleSignal::Initialize | LifecycleSignal::Start | LifecycleSignal::Loop => Decision::Continue,
+            LifecycleSignal::Finalize => Decision::Finished { failed: self.failed },
+            _ => Decision::Finalize { failed: self.failed, error: self.error.clone() },
         }
     }
 }
@@ -493,6 +705,45 @@ impl IterationSummarySignals {
             message: projected.message.or(parser.message),
             reset_at: projected.reset_at.or(parser.reset_at),
         });
+    }
+}
+
+impl super::LifecycleRunGuard<'_> {
+    /// Complete cancellation cleanup without allowing recovery to replace its cause.
+    /// Before `start`, the guard keeps both cleanup events shell-free.
+    pub fn cancel_if_requested(&mut self, context: &super::executor::StackExecutionContext<'_>) -> bool {
+        let Some(cause) = super::cancellation::cause() else {
+            return false;
+        };
+        let error = cause.error();
+        for signal in [LifecycleSignal::Cancelled, LifecycleSignal::Finalize] {
+            let cleanup = self.execute_event(signal, &context.with_signal(signal).with_error(&error));
+            for info in cleanup.evaluation_error.iter().chain(cleanup.action_error.iter()) {
+                self.emitter().emit_warn(&info.msg, context.term);
+            }
+            if let Some(control) = cleanup.control.as_ref() {
+                let recovery = match control {
+                    StackControl::Retry { .. } => Some("retry"),
+                    StackControl::Resume { .. } => Some("resume"),
+                    StackControl::Proxy { .. } => Some("proxy"),
+                    StackControl::Defer { .. } => Some("defer"),
+                    _ => None,
+                };
+                if let Some(action) = recovery {
+                    let diagnostic = crate::composition::CompositionError::LifecycleCancellationRecovery {
+                        source_path: context.source_path.to_path_buf(), action: action.into(),
+                    };
+                    let info = super::context::LifecycleErrorInfo::from_composition_error(&diagnostic);
+                    self.emitter().emit_warn(&info.msg, context.term);
+                }
+                if let StackControl::Error { reason } = control {
+                    let info = super::context::LifecycleErrorInfo::from_action_failure("error",
+                        reason.clone().unwrap_or_else(|| "cancellation cleanup failed".into()));
+                    self.emitter().emit_warn(&info.msg, context.term);
+                }
+            }
+        }
+        true
     }
 }
 

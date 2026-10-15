@@ -63,7 +63,7 @@ fn expected(scope: LifecycleScope, root: &str) -> Expect {
     let approval = matches!(scope, S::LifecycleShellApproval | S::SequenceShellApproval);
     match root {
         "err" => match scope {
-            S::Event(E::Blocked | E::Failure | E::Finalize) | S::TaskTeardown => Available,
+            S::Event(E::Blocked | E::Failure | E::Cancelled | E::Finalize) | S::TaskTeardown => Available,
             _ if approval => Unavailable(PREFLIGHT_UNAVAILABLE),
             _ => Unavailable(EVENT_HAS_NO_ERROR),
         },
@@ -71,7 +71,6 @@ fn expected(scope: LifecycleScope, root: &str) -> Expect {
         "timing" => Available,
         "group" if approval => Unavailable(PREFLIGHT_UNAVAILABLE),
         "group" => Deferred,
-        "outputs" if scope == S::SequenceShellApproval => Unavailable(PREFLIGHT_UNAVAILABLE),
         "outputs" => Document,
         "loop" if scope == S::SequenceShellApproval => Unavailable(PREFLIGHT_UNAVAILABLE),
         "loop" => Deferred,
@@ -88,7 +87,9 @@ fn ambient() -> LoopAmbient {
 
 #[test]
 fn the_matrix_has_every_scope() {
-    assert_eq!(LifecycleScope::ALL.len(), 11);
+    assert_eq!(LifecycleScope::ALL.len(), 12);
+    assert_eq!(&LifecycleScope::ALL[..LifecycleSignal::ALL.len()],
+        &LifecycleSignal::ALL.map(LifecycleScope::Event));
     let ids: std::collections::BTreeSet<_> = LifecycleScope::ALL.iter().map(|s| s.id()).collect();
     assert_eq!(ids.len(), LifecycleScope::ALL.len(), "scope ids are distinct");
 }
@@ -144,6 +145,7 @@ fn runtime_resolution_follows_the_matrix_and_never_reads_the_document() {
                 err: Some(&err),
                 timing: Some(&timing),
                 group: membership,
+                seq: None,
             };
             let (view, entries) = runtime_bindings_in_loop(scope, values, in_loop);
             let session = EvaluationSession::associate(view, &document, entries)
@@ -241,7 +243,7 @@ fn approval_diagnostics_name_late_globals_and_namespaces_in_any_branch() {
         (LifecycleScope::LifecycleShellApproval, "echo {{ false ? timing : 'x' }}", "timing"),
         (LifecycleScope::LifecycleShellApproval, "echo {{ group.label }}", "group"),
         (LifecycleScope::LifecycleShellApproval, "echo {{ current.branch }}", "current"),
-        (LifecycleScope::SequenceShellApproval, "echo {{ outputs[0] }}", "outputs"),
+        (LifecycleScope::SequenceShellApproval, "echo {{ seq.outputs[0] }}", "seq"),
         (LifecycleScope::SequenceShellApproval, "echo {{ x || current.os }}", "current"),
     ] {
         let diagnostics = approval_diagnostics(raw, scope).expect("parses");
@@ -355,4 +357,65 @@ fn a_retired_loop_read_is_found_only_in_parsed_reads() {
     );
     assert_eq!(removed_loop_read_in_text("plain _loop_count text"), None);
     assert_eq!(removed_loop_read_in_text("{{ '_loop_count' }}"), None);
+}
+
+#[test]
+fn sequence_roots_shadow_completely_and_restore_without_merging() {
+    let document = Document(Map::from_iter([("seq".into(), json!({"name": "document", "leak": true}))]));
+    let outer = SequenceBinding::container("invocation", vec![json!("outer")]).to_value();
+    let inner = SequenceBinding::container("invocation", vec![]).to_value();
+    for (root, expected) in [(&outer, json!(["outer"])), (&inner, json!([])), (&outer, json!(["outer"]))] {
+        let (view, entries) = runtime_bindings(LifecycleScope::Event(LifecycleSignal::Finalize),
+            LifecycleValues { seq: Some(root), ..LifecycleValues::default() });
+        let session = EvaluationSession::associate(view, &document, entries).unwrap();
+        for (expr, value) in [("seq.outputs", expected), ("seq.run_id", json!("invocation")),
+            ("seq.index", Value::Null), ("seq.leak", Value::Null), ("fm.seq.name", json!("document"))] {
+            assert_eq!(evaluate(&parse(expr).unwrap(), &session).unwrap(), value, "{expr}");
+        }
+    }
+}
+
+#[test]
+fn standalone_sequence_has_only_outputs_and_cancelled_has_an_error_binding() {
+    let document = Document::shadowing();
+    let (view, entries) = runtime_bindings(LifecycleScope::Event(LifecycleSignal::Cancelled), LifecycleValues::default());
+    let session = EvaluationSession::associate(view, &document, entries).unwrap();
+    for (expr, wanted) in [("seq", json!({"outputs": []})), ("seq.outputs", json!([])),
+        ("seq.name", Value::Null), ("seq.run_id", Value::Null), ("err", Value::Null)] {
+        assert_eq!(evaluate(&parse(expr).unwrap(), &session).unwrap(), wanted);
+    }
+}
+
+#[test]
+fn group_results_obey_event_timing_and_declaration_order() {
+    let binding = GroupBinding {
+        variables: Map::from_iter([("label".into(), json!("inner"))]),
+        legs: [
+            ("z", LegOutcome::Succeeded, json!("done"), Value::Null),
+            ("a", LegOutcome::Failed, json!("partial"), json!({"kind": "shell"})),
+            ("c", LegOutcome::Cancelled, Value::Null, json!({"kind": "sibling"})),
+            ("skip", LegOutcome::Skipped, Value::Null, Value::Null),
+            ("b", LegOutcome::Succeeded, json!("last"), Value::Null),
+        ].into_iter().map(|(name, outcome, output, err)| GroupLegResult { name: name.into(), outcome, output, err }).collect(),
+    };
+    assert_eq!(binding.leg_value(), binding.variables);
+    for event in LifecycleSignal::ALL {
+        let group = binding.event_value(event);
+        let document = Document::shadowing();
+        let (view, entries) = runtime_bindings(LifecycleScope::Event(event),
+            LifecycleValues { group: Some(&group), ..LifecycleValues::default() });
+        let session = EvaluationSession::associate(view, &document, entries).unwrap();
+        let read = |expr: &str| evaluate(&parse(expr).unwrap(), &session).unwrap();
+        let terminal = matches!(event, LifecycleSignal::Success | LifecycleSignal::Failure
+            | LifecycleSignal::Cancelled | LifecycleSignal::Finalize | LifecycleSignal::Loop);
+        assert_eq!(read("group.label"), json!("inner"));
+        assert_eq!(read("group.succeeded"), if terminal { json!(["z", "b"]) } else { json!([]) });
+        assert_eq!(read("group.failed"), if terminal { json!(["a"]) } else { json!([]) });
+        assert_eq!(read("group.cancelled"), if terminal { json!(["c"]) } else { json!([]) });
+        if terminal {
+            assert_eq!(read("group.legs.a.output"), json!("partial"));
+            assert_eq!(read("group.legs.c.err.kind"), json!("sibling"));
+            assert_eq!(read("group.legs.skip.outcome"), json!("skipped"));
+        } else { assert_eq!(read("group.legs"), json!({})); }
+    }
 }

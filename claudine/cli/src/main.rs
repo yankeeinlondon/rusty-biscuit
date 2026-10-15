@@ -8,7 +8,6 @@ use claudine::provider::Provider;
 use color_eyre::eyre::{Report, Result};
 
 mod args;
-mod budget;
 mod argv;
 mod cli_utils;
 mod commands;
@@ -191,14 +190,14 @@ fn skip_help_injection(name: &str) -> bool {
 
 /// Add `--help`/`-h` (an `ArgAction::Help`) to every subcommand for which
 /// [`skip_help_injection`] returns `false`, and to every subcommand nested
-/// beneath one (`budget grant`, `mcp alias`, …).
+/// beneath one (`mcp alias`, …).
 ///
 /// This is necessary because the root `Cli` sets `disable_help_flag = true`
 /// (so the custom grouped help can fire on `claudine` / `claudine --help`),
 /// and clap propagates that setting to subcommands at every depth. Without
 /// re-injection, `claudine <subcmd> --help` errors with
 /// `unexpected argument '--help'`. Clap acts on an `ArgAction::Help` before
-/// it validates required arguments, so `budget grant --help` needs no ledger.
+/// it validates required arguments, so `mcp alias --help` needs no server.
 fn inject_subcommand_help_flag(cmd: &mut clap::Command) {
     let names: Vec<String> = cmd
         .get_subcommands()
@@ -510,7 +509,6 @@ async fn dispatch(
             return commands::sequence::run_sequence(args, cli.verbose, startup_timings);
         }
         Commands::Steer(args) => return Ok(commands::steer::run(args).await),
-        Commands::Budget(args) => commands::budget::run(args),
         Commands::Dashboard(args) => commands::dashboard::run(args).await,
         Commands::Context(args) => commands::context::run(args),
         Commands::Errors(args) => commands::errors::run(args),

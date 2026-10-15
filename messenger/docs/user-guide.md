@@ -761,7 +761,7 @@ Only `research-refresh` reaches the network or starts an agent. Every other reci
 - **Accepted research:** one document per platform (`docs/research/platforms/<platform>.md`). It changes only through `promote`, never by hand.
 - **Generated:** `docs/research/platforms/catalog.json`, the region of `docs/research/summary/platforms.md` between the `BEGIN GENERATED` / `END GENERATED` markers, and `docs/research/CHANGELOG.md`. Each carries a "do not edit" notice. Prose outside the summary's markers is authored and kept.
 - **Selection:** `docs/research/publication.json` names the exact bytes of every published file. Commit it together with every file it lists; `report` and `generate` refuse a snapshot whose files do not match it (hand edits included).
-- **Local only (gitignored):** `messenger/.research-state/` holds refresh runs, budget ledgers, renewal records, and the publication journal.
+- **Local only (gitignored):** `messenger/.research-state/` holds refresh runs, renewal records, and the publication journal.
 
 ### Validate, generate, and check for drift
 
@@ -776,9 +776,9 @@ Two generations from the same inputs are byte-identical. Invalid inputs, a missi
 
 ### Refresh research
 
-A refresh re-researches one platform in three passes: independent discovery, reconciliation against the curated sources and previous research, and curated-source maintenance. An independent evidence review follows. Each platform run is one budgeted [Claudine](../../claudine/docs/cli/budget.md) sequence. Platforms run one at a time behind a shared fleet lock.
+A refresh re-researches one platform in three passes: independent discovery, reconciliation against the curated sources and previous research, and curated-source maintenance. An independent evidence review follows. Each platform run is one [Claudine](../../claudine/docs/cli/sequence.md) sequence, executed by the Messenger-owned runner (`messenger research run RUN_ID`), which holds the fleet lock for the whole execution so platforms run one at a time and records what it observed in the run record.
 
-Both limits are required and have no default. `SECONDS` caps elapsed agent time and `INVOCATIONS` caps agent launches, per platform run. Unused allowance is not spent.
+Both limits are required and have no default. `SECONDS` caps the run's elapsed time — the runner stops a sequence that overruns it — and `INVOCATIONS` caps agent launches, per platform run. Each prepared prompt reserves one invocation in its `start` hook before the agent launches. Admissions are saved in `run.json` and remain spent across resumptions; a refused admission prevents the launch. Ledger-era records without an admission count start at zero, and the runner installs the hooks on their prepared prompts before execution. Unused allowance is not spent.
 
 ```bash
 just research-refresh 3600 12 discord -- --claude           # one platform
@@ -787,7 +787,7 @@ just research-refresh 3600 12 discord --force -- --claude   # refresh even if cu
 messenger research prepare --dry-run                        # which platforms are due, and why
 ```
 
-Arguments before `--` go to `prepare` (platforms, `--force`, `--observed-version IFACE=VER`). Arguments after it go to each `claudine sequence`. Name the agent there (for example `--claude`): the prepared sequence names none, and without a terminal Claudine stops before the first step. The recipe builds `messenger` and `claudine` from this checkout and puts them first on `PATH`, because the sequence's check steps call `messenger research check-run`. It needs `jq`.
+Arguments before `--` go to `prepare` (platforms, `--force`, `--observed-version IFACE=VER`). Arguments after it reach each run's `claudine sequence` command through `messenger research run`. Name the agent there (for example `--claude`): the prepared sequence names none, and without a terminal Claudine stops before the first step. The recipe builds `messenger` and `claudine` from this checkout and puts them first on `PATH`, because the sequence's check steps call `messenger research check-run`. It needs `jq`.
 
 A platform is due when its accepted document is missing, expired, or invalid, or was researched under an older prompt or schema. An observed version that the accepted research does not know also makes it due, as does `--force`. A platform with an open run is skipped until that run is resumed, promoted, or rejected. A platform with an unreadable run record (for example a truncated `run.json` after a crash) is blocked, and `prepare` names the run directory: repair the record or remove the directory before the platform can be prepared again. The research root must be its Git repository's top level (the default) or sit outside any Git repository: `prepare` refuses a subdirectory of a work tree with exit `2`, because the agents and check steps resolve the run's repository-relative paths from that top level. Only one `prepare` runs at a time; a second one exits `3` while the first holds `messenger/.research-state/runs/prepare.lock`, and that lock is released when its holder exits, even by crashing.
 
@@ -808,10 +808,9 @@ A named maintainer approves every substantive change, and every initial baseline
 ### Partial failures and recovery
 
 - **One platform fails.** The others still publish. The failed platform keeps its previous accepted document with its original dates, so a failed attempt never looks newly verified.
-- **A run failed a check, or its sequence stopped** (a failed step, Ctrl+C, or no agent named): `messenger research prepare --resume RUN_ID` reruns it from the first incomplete stage within the same budget, at most twice. Or reject it and prepare a new run. A platform has at most one open run: once a new run is prepared, resuming the failed one is refused (exit `1`, naming the other run's directory) until that run is no longer open.
-- **Budget exhausted** (Claudine exit `76`): the run stays incomplete, never finished. Record more allowance with `claudine budget grant`, then resume.
-- **Runner killed:** the next Claudine command marks the ledger `interrupted`. Run `claudine budget resume` on the ledger, then resume the run.
-- **Prepared but never started:** the run stays active until its printed `claudine sequence` command runs.
+- **A run failed a check, or its sequence stopped** (a failed step, Ctrl+C, or no agent named): `messenger research prepare --resume RUN_ID` reruns it from the first incomplete stage, at most twice. Or reject it and prepare a new run. A platform has at most one open run: once a new run is prepared, resuming the failed one is refused (exit `1`, naming the other run's directory) until that run is no longer open.
+- **Runner killed:** the OS releases the fleet lock when the runner dies, leaving a launched `active` record that `messenger research runs` reports as stale. Recover it explicitly with `messenger research cleanup --recover RUN_ID` (marking it `interrupted`), then resume the run.
+- **Prepared but never started:** the run stays active until `messenger research run RUN_ID` executes it.
 - **Unreadable run record:** `prepare` blocks the platform and names the run directory; `messenger research runs` lists it with the error. Repair the record or remove the directory.
 - **Publication interrupted:** `generate` and `promote` refuse until `messenger research recover` completes or undoes it. The previous snapshot stays selected until then.
 
@@ -822,4 +821,4 @@ just research-cleanup                            # preview records at least 30 d
 just research-cleanup --older-than 7 --apply     # delete them
 ```
 
-The preview lists exactly what would be removed, and which removals end the ability to resume a run. Active, awaiting-review, and interrupted runs, runs whose ledger is locked, and everything under `docs/` are never removed.
+The preview lists exactly what would be removed, and which removals end the ability to resume a run. Active, awaiting-review, and interrupted runs, and everything under `docs/` are never removed; cleanup itself is refused while a research runner is live.

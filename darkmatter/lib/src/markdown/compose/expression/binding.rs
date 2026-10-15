@@ -17,7 +17,7 @@
 //! ([`validate_prepared`](super::prepared::validate_prepared)) reads the same
 //! view without runtime values.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -704,6 +704,7 @@ fn unavailable_read(
 /// once across them.
 #[derive(Clone)]
 pub struct HostGlobals {
+    document_fallbacks: BTreeSet<String>,
     view: Arc<BindingView>,
     runtime: Arc<HashMap<String, RuntimeBinding<'static>>>,
     cache: Arc<Mutex<HashMap<String, Value>>>,
@@ -732,10 +733,24 @@ impl HostGlobals {
     {
         let runtime = check_registration(&view, runtime)?;
         Ok(Self {
+            document_fallbacks: BTreeSet::new(),
             view,
             runtime: Arc::new(runtime),
             cache: Arc::new(Mutex::new(HashMap::new())),
         })
+    }
+
+    /// Let present document properties take precedence for selected roots.
+    /// Presence includes null. This opt-in supports migration diagnostics
+    /// whose unavailable fallback applies only to undeclared names; lexical
+    /// globals should keep the default whole-root shadowing behavior.
+    pub fn with_document_fallbacks(mut self, roots: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.document_fallbacks = roots.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub(crate) fn prefers_document(&self, root: &str) -> bool {
+        self.document_fallbacks.contains(root)
     }
 
     /// The view these globals were associated against.
@@ -750,7 +765,7 @@ impl HostGlobals {
         use crate::markdown::compose::cache::hashing::canonical_json_sorted;
         let mut roots: Vec<&String> = self.runtime.keys().collect();
         roots.sort_unstable();
-        let mut identity = format!("scope={}", self.view.scope());
+        let mut identity = format!("scope={};document_fallbacks={:?}", self.view.scope(), self.document_fallbacks);
         for root in roots {
             let entry = match &self.runtime[root] {
                 RuntimeBinding::Eager(value) => format!("eager:{}", canonical_json_sorted(value)),
@@ -760,6 +775,11 @@ impl HostGlobals {
             identity.push_str(&format!(";{root}={entry}"));
         }
         identity
+    }
+
+    /// Every declared global root.
+    pub(crate) fn roots(&self) -> impl Iterator<Item = &str> {
+        self.runtime.keys().map(String::as_str)
     }
 
     /// Whether `root` is a declared global (never a reserved namespace).
@@ -858,12 +878,7 @@ impl EvaluationLookup for EvaluationSession<'_> {
     }
 
     fn format_resolved(&self, path: &str, value: &Value) -> String {
-        let root = root_of(path);
-        if !is_reserved_namespace(root) && self.runtime.contains_key(root) {
-            super::default_format(value)
-        } else {
-            self.document.format_resolved(path, value)
-        }
+        self.document.format_resolved(path, value)
     }
 
     fn resolution_context(&self) -> Option<ResolutionContext> {

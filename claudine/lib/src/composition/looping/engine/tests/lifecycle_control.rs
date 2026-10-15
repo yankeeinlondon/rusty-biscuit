@@ -849,3 +849,117 @@ fn loop_initialize_error_with_failure_and_finalize_raise_surfaces_finalize() {
         ),
     }
 }
+
+
+#[derive(Default)]
+struct CancelInitializeRecorder {
+    token: crate::composition::lifecycle::cancellation::CancellationToken,
+    events: Mutex<Vec<(LifecycleSignal, String)>>,
+    warnings: Mutex<Vec<String>>,
+}
+
+impl LifecycleEmitter for CancelInitializeRecorder {
+    fn emit_stderr(&self, signal: LifecycleSignal, text: &str, _: &biscuit_terminal::terminal::Terminal) {
+        self.events.lock().unwrap().push((signal, text.into()));
+        if signal == LifecycleSignal::Initialize {
+            self.token.cancel(crate::composition::lifecycle::cancellation::CancellationCause::SiblingFailure {
+                group: "atomic".into(), leg: "failed".into(),
+                error: LifecycleErrorInfo::from_action_failure("shell", "original failure"),
+            });
+        }
+    }
+    fn emit_warn(&self, text: &str, _: &biscuit_terminal::terminal::Terminal) {
+        self.warnings.lock().unwrap().push(text.into());
+    }
+    fn emit_message(&self, _: &str, _: &Path, _: Option<&Path>, _: &crate::messaging::RuntimeMessagingSettings) {}
+    fn emit_speech(&self, _: &str, _: biscuit_speaks::TtsConfig) {}
+    fn emit_effect(&self, _: &str) {}
+    fn emit_notification(&self, _: &str) {}
+}
+
+fn assert_cancelled_loop_initialize(control: Value) {
+    let dir = TempDir::new().unwrap();
+    let marker = dir.path().join("forbidden.txt");
+    let path = dir.path().join("loop.md");
+    let lifecycle = lifecycle_from(json!({
+        "initialize": [{"stderr": "initializing"}, control],
+        "failure": [{"stderr": "must not catch"}],
+        "cancelled": [{"stderr": "{{ err.detail.group }}:{{ err.detail.leg }}"}, {"shell": format!("echo forbidden > {}", marker.display())}],
+        "finalize": [{"stderr": "finalized"}, {"retry": 2}],
+        "loop": {"gate": [{"stderr": "must not gate"}]}
+    }));
+    let recorder = CancelInitializeRecorder::default();
+    let _scope = recorder.token.enter();
+    let invocations = RefCell::new(0);
+    let result = run_loop_lifecycle(&path, &counter_loop(3), object(json!({"counter":0})), &lifecycle, &recorder, &invocations);
+    assert_eq!(result.final_exit_code, 130);
+    assert_eq!(result.iteration_count, 0);
+    assert_eq!(*invocations.borrow(), 0);
+    assert!(result.error.is_none());
+    assert!(result.handoff.is_none());
+    assert!(!marker.exists(), "pre-start cancellation cleanup cannot run shells");
+    assert_eq!(*recorder.events.lock().unwrap(), vec![
+        (LifecycleSignal::Initialize, "initializing".into()),
+        (LifecycleSignal::Cancelled, "atomic:failed".into()),
+        (LifecycleSignal::Finalize, "finalized".into()),
+    ]);
+    let warnings = recorder.warnings.lock().unwrap();
+    assert!(warnings.iter().any(|warning| warning.contains("shell")), "{warnings:?}");
+    assert!(warnings.iter().any(|warning| warning.contains("retry")), "{warnings:?}");
+}
+
+#[test]
+fn cancelled_loop_initialize_skip_has_priority_over_routing() {
+    assert_cancelled_loop_initialize(json!("skip"));
+}
+
+#[test]
+fn cancelled_loop_initialize_proxy_has_priority_over_routing() {
+    assert_cancelled_loop_initialize(json!({"proxy": "missing.md"}));
+}
+
+#[test]
+fn cancelled_loop_initialize_error_has_priority_over_routing() {
+    assert_cancelled_loop_initialize(json!({"error": "must not catch"}));
+}
+
+#[test]
+fn cancelled_loop_executor_stops_without_gate_or_mutation() {
+    let dir = TempDir::new().unwrap();
+    let mut config = counter_loop(3);
+    config.fail_fast = Some(false);
+    let mut calls = 0;
+    let result = run_loop(&dir.path().join("loop.md"), &config, object(json!({"counter":0})), LoopExecutionOptions::default(), |_| {
+        calls += 1;
+        Ok(LoopIterationOutput {
+            output: "partial output".into(), exit_code:130,
+            terminal_signal:Some(LifecycleSignal::Cancelled),
+            ..Default::default()
+        })
+    }).unwrap();
+    assert_eq!(calls, 1);
+    assert_eq!(result.final_exit_code, 130);
+    assert_eq!(result.last_output, "partial output");
+    assert_eq!(result.final_frontmatter["counter"], json!(0));
+    assert!(result.handoff.is_none());
+}
+
+#[test]
+fn cancelled_loop_executor_error_stops_even_when_fail_fast_is_false() {
+    let dir = TempDir::new().unwrap();
+    let token = crate::composition::lifecycle::cancellation::CancellationToken::default();
+    let _scope = token.enter();
+    let mut config = counter_loop(3);
+    config.fail_fast = Some(false);
+    let mut calls = 0;
+    let result = run_loop(&dir.path().join("loop.md"), &config, object(json!({"counter":0})), LoopExecutionOptions::default(), |_| {
+        calls += 1;
+        token.cancel(crate::composition::lifecycle::cancellation::CancellationCause::Interrupt);
+        Err(CompositionError::LifecycleInitializeFailed {source_path:dir.path().join("loop.md"), reason:"cancelled preparation".into()})
+    }).unwrap();
+    assert_eq!(calls, 1);
+    assert_eq!(result.iteration_count, 1);
+    assert_eq!(result.final_exit_code, 130);
+    assert_eq!(result.final_frontmatter["counter"], json!(0));
+    assert!(result.error.is_none());
+}

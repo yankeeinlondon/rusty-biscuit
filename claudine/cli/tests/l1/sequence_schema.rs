@@ -113,7 +113,7 @@ sequence:
   - one
   - two
 ---
-Working on {{topic}} ({{state}}).
+Working on {{topic}} ({{seq}}).
 "#,
     )
     .unwrap();
@@ -220,13 +220,13 @@ Step about {{config}}.
 
 /// Verifies that a step-level `step_timeout` (declared in a sequence step's
 /// raw state object) overrides the document-level `step_timeout`. The step
-/// overlay passes the step's raw state unchanged under the `state` key, so
-/// per-step `step_timeout` is surfaced via `{{ state.step_timeout || ... }}`
+/// binding exposes authored properties under `seq`, so
+/// per-step `step_timeout` is surfaced via `{{ seq.step_timeout || ... }}`
 /// interpolation in the document frontmatter.
 ///
 /// Test shape:
 /// - Document `step_timeout` falls back to `30s` when the step does not
-///   declare one, but uses `state.step_timeout` when the step does.
+///   declare one, but uses `seq.step_timeout` when the step does.
 /// - Step 1 has no `step_timeout`, so the effective deadline is `30s`. The
 ///   fake provider completes quickly and the step succeeds.
 /// - Step 2 declares `step_timeout: 0.5s` at the step level. The fake
@@ -240,7 +240,7 @@ fn sequence_per_step_step_timeout_override() {
 
     // Document-level step_timeout defaults to 30s; a step may override by
     // setting `step_timeout` at the step level, which the overlay exposes
-    // via `state.step_timeout`. Step 2 sets it to 0.5s: the stall below is
+    // via `seq.step_timeout`. Step 2 sets it to 0.5s: the stall below is
     // unconditional, so the budget only has to outlast the gap between the
     // fixture's two `printf` lines (back-to-back, no sleep) — 0.5s is two
     // orders of magnitude above that even under WSL2 contention, and it
@@ -249,13 +249,13 @@ fn sequence_per_step_step_timeout_override() {
     fs::write(
         &md_file,
         r#"---
-step_timeout: '{{ state.step_timeout || "30s" }}'
+step_timeout: '{{ seq.step_timeout || "30s" }}'
 sequence:
   - name: fast
   - name: slow
     step_timeout: 0.5s
 ---
-Run step {{ state.name }}
+Run step {{ seq.name }}
 "#,
     )
     .unwrap();
@@ -365,7 +365,7 @@ sequence:
   - alpha
 tier: $(echo huge)
 ---
-Step {{state}} with tier {{tier}}.
+Step {{seq}} with tier {{tier}}.
 "#,
     )
     .unwrap();
@@ -424,9 +424,9 @@ sequence:
     doc: {}
   - name: malformed
     doc: {}
-loaded_title: "{{{{ frontmatter(state.doc, 'title') }}}}"
+loaded_title: "{{{{ frontmatter(seq.doc, 'title') }}}}"
 ---
-Step {{{{ state.name }}}}: {{{{ loaded_title }}}}
+Step {{{{ seq.name }}}}: {{{{ loaded_title }}}}
 "#,
             valid_doc.display(),
             malformed_doc.display()
@@ -527,7 +527,7 @@ sequence:
 initialize:
   - proxy: "./review.md"
 ---
-Step {{ state }}.
+Step {{ seq }}.
 "#,
     )
     .unwrap();
@@ -559,7 +559,7 @@ Step {{ state }}.
         .collect::<Vec<_>>()
         .join(" ");
     assert!(
-        collapsed.contains("schema validation failed for"),
+        collapsed.to_ascii_lowercase().contains("schema validation failed for"),
         "expected the typed schema surface; stderr:\n{plain}"
     );
     assert!(

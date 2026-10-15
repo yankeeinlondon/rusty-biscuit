@@ -108,7 +108,7 @@ fn multi_hop_chain_resolves_and_records_every_hop() {
     // has no declaration for `relatedInformation` to point at.
     assert_eq!(resolved.origin.kind, SchemaOriginKind::ReferencedFile);
     assert_eq!(
-        resolved.origin.uri.as_deref().and_then(Path::file_name),
+        resolved.origin.file().and_then(Path::file_name),
         terminal.file_name(),
         "the redirect must not claim an origin the declaration owns",
     );

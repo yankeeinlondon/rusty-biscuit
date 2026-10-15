@@ -300,6 +300,25 @@ pub enum SchemaError {
         source: Box<SchemaError>,
     },
 
+    /// A trigger in a host's [`EmbeddedSchemaBundle`](super::EmbeddedSchemaBundle)
+    /// claimed `kind: trigger-schema` but could not be loaded: a malformed
+    /// envelope, or a payload that failed to resolve inside its bundle.
+    /// `bundle` and `name` identify the embedded document; it has no host
+    /// path, so this is never a [`SchemaError::TriggerLoad`].
+    #[error("embedded trigger-schema `{bundle}/{name}` is malformed: {source}")]
+    EmbeddedTriggerLoad {
+        bundle: String,
+        name: String,
+        #[source]
+        source: Box<SchemaError>,
+    },
+
+    /// A host's [`EmbeddedSchemaBundle`](super::EmbeddedSchemaBundle) has an
+    /// unusable name or file list (see
+    /// [`EmbeddedSchemaBundle::new`](super::EmbeddedSchemaBundle::new)).
+    #[error("embedded schema bundle `{bundle}` is invalid: {message}")]
+    EmbeddedBundle { bundle: String, message: String },
+
     /// A bare-name schema reference (no path component) was not found in any
     /// schema root, but a file of that name exists in the document's own
     /// directory. The author likely intended a relative reference; the error
@@ -843,6 +862,33 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                          <cyan>$path</cyan> predicate.",
                     )
             }
+
+            SchemaError::EmbeddedTriggerLoad { bundle, name, source } => {
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("SchemaError", "embedded trigger-schema malformed"))
+                    .body(vec![
+                        Prose::new(format!(
+                            "Embedded trigger <cyan>{}</cyan> could not be loaded:",
+                            Prose::escape_text(&format!("{bundle}/{name}"))
+                        )),
+                        Prose::new(format!(
+                            "<dim>Reason:</dim> {}",
+                            Prose::escape_text_outside_code_spans(&source.to_string())
+                        )),
+                    ])
+                    .hint(
+                        "The trigger ships inside the host binary; a schema file of the same \
+                         name in a schema root replaces it.",
+                    )
+            }
+
+            SchemaError::EmbeddedBundle { bundle, message } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "embedded schema bundle invalid"))
+                .body(vec![Prose::new(format!(
+                    "Embedded schema bundle <cyan>{}</cyan>: {}",
+                    Prose::escape_text(bundle),
+                    Prose::escape_text_outside_code_spans(message)
+                ))]),
 
             SchemaError::BareNameSiblingExists {
                 reference,

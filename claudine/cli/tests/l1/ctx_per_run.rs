@@ -401,10 +401,9 @@ fn a_resumed_attempt_observes_the_previous_attempts_staging() {
     );
 }
 
-/// Each task of a serial group is a run: a member observes what the member
-/// before it staged.
+/// Each sequence task is a run and observes earlier tasks' staging.
 #[test]
-fn a_serial_group_member_observes_an_earlier_members_staging() {
+fn a_sequence_task_observes_an_earlier_tasks_staging() {
     let fixture = repo("ctx-per-run-serial-group");
     doc(
         &fixture,
@@ -414,7 +413,7 @@ fn a_serial_group_member_observes_an_earlier_members_staging() {
     let file = doc(
         &fixture,
         "seq.md",
-        "---\nsequence:\n  - name: bundle\n    group:\n      name: bundle\n      execution: serial\n      tasks:\n        - name: before\n          prompt: ./read.md\n        - name: stage\n          shell: \"git add a.txt\"\n        - name: after\n          prompt: ./read.md\n---\n",
+        "---\nsequence:\n  - name: before\n    prompt: ./read.md\n  - name: stage\n    shell: \"git add a.txt\"\n  - name: after\n    prompt: ./read.md\n---\n",
     );
 
     let run = run(&fixture, &["sequence", "--claude", &file]);
@@ -448,7 +447,7 @@ fn parallel_siblings_share_one_capture_until_one_reenters() {
     let file = doc(
         &fixture,
         "seq.md",
-        "---\nsequence:\n  - name: bundle\n    group:\n      name: bundle\n      execution: parallel\n      max_parallel: 1\n      tasks:\n        - name: stage\n          shell: \"git add a.txt\"\n        - name: read\n          prompt: ./read.md\n---\n",
+        "---\nsequence:\n  - name: bundle\n    group:\n      name: bundle\n      max_parallel: 1\n      tasks:\n        - name: stage\n          shell: \"git add a.txt\"\n        - name: read\n          prompt: ./read.md\n---\n",
     );
 
     let run = run(&fixture, &["sequence", "--claude", &file]);
@@ -861,4 +860,32 @@ fn sequence_preflight_observes_git_state_once_for_every_prompt_document() {
 
     assert_eq!(run.code, Some(0), "{}", run.output);
     assert_eq!(volatile_observations(&run.output), "file_changes (4)", "{}", run.output);
+}
+
+#[test]
+fn container_events_refresh_current_after_nested_child_work() {
+    let fixture = repo("current-container-events");
+    let source = fixture.cwd().join("sequence.md");
+    write(&source, r#"---
+start: [{ stdout: 'root-start {{ length(current.staged_files) }}' }]
+success: [{ stdout: 'root-success {{ length(current.staged_files) }}' }]
+sequence:
+  - name: group
+    group:
+      name: checks
+      start: [{ stdout: 'group-start {{ length(current.staged_files) }}' }]
+      success: [{ stdout: 'group-success {{ length(current.staged_files) }}' }]
+      tasks:
+        - name: leg
+          start: [{ stdout: 'leg-start {{ length(current.staged_files) }}' }]
+          success: [{ stdout: 'leg-success {{ length(current.staged_files) }}' }]
+          sequence:
+            - { name: stage, shell: 'git add a.txt' }
+---
+"#);
+    let output = fixture.command().args(["sequence", "--claude", "--yolo", "--silent"])
+        .arg(&source).assert().success().get_output().clone();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.lines().collect::<Vec<_>>(), ["root-start 0", "group-start 0", "leg-start 0",
+        "leg-success 1", "group-success 1", "root-success 1"]);
 }

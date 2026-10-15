@@ -67,6 +67,7 @@ pub(crate) fn contains_interpolation(value: &Value) -> bool {
 /// read-side expression functions (`file_exists`, `frontmatter`, …) during
 /// frontmatter interpolation; it is `None` for context-free callers.
 pub(crate) struct FrontmatterSeedState {
+    declared_properties: HashSet<String>,
     data: HashMap<String, Value>,
     context: ComposeContext,
     resolution_context: Option<ResolutionContext>,
@@ -78,12 +79,18 @@ pub(crate) struct FrontmatterSeedState {
 impl FrontmatterSeedState {
     pub(crate) fn new(data: HashMap<String, Value>, context: ComposeContext) -> Self {
         Self {
+            declared_properties: data.keys().cloned().collect(),
             data,
             context,
             resolution_context: None,
             name_coercion_keys: Vec::new(),
             current: super::context::CurrentScope::default(),
         }
+    }
+
+    fn with_document_properties(mut self, names: impl IntoIterator<Item = String>) -> Self {
+        self.declared_properties.extend(names);
+        self
     }
 
     /// Sets the request's refresh authority for the lazy `current` root. The
@@ -127,7 +134,10 @@ impl FrontmatterSeedState {
 
     /// The host global `path` reads, when its root is one.
     fn host_global(&self, path: &str) -> Option<Result<ResolvedBinding, ExpressionError>> {
-        self.host_globals()?.resolve(path)
+        let globals = self.host_globals()?;
+        let root = path.split('.').next().unwrap_or(path);
+        if globals.prefers_document(root) && self.declared_properties.contains(root) { return None; }
+        globals.resolve(path)
     }
 }
 
@@ -198,9 +208,6 @@ impl EvaluationLookup for FrontmatterSeedState {
     }
 
     fn format_resolved(&self, path: &str, value: &Value) -> String {
-        if self.host_global(path).is_some() {
-            return super::expression::default_format(value);
-        }
         super::context::effective_state::coerce_named_object(path, value, &self.name_coercion_keys)
             .unwrap_or_else(|| super::expression::default_format(value))
     }
@@ -1045,6 +1052,7 @@ fn interpolate_frontmatter_impl(
         .map(|context| context.current.clone())
         .unwrap_or_default();
     let mut state = FrontmatterSeedState::new(seed_map, context.clone())
+        .with_document_properties(authored_values.keys().cloned())
         .with_current_authority(current_authority)
         .with_resolution_context(resolution_context)
         .with_name_coercion_keys(name_coercion_keys.to_vec());

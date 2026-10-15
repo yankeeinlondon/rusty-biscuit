@@ -188,9 +188,9 @@ impl ReviewFixture {
                  \x20   - name: build\n\
                  \x20     group:\n\
                  \x20         name: build-group\n\
-                 \x20         execution: serial\n\
                  \x20         tasks:\n\
-                 \x20             - prompt: \"./member.md\"\n\
+                 \x20             - name: member\n\
+                 \x20               prompt: \"./member.md\"\n\
                  \x20   - name: {LONG_STEP_NAME}\n\
                  \x20   - name: stage-last\n\
                  \x20     shell: echo shell-last >> events.log\n\

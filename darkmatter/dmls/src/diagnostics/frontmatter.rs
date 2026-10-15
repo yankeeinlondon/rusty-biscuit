@@ -856,7 +856,7 @@ fn schema_origin_related(
         let _ = ctx;
         return None;
     }
-    let path = origin.uri.as_ref()?;
+    let path = origin.file()?;
     let uri = file_path_to_uri(path)?;
     Some(vec![DiagnosticRelatedInformation {
         location: Location::new(uri, zero_range()),

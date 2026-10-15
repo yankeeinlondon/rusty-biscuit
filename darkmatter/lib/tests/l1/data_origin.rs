@@ -42,8 +42,14 @@ impl Recorder {
 }
 
 impl ShellApprovalHandler for Recorder {
+    /// Records the request's resolved bytes, or `template <display>` for a
+    /// request that offers no bytes, only the authored template.
     fn approve(&self, request: ShellApprovalRequest) -> Result<ShellApprovalDecision, ShellExpansionError> {
-        self.commands.lock().unwrap().push(request.normalized_exact);
+        let recorded = match (request.offered.exact, request.template) {
+            (false, Some(template)) => format!("template {}", template.display),
+            _ => request.normalized_exact,
+        };
+        self.commands.lock().unwrap().push(recorded);
         Ok(self.decision.clone())
     }
 }
@@ -258,19 +264,21 @@ fn a_body_executable_from_interpolation_is_rejected() {
     assert_eq!(approvals.commands(), vec!["echo ARG"]);
 }
 
-/// A data operator cannot extend an authored command's pipeline.
+/// A data operator cannot extend an authored command's pipeline: the
+/// command's interpolated bytes are never offered, only its authored
+/// one-segment template, which fills the value into one argument.
 #[test]
 fn a_body_pipeline_operator_from_interpolation_is_rejected() {
     let dir = TempDir::new().unwrap();
     write(dir.path(), "op.md", "---\ny: \"a && rm -rf x\"\n---\n::shell echo {{ y }}\n");
-    let approvals = Recorder::allowing();
+    let approvals = Recorder::denying();
     let error = compose(dir.path(), "op.md", options(dir.path(), "op.md", approvals.clone())).unwrap_err();
-    assert!(error.contains("changes the command from 1 action(s) to 2"), "{error}");
-    assert!(approvals.commands().is_empty());
+    assert!(error.contains("Command denied: 'echo {{ y }}'"), "{error}");
+    assert_eq!(approvals.commands(), vec!["template echo {{ y: string }}"]);
 }
 
 /// Data in a `::shell-block` cannot add a command or close the block
-/// (spike S1 E5, E5b).
+/// (spike S1 E5, E5b): only the authored command is offered, as its template.
 #[test]
 fn data_cannot_split_or_close_a_shell_block() {
     let dir = TempDir::new().unwrap();
@@ -279,19 +287,19 @@ fn data_cannot_split_or_close_a_shell_block() {
         "split.md",
         "---\nx: \"hi\\necho SECOND\"\n---\n::shell-block\necho {{ x }}\n::end-block\n",
     );
-    let approvals = Recorder::allowing();
+    let approvals = Recorder::denying();
     let error = compose(dir.path(), "split.md", options(dir.path(), "split.md", approvals.clone())).unwrap_err();
-    assert!(error.contains("splits or joins the block's commands"), "{error}");
-    assert!(approvals.commands().is_empty());
+    assert!(error.contains("Command denied: 'echo {{ x }}'"), "{error}");
+    assert_eq!(approvals.commands(), vec!["template echo {{ x: string }}"]);
 
     write(
         dir.path(),
         "close.md",
         "---\nx: \"\\n::end-block\\nafter\"\n---\n::shell-block\necho {{ x }}\n::end-block\n",
     );
-    let approvals = Recorder::allowing();
+    let approvals = Recorder::denying();
     assert!(compose(dir.path(), "close.md", options(dir.path(), "close.md", approvals.clone())).is_err());
-    assert!(approvals.commands().is_empty());
+    assert_eq!(approvals.commands(), vec!["template echo {{ x: string }}"]);
 }
 
 /// Directives inside data are text (spike S1 E1–E4): none runs, transcludes,

@@ -31,7 +31,7 @@ claudine/lib/src/
 │   ├── lifecycle/ → Lifecycle config/types, parsing, validation, actions, context, control, execution, and the pure transition core shared by composition preflight and the harness loop
 │   ├── looping/   → Loop configuration, action DSL, condition evaluation, and execution orchestration (looping/{engine,types,seed,config,dsl,actions,expression}.rs — engine holds only execution/routing/gate logic; types holds the option/context/output/result value types; seed holds loop-seed construction)
 │   ├── prepare/   → The canonical preparation service (prepare/service.rs) and the entry-reason stage matrix as data (prepare/entry.rs); prepare.rs holds the two sanctioned composers prepare_direct/prepare_inline
-│   ├── schema/    → Schema-aware preparation, error translation, problem classification, and status reporting
+│   ├── schema/    → Schema-aware preparation, error translation, problem classification, and status reporting; `bundle.rs` embeds `claudine/schemas/` as the last-resort trigger location and decides Claudine-control ownership (see topics/schemas.md)
 │   ├── closure.rs → The inline artifact reconciler: reads the agent-written document back, restores the three closure-owned nodes textually, judges the body under Darkmatter's non-strict Simple hash, stamps, writes once atomically, and owns baseline rollback
 │   └── completion.rs → The one completion verdict for both modes: pure evaluate_completion + the complete_active_document orchestration entry point
 ├── config/       → Agent detection, hook registration, atomic writes, backups
@@ -549,7 +549,7 @@ environment to resolve a reference or seed `ctx.*`. `InvocationContext::capture`
 `ScopeContext` takes its directory and home.
 
 The snapshot's environment is the launched document's. Every later document (a
-sequence step, a serial or parallel group leg, a `proxy` target) captures its
+sequence step, a concurrent group leg, a `proxy` target) captures its
 own map once, before its `initialize`, through
 `InvocationContext::capture_document()`, which reads the `EnvironmentSource`
 the CLI installed (`request::document_environment_source()`, pinning `PWD` to
@@ -562,7 +562,7 @@ process. Every consumer of the document (`env.*`, `ctx` environment values,
 lazy `current`, file references, `SCHEMAS_DIR`, model selection, loop settings,
 shell approval, and shell children through the view's `DocumentShellRunner`
 and Darkmatter's `ComposeOptions::with_shell_child_environment`) reads that
-view. Sequence tasks re-resolve preflight-approved `shell:`/`setup:`/`teardown:`
+view. Sequence tasks re-resolve preflight-approved `shell:` and lifecycle command
 text under their own map and refuse changed text
 (`CompositionError::SequenceShellApprovalChanged`,
 `sequence/preflight/reapproval.rs`). See `docs/topics/composition.md`
@@ -611,8 +611,7 @@ repository and `@` from the launch tree, in composition and in completion
 
 ### Lifecycle grammar
 
-Every stack (the six events, the `loop:` block's loose verbs or `gate:` list,
-and a task's `setup:`/`teardown:`) parses into `Vec<LifecycleNode>`
+Every stack (the seven events and the `loop:` block's loose verbs or `gate:` list) parses into `Vec<LifecycleNode>`
 (`lifecycle/actions.rs`): `Action(LifecycleAction)` or
 `Conditional(LifecycleConditional { when, then, otherwise, path })`, at most
 five `when` levels deep. `LifecycleConfig` holds only `stacks`. A dictionary
@@ -641,6 +640,14 @@ checks, and DMLS's `nested_span.rs` mirrors its path spelling.
   ends the whole event. Audio is published in list position (no
   `audio_phases`). `LifecycleRunGuard::emit_signal` (the drop safety net) emits
   only root, unguarded, literal communication.
+- **Shell modes.** A `shell` command or `set` `$( … )` with a placeholder
+  carries a `shell_template::LifecycleShellTemplate` (stamped by
+  `preflight::resolve_lifecycle_shell_commands`); the lifecycle audit settles
+  it to resolved bytes or template, or leaves it refusing. Template mode fills
+  from the live state, checks the filled chain, and dispatches through
+  `ShellRunner::run_structured` (`structured_shell.rs`); a host that approves a
+  container stack elsewhere builds one with
+  `LifecycleShellTemplate::approved`.
 - **`with` overlays.** `proxy` and `retry` share `WithOverlay` and
   `executor.rs::resolve_with_overlay`; errors are the `LifecycleWith*` family
   (`LifecycleWithUnsupported` elsewhere). A retry overlay travels as
@@ -655,7 +662,7 @@ wrote (the document, `--set`/`key=value`, interactive answers) is a template.
 Claudine enforces this at two boundaries:
 
 - **In memory — `LayeredOverrides`** (`runtime_state.rs`). Runtime values stay
-  raw and typed (`outputs`, loop action results, lifecycle `set:`,
+  raw and typed (`seq.outputs`, loop action results, lifecycle `set:`,
   task `params`, group `variables`, the step overlay, and the per-document
   `PrepareOptions::proxy_overlay`, which carries the retained proxy overlay
   with any one-read `retry.with` overlay merged on top). A loop iteration's
@@ -721,41 +728,48 @@ as authored.
 
 ### Sequences
 
-`lib/src/composition/sequence/` owns the normalized plan; `cli/src/commands/wrap/sequence/`
-owns orchestration. The split follows the two execution phases:
+`lib/src/composition/sequence/` owns normalized tasks, recursive preflight,
+and primitive execution; `cli/src/commands/wrap/sequence/` owns orchestration.
 
-- `sequence/{model,normalize,reserved,source,grammar,data,expr}.rs` — typed step
-  state, id/`sequence_id` generation, the reserved-key catalog, and the
-  `<file-ref> [-> offset] [::op(args)]` source grammar. Data files load through
-  `biscuit_file` and resolve through `FileReference::resolve_in_context` using
-  the request-scoped `FileResolutionContext` derived for the authoring source;
-  string sources classify through `biscuit_file::ListFormat`. `grammar.rs`
-  refuses a `sequence:` value that opens a stored literal token
-  (`SequenceInvalid`); expression sources and pre-flight `step_state` read
-  stored tokens as their text via `closure::stored_text`.
-- `sequence/preflight/` — the recursive task-graph loader. Walks inline tasks,
-  `kind: task` / `kind: group` / `kind: group-catalog` files, and every `prompt:`
-  document, keeping a canonical-path ancestry stack so a cycle reports its whole
-  chain. Resolves shell bytes under an early-binding-only lookup and the
-  launch environment so approved == executed. `preflight/reapproval.rs`
-  (`PreflightApproval`, `compose_shell_text`) re-resolves each interpolating
-  task command under the task's own document environment before any stage
-  runs and refuses changed text (`SequenceShellApprovalChanged`); interim until
-  shell template approval lands.
-- `sequence/task/` — `TaskExecution::run` → `TaskOutcome`. `run()` never returns
-  `Err`: continuation is the scheduler's `fail_fast` decision, not an error
-  escaping one task. `group.rs` adds serial and (via `std::thread::scope` plus a
-  shared cursor) parallel groups.
-- `composition/runtime_state.rs` — `RuntimeState`, the invocation-local cell
-  holding accumulated `set` mutations and the `outputs` accumulator.
-  `layered_set_overrides` is the single place the four-layer precedence
-  (live frontmatter < user setters < mutations < reserved overlay) is encoded;
-  it returns `LayeredOverrides`, which also records which keys are data (see
-  [Agent text is data](#agent-text-is-data)).
-- `wrap/sequence/{jit,iterate,phase1c,task_run,task_frames}.rs` — just-in-time
-  composition at each step's turn. `phase1c`'s validation compose and execution
-  both route through `jit::compose_step`, so "validated == executed" holds
-  without a second prepare implementation.
+- `sequence/{model,normalize,reserved,source,grammar,data,expr}.rs` handles
+  step rows, unique step IDs, and `<file-ref> [-> offset] [::op(args)]` sources.
+  Data files load through `biscuit_file` and resolve with the request-scoped
+  `FileReference::resolve_in_context`. A task chooses one executable, including
+  inline or referenced `sequence:` containers.
+- `sequence/preflight/` recursively loads inline tasks, task/group/catalog
+  files, nested sequences, and referenced prompt lifecycle stacks. Ancestry
+  includes a selected catalog entry, allowing different entries in one catalog.
+  `PreparedShellSite` records authored text, typed template, position, and
+  property. Known first-task values may use exact bytes or shape approval;
+  later placeholders and container terminal-event placeholders require shape
+  approval. Late roots are `seq`, `loop`, and `group`. The graph's audited
+  root lifecycle is installed on the root guard; rereads settle only against
+  original approval membership.
+- `sequence/task/` executes primitives and concurrent named group legs.
+  Group workers clone runtime snapshots, preserving isolated mutations and
+  proxy ancestry. Only groups accept `fail_fast`: atomic failed groups publish
+  no leg state; tolerant groups merge completed legs in declaration order.
+- `lifecycle/runtime::ContainerRunner` and `LifecycleRunGuard` own container
+  events. Root initialize precedes preflight; nested preparation is just in
+  time. Retry retains mutations but clears child results and defers finalize
+  until the final attempt. Unhandled failures propagate outward. Cancellation
+  settles descendants before `cancelled` and `finalize`, without recovery.
+- `composition/runtime_state.rs` holds invocation-local mutations and lexical
+  `seq`, `group`, and `loop` roots. `LayeredOverrides.sequence_value` and
+  `CallerInputLayers.sequence_binding` carry sequence data separately from
+  frontmatter/setters; never flatten them. `replace_sequence_scope` restores
+  enclosing position and outputs while retaining mutations.
+- `wrap/sequence/{jit,iterate,phase1c,task_run,task_frames}.rs` composes each
+  child at its turn. Prompt passive validation and execution share the same
+  document epoch and retain `DocumentShellValues`. Closed shell approvals
+  travel through step scopes, retries, proxies, and concurrent descendants.
+  Body-only steps mask source lifecycle keys to avoid repeating root events.
+
+Successful children publish a string, sequence array, or named group dictionary
+only after finalize. Nested sequences start with empty `seq.outputs` and share
+`seq.run_id`. In-memory isolation does not roll back filesystem effects.
+Task `setup:`/`teardown:`, group `execution:`, sequence-level `fail_fast`, and
+`--fail-fast` are removed grammar. Container looping remains planned.
 
 Two seams are worth knowing before editing:
 

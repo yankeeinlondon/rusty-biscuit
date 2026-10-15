@@ -175,7 +175,7 @@ pub fn renewals(state: &StateArea) -> Vec<RenewalRecord> {
 pub fn blocking_runs(state: &StateArea, except: Option<&RunId>) -> BTreeMap<PlatformId, (String, Skip)> {
     let mut blocked: BTreeMap<PlatformId, (String, Skip)> = BTreeMap::new();
     for (platform, path, record) in state.list() {
-        let mut record = match record {
+        let record = match record {
             Ok(record) if except == Some(&record.run_id) => continue,
             Ok(record) => record,
             Err(error) => {
@@ -184,11 +184,6 @@ pub fn blocking_runs(state: &StateArea, except: Option<&RunId>) -> BTreeMap<Plat
                 continue;
             }
         };
-        // Judge the run's resting state, not its last saved status. An
-        // unreadable ledger leaves the saved status, and an `active` run
-        // stays open.
-        let ledger = state.ledger(&record).ok().flatten();
-        super::state::apply_ledger(&mut record, ledger.as_ref());
         if record.status.is_open() && !matches!(blocked.get(&platform), Some((_, Skip::UnreadableRun { .. }))) {
             blocked.insert(platform, (path, Skip::OpenRun { run_id: record.run_id, status: record.status }));
         }

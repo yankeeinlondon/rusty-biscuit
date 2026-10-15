@@ -89,6 +89,8 @@ pub struct PrepareOptions {
     /// are data, never templates. Set both through
     /// [`set_layered_overrides`](Self::set_layered_overrides).
     pub data_override_keys: std::collections::BTreeSet<String>,
+    /// Complete lexical sequence root, carried outside frontmatter.
+    pub sequence_binding: Option<serde_json::Value>,
     /// The immediate `proxy.with:` overlay of a document entered through a
     /// hand-off (empty otherwise).
     ///
@@ -99,8 +101,18 @@ pub struct PrepareOptions {
     pub proxy_overlay: indexmap::IndexMap<String, serde_json::Value>,
     /// Immutable raw caller overrides paired with their launch-time origins.
     pub caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
-    /// Commands pre-approved during pre-flight shell discovery.
-    pub pre_approved_commands: Option<std::collections::HashSet<String>>,
+    /// Commands pre-approved during pre-flight shell discovery: resolved
+    /// bytes and template shapes.
+    pub pre_approved_commands:
+        Option<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals>,
+    /// Lexical group variables of a referenced sequence prompt.
+    pub lifecycle_group: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Static sequence position and late inputs retained from discovery.
+    pub deferred_shell_roots: darkmatter::markdown::compose::shell_expansion::template::DeferredShellRoots,
+    /// Validate late inputs passively before task setup.
+    pub validate_deferred_shell_values: bool,
+    /// The current task's validated document late inputs.
+    pub document_shell_values: Option<darkmatter::markdown::compose::shell_expansion::template::DocumentShellValues>,
     /// Extra environment variables to inject into the composition context.
     pub env_overrides: BTreeMap<String, String>,
     /// Enable Darkmatter composition performance collection.
@@ -153,9 +165,9 @@ pub struct PrepareOptions {
     /// retained across harness re-materialization.
     pub file_resolution_context: biscuit_file::FileResolutionContext,
     /// Frontmatter keys whose object values render their `name` field in inline
-    /// string context (`{{state}}` → the name). Sequence preparation sets this
-    /// to the reserved overlay keys (`state`/`previous`/`next`); every other
-    /// caller leaves it empty, so this is a no-op for `compose`/`inline-compose`.
+    /// string context. Preparation also includes the lexical sequence paths
+    /// (`seq`, `seq.previous`, `seq.next`) so these render their names in text
+    /// while whole-value expressions retain native objects.
     pub name_coercion_keys: Vec<String>,
     /// Accept a composition whose body is empty instead of raising
     /// [`CompositionError::ComposedBodyEmpty`].
@@ -208,9 +220,14 @@ impl PrepareOptions {
             document_epoch: None,
             set_overrides: None,
             data_override_keys: Default::default(),
+            sequence_binding: None,
             proxy_overlay: Default::default(),
             caller_input_records: Default::default(),
             pre_approved_commands: None,
+            lifecycle_group: None,
+            deferred_shell_roots: Default::default(),
+            validate_deferred_shell_values: false,
+            document_shell_values: None,
             env_overrides: BTreeMap::new(),
             perf_enabled: false,
             source_repo_root: None,
@@ -240,11 +257,12 @@ impl PrepareOptions {
         super::runtime_state::LayeredOverrides::from_parts(
             self.set_overrides.as_ref(),
             &self.data_override_keys,
-        )
+        ).with_sequence_value(self.sequence_binding.clone())
     }
 
     /// Replace the overrides and their origins together.
     pub fn set_layered_overrides(&mut self, overrides: super::runtime_state::LayeredOverrides) {
+        self.sequence_binding = overrides.sequence_value().cloned();
         self.data_override_keys = overrides.data_keys().clone();
         self.set_overrides = Some(overrides.to_value());
     }
@@ -394,6 +412,9 @@ fn canonical_compose_options(
             .with_current_provider(current_provider)
             .with_host_globals(super::lifecycle::bindings::composition_host_globals(
                 options.enclosing_loop(loop_document),
+                options.sequence_binding.clone().unwrap_or_else(||
+                    super::lifecycle::bindings::SequenceBinding::standalone(Vec::new()).to_value()),
+                options.lifecycle_group.as_ref(),
             )),
         source_path,
         options.shell_working_directory.as_deref(),
@@ -409,7 +430,7 @@ fn canonical_compose_options(
         // variable *values* (`phase`, `pass_icon`, …) are composed before
         // launch and may still be mutated by lifecycle/loop side effects
         // during the run.
-        .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied())
+        .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied().chain(["sequence"]))
         // The composed body is delivered verbatim to the agent and reported as the
         // user prompt. Darkmatter's default strips incidental single newlines, which
         // would collapse an author's line-structured prompt into one paragraph —
@@ -421,8 +442,11 @@ fn canonical_compose_options(
     overrides.initialize_outputs();
     compose_opts = overrides.apply_to(compose_opts);
     compose_opts = compose_opts.with_caller_input_records(options.caller_input_records.clone());
-    if !options.name_coercion_keys.is_empty() {
-        compose_opts = compose_opts.with_name_coercion_keys(options.name_coercion_keys.clone());
+    let mut coercion_keys = options.name_coercion_keys.clone();
+    coercion_keys.extend(super::sequence::reserved::NAME_COERCION_KEYS.iter().map(|key| key.to_string()));
+    compose_opts = compose_opts.with_name_coercion_keys(coercion_keys);
+    if let Some(values) = &options.document_shell_values {
+        compose_opts = compose_opts.with_document_shell_values(values.clone());
     }
     if let Some(approved) = options.pre_approved_commands.clone() {
         compose_opts = compose_opts.with_pre_approved_commands(approved);
@@ -431,6 +455,8 @@ fn canonical_compose_options(
         compose_opts = compose_opts.with_file_ref_fallback_dir(fallback);
     }
     compose_opts
+        .with_deferred_shell_roots(options.deferred_shell_roots.clone())
+        .with_deferred_shell_value_validation(options.validate_deferred_shell_values)
         .with_deferred_schema_verdict(options.defer_schema_verdict)
         .with_schema_phase(schema_phase)
         // `prepare_*_with_schema` re-validates the post-shell frontmatter and
@@ -446,22 +472,23 @@ fn prepared_request(
     Ok(super::compose_request(compose_opts, options.file_resolution_context.clone())?)
 }
 
-/// Resolve the document's `$schema` once for this preparation so it can be
-/// retained on the prepared composition.
+/// Resolve the document's effective schema (its matching trigger schemas
+/// under its `$schema`) once for this preparation so it can be retained on
+/// the prepared composition; triggers match the composed `effective_frontmatter`
+/// the verdict judges.
 ///
 /// A deferred-verdict read tolerates a schema that cannot be prepared (the
 /// stabilized reread reports it); every other read surfaces the typed
 /// [`CompositionError::SchemaLoad`] / [`CompositionError::SchemaParse`].
 fn resolve_launch_schema(
     source: &ResolvedCompositionSource,
+    effective_frontmatter: &serde_json::Value,
     options: &PrepareOptions,
     phase: Option<SchemaPhase>,
 ) -> Result<Option<LaunchSchema>, CompositionError> {
-    if !source.markdown.frontmatter().as_map().contains_key("$schema") {
-        return Ok(None);
-    }
     match super::schema::load_effective_schema(
         source,
+        Some(effective_frontmatter),
         options.file_ref_fallback_dir.as_deref(),
         &options.file_resolution_context,
         &options.schema_caller_records(),
@@ -525,12 +552,10 @@ pub fn preflight_document_shell(
     source: &ResolvedCompositionSource,
     options: &PrepareOptions,
     approval_options: &crate::harness::ShellApprovalOptions,
-) -> Result<std::collections::HashSet<String>, CompositionError> {
+) -> Result<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals, CompositionError> {
     match approve_document_shell(source, options, approval_options) {
         Ok(result) => Ok(result.approved_commands),
-        Err(CompositionError::PreFlightDiscoveryFailed(_)) => {
-            Ok(std::collections::HashSet::new())
-        }
+        Err(CompositionError::PreFlightDiscoveryFailed(_)) => Ok(Default::default()),
         Err(e) => Err(e),
     }
 }
@@ -563,6 +588,7 @@ pub fn approve_document_shell(
     // The audit composes the document, so a retired read is reported as
     // removed grammar here, before composition would meet it.
     reject_removed_loop_reads_in_source(source)?;
+    reject_removed_sequence_reads_in_source(source, options, None)?;
     let ctx = derive_compose_context(source, options);
     let compose_request = prepared_request(
         canonical_compose_options(source, &ctx, options, None),
@@ -583,7 +609,7 @@ use super::lifecycle::{
     LIFECYCLE_EVENT_KEYS, validate_no_err_in_no_error_events,
     validate_no_nested_spans_in_literals,
 };
-use super::hints::{ParsedAgentHint, parse_agent_hint_full, parse_interactive_hint, parse_model_hint};
+use super::hints::{ParsedAgentHint, parse_agent_hint_full, parse_interactive_hint, parse_model_hint, parse_yolo_hint};
 use super::guardrails::render_guardrails;
 use super::types::{
     CompositionClosurePlan, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
@@ -613,6 +639,80 @@ pub(super) fn prepare_direct_with_prompt(
     options: PrepareOptions,
     prompt_source: PromptSource,
 ) -> Result<PreparedComposition, CompositionError> {
+    prepare_direct_on(source, options, prompt_source, BodyCommands::Run)
+}
+
+/// Whether a preparation runs the body's `::shell` and `::shell-block`
+/// commands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BodyCommands {
+    Run,
+    /// Sequence validation observes the document without running any shell.
+    Probe,
+    /// The loop seed's read: before the first iteration the `loop` global has
+    /// no value, so a body command reading it cannot run yet. Each iteration
+    /// runs the body's commands with its own values.
+    Defer,
+}
+
+impl BodyCommands {
+    fn apply(self, options: ComposeOptions) -> ComposeOptions {
+        match self {
+            Self::Run => options,
+            Self::Probe => options
+                .disable(darkmatter::markdown::compose::ComposeOperation::FrontmatterShellExpansion)
+                .disable(darkmatter::markdown::compose::ComposeOperation::ShellExpansion)
+                .disable(darkmatter::markdown::compose::ComposeOperation::ShellBlocks),
+            Self::Defer => options
+                .disable(darkmatter::markdown::compose::ComposeOperation::ShellExpansion)
+                .disable(darkmatter::markdown::compose::ComposeOperation::ShellBlocks),
+        }
+    }
+}
+
+/// Prepare a loop document's seed read: its effective frontmatter and
+/// lifecycle before the first iteration, with the body's commands left to
+/// the iterations.
+///
+/// ## Errors
+///
+/// As [`prepare_direct`] or [`prepare_inline`] for `mode`.
+pub fn prepare_loop_seed(
+    source: &ResolvedCompositionSource,
+    options: PrepareOptions,
+    mode: CompositionMode,
+) -> Result<PreparedComposition, CompositionError> {
+    match mode {
+        CompositionMode::ChainedDocument => {
+            prepare_direct_on(source, options, PromptSource::ComposedBody, BodyCommands::Defer)
+        }
+        CompositionMode::InlineFrontmatterPrompt => prepare_inline_on(source, options, BodyCommands::Defer),
+    }
+}
+
+/// Prepare a sequence validation probe without executing document shell sites.
+/// Schema inputs are prevalidated by the caller; shell-produced values wait for execution.
+///
+/// ## Errors
+/// Returns the same document errors as the corresponding direct or inline preparation.
+pub fn prepare_sequence_probe(
+    source: &ResolvedCompositionSource,
+    mut options: PrepareOptions,
+    mode: CompositionMode,
+) -> Result<PreparedComposition, CompositionError> {
+    options.defer_schema_verdict = true;
+    match mode {
+        CompositionMode::ChainedDocument => prepare_direct_on(source, options, PromptSource::ComposedBody, BodyCommands::Probe),
+        CompositionMode::InlineFrontmatterPrompt => prepare_inline_on(source, options, BodyCommands::Probe),
+    }
+}
+
+fn prepare_direct_on(
+    source: &ResolvedCompositionSource,
+    options: PrepareOptions,
+    prompt_source: PromptSource,
+    body_commands: BodyCommands,
+) -> Result<PreparedComposition, CompositionError> {
     let override_keys = top_level_override_keys(options.set_overrides.as_ref());
     if let Some((key, replacement)) =
         super::lifecycle::scan_removed_validation_keys(&frontmatter_to_value(source.markdown.frontmatter()))
@@ -624,6 +724,7 @@ pub(super) fn prepare_direct_with_prompt(
         });
     }
     reject_removed_loop_reads_in_source(source)?;
+    reject_removed_sequence_reads_in_source(source, &options, None)?;
     if matches!(&prompt_source, PromptSource::ComposedBody) {
         observe_prepared_context(
             &options,
@@ -642,7 +743,7 @@ pub(super) fn prepare_direct_with_prompt(
         ctx.env_mut().insert(key.clone(), value.clone());
     }
     let compose_request = prepared_request(
-        canonical_compose_options(source, &ctx, &options, None),
+        body_commands.apply(canonical_compose_options(source, &ctx, &options, None)),
         &options,
     )?;
     // Retain the caller's inputs so a later canonical preparation of this or a
@@ -681,7 +782,7 @@ pub(super) fn prepare_direct_with_prompt(
 
     // Resolved after a successful compose so a schema that cannot be prepared
     // keeps surfacing through the composer's own typed failure.
-    let launch_schema = resolve_launch_schema(source, &options, None)?;
+    let launch_schema = resolve_launch_schema(source, &effective_frontmatter, &options, None)?;
     let source_repo_root = options.source_repo_root.clone();
 
     Ok(PreparedComposition {
@@ -720,6 +821,14 @@ pub fn prepare_inline(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
 ) -> Result<PreparedComposition, CompositionError> {
+    prepare_inline_on(source, options, BodyCommands::Run)
+}
+
+fn prepare_inline_on(
+    source: &ResolvedCompositionSource,
+    options: PrepareOptions,
+    body_commands: BodyCommands,
+) -> Result<PreparedComposition, CompositionError> {
     let override_keys = top_level_override_keys(options.set_overrides.as_ref());
     let fm = source.markdown.frontmatter();
     if let Some((key, replacement)) =
@@ -732,6 +841,7 @@ pub fn prepare_inline(
         });
     }
     reject_removed_loop_reads_in_source(source)?;
+    reject_removed_sequence_reads_in_source(source, &options, None)?;
 
     let prompt_text = inline_prompt_text(fm, options.set_overrides.as_ref())?;
 
@@ -754,7 +864,7 @@ pub fn prepare_inline(
     // Retain the composed context so pre-flight shell resolution (C3) can build
     // an early-binding lookup over the same `ctx.*`/`env.*` state main compose saw.
     let compose_request = prepared_request(
-        canonical_compose_options(source, &ctx, &options, Some(SchemaPhase::Launch)),
+        body_commands.apply(canonical_compose_options(source, &ctx, &options, Some(SchemaPhase::Launch))),
         &options,
     )?;
     let input_layers = super::CallerInputLayers::from_options(&options);
@@ -780,7 +890,8 @@ pub fn prepare_inline(
         });
     }
 
-    let launch_schema = resolve_launch_schema(source, &options, Some(SchemaPhase::Launch))?;
+    let launch_schema =
+        resolve_launch_schema(source, &effective_frontmatter, &options, Some(SchemaPhase::Launch))?;
     let source_repo_root = options.source_repo_root.clone();
 
     // The agent works on the file: it is told which file, what the schema
@@ -878,6 +989,7 @@ fn effective_surface(
         agent: agent_hint,
         model: model_hint,
         interactive: interactive_hint,
+        yolo: composed.frontmatter().as_map().get("yolo").map_or(Ok(None), parse_yolo_hint)?,
         agent_invalid: agent_full.invalid,
         agent_was_list: agent_full.is_list,
     };
@@ -895,12 +1007,31 @@ fn effective_surface(
         &source.resolved_path,
         &lifecycle,
     )?;
+    reject_removed_sequence_reads_in_source(source, options, Some(&lifecycle))?;
     // Pre-flight shell resolution (C3): resolve each shell command in the
     // deferred lifecycle subtree via DM2 with an early-binding-only lookup
     // and stamp the resolved bytes back so the approved command equals the
     // executed command. Late-binding references (`err`/`timing`/`current`)
     // are rejected with a typed error.
-    super::preflight::resolve_lifecycle_shell_commands(
+    // A shell command or `set` value with a placeholder is also kept as its
+    // authored template, typed by the document's own schema, so approval by
+    // shape can run it as one. The schema is read only when one exists.
+    let owner_schema = super::lifecycle::shell_template::lifecycle_shell_has_placeholders(&lifecycle)
+        .then(|| {
+            super::schema::load_authored_schema(
+                source,
+                options.file_ref_fallback_dir.as_deref(),
+                &options.file_resolution_context,
+                &options.caller_input_records,
+            )
+            .ok()
+            .flatten()
+            .and_then(|effective| effective.simplified)
+        })
+        .flatten();
+    let mut lifecycle_options = options.clone();
+    lifecycle_options.deferred_shell_roots = super::preflight::lifecycle_document_roots(&source.markdown, &options.deferred_shell_roots);
+    super::preflight::resolve_lifecycle_shell_commands_in_sequence(
         &mut lifecycle,
         effective_frontmatter,
         ctx,
@@ -908,6 +1039,8 @@ fn effective_surface(
         &options.file_resolution_context,
         options.file_ref_fallback_dir.as_deref(),
         options.enclosing_loop(is_loop_document(source)),
+        owner_schema.as_ref(),
+        Some(&lifecycle_options),
     )?;
     // Lifecycle communication/action strings are deferred by design (C1): they
     // keep their `{{ }}` spans through prepare and resolve at event time, where
@@ -939,7 +1072,9 @@ fn bootstrap_compose_options(
         canonical_compose_options(source, &ctx, options, schema_phase)
             .with_deferred_schema_verdict(true)
             .only_frontmatter_surface()
-            .with_pre_approved_commands(std::collections::HashSet::new());
+            .with_pre_approved_commands(
+                darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals::new(),
+            );
     Ok((ctx, prepared_request(compose_opts, options)?))
 }
 
@@ -959,7 +1094,7 @@ pub fn preflight_bootstrap_shell(
     mode: CompositionMode,
     options: &PrepareOptions,
     _approval_options: &crate::harness::ShellApprovalOptions,
-) -> Result<std::collections::HashSet<String>, CompositionError> {
+) -> Result<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals, CompositionError> {
     observe_prepared_context(
         options,
         crate::invocation_context::PreparedContextConsumer::Preflight,
@@ -969,7 +1104,7 @@ pub fn preflight_bootstrap_shell(
         &source.markdown,
         &compose_opts,
     ) else {
-        return Ok(std::collections::HashSet::new());
+        return Ok(Default::default());
     };
     if let Some(entry) = entries.first() {
         return Err(CompositionError::LifecycleInvalid {
@@ -980,7 +1115,7 @@ pub fn preflight_bootstrap_shell(
             expected_fields: Vec::new(),
         });
     }
-    Ok(std::collections::HashSet::new())
+    Ok(Default::default())
 }
 
 /// Compose the bootstrap read of one document: effective frontmatter and
@@ -1001,6 +1136,7 @@ pub(super) fn compose_bootstrap(
         });
     }
     reject_removed_loop_reads_in_source(source)?;
+    reject_removed_sequence_reads_in_source(source, &options, None)?;
     // The bootstrap composes frontmatter only; recording `Body` would claim a
     // read this stage never performs.
     observe_prepared_context(
@@ -1050,8 +1186,34 @@ fn reject_removed_loop_reads_in_source(
     )
 }
 
+fn reject_removed_sequence_reads_in_source(
+    source: &ResolvedCompositionSource,
+    options: &PrepareOptions,
+    lifecycle: Option<&super::lifecycle::LifecycleConfig>,
+) -> Result<(), CompositionError> {
+    let mut supplied = super::runtime_state::LayeredOverrides::proxy_overlay(&options.proxy_overlay);
+    supplied.extend(&options.layered_overrides());
+    let mut authored = frontmatter_to_value(source.markdown.frontmatter());
+    if let serde_json::Value::Object(values) = &mut authored {
+        for (key, value) in supplied.values() {
+            let value = if supplied.origin_of(key) == darkmatter::markdown::compose::OverrideOrigin::Authored {
+                value.clone()
+            } else { serde_json::Value::Null };
+            values.insert(key.clone(), value);
+        }
+    }
+    super::lifecycle::bindings::reject_removed_sequence_reads(
+        &source.resolved_path,
+        super::lifecycle::bindings::AuthoredDocument {
+            frontmatter: &authored,
+            body: source.markdown.content(),
+            body_line_offset: source.markdown.frontmatter_line_count(),
+        }, Some(&supplied.to_value()), lifecycle,
+    )
+}
+
 /// Convert a `Frontmatter` to a `serde_json::Value::Object`.
-fn frontmatter_to_value(fm: &darkmatter::markdown::Frontmatter) -> serde_json::Value {
+pub(super) fn frontmatter_to_value(fm: &darkmatter::markdown::Frontmatter) -> serde_json::Value {
     serde_json::Value::Object(
         fm.as_map()
             .iter()
@@ -1086,3 +1248,51 @@ fn top_level_override_keys(overrides: Option<&serde_json::Value>) -> Vec<String>
 
 #[cfg(test)]
 mod tests;
+
+/// Check a prompt document's deferred shell values before its task runs setup.
+/// This discovery walk is passive, including transcluded documents.
+///
+/// ## Errors
+/// Returns the owner's typed shell input or discovery error without executing commands.
+pub fn validate_document_shell_late_values(
+    source: &ResolvedCompositionSource,
+    options: &PrepareOptions,
+) -> Result<super::lifecycle::LifecycleConfig, CompositionError> {
+    observe_prepared_context(options, crate::invocation_context::PreparedContextConsumer::Preflight);
+    let ctx = derive_compose_context(source, options);
+    let request = prepared_request(
+        canonical_compose_options(source, &ctx, options, None)
+            .with_deferred_shell_value_validation(true),
+        options,
+    )?;
+    source.markdown.compose_preflight(&request)
+        .map_err(|error| map_compose_error(&source.resolved_path, error))?;
+    let mut authored_values = frontmatter_to_value(source.markdown.frontmatter());
+    if let serde_json::Value::Object(values) = &mut authored_values {
+        let mut overrides = super::runtime_state::LayeredOverrides::proxy_overlay(&options.proxy_overlay);
+        overrides.extend(&options.layered_overrides());
+        values.extend(overrides.values().clone());
+    }
+    let authored = super::lifecycle::parse_lifecycle_config_with_orders(
+        &authored_values,
+        &source.resolved_path,
+        Some(source.markdown.frontmatter()),
+    )?;
+    let mut has_shell = false;
+    for signal in super::lifecycle::LifecycleSignal::ALL {
+        super::lifecycle::actions::for_each_action(authored.stack(signal), &mut |action| {
+            has_shell |= match &action.kind {
+                super::lifecycle::actions::LifecycleActionKind::Shell(_) => true,
+                super::lifecycle::actions::LifecycleActionKind::RuntimeSet(set) => set.shell_values().next().is_some(),
+                _ => false,
+            };
+        });
+    }
+    if !has_shell {
+        return Ok(authored);
+    }
+    let mut probe = options.clone();
+    probe.validate_deferred_shell_values = true;
+    let prepared = prepare_sequence_probe(source, probe, CompositionMode::ChainedDocument)?;
+    Ok(prepared.lifecycle)
+}

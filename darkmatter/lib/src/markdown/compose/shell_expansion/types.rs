@@ -202,7 +202,7 @@ pub struct PipelineAction {
 }
 
 /// Chain operator connecting pipeline actions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ChainOperator {
     /// First command in the pipeline (no preceding operator).
     None,
@@ -235,13 +235,20 @@ pub enum StdoutTarget {
     Capture,
     /// Discard stdout (`> /dev/null`).
     Null,
-    /// Route stdout to stderr (`>&2`).
+    /// Route stdout to the original stderr destination (`>&2`), even if stderr is later redirected.
     ToStderr,
 }
 
 /// Renders a [`RedirectionConfig`] as the trailing redirection tokens that
 /// would appear after a command (with a leading space when non-empty).
 pub(crate) fn render_redirection(redir: &RedirectionConfig) -> String {
+    // A duplicated destination survives a later null redirect; render that dup first.
+    if redir.stdout == StdoutTarget::Null && redir.stderr == StderrTarget::ToStdout {
+        return " 2>&1 > /dev/null".to_string();
+    }
+    if redir.stdout == StdoutTarget::ToStderr && redir.stderr == StderrTarget::Null {
+        return " >&2 2> /dev/null".to_string();
+    }
     let mut out = String::new();
     match redir.stdout {
         StdoutTarget::Capture => {}
@@ -264,7 +271,7 @@ pub enum StderrTarget {
     Capture,
     /// Discard stderr (`2> /dev/null`).
     Null,
-    /// Merge stderr into stdout (`2>&1`).
+    /// Route stderr to the original stdout destination (`2>&1`), even if stdout is later redirected.
     ToStdout,
 }
 
@@ -549,6 +556,11 @@ pub struct ShellApprovalRequest {
     /// For non-chained requests this is empty; the CLI prompt should fall
     /// back to `executable` in that case.
     pub chain_executables: Vec<String>,
+    /// The choices this request may offer. A handler must not return a
+    /// decision for a choice that is not offered.
+    pub offered: super::template::OfferedChoices,
+    /// The authored template, when the command has one with a placeholder.
+    pub template: Option<super::template::TemplateApprovalView>,
 }
 
 /// Possible decisions from approval handler.
@@ -556,12 +568,19 @@ pub struct ShellApprovalRequest {
 pub enum ShellApprovalDecision {
     AllowExactPersist,
     AllowCommandPersist,
+    /// Persist the request's template shape (`template <shape>`) and run the
+    /// command in template mode. Valid only when the request offered the
+    /// shape choice.
+    AllowTemplatePersist,
+    /// This session only. For a template request it approves the shape, not
+    /// the bytes of this run.
     AllowOnce,
     Deny,
     BlacklistPersist,
 }
 
 use biscuit_terminal::errors::SourceContext;
+use super::template::ApprovalKey;
 
 #[derive(Error, Debug)]
 pub enum ShellExpansionError {
@@ -627,6 +646,60 @@ pub enum ShellExpansionError {
         command: String,
         origin: ShellCommandOrigin,
         source_desc: String,
+    },
+
+    /// A shell command reads a value that is `null` (or absent). The command
+    /// never runs with a missing value. `command` is the authored text; the
+    /// value is never shown.
+    #[error("shell command '{command}' reads '{expression}', which is missing ({origin})")]
+    MissingValue {
+        ctx: Box<SourceContext>,
+        command: String,
+        expression: String,
+        origin: ShellCommandOrigin,
+    },
+
+    /// A command that can run only in template mode is not a valid template.
+    /// No approval choice, prefix and once included, bypasses this.
+    #[error("shell command '{command}' at {origin} must run as a template, but {reason}")]
+    TemplateGrammar {
+        ctx: Box<SourceContext>,
+        command: String,
+        reason: super::template::TemplateGrammarError,
+        origin: ShellCommandOrigin,
+    },
+
+    /// A template-mode placeholder's value cannot become one argument of its
+    /// declared type: it is an array or object, holds a NUL byte, or fails
+    /// the declaration or one of its constraints. Nothing ran. The value is
+    /// never shown; `placeholder` is the expression and `declared_type` the
+    /// type it was checked against.
+    #[error(
+        "shell command '{command}' at {origin}: the value of '{placeholder}' {reason} \
+         (declared type: {declared_type}); the command did not run"
+    )]
+    TemplateValueRejected {
+        ctx: Box<SourceContext>,
+        command: String,
+        /// Boxed, with `declared_type`, to keep `ShellExpansionError` under
+        /// the `result_large_err` threshold.
+        placeholder: Box<str>,
+        declared_type: Box<str>,
+        reason: super::template::RejectReason,
+        origin: ShellCommandOrigin,
+    },
+
+    /// A template-mode command's program cannot be run directly: it is not on
+    /// the search path, or it would run through an interpreter that re-parses
+    /// its arguments. Nothing ran, and nothing fell back to a shell.
+    #[error("shell command '{command}' at {origin} cannot run as a template: {reason}")]
+    TemplateTarget {
+        ctx: Box<SourceContext>,
+        command: String,
+        /// Boxed to keep `ShellExpansionError` under the `result_large_err`
+        /// threshold.
+        reason: Box<super::template::TemplateTargetError>,
+        origin: ShellCommandOrigin,
     },
 
     #[error(
@@ -705,6 +778,10 @@ impl ShellExpansionError {
             | Self::ApprovalRequired { command, .. }
             | Self::Denied { command, .. }
             | Self::NotPreApproved { command, .. }
+            | Self::MissingValue { command, .. }
+            | Self::TemplateGrammar { command, .. }
+            | Self::TemplateValueRejected { command, .. }
+            | Self::TemplateTarget { command, .. }
             | Self::DynamicCommandShape { command, .. }
             | Self::UnevaluatedDependencyShape { command, .. }
             | Self::Timeout { command, .. }
@@ -729,6 +806,10 @@ impl ShellExpansionError {
             | Self::ApprovalRequired { origin, .. }
             | Self::Denied { origin, .. }
             | Self::NotPreApproved { origin, .. }
+            | Self::MissingValue { origin, .. }
+            | Self::TemplateGrammar { origin, .. }
+            | Self::TemplateValueRejected { origin, .. }
+            | Self::TemplateTarget { origin, .. }
             | Self::DynamicCommandShape { origin, .. }
             | Self::UnevaluatedDependencyShape { origin, .. }
             | Self::Timeout { origin, .. }
@@ -858,6 +939,68 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                     ctx.excerpt_prose(origin.line_number(), 1, "md"),
                 ])
                 .hint("This is a bug in the pre-flight scanner — please report it."),
+
+            ShellExpansionError::MissingValue {
+                ctx,
+                command,
+                expression,
+                origin,
+            } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ShellExpansionError", "missing shell value"))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Reads:</dim> <cyan>{expression}</cyan>, which is missing\n<dim>Origin:</dim> {origin}"
+                    )).with_line_breaks(LineBreaks::Hard),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
+                .hint("A shell command never runs with a missing value. Supply the value, or give the expression a fallback such as <cyan>{{ name || 'default' }}</cyan>."),
+
+            ShellExpansionError::TemplateGrammar {
+                ctx,
+                command,
+                reason,
+                origin,
+            } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ShellExpansionError", "not a valid command template"))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Reason:</dim> {reason}\n<dim>Origin:</dim> {origin}"
+                    )).with_line_breaks(LineBreaks::Hard),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
+                .hint("A command that reads a value produced later in the run can be approved only as a template: keep placeholders in arguments and use only <cyan>&&</cyan>, <cyan>||</cyan>, and the curated redirections."),
+
+            ShellExpansionError::TemplateValueRejected {
+                ctx,
+                command,
+                placeholder,
+                declared_type,
+                reason,
+                origin,
+            } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ShellExpansionError", "shell value rejected"))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Reads:</dim> <cyan>{placeholder}</cyan>, whose value {reason}\n<dim>Declared type:</dim> {declared_type}\n<dim>Origin:</dim> {origin}"
+                    )).with_line_breaks(LineBreaks::Hard),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
+                .hint("Each placeholder fills exactly one argument with a string, number, or boolean that its declared type accepts; the command did not run."),
+
+            ShellExpansionError::TemplateTarget {
+                ctx,
+                command,
+                reason,
+                origin,
+            } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ShellExpansionError", "template target refused"))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Reason:</dim> {reason}\n<dim>Origin:</dim> {origin}"
+                    )).with_line_breaks(LineBreaks::Hard),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
+                .hint("A template command runs its program directly with one argument per placeholder: use a native executable on PATH, not a shell builtin, a script without #!, or a .cmd/.bat file."),
 
             ShellExpansionError::DynamicCommandShape {
                 ctx,
@@ -1069,10 +1212,13 @@ pub struct ShellPolicyPaths {
 }
 
 /// A single rule in a whitelist or user blacklist file.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ShellRuleEntry {
     Exact(String),
     Prefix(String),
+    /// A `template <shape>` rule: an argument-list shape whose holes hold
+    /// approval types. Matching is in [`super::template::matching`].
+    Template(super::template::TemplateShape),
 }
 
 /// A loaded set of rules from a policy file.
@@ -1121,8 +1267,10 @@ struct SharedShellExpansionRuntime {
     /// copy of every rule — a snapshot is taken once per directive, but rules
     /// change only on approval. Writers copy-on-write via `Arc::make_mut`, so an
     /// outstanding snapshot keeps observing the rules it was taken with.
-    allow_once: Arc<HashSet<String>>,
-    pending_allow_once: HashSet<String>,
+    /// Session approvals, tagged with their execution mode and policy root,
+    /// so a resolved-byte approval never authorizes a template or the reverse.
+    allow_once: Arc<HashSet<ApprovalKey>>,
+    pending_allow_once: HashSet<ApprovalKey>,
     whitelist: Arc<ShellRuleSet>,
     user_blacklist: Arc<ShellRuleSet>,
     policy_paths: Option<ShellPolicyPaths>,
@@ -1146,7 +1294,7 @@ struct SharedShellExpansionRuntime {
     /// parked peer instead of inferring it from a sleep; `#[cfg(test)]`-gated so
     /// production builds carry neither the field nor its bookkeeping.
     #[cfg(test)]
-    parked_waiters: HashMap<String, usize>,
+    parked_waiters: HashMap<ApprovalKey, usize>,
 }
 
 /// An immutable read-only view of the runtime's policy collections, shared by
@@ -1159,7 +1307,7 @@ struct SharedShellExpansionRuntime {
 /// to it, and a fresh snapshot is required to observe them.
 #[derive(Debug, Clone)]
 pub(crate) struct ShellRuntimeSnapshot {
-    pub allow_once: Arc<HashSet<String>>,
+    pub allow_once: Arc<HashSet<ApprovalKey>>,
     pub whitelist: Arc<ShellRuleSet>,
     pub user_blacklist: Arc<ShellRuleSet>,
 }
@@ -1258,13 +1406,13 @@ impl ShellExpansionRuntime {
     ///   this exact command and the caller either passed `may_wait = false` or
     ///   the wait timed out. The caller MUST NOT implicitly approve other
     ///   un-reserved commands in the same chain.
-    pub(crate) fn reserve_allow_once(&mut self, normalized: &str, may_wait: bool) -> ReserveOutcome {
+    pub(crate) fn reserve_allow_once(&mut self, key: &ApprovalKey, may_wait: bool) -> ReserveOutcome {
         let mut shared = self.shared.lock().unwrap();
         loop {
-            if shared.allow_once.contains(normalized) {
+            if shared.allow_once.contains(key) {
                 return ReserveOutcome::AlreadyAllowed;
             }
-            if shared.pending_allow_once.insert(normalized.to_string()) {
+            if shared.pending_allow_once.insert(key.clone()) {
                 return ReserveOutcome::Reserved;
             }
             if !may_wait {
@@ -1286,23 +1434,23 @@ impl ShellExpansionRuntime {
             {
                 *shared
                     .parked_waiters
-                    .entry(normalized.to_string())
+                    .entry(key.clone())
                     .or_insert(0) += 1;
             }
             let (guard, timeout) = self
                 .reservation_done
                 .wait_timeout_while(shared, RESERVATION_WAIT_TIMEOUT, |state| {
-                    state.pending_allow_once.contains(normalized)
-                        && !state.allow_once.contains(normalized)
+                    state.pending_allow_once.contains(key)
+                        && !state.allow_once.contains(key)
                 })
                 .unwrap();
             shared = guard;
             #[cfg(test)]
             {
-                if let Some(count) = shared.parked_waiters.get_mut(normalized) {
+                if let Some(count) = shared.parked_waiters.get_mut(key) {
                     *count -= 1;
                     if *count == 0 {
-                        shared.parked_waiters.remove(normalized);
+                        shared.parked_waiters.remove(key);
                     }
                 }
             }
@@ -1317,12 +1465,12 @@ impl ShellExpansionRuntime {
     /// Removes the command from the pending set. If `approved` is `true`, also
     /// inserts it into the allow-once set. Wakes any thread blocked in
     /// [`Self::reserve_allow_once`] waiting on this command.
-    pub(crate) fn complete_allow_once(&mut self, normalized: &str, approved: bool) {
+    pub(crate) fn complete_allow_once(&mut self, key: &ApprovalKey, approved: bool) {
         {
             let mut shared = self.shared.lock().unwrap();
-            shared.pending_allow_once.remove(normalized);
+            shared.pending_allow_once.remove(key);
             if approved {
-                Arc::make_mut(&mut shared.allow_once).insert(normalized.to_string());
+                Arc::make_mut(&mut shared.allow_once).insert(key.clone());
             }
         }
         self.reservation_done.notify_all();
@@ -1339,7 +1487,7 @@ impl ShellExpansionRuntime {
     #[cfg(test)]
     pub(crate) fn pending_allow_once_for_test(&self) -> Vec<String> {
         let shared = self.shared.lock().unwrap();
-        let mut pending: Vec<String> = shared.pending_allow_once.iter().cloned().collect();
+        let mut pending: Vec<String> = shared.pending_allow_once.iter().map(ApprovalKey::command_text).collect();
         pending.sort();
         pending
     }
@@ -1355,7 +1503,12 @@ impl ShellExpansionRuntime {
     #[cfg(test)]
     pub(crate) fn parked_waiters_for_test(&self, normalized: &str) -> usize {
         let shared = self.shared.lock().unwrap();
-        shared.parked_waiters.get(normalized).copied().unwrap_or(0)
+        shared
+            .parked_waiters
+            .iter()
+            .filter(|(key, _)| key.command_text() == normalized)
+            .map(|(_, count)| *count)
+            .sum()
     }
 
     pub(crate) fn persist_whitelist_exact(&mut self, normalized: String) {
@@ -1370,6 +1523,20 @@ impl ShellExpansionRuntime {
         Arc::make_mut(&mut shared.whitelist)
             .entries
             .push(ShellRuleEntry::Prefix(executable));
+    }
+
+    pub(crate) fn persist_whitelist_template(&mut self, shape: super::template::TemplateShape) {
+        let mut shared = self.shared.lock().unwrap();
+        Arc::make_mut(&mut shared.whitelist)
+            .entries
+            .push(ShellRuleEntry::Template(shape));
+    }
+
+    pub(crate) fn persist_blacklist_template(&mut self, shape: super::template::TemplateShape) {
+        let mut shared = self.shared.lock().unwrap();
+        Arc::make_mut(&mut shared.user_blacklist)
+            .entries
+            .push(ShellRuleEntry::Template(shape));
     }
 
     pub(crate) fn persist_blacklist_exact(&mut self, normalized: String) {

@@ -380,7 +380,7 @@ fn fleet_clean_action_requires_explicit_clean_status() {
     let report = dir.path().join("outcome.md");
     let data = serde_json::json!({"findings": report.display().to_string()});
     let condition_context = context_at(dir.path());
-    let fleet_text = fs::read_to_string(real_area().join("docs/research/agent-errors/_fleet.md"))
+    let fleet_text = fs::read_to_string(real_area().join("docs/research/agent-errors/_research.md"))
         .expect("read fleet lifecycle");
     assert!(
         !fleet_text.contains("no_error: true"),

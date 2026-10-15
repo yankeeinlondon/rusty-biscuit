@@ -125,7 +125,7 @@ fn compose(
         .map_err(|error| error.to_string())?
         .approval_set()
         .into_iter()
-        .collect();
+        .collect::<std::collections::HashSet<String>>();
     document
         .compose_with(&crate::request_support::request(options.with_pre_approved_commands(approved)))
         .map(|(composed, _report)| composed.content().to_string())

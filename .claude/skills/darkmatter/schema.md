@@ -42,7 +42,8 @@ interpretation. Remedy it by wrapping the properties under the sole root
 `$schema:` key or under `kind: schema` plus `types:`. Classification is passive:
 it uses the already-parsed YAML value and performs no additional I/O.
 
-Schema-trigger documents use `kind: schema-trigger`. Preserve the kinded root
+Schema-trigger documents use `kind: trigger-schema` (the envelope kind the
+parser accepts, `triggers/envelope.rs::ENVELOPE_KIND`). Preserve the kinded root
 declaration so Darkmatter and Claudine can select the right schema formally.
 
 ## Composition and validation
@@ -465,6 +466,35 @@ For grammar or schema changes, cover:
   triggers); `&`, `^`, `~`, absolute from the document's own context. `@`,
   `vault:`, `%`, and `{{` anywhere are `TriggerMatch` definition errors naming
   the pattern.
+- Embedded trigger bundles (`EmbeddedSchemaBundle`, `schemas/embedded.rs`):
+  a host registers `(file name, &'static str)` pairs with
+  `DarkmatterSchemas::with_embedded_trigger_bundle` (or
+  `triggers::scan_with_embedded`); they are appended after the five roots,
+  and a bundle file is skipped when any root enumerated a file of that name
+  (the registry's private `claimed_names`). Bundle documents are keyed
+  `{bundle}/{name}`; `NamespaceSource::Embedded { documents, bundle }`
+  confines imports with `embedded::resolve_bundle_path`. Identity is
+  `TriggerSource::{File, Embedded { bundle, name }}`; load failures are
+  `SchemaError::EmbeddedTriggerLoad` (never `TriggerLoad`, whose path DMLS
+  publishes on). `SchemaOrigin { kind, source: Option<SchemaSourceId> }`:
+  read `file()` (real files only; DMLS links only `ReferencedFile` through
+  it) or `trigger_source()`. Embedded triggers add no dependency edges.
+  Tests: `tests/l1/schema_embedded_trigger_bundles.rs` (incl. the envelope
+  input matrix for block YAML and JSON syntax).
+- Large host payloads (Claudine's resolves to ~2.5 MB) are kept affordable by
+  process-wide memos, each holding its inputs alive and keyed by `Arc`
+  identity (plus value equality for small authored schemas): embedded
+  trigger loads (`discovery.rs::load_embedded_trigger`, successes only),
+  trigger merges (`mod.rs::merged_trigger_schema`), phase schemas
+  (`phase_json_schema`), and wrapped root-union arms (`wrapped_root_arms`).
+  Payload and layer JSON are `Arc<Value>`; a lone trigger layer is shared,
+  never cloned. `ValidatorCache` compiles a schema that names no
+  `darkmatter-file*` format and no `x-darkmatter-match` once for every
+  context (structural slot); a root union compiles only its arms
+  (`CompiledValidators::RootUnion`, so `EffectiveSchema::validator()` is
+  `None` for it). Coercion skips validating union arms when no arm changes
+  the value. Do not reintroduce a per-call clone, serialization, or
+  uncached compile of an effective schema.
 - A test fixture for roots builds its context with `build_resolution_context`
   from a `RequestSnapshot` carrying a fixture home and env, never
   `FileResolutionContext::new` (ambient `HOME` would add a real `~/schemas`).

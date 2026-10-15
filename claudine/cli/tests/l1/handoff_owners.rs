@@ -307,9 +307,9 @@ fn compose_success_proxy_adopts_the_target() {
 
 /// A two-step sequence: a `prompt:` task on `./step.md`, then a side effect that
 /// records how many `outputs` entries the first step published.
-fn sequence_doc(fail_fast: bool, task_extras: &str) -> String {
+fn sequence_doc(_fail_fast: bool, task_extras: &str) -> String {
     format!(
-        "---\nfail_fast: {fail_fast}\nsequence:\n    - name: first\n      prompt: \"./step.md\"\n{task_extras}    - name: second\n      side_effect: {{ append_line: [\"events.log\", \"second step outputs={{{{ length(outputs) }}}}\"] }}\n---\n"
+        "---\nsequence:\n    - name: first\n      prompt: \"./step.md\"\n{task_extras}    - name: second\n      side_effect: {{ append_line: [\"events.log\", \"second step outputs={{{{ length(seq.outputs) }}}}\"] }}\n---\n"
     )
 }
 
@@ -401,11 +401,9 @@ fn sequence_task_proxy_after_a_retry_runs_target_within_the_step() {
     );
 }
 
-/// Setup and teardown belong to the task, not to a document, so a handoff inside
-/// the task runs each once, and the task publishes one `outputs` entry: the
-/// final target's.
+/// A handoff publishes one output entry, containing the final target's text.
 #[test]
-fn sequence_task_setup_teardown_and_output_run_once_across_a_handoff() {
+fn sequence_task_output_commits_once_across_a_handoff() {
     let fixture = fixture("handoff-task-setup-teardown");
     write_target(&fixture);
     write_doc(
@@ -418,22 +416,21 @@ fn sequence_task_setup_teardown_and_output_run_once_across_a_handoff() {
         "sequence.md",
         &sequence_doc(
             true,
-            "      setup:\n          - append_line: [\"events.log\", \"setup\"]\n      teardown:\n          - append_line: [\"events.log\", \"teardown\"]\n",
+            "",
         ),
     );
 
     let run = run_sequence(&fixture, &doc);
 
-    let mut expected = vec!["setup", "step start"];
+    let mut expected = vec!["step start"];
     expected.extend(TARGET_TRAIL);
-    expected.extend(["teardown", "second step outputs=1"]);
+    expected.extend(["second step outputs=1"]);
     assert_eq!(events(&fixture), expected, "{}", run.output);
     assert_step_one_succeeded_once(&run);
     assert_eq!(run.code, Some(0), "{}", run.output);
 }
 
-/// A target that fails is the step's failure: teardown still runs once, no
-/// output is published, and `fail_fast` decides whether step two runs.
+/// A target failure stops the sequence and publishes no task output.
 fn failing_target_row(name: &str, fail_fast: bool) {
     let fixture = fixture(name);
     write_doc(
@@ -454,13 +451,13 @@ fn failing_target_row(name: &str, fail_fast: bool) {
         "sequence.md",
         &sequence_doc(
             fail_fast,
-            "      teardown:\n          - append_line: [\"events.log\", \"teardown\"]\n",
+            "",
         ),
     );
 
     let run = run_sequence(&fixture, &doc);
 
-    let mut expected = vec!["step start", "target initialize", "teardown"];
+    let mut expected = vec!["step start", "target initialize"];
     if !fail_fast {
         expected.push("second step outputs=0");
     }
@@ -478,11 +475,6 @@ fn failing_target_row(name: &str, fail_fast: bool) {
 #[test]
 fn sequence_task_failing_target_halts_under_fail_fast_true() {
     failing_target_row("handoff-task-fail-fast", true);
-}
-
-#[test]
-fn sequence_task_failing_target_continues_under_fail_fast_false() {
-    failing_target_row("handoff-task-continue", false);
 }
 
 /// Parallel siblings own independent chains, so both may adopt the same target
@@ -508,7 +500,7 @@ fn parallel_siblings_adopt_the_same_target_independently() {
     let doc = write_doc(
         &fixture,
         "sequence.md",
-        "---\nsequence:\n    - name: both\n      group:\n          name: pair\n          execution: parallel\n          tasks:\n              - name: left\n                prompt: \"./left.md\"\n              - name: right\n                prompt: \"./right.md\"\n    - name: after\n      side_effect: { append_line: [\"events.log\", \"after outputs={{ length(outputs) }} slots={{ length(last(outputs)) }}\"] }\n---\n",
+        "---\nsequence:\n    - name: both\n      group:\n          name: pair\n          tasks:\n              - name: left\n                prompt: \"./left.md\"\n              - name: right\n                prompt: \"./right.md\"\n    - name: after\n      side_effect: { append_line: [\"events.log\", \"after outputs={{ length(seq.outputs) }} slots={{ length(last(seq.outputs)) }}\"] }\n---\n",
     );
 
     let run = run_sequence(&fixture, &doc);
@@ -533,7 +525,7 @@ fn parallel_siblings_adopt_the_same_target_independently() {
 #[test]
 fn sequence_task_target_keeps_the_tasks_operation_and_environment() {
     let fixture = fixture("handoff-task-inputs");
-    let probe = "op={{ env.OPERATION }} fail_fast={{ env.CLAUDINE_FAIL_FAST }}";
+    let probe = "op={{ env.OPERATION }}";
     write_doc(
         &fixture,
         "target.md",
@@ -558,8 +550,8 @@ fn sequence_task_target_keeps_the_tasks_operation_and_environment() {
     assert_eq!(
         events(&fixture),
         [
-            "source op=review fail_fast=false",
-            "target op=review fail_fast=false",
+            "source op=review",
+            "target op=review",
             "second step outputs=1"
         ],
         "{}",
@@ -571,7 +563,7 @@ fn sequence_task_target_keeps_the_tasks_operation_and_environment() {
 /// Serial group members are separate tasks too, so each owns its chain and the
 /// second may adopt the target the first already adopted.
 #[test]
-fn serial_group_members_adopt_the_same_target_independently() {
+fn bounded_group_members_adopt_the_same_target_independently() {
     let fixture = fixture("handoff-task-serial");
     write_doc(
         &fixture,
@@ -591,12 +583,12 @@ fn serial_group_members_adopt_the_same_target_independently() {
     let doc = write_doc(
         &fixture,
         "sequence.md",
-        "---\nsequence:\n    - name: both\n      group:\n          name: pair\n          execution: serial\n          tasks:\n              - name: left\n                prompt: \"./left.md\"\n              - name: right\n                prompt: \"./right.md\"\n    - name: after\n      side_effect: { append_line: [\"events.log\", \"after outputs={{ length(outputs) }}\"] }\n---\n",
+        "---\nsequence:\n    - name: both\n      group:\n          name: pair\n          max_parallel: 1\n          tasks:\n              - name: left\n                prompt: \"./left.md\"\n              - name: right\n                prompt: \"./right.md\"\n    - name: after\n      side_effect: { append_line: [\"events.log\", \"after outputs={{ length(seq.outputs) }}\"] }\n---\n",
     );
 
     let run = run_sequence(&fixture, &doc);
 
-    // A serial group commits one entry per member.
+    // A group commits one entry containing its members.
     assert_eq!(
         events(&fixture),
         [
@@ -604,7 +596,7 @@ fn serial_group_members_adopt_the_same_target_independently() {
             "target success",
             "right start",
             "target success",
-            "after outputs=2"
+            "after outputs=1"
         ],
         "{}",
         run.output
@@ -639,25 +631,21 @@ fn a_cycle_within_one_tasks_chain_is_refused() {
 /// A step that runs the sequence document's own body keeps its scope across a
 /// handoff too: the target's output is the one entry the step publishes.
 #[test]
-fn sequence_body_step_proxy_publishes_the_targets_output_once() {
+fn sequence_start_proxy_replaces_the_container_before_any_body_step() {
     let fixture = fixture("handoff-body-step");
     write_target(&fixture);
     let doc = write_doc(
         &fixture,
         "sequence.md",
-        &format!(
-            "---\nsequence:\n    - name: first\n    - name: second\n      side_effect: {{ append_line: [\"events.log\", \"second step outputs={{{{ length(outputs) }}}}\"] }}\n{}---\nBody {{{{ state }}}}.\n",
-            "start:\n    - when: \"state.name == 'first'\"\n      then:\n          - append_line: [\"events.log\", \"body start\"]\n          - proxy: ./target.md\n",
-        ),
+        "---\nsequence:\n    - name: first\n    - name: second\n      side_effect: { append_line: [\"events.log\", \"unexpected second step\"] }\nstart:\n    - append_line: [\"events.log\", \"container start\"]\n    - proxy: ./target.md\nfinalize:\n    - append_line: [\"events.log\", \"unexpected source finalize\"]\n---\nBody {{ seq }}.\n",
     );
 
     let run = run_sequence(&fixture, &doc);
 
-    let mut expected = vec!["body start"];
+    let mut expected = vec!["container start"];
     expected.extend(TARGET_TRAIL);
-    expected.push("second step outputs=1");
     assert_eq!(events(&fixture), expected, "{}", run.output);
-    assert_step_one_succeeded_once(&run);
+    assert!(!run.output.contains("step 1/2 succeeded"), "{}", run.output);
     assert_eq!(run.code, Some(0), "{}", run.output);
 }
 
@@ -842,11 +830,9 @@ fn sequence_task_an_adopted_target_that_fails_remains_recorded() {
     assert_eq!(run.output.matches("step 1/2 failed").count(), 1, "{}", run.output);
 }
 
-/// The terminal-event counterpart of the `start` row above: a handoff from the
-/// task document's `success` still runs setup and teardown once and publishes
-/// one `outputs` entry, the final target's.
+/// A handoff from success publishes the final target's output once.
 #[test]
-fn sequence_task_setup_teardown_and_output_run_once_across_a_terminal_handoff() {
+fn sequence_task_output_commits_once_across_a_terminal_handoff() {
     let fixture = fixture("handoff-task-setup-teardown-terminal");
     write_target(&fixture);
     write_doc(
@@ -859,15 +845,15 @@ fn sequence_task_setup_teardown_and_output_run_once_across_a_terminal_handoff() 
         "sequence.md",
         &sequence_doc(
             true,
-            "      setup:\n          - append_line: [\"events.log\", \"setup\"]\n      teardown:\n          - append_line: [\"events.log\", \"teardown\"]\n",
+            "",
         ),
     );
 
     let run = run_sequence(&fixture, &doc);
 
-    let mut expected = vec!["setup", "step success"];
+    let mut expected = vec!["step success"];
     expected.extend(TARGET_TRAIL);
-    expected.extend(["teardown", "second step outputs=1"]);
+    expected.extend(["second step outputs=1"]);
     assert_eq!(events(&fixture), expected, "{}", run.output);
     assert_step_one_succeeded_once(&run);
     assert_eq!(run.code, Some(0), "{}", run.output);

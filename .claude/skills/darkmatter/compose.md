@@ -24,6 +24,15 @@ Use heading search to jump to the listed subsystem.
 The darkmatter compose pipeline provides document preparation through four phases:
 Inline Pre, Transclusion, Inline Post, and Finalization.
 
+Host binding presentation uses the lookup's configured name-coercion keys
+for globals as well as document values; typed evaluation stays unchanged.
+`HostGlobals::with_document_fallbacks` is an explicit opt-in for migration
+diagnostics: a present property (including null) in the reading document
+wins for those selected roots, while an absent property reads the registered
+fallback. Normal lexical roots keep whole-root shadowing. Body and
+frontmatter seed lookups share this rule, including transcluded children;
+the selected fallback roots participate in the compose fingerprint.
+
 ## Pipeline Overview
 
 **Inline Pre** (serial):
@@ -957,6 +966,114 @@ candidates. The lower-level `collect_shell_commands(&md, &options)` returns the
 raw `ShellCommandEntry` list. See
 `docs/inline/preflight-checks.md`.
 
+### Typed shell templates (`shell_expansion/template/`)
+
+The shared model for template-mode approval. `parse_authored` parses
+*authored* command text (holes found with `ExpressionFinder::scan_plain` before
+quotes, spaces, or operators are read) into a `CommandTemplate`; never
+interpolate and then tokenize. `project_types` types each hole from the owning
+document's `EffectiveSchema.simplified`, and only a bare top-level property
+(`dir`, `fm.dir`) reads a declaration. Each `HoleType` keeps the approval type
+(`BroadString` or `StringLike`) separate from its validator, so a numeric
+declaration is approved as `{{ string }}` but still validated as a number.
+`TemplateShape` is what a `template` rule stores and matches, and
+`canonical_text`/`parse_rule` round-trip it. Covers is `rule_covers`, which
+gates `schemas::is_subtype` behind `is_string_like`, because `is_subtype`
+accepts any identical pair. Blacklist matching errs toward refusing: holes
+ignore type, redirects are ignored, a one-segment rule matches any chain
+segment, and `blocks_filled` treats holes as `*` against filled argv.
+
+The runtime template rejection chain never stores a rejected value; this does
+not cover the earlier document-schema verdict, which can display it. Template
+authorization and command-result caching remain separate: fill, validate,
+check blacklists, and resolve direct targets before result reuse. The native
+redirection regressions preserve original stream destinations, so `2>&1 >
+/dev/null` retains stderr on original stdout whereas `> /dev/null 2>&1`
+discards both. Do not replace a surviving `ToStdout`/`ToStderr` with that
+stream's own capture channel.
+`check_user_blacklist` already applies template blacklist rules to
+resolved-byte commands. `store::load_ruleset_with_warnings` returns the
+skipped lines with file and line; `load_ruleset` logs them.
+
+Discovery (`preflight/collect.rs`) also reads each command site as authored
+(`parser::authored_directive_commands` + `authored_template`, which drops
+directive options; shell-block lines; `authored_shell_template` for
+frontmatter `$( … )`) and reports one `ShellCandidate` per site in
+`ComposePreflightReport::candidates`, never merged by bytes. Each candidate keeps
+`authored_command` independently of template parse success; `program_words_fixed`
+and `offered()` retain program-hole restrictions for byte-only host commands.
+A site is matched
+to its resolved bytes by document order (`resolved`); a count mismatch leaves
+it unlinked rather than guessed. `CandidateScope::build` types holes from the
+owner's schema (assembled lazily, only for a site with holes), marks a hole
+`HoleTiming::Deferred` when it reads a root from
+`ComposeOptions::with_deferred_shell_roots` directly or through a derived
+frontmatter key (`derived_deferred_keys`, inherited by children), and raises
+`ShellExpansionError::MissingValue` for an approval-time hole that evaluates
+to `null`. A deferred site is `ModeRequirement::TemplateRequired`, contributes
+no entry, and is `TemplateGrammar` if its text is not a template. A host that
+places commands late (Claudine's later sequence tasks) adds
+`DeferredShellRoots::with_placeholders_template_required()`: every site with a
+placeholder is then `TemplateRequired` too. `DeferredShellRoots::late_roots_of`
+is the one root-read check (a late root matches only a bare read; `fm.<root>`
+is the document's property; a derived key matches either way), and
+`derived_deferred_keys` and `compose::authored_shell_template` are public so a
+host building its own candidates (Claudine's sequence `shell:` tasks and stack
+`set` values) shares them.
+`MissingValue`/`TemplateGrammar` are `shell_input_violation()`s, fatal through
+transclusion notices and nested `||`. `ComposeOptions.pre_approved_commands`
+is `ShellPreApprovals` (exact bytes + shapes; a `HashSet<String>` converts to
+exact only); `validate_pre_approved` admits a site by bytes or shape.
+The runtime allow-once set and Claudine's session cache key on `ApprovalKey`
+(mode + policy root). `compose_preflight_approvals` decides per site (exact
+rule, template rule, prefix rule, then the handler with
+`ShellApprovalRequest::offered`/`template`) and persists every chosen row.
+The `md` prompt (`cli/src/approval.rs`, also Claudine's installed handler)
+numbers only the offered choices (exact, shape, prefix, once, deny,
+blacklist), shows `template.display` as `Command:` with the resolved bytes as
+`Resolved:` only when exact is offered, re-asks on an unlisted number, and
+denies at end of input; `approve_with_io` is its scripted-I/O test seam
+(`cli/tests/l1/approval_prompt.rs`).
+A site whose interpolated text no longer parses (a value holding `;`, quotes,
+`&&`) is not an error when its authored text is a template: discovery marks
+it `TemplateRequired` (`parser::scan_directive_lines` keeps each line's parse
+result; blocks and frontmatter fall back to their authored commands, the
+latter as `FrontmatterShellAst::Unparsed`).
+
+**Execution (`shell_expansion/site.rs`).** Each stage builds a `TemplateSite`
+for a command whose *authored* text has a placeholder: body `::shell` lines
+recover it through `BodyProvenance::authored` (an identity `BodyOrigin` over
+the pristine body, advanced with every edit), `::shell-block` through
+`BlockTemplates`, frontmatter through `FrontmatterProvenance::authored_source`.
+`SiteScope::site` types it against `PreparedSchemas::effective_for(..).simplified`
+(threaded into the inline stages) and evaluates holes with `LookupEvaluator`
+over the stage's state (`ResolvingLookup` for the body, `FrontmatterSeedState`
+for frontmatter). `prepare_site` picks the mode: pre-approved → exact bytes
+member, else shape member, else `NotPreApproved`; policy → blacklists, exact
+rule/cached exact key, template rule/cached shape key, prefix (bytes) or
+prefix-per-program (template-only), then the handler. `prepare_resolved` (the
+old `prepare_directive` body) offers the shape beside the bytes and handles
+`AllowTemplatePersist`. `TemplateSite::prepare_template` fills, runs
+`check_filled_chain`, resolves each program with `resolve_direct_target`, and
+returns `ExecutionMode::Template` with authored `raw_command`; its cache key is
+`template_command_key` (length-prefixed argv), never the rendered line.
+Resolved-byte preparation now also runs `check_filled_chain` (pre-approved
+path included) so chain `template` blacklists reach bytes.
+
+**Shared API for hosts (`template/fill.rs`, `template/target.rs`).**
+`HoleEvaluator` (closures and `LookupEvaluator<L: EvaluationLookup>`),
+`fill_template(&CommandTemplate, &dyn HoleEvaluator, Option<&SiteValues>) ->
+Result<FilledChain, HoleError>` (evaluate once → null/container/NUL refusal →
+`HoleValidator::accepts` on the original value → `scalar_string` → concatenate;
+`HoleError::into_shell_error` maps to `MissingValue`/`TemplateValueRejected`/
+`ExpressionEvaluation`), `resolve_late_values(sites, eval) -> LateValues`
+(only `HoleTiming::Deferred` holes, keyed by host site id + hole index),
+`resolve_direct_target(program, path, cwd)` (Windows `.exe`/`.com` only; Unix
+ELF/Mach-O/fat or `#!`). `TemplateValueRejected` and `TemplateTarget` are
+`shell_input_violation()`s like `MissingValue`. The native argv recorder for
+tests is `test_toolkit::argv_recorder` (bins `darkmatter-argv-recorder`,
+`claudine-argv-recorder`, both behind `test-fixtures`).
+
 ### Frontmatter-surface projection
 
 `ComposeOptions::only_frontmatter_surface()` narrows a compose to frontmatter
@@ -996,8 +1113,14 @@ and DMLS: at most one result suffix, no suffix twice, no trailing text. A
 suffix is never part of the approved bytes. `ResolvedShellValue` and
 `execute_resolved_shell_values` (`frontmatter_shell_expansion/assignment.rs`)
 serve a `$( … )` that runs outside a compose (Claudine's lifecycle `set`): bytes
-are fixed at `resolve`, and every execution gets a fresh cache. See
-`docs/inline/fm-shell-expansion.md`.
+are fixed at `resolve`, and every execution gets a fresh cache. A value given
+`with_template` runs as its typed template instead (`prepare_template_value` →
+`site::prepare_site`, pre-approved by shape; `with_late_values` fills barrier
+values; `execute_shell_values_with` takes the host's `HoleEvaluator`), and
+`template_only` keeps one whose interpolated text no longer parses. Discovery
+(`preflight/collect.rs::DiscoverySiteContext::awaits_execution`) leaves a body
+site reading an `ExecutionDependent` host global to the preparation that binds
+it, and skips its presence check. See `docs/inline/fm-shell-expansion.md`.
 
 A repeated command whose executable is on the built-in volatile allowlist
 (`uuidgen`, `date`, `openssl`) emits a one-time discoverability warning

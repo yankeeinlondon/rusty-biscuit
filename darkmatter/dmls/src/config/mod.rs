@@ -917,8 +917,8 @@ mod tests {
             [schema]
             strict = true
 
-            [schema.extensions.claudine]
-            path = "darkmatter/docs/schemas/claudine.yaml"
+            [schema.extensions.prompts]
+            path = "schemas/prompts.yaml"
             globs = [".claude/**", "prompts/**"]
 
             [style]
@@ -958,12 +958,9 @@ mod tests {
             HeadingCompletionStyle::Slug
         );
         assert!(config.schema.strict);
-        let claudine = &config.schema.extensions["claudine"];
-        assert_eq!(
-            claudine.path,
-            PathBuf::from("darkmatter/docs/schemas/claudine.yaml")
-        );
-        assert_eq!(claudine.globs.len(), 2);
+        let prompts = &config.schema.extensions["prompts"];
+        assert_eq!(prompts.path, PathBuf::from("schemas/prompts.yaml"));
+        assert_eq!(prompts.globs.len(), 2);
         assert!(config.style.strict);
         assert_eq!(
             config.shell.policy_path,

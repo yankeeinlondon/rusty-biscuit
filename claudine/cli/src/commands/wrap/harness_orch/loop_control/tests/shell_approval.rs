@@ -204,7 +204,7 @@ fn a_target_only_command_prompts_while_a_shared_command_reuses_the_approval() {
         .as_ref()
         .expect("the target's approvals are folded into the carried input layers");
     assert!(
-        approved.contains("echo target-only"),
+        approved.contains_exact("echo target-only"),
         "the target-only command is approved for execution; got {approved:?}",
     );
 }

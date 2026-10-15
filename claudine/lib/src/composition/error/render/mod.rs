@@ -463,6 +463,7 @@ impl Diagnostic for CompositionError {
             | CompositionError::LifecycleSetPositionalRemoved { .. }
             | CompositionError::LifecycleSetNotMapping { .. }
             | CompositionError::LifecycleSetInvalidKey { .. }
+            | CompositionError::LifecycleCancellationRecovery { .. }
             | CompositionError::LifecycleEvaluationError { .. } => "composition.lifecycle_invalid",
             // Everything else is a composition failure without a finer code yet.
             _ => "composition.failed",

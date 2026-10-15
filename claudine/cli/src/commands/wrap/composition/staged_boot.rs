@@ -82,7 +82,7 @@ pub(crate) fn bootstrap_document(
     entry: DocumentEntryReason,
     mut options: PrepareOptions,
     approval_options: &claudine::harness::ShellApprovalOptions,
-) -> Result<(BootstrapPreparation, HashSet<String>), CompositionError> {
+) -> Result<(BootstrapPreparation, darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals), CompositionError> {
     let approved =
         claudine::composition::preflight_bootstrap_shell(source, mode, &options, approval_options)?;
     options.pre_approved_commands = Some(approved.clone());
@@ -129,6 +129,21 @@ impl StagedLifecycleRuntime {
         }
         for (key, value) in env_overrides {
             context.env_mut().insert(key.clone(), value.clone());
+        }
+        // The bootstrap walk, before `initialize` fires: initialization may
+        // change these phrases, and the stabilized reread submits again.
+        if let Some(epoch) = bootstrap.document_epoch.as_ref() {
+            claudine::composition::lifecycle::prewarm::collect_and_submit(
+                epoch.prewarm(),
+                &settings,
+                &bootstrap.lifecycle,
+                || {
+                    claudine::composition::lifecycle::prewarm::PrewarmInputs::captured(
+                        &bootstrap.effective_frontmatter,
+                        context.clone(),
+                    )
+                },
+            );
         }
         Self {
             settings,
@@ -216,6 +231,8 @@ pub(crate) enum StagedInitialize {
     Proceed,
     /// A clean `skip`: the run ends successfully with no further events.
     Skipped,
+    /// Initialization entered, then cancellation completed its terminal cleanup.
+    Cancelled,
     /// A proxy, already committed against the invocation ledger.
     Handoff(SurfacedHandoff),
 }
@@ -251,6 +268,7 @@ pub(crate) fn route_staged_initialize(
         Instant::now(),
     );
     let init_ctx = StackExecutionContext {
+        seq: None,
         signal: LifecycleSignal::Initialize,
         scope: None,
         frontmatter,
@@ -294,11 +312,62 @@ pub(crate) fn route_staged_initialize(
             )?),
         ),
         CompositionPhaseResult::Proceed(_) => Ok(StagedInitialize::Proceed),
+        CompositionPhaseResult::Completed(outcome) if outcome.exit_code == 130 => {
+            Ok(StagedInitialize::Cancelled)
+        }
         CompositionPhaseResult::Completed(_) => Ok(StagedInitialize::Skipped),
         CompositionPhaseResult::Blocked(error) | CompositionPhaseResult::Failed(error) => {
             Err(error)
         }
     }
+}
+
+/// Catch cancellation before a stabilized-read error can dispatch recovery.
+pub(crate) fn cancel_staged_before_start(
+    guard: &mut LifecycleRunGuard<'_>,
+    document: &StagedDocument<'_>,
+) -> bool {
+    let empty = serde_json::Map::new();
+    let frontmatter = document
+        .bootstrap
+        .effective_frontmatter
+        .as_object()
+        .unwrap_or(&empty);
+    let timing = claudine::composition::lifecycle_context::LifecycleTiming::from_instants(
+        document.document_start,
+        None,
+        Instant::now(),
+    );
+    let context = StackExecutionContext {
+        seq: None,
+        signal: LifecycleSignal::Initialize,
+        scope: None,
+        frontmatter,
+        live_frontmatter: None,
+        runtime_state: None,
+        err: None,
+        timing: Some(&timing),
+        current: document
+            .current
+            .as_ref()
+            .map(darkmatter::markdown::compose::CurrentAuthority::memoized),
+        group: None,
+        loop_values: None,
+        base_dir: document.bootstrap.resolved_path.parent().or(document.repo_root),
+        ctx_base_dir: Some(document.launch_area),
+        prepared_context: Some(document.context),
+        file_resolution_context: &document.bootstrap.input_layers.file_resolution_context,
+        effect_engine: document.effect_engine,
+        shell_runner: &SystemShellRunner,
+        emitter: document.emitter,
+        term: document.term,
+        source_path: &document.bootstrap.resolved_path,
+        repo_root: document.repo_root,
+        messaging: document.messaging,
+        settings: document.settings,
+    };
+
+    super::pipeline::cancel_before_start(guard, &context)
 }
 
 /// The stabilized reread: read the document `initialize` left on disk, reapply
@@ -321,7 +390,7 @@ pub(crate) fn reread_and_audit(
     original_ref: &str,
     overlay: &indexmap::IndexMap<String, serde_json::Value>,
     mut options: PrepareOptions,
-    approved: HashSet<String>,
+    approved: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
     approval_options: &claudine::harness::ShellApprovalOptions,
 ) -> Result<(ResolvedCompositionSource, PrepareOptions), CompositionError> {
     let source = crate::commands::wrap::load_overlaid_document(path, original_ref, overlay)?;
@@ -353,12 +422,16 @@ fn extend_epoch_context(options: &mut PrepareOptions, source: &ResolvedCompositi
 ///
 /// From `initialize` on the document owns the run, so a body dependency that
 /// is still missing, a body shell denial, or a schema verdict is an ordinary
-/// blocked attempt. A catch stack's evaluation error outranks the cause.
+/// blocked attempt. Cancellation completes cleanup before catch routing; otherwise
+/// a catch stack's evaluation error outranks the cause.
 pub(crate) fn route_stabilized_failure(
     guard: &mut LifecycleRunGuard<'_>,
     document: &StagedDocument<'_>,
     error: CompositionError,
 ) -> CompositionError {
+    if cancel_staged_before_start(guard, document) {
+        return error;
+    }
     let empty = serde_json::Map::new();
     let frontmatter = document
         .bootstrap

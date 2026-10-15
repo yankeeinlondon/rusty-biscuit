@@ -63,12 +63,12 @@ pub fn parse_trigger_envelope(value: &YamlValue) -> Result<Option<TriggerEnvelop
         return Ok(None);
     }
 
-    // Reject unknown top-level keys.
+    // Reject unknown top-level keys. A non-string key (`42: extra`) is never
+    // a known key, so it is reported too, rendered as its YAML text.
     let unknown: Vec<String> = map
         .keys()
-        .filter_map(YamlValue::as_str)
-        .filter(|key| !KNOWN_KEYS.contains(key))
-        .map(str::to_string)
+        .filter(|key| key.as_str().is_none_or(|key| !KNOWN_KEYS.contains(&key)))
+        .map(describe_key)
         .collect();
     if !unknown.is_empty() {
         return Err(SchemaError::TriggerMatch {
@@ -99,6 +99,17 @@ pub fn parse_trigger_envelope(value: &YamlValue) -> Result<Option<TriggerEnvelop
         match_arms,
         payload,
     }))
+}
+
+/// A top-level key as the unknown-key message shows it: a string as-is,
+/// anything else as its compact YAML text.
+fn describe_key(key: &YamlValue) -> String {
+    match key {
+        YamlValue::String(text) => text.clone(),
+        other => serde_yaml_ng::to_string(other)
+            .map(|text| text.trim_end().replace('\n', " "))
+            .unwrap_or_else(|_| format!("{other:?}")),
+    }
 }
 
 /// Convenience wrapper that parses YAML source first.
@@ -164,6 +175,26 @@ mod tests {
         .unwrap();
         let err = parse_trigger_envelope(&v).unwrap_err();
         assert!(matches!(err, SchemaError::TriggerMatch { .. }));
+    }
+
+    #[test]
+    fn rejects_non_string_top_level_keys_by_their_yaml_text() {
+        for (source, shown) in [
+            ("kind: trigger-schema\nmatch:\n  prompt: string(required)\n42: extra", "42"),
+            ("kind: trigger-schema\nmatch:\n  prompt: string(required)\ntrue: extra", "true"),
+            ("kind: trigger-schema\nmatch:\n  prompt: string(required)\n~: extra", "null"),
+            ("kind: trigger-schema\nmatch:\n  prompt: string(required)\n[a, b]: extra", "- a - b"),
+            ("{\"kind\": \"trigger-schema\", \"match\": {\"prompt\": \"string(required)\"}, 42: \"x\"}", "42"),
+        ] {
+            let v: YamlValue = serde_yaml_ng::from_str(source).unwrap();
+            match parse_trigger_envelope(&v) {
+                Err(SchemaError::TriggerMatch { message }) => assert!(
+                    message.contains("unknown keys") && message.ends_with(shown),
+                    "{source:?}: {message}"
+                ),
+                other => panic!("{source:?} was accepted: {other:?}"),
+            }
+        }
     }
 
     #[test]

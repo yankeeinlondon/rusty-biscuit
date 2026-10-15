@@ -726,3 +726,13 @@ tests; root-caused the same day. Tracked by fix
 - **What was done.** The four loopback-TLS tests in
   `schematic/runtime/tests/l1/builder.rs` carry `#[cfg_attr(windows, ignore =
   "…")]` naming the fix; macOS, Linux, and WSL2 run them.
+
+## Sequence lifecycle shell fixtures
+
+Template-mode commands resolve native executables directly. Windows `echo`
+is a `cmd.exe` builtin and has no native executable in the hermetic fixture
+PATH, so `shell: 'echo {{ value }}'` fails there even when macOS finds
+`/bin/echo`. Use the existing `claudine-argv-recorder` binary, copied as
+`argv-recorder.exe`, and assert its recorded argument vectors for lifecycle
+and task template tests. Literal shell commands may still use builtins.
+Do not add an interpreter fallback to make a template test pass.

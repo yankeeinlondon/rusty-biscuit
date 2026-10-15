@@ -14,15 +14,18 @@ A primitive without a `loop` property runs once. When looping is wanted, the pri
 
 **The condition is checked at the end of each iteration, not before it.** A loop therefore always runs at least once, and the condition decides whether there is a *next* iteration. See [Iteration semantics](#iteration-semantics) for exactly how many times a given condition runs. Whether the primitive runs *at all* is a separate question, answered by a `when:` condition on the step or task (planned) or by `skip` from a document's `initialize`; see [Leaving a loop early](#leaving-a-loop-early).
 
-For a pipeline of _different_ documents, put them in a [sequence](./sequences.md) and loop the sequence, or a group inside it. A document's own loop keeps working when that document is one step of a sequence or one task of a group; the loops nest.
+For a pipeline of different documents, use a [sequence](./sequences.md).
+Uniform loops on groups and nested sequences are **planned**. A group with
+`loop:` is rejected, and a looping document inside a sequence currently runs
+one iteration and reports success. Until uniform container loops are built,
+use a standalone document loop when repeated execution is required.
 
 ## Frontmatter shape
 
 A loop is declared as a `loop:` object. Where it lives depends on the primitive:
 
 - a **document** carries it at the root of its frontmatter;
-- a **group** carries it on the group object, beside `execution` and `tasks`;
-- a **sequence document** carries it at the root of its frontmatter, beside `sequence:`. The presence of `sequence:` is what makes the root block the sequence's loop rather than the body's.
+- loops on **groups and sequences** are planned; a group `loop:` is rejected.
 
 ```yaml
 ---
@@ -33,18 +36,7 @@ loop:
 ---
 ```
 
-```yaml
-sequence:
-    - name: review-repair
-      group:
-          execution: serial
-          loop:
-              until: "frontmatter(latest_review, 'ready') == true"
-              max: 5
-          tasks:
-              - prompt: "@prompts/review.md"
-              - prompt: "@prompts/repair.md"
-```
+
 
 Recognized keys, identical on every primitive:
 
@@ -248,7 +240,7 @@ Continue from where you left off. Your last report was:
 {{ loop.last_output }}
 ```
 
-If iteration 1 ends with `see {{…}} and $(rm -rf x)`, iteration 2's prompt contains exactly that text: no parse error, no shell approval, nothing run. The same holds for every value the loop produces, not only the loop values: a frontmatter key an action wrote, a value lifted from the composed document, and, inside a sequence, [`outputs`](sequences.md#the-outputs-array). Only values a person typed (`--set`, `key=value`, interactive answers) are templates; see [CLI overrides interact with looping](#cli-overrides-interact-with-looping).
+If iteration 1 ends with `see {{…}} and $(rm -rf x)`, iteration 2's prompt contains exactly that text: no parse error, no shell approval, nothing run. The same holds for every value the loop produces, not only the loop values: a frontmatter key an action wrote, a value lifted from the composed document, and, inside a sequence, [`seq.outputs`](sequences.md#the-output-array). Only values a person typed (`--set`, `key=value`, interactive answers) are templates; see [CLI overrides interact with looping](#cli-overrides-interact-with-looping).
 
 > **`loop.is_last` means "last permitted", not "last".** A loop usually ends because of something the iteration itself produced: the agent's output, an exit code, or a file it wrote that the condition reads through `frontmatter(...)`. Nothing can know that before the iteration runs, so `is_last` does not try. It is `true` only on the `max`-th pass. If you want a prompt to say "this is your final attempt" in a loop that runs a fixed number of times, test the count directly: `{{ loop.count == 3 }}`, or set `max: 3` and let `is_last` do it.
 >
@@ -376,7 +368,7 @@ A loop therefore ends in one of three ways, and sequence summaries and exit code
 | Action raises an error (e.g. `InvalidIncrementType`) | Loop halts; the action stage for that iteration is discarded.               | Loop continues; the iteration's frontmatter remains in its pre-action state.    |
 | Loop condition cannot be parsed/evaluated            | Loop halts unconditionally — this is a structural error, not a runtime one. | Same.                                                                           |
 
-Per-run override: `--fail-fast=true|false` on the CLI, or the `CLAUDINE_FAIL_FAST` environment variable. Precedence is **CLI > environment > frontmatter > built-in default (true)**.
+The `CLAUDINE_FAIL_FAST` environment variable overrides `loop.fail_fast`; precedence is **environment > loop frontmatter > built-in default (true)**. The sequence command does not inject this variable, and `--fail-fast` is removed grammar.
 
 ## User interrupt (Ctrl+C)
 

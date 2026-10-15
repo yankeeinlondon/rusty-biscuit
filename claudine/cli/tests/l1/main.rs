@@ -93,6 +93,8 @@ mod inline_compose_cli;
 mod inline_compose_hash;
 mod inline_compose_sequence_mismatch;
 #[cfg(unix)]
+mod launch_trigger_schemas;
+#[cfg(unix)]
 mod level1_compose_autocomplete_failure_pty;
 #[cfg(unix)]
 mod level1_dry_run_pty;
@@ -120,6 +122,10 @@ mod lifecycle_message_drain;
 #[cfg(windows)]
 mod lifecycle_message_drain_console_windows;
 mod lifecycle_message_drain_interrupt;
+// Installs the `claudine-argv-recorder` and `claudine-fake-goose` fixture
+// binaries, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod lifecycle_shell_templates;
 #[cfg(unix)]
 mod loop_cli;
 // Installs the `claudine-fake-goose` fixture binary on Windows, which only
@@ -134,6 +140,8 @@ mod preflight_execution_parity;
 #[cfg(unix)]
 mod lifecycle_mixed_span_validation;
 mod lifecycle_set_shell_values;
+mod shell_approval_prompt;
+mod shell_missing_values;
 mod literal_glob_hint;
 #[cfg(unix)]
 mod prompt_reporting;
@@ -150,10 +158,6 @@ mod provider_tail_notice;
 mod provider_tail_ownership;
 mod run_harness_loop_call_sites;
 mod setter_after_switch;
-// Spawns the `claudine-fake-goose` fixture binary, which only
-// `test-fixtures` builds.
-#[cfg(feature = "test-fixtures")]
-mod sequence_budget;
 mod sequence_cli;
 #[cfg(windows)]
 mod sequence_ctrl_c_windows;
@@ -179,6 +183,10 @@ mod sequence_perf;
 mod sequence_prompt_property;
 #[cfg(unix)]
 mod sequence_schema;
+// Installs the `claudine-argv-recorder` and `claudine-fake-goose` fixture
+// binaries, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod sequence_shell_templates;
 mod sequence_sources_cli;
 mod shipped_prompts;
 mod skills_integration;
@@ -187,6 +195,10 @@ mod switch_catalog_guard;
 mod system_prompt_perf_bench;
 mod test_placement;
 mod test_seam_gate_guard;
+// Reads the `CLAUDINE_TEST_PREWARM` seam, which only `test-fixtures` builds
+// compile, and records launches with Unix shell-stub providers.
+#[cfg(all(unix, feature = "test-fixtures"))]
+mod tts_prewarm;
 #[cfg(unix)]
 mod wrap_antigravity_exit_signal;
 mod wrap_basics;
@@ -226,3 +238,7 @@ mod wrap_structured_stream;
 mod wrap_watchdog_startup_stall;
 #[cfg(unix)]
 mod wrap_watchdog_timeout;
+
+mod sequence_containers;
+
+mod research_sequence_artifacts;

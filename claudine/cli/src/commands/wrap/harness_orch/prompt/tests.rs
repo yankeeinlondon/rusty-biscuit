@@ -356,7 +356,7 @@ fn proxy_target_preflight_approves_frontmatter_shell_and_rematerializes() {
         .as_ref()
         .expect("pre-approved set must be populated after target pre-flight");
     assert!(
-        approved.contains("basename features/x/spec.md"),
+        approved.contains_exact("basename features/x/spec.md"),
         "expected the resolved frontmatter shell command; got: {approved:?}",
     );
 

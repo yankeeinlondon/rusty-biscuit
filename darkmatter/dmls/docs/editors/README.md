@@ -57,10 +57,11 @@ enable = true
 [schema]
 strict = false
 
-# Activate an extension baseline schema by name → path + globs.
-# [schema.extensions.claudine]
-# path = "docs/schemas/claudine.yaml"
-# globs = [".claude/**", "prompts/**"]
+# Activate an extension baseline schema by name → path + globs. The path
+# names a document schema; trigger schemas need no entry here.
+# [schema.extensions.team]
+# path = "schemas/team-prompt.yaml"
+# globs = ["prompts/**"]
 
 # Workspace defaults for textDocument/formatting; the same rule keys as a
 # document's `style.markdown`, which overrides them per document.
@@ -68,6 +69,14 @@ strict = false
 # list-item-padding = "none" # preserve | none | one
 # fixed-width = 80           # 1..=1000, true (120), or false
 ```
+
+Claudine's schemas need no extension entry. They are trigger schemas, which
+`dmls` discovers in the document's schema roots: a document under `claudine/`
+reaches `claudine/schemas/` automatically, and a document elsewhere needs the
+complete five-file bundle in the repository root's `schemas/`, an absolute
+`SCHEMAS_DIR`, or `~/schemas`. `dmls` reads them from disk only and uses them
+for diagnostics, completion, and hover. See
+[DMLS Schema Support](../../../docs/topics/schemas/dmls-schema-support.md#claudine-documents).
 
 The older `formatting.cleanup` (`compact` → `list-item-padding = "none"`,
 `loose` → `"one"`, `default` → no override) and `formatting.fixed_width` keys

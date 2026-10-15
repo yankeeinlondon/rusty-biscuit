@@ -38,6 +38,18 @@ const ALLOWLIST: &[Allowance] = &[
         1,
         "absolute hyperlink target for a relative path in an error block (rendering)",
     ),
+    ambient(
+        "composition/lifecycle/prewarm/fixture.rs",
+        "std::env::var",
+        1,
+        "`test-fixtures` hook that swaps TTS pre-warm's preparer for a recorder in CLI tests",
+    ),
+    ambient(
+        "composition/lifecycle/prewarm/worker.rs",
+        "std::env::var",
+        1,
+        "`PLAYA_DRY_RUN` disables TTS pre-warm before its worker starts, as it does playback",
+    ),
     ambient("config/antigravity.rs", "biscuit_file::home_dir", 1, HOME_CONFIG),
     ambient("config/backup.rs", "biscuit_file::home_dir", 1, "locates Claudine's configuration backups under the user's home"),
     ambient("config/claude.rs", "biscuit_file::home_dir", 1, HOME_CONFIG),

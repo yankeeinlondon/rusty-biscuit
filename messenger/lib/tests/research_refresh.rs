@@ -1,10 +1,10 @@
 //! Refresh and review lifecycle (feature `research`): selection, prepared
 //! inputs, stage checks, the approval policy, promotion with review records
-//! and CHANGELOG, bounded recovery, budget exhaustion, interrupted promotion,
-//! rejection, and retention. A fake agent writes each pass's outputs into the
-//! prepared run; nothing launches Claudine or reaches the network. Every test
-//! runs in a throwaway repository holding copies of the shipped roster,
-//! schemas, and fleet prompt plus the accepted-fleet fixture.
+//! and CHANGELOG, bounded recovery, the fleet-locked runner, interrupted
+//! promotion, rejection, and retention. A fake agent writes each pass's
+//! outputs into the prepared run; nothing launches Claudine or reaches the
+//! network. Every test runs in a throwaway repository holding copies of the
+//! shipped roster, schemas, and fleet prompt plus the accepted-fleet fixture.
 #![cfg(feature = "research")]
 
 use std::collections::BTreeMap;
@@ -21,8 +21,9 @@ use messenger::research::refresh::prepare::{self, PreparedRun};
 use messenger::research::refresh::promote::{self, Request as Approve};
 use messenger::research::refresh::records::unsafe_content;
 use messenger::research::refresh::review::{CHANGELOG, ReviewRecord};
+use messenger::research::refresh::runner;
 use messenger::research::refresh::select::{self, Reason, Request, Skip};
-use messenger::research::refresh::state::{RunRecord, StageStatus, StateError};
+use messenger::research::refresh::state::{RunRecord, RunnerOutcome, StageStatus, StateError};
 use messenger::research::refresh::{DecisionReason, InputError, Maintainer, RefreshError, RunLimits, RunStatus, Stage, StateArea};
 use messenger::research::{Loader, Workspace};
 use serde_json::{Value, json};
@@ -143,8 +144,12 @@ impl Repo {
     }
 
     fn prepare(&self, platform: PlatformId, today: &Date) -> PreparedRun {
+        self.prepare_with(platform, LIMITS, today)
+    }
+
+    fn prepare_with(&self, platform: PlatformId, limits: RunLimits, today: &Date) -> PreparedRun {
         let request = Request { forced: [platform].into(), ..Request::default() };
-        let mut prepared = prepare::prepare(&self.loader, &[platform], LIMITS, today, &request).expect("prepare");
+        let mut prepared = prepare::prepare(&self.loader, &[platform], limits, today, &request).expect("prepare");
         assert_eq!(prepared.runs.len(), 1, "{:?}", prepared.selections);
         prepared.runs.remove(0)
     }
@@ -409,8 +414,7 @@ fn run_dirs(repo: &Repo, platform: PlatformId) -> Vec<String> {
 }
 
 /// Review-1 regression: selection once dropped unreadable run records, so a
-/// truncated `run.json` for an active run let `prepare` start a second run
-/// with a fresh budget.
+/// truncated `run.json` for an active run let `prepare` start a second run.
 #[test]
 fn an_unreadable_run_record_blocks_its_platform_and_names_its_path() {
     let on = day("2026-09-18");
@@ -429,7 +433,7 @@ fn an_unreadable_run_record_blocks_its_platform_and_names_its_path() {
         let prepared = prepare::prepare(&repo.loader, &[PlatformId::Discord], LIMITS, &on, &forced).expect(name);
         assert!(prepared.runs.is_empty(), "{name}: {:?}", prepared.runs);
         assert!(matches!(prepared.selections[0].skip, Some(Skip::UnreadableRun { .. })), "{name}");
-        assert_eq!(run_dirs(&repo, PlatformId::Discord), vec![open.run_id.to_string()], "{name}: no second run or ledger");
+        assert_eq!(run_dirs(&repo, PlatformId::Discord), vec![open.run_id.to_string()], "{name}: no second run");
         // The block is per platform: another platform still prepares.
         assert_eq!(repo.prepare(PlatformId::Slack, &on).platform_id, PlatformId::Slack, "{name}");
     }
@@ -568,12 +572,15 @@ fn discovery_inputs_hold_no_previous_research_or_curated_sources() {
     assert!(!sequence.lines().any(|line| line.starts_with("prompt:")), "no top-level prompt");
     let steps: Vec<&str> = sequence.lines().filter_map(|line| line.trim().strip_prefix("- name: ")).collect();
     assert_eq!(steps, ["discovery", "reconcile", "sources", "validation", "review", "review-check"]);
+    for pass in ["discovery", "reconcile", "sources", "review"] {
+        let prompt = fs::read_to_string(dir.join(format!("inputs/{pass}/prompt.md"))).expect("prompt");
+        assert!(prompt.starts_with(&format!("---\nstart:\n  - shell: messenger research admit-agent {} --root .\n---\n", run.run_id)), "{prompt}");
+    }
     assert!(sequence.contains("check-run") && sequence.contains("--through validation") && sequence.contains("--through review"));
-    // Both limits reach Claudine's ledger; the shared fleet lock serializes platforms.
-    let init = run.commands[0].join(" ");
-    assert!(init.contains("budget init") && init.contains("--max-seconds 600") && init.contains("--max-invocations 8"), "{init}");
-    assert!(init.contains("--exclusive-lock ../../fleet.lock"));
-    assert!(run.commands[1].join(" ").contains("sequence --yolo --budget-ledger"));
+    // One command: the Messenger-owned runner takes the fleet lock for the
+    // whole execution; the operator's limits live in the run record.
+    assert_eq!(run.commands.len(), 1, "{:?}", run.commands);
+    assert_eq!(run.commands[0].join(" "), format!("messenger research run {}", run.run_id));
     let record = repo.run(&run);
     assert_eq!(record.selected_because, ["forced", "no_review_record"]);
     assert_eq!(record.limits, LIMITS);
@@ -960,10 +967,10 @@ fn a_partial_refresh_publishes_successes_and_keeps_failed_platforms_resumable() 
     assert_eq!(resumed.stages, [Stage::Reconcile, Stage::Sources, Stage::Validation, Stage::Review]);
 }
 
-// ---- recovery and budgets ---------------------------------------------------------
+// ---- recovery ---------------------------------------------------------------------
 
 #[test]
-fn recovery_is_bounded_and_never_adds_budget() {
+fn recovery_is_bounded() {
     let repo = Repo::published();
     let on = day("2026-09-18");
     let run = repo.prepare(PlatformId::Discord, &on);
@@ -977,7 +984,7 @@ fn recovery_is_bounded_and_never_adds_budget() {
         assert!(!check_run(&repo.loader, id, Stage::Validation, &on).expect("check").passed);
         let resumed = prepare::resume(&repo.loader, id).expect("resume");
         assert_eq!(resumed.stages[0], Stage::Reconcile, "validation failures rerun reconciliation");
-        assert!(resumed.commands.iter().all(|c| !c.contains(&"init".to_string())), "a resumption keeps the ledger");
+        assert_eq!(resumed.commands.len(), 1, "a resumption prints the same runner command");
         assert_eq!(repo.run(&run).recovery_attempts, attempt);
         let sequence = fs::read_to_string(repo.run_dir(&run).join("run.md")).expect("run.md");
         assert!(!sequence.contains("name: discovery"), "completed discovery is not rerun");
@@ -1020,41 +1027,8 @@ fn resuming_is_refused_while_another_run_for_the_platform_is_open_or_unreadable(
     assert_eq!(repo.run(&failed).status, RunStatus::Active);
 }
 
-#[test]
-fn an_exhausted_budget_stays_incomplete_and_needs_a_recorded_grant() {
-    let repo = Repo::published();
-    let before = repo.tree();
-    let on = day("2026-09-18");
-    let run = repo.prepare(PlatformId::Discord, &on);
-    let agent = Agent { repo: &repo, run: &run };
-    agent.discovery();
-    // Claudine's ledger after exhaustion during reconciliation.
-    let ledger = |state: &str| {
-        json!({ "format": "claudine-budget-ledger/1", "run_id": run.run_id.as_str(), "platform": "discord", "state": state,
-                "stop_reason": null, "stage": "reconcile", "limits": { "invocations": 8, "active_ms": 600000 },
-                "used": { "invocations": 8, "active_ms": 412000 }, "grants": [], "heartbeat_ms": 5000, "runs": 1,
-                "segment": null, "in_flight": [], "events": [], "exclusive_lock": "../../fleet.lock" })
-        .to_string()
-    };
-    agent.write("budget.json", &ledger("exhausted"));
-    let report = check_run(&repo.loader, run.run_id.as_str(), Stage::Validation, &on).expect("check");
-    assert!(!report.passed);
-    assert_eq!(report.status, RunStatus::Exhausted, "exhaustion is never a finished or investigated result");
-    assert!(repo.run(&run).stop_reason.expect("reason").contains("reconcile"));
-    assert!(matches!(approve(&repo, &[&run], "2026-09-18"), Err(RefreshError::WrongStatus { status: RunStatus::Exhausted, .. })));
-    assert!(matches!(
-        prepare::resume(&repo.loader, run.run_id.as_str()),
-        Err(RefreshError::Ledger { ref state, .. }) if state == "exhausted"
-    ));
-    assert_eq!(repo.run(&run).recovery_attempts, 0, "a refused resumption consumes no attempt");
-    // After an operator grant Claudine rests the ledger `stopped`; resumption
-    // continues the same run and ledger.
-    agent.write("budget.json", &ledger("stopped"));
-    let resumed = prepare::resume(&repo.loader, run.run_id.as_str()).expect("resume after grant");
-    assert_eq!(resumed.stages[0], Stage::Reconcile);
-    assert_eq!(repo.tree(), before, "accepted research is untouched");
-}
-
+/// A sequence that stops or is interrupted before its checks leaves a
+/// resumable or rejectable run, driven by what the runner records.
 #[test]
 fn a_sequence_that_stops_before_its_checks_leaves_a_resumable_or_rejectable_run() {
     let repo = Repo::published();
@@ -1062,50 +1036,385 @@ fn a_sequence_that_stops_before_its_checks_leaves_a_resumable_or_rejectable_run(
     let on = day("2026-09-18");
     let run = repo.prepare(PlatformId::Discord, &on);
     let id = run.run_id.as_str();
-    let agent = Agent { repo: &repo, run: &run };
-    let ledger = |runs: u64, stop_reason: &str| {
-        json!({ "format": "claudine-budget-ledger/1", "run_id": id, "platform": "discord", "state": "stopped",
-                "stop_reason": stop_reason, "stage": null, "limits": { "invocations": 8, "active_ms": 600000 },
-                "used": { "invocations": 0, "active_ms": 1200 }, "grants": [], "heartbeat_ms": 5000, "runs": runs,
-                "segment": null, "in_flight": [], "events": [], "exclusive_lock": "../../fleet.lock" })
-        .to_string()
-    };
     let active = |result: Result<_, RefreshError>| matches!(result, Err(RefreshError::WrongStatus { status: RunStatus::Active, .. }));
     let discord_is_open = |repo: &Repo| {
         let selection = &repo.select("2026-09-18", &Request { forced: [PlatformId::Discord].into(), ..Request::default() })[&PlatformId::Discord];
         matches!(selection.skip, Some(Skip::OpenRun { .. }))
     };
 
-    // Initialized but never launched: the printed sequence command is still
-    // the way forward, so the run stays active.
-    agent.write("budget.json", &ledger(0, "initialized"));
+    // Prepared but never launched: the printed runner command is still the
+    // way forward, so the run stays active.
     assert!(active(prepare::resume(&repo.loader, id).map(|_| ())));
     assert!(active(reject(&repo, id, "Maintainer", "unused", &on).map(|_| ())));
     assert!(discord_is_open(&repo));
 
-    // Claudine refused the first step (no agent named, no terminal); the ledger
-    // rests `stopped` and no stage recorded a result.
-    agent.write("budget.json", &ledger(1, "agent resolution failed for run.md: NoAgent"));
+    // The sequence failed before any check ran (the runner observed a
+    // nonzero exit); the run rests failed and no stage recorded a result.
+    let stopped = runner::execute_with(&repo.loader, id, &exit_command(1)).expect("run");
+    assert_eq!(stopped.status, RunStatus::Failed);
+    assert_eq!(stopped.runner, Some(RunnerOutcome::Stopped));
     assert!(!discord_is_open(&repo), "a failed run no longer blocks selection");
     let resumed = prepare::resume(&repo.loader, id).expect("a stopped sequence is resumable");
     assert_eq!(resumed.stages[0], Stage::Discovery, "nothing completed, so everything reruns");
-    assert!(resumed.commands.iter().all(|c| !c.contains(&"init".to_string())), "a resumption keeps the ledger");
+    assert_eq!(resumed.commands.len(), 1, "a resumption prints the same runner command");
     assert_eq!(repo.run(&run).recovery_attempts, 1);
     assert_eq!(repo.run(&run).status, RunStatus::Active);
+    assert!(!repo.run(&run).launched, "the new attempt starts unlaunched");
 
-    // Resumed but not yet relaunched: the ledger still shows the earlier
-    // sequence, which must not count against the new attempt.
+    // Resumed but not yet relaunched: still active, and a refused resumption
+    // consumes no attempt.
     assert!(active(prepare::resume(&repo.loader, id).map(|_| ())));
     assert_eq!(repo.run(&run).recovery_attempts, 1, "a refused resumption consumes no attempt");
     assert!(discord_is_open(&repo), "the resumed run is open again");
 
-    // The relaunched sequence is stopped by Ctrl+C before any check ran.
-    agent.write("budget.json", &ledger(2, "interrupted by the operator"));
-    let rejected = reject(&repo, id, "Maintainer", "wrong agent", &on).expect("a stopped run is rejectable");
+    // The relaunched sequence is interrupted by Ctrl+C before any check ran.
+    let interrupted = runner::execute_with(&repo.loader, id, &exit_command(130)).expect("run");
+    assert_eq!(interrupted.status, RunStatus::Interrupted);
+    assert_eq!(interrupted.runner, Some(RunnerOutcome::Interrupted));
+    let rejected = reject(&repo, id, "Maintainer", "wrong agent", &on).expect("an interrupted run is rejectable");
     assert_eq!(rejected.status, RunStatus::Rejected);
     assert_eq!(repo.run(&run).status, RunStatus::Rejected, "the decision is persisted");
     assert!(!discord_is_open(&repo), "a rejected run no longer blocks selection");
     assert_eq!(repo.tree(), before, "accepted research is untouched");
+}
+
+// ---- runner protection (fleet lock) ---------------------------------------------
+
+/// A fake sequence command that exits with `code` on every supported OS.
+fn exit_command(code: i32) -> Vec<String> {
+    if cfg!(windows) {
+        vec!["cmd".to_string(), "/D".to_string(), "/C".to_string(), format!("exit {code}")]
+    } else {
+        vec!["sh".to_string(), "-c".to_string(), format!("exit {code}")]
+    }
+}
+
+/// A fake sequence command that sleeps well past the runner's limit.
+fn sleep_command() -> Vec<String> {
+    if cfg!(windows) {
+        vec!["powershell".to_string(), "-Command".to_string(), "Start-Sleep -Seconds 30".to_string()]
+    } else {
+        vec!["sh".to_string(), "-c".to_string(), "sleep 30".to_string()]
+    }
+}
+
+#[test]
+fn agent_admission_preserves_the_cap_across_resumptions() {
+    let repo = Repo::published();
+    let run = repo.prepare_with(PlatformId::Discord, RunLimits { max_seconds: 60, max_invocations: 1 }, &day("2026-09-18"));
+    let record = runner::admit_agent(&repo.loader, run.run_id.as_str()).expect("first admission");
+    assert_eq!(record.invocations, 1);
+    assert_eq!(repo.run(&run).invocations, 1);
+    let refused = runner::admit_agent(&repo.loader, run.run_id.as_str()).expect_err("cap spent");
+    assert!(matches!(refused, RefreshError::InvocationLimit { .. }), "{refused}");
+    assert_eq!(repo.run(&run), record, "a refusal changes nothing");
+    let mut interrupted = record;
+    interrupted.status = RunStatus::Interrupted;
+    repo.state().save(&interrupted).expect("save");
+    assert!(matches!(runner::admit_agent(&repo.loader, run.run_id.as_str()), Err(RefreshError::WrongStatus { .. })));
+    prepare::resume(&repo.loader, run.run_id.as_str()).expect("resume");
+    assert_eq!(repo.run(&run).invocations, 1, "resume retains spent allowance");
+    assert!(matches!(runner::admit_agent(&repo.loader, run.run_id.as_str()), Err(RefreshError::InvocationLimit { .. })));
+}
+
+#[test]
+fn the_runner_upgrades_legacy_prompt_hooks_only_once() {
+    let repo = Repo::published();
+    let run = repo.prepare(PlatformId::Discord, &day("2026-09-18"));
+    let prompt = repo.run_dir(&run).join("inputs/discovery/prompt.md");
+    fs::write(&prompt, "# Legacy prepared discovery\n").expect("legacy prompt");
+    runner::execute_with(&repo.loader, run.run_id.as_str(), &exit_command(0)).expect("first run");
+    let first = fs::read_to_string(&prompt).unwrap();
+    assert!(first.contains("messenger research admit-agent"), "{first}");
+    runner::execute_with(&repo.loader, run.run_id.as_str(), &exit_command(0)).expect("second run");
+    assert_eq!(fs::read_to_string(&prompt).unwrap(), first, "no duplicate frontmatter or admission");
+}
+
+/// Criterion 22: a live runner refuses a second run, and nothing is recorded.
+#[test]
+fn a_live_runner_refuses_a_second_run() {
+    let repo = Repo::published();
+    let run = repo.prepare(PlatformId::Discord, &day("2026-09-18"));
+    let state = repo.state();
+    fs::create_dir_all(state.runs_dir()).expect("mkdir");
+    let holder = fs::File::create(state.fleet_lock()).expect("fleet lock");
+    holder.try_lock().expect("hold the fleet lock");
+    let refused = runner::execute_with(&repo.loader, run.run_id.as_str(), &exit_command(0)).expect_err("a second run is refused");
+    assert!(
+        matches!(&refused, RefreshError::RunnerLive { path } if path == "messenger/.research-state/runs/fleet.lock"),
+        "{refused}"
+    );
+    let record = repo.run(&run);
+    assert_eq!(record.status, RunStatus::Active);
+    assert_eq!((record.launched, record.runner), (false, None), "a refused run records nothing");
+    // The OS lock, not the file, is the protection: after the holder exits the
+    // file remains and a run proceeds.
+    drop(holder);
+    assert!(state.fleet_lock().exists());
+    runner::execute_with(&repo.loader, run.run_id.as_str(), &exit_command(0)).expect("run after release");
+}
+
+/// The runner's three observations: `finished` keeps the status the run's
+/// checks decided, `interrupted` rests the run on `interrupted`, and `stopped`
+/// fails an undecided run with a stop reason naming the exit.
+#[test]
+fn the_runner_records_finished_interrupted_and_stopped() {
+    let repo = Repo::published();
+    let on = day("2026-09-18");
+
+    // Interrupted (exit 130): the run rests `interrupted` and is resumable.
+    let interrupted = repo.prepare(PlatformId::Slack, &on);
+    let record = runner::execute_with(&repo.loader, interrupted.run_id.as_str(), &exit_command(130)).expect("run");
+    assert_eq!(record.status, RunStatus::Interrupted);
+    assert_eq!(record.runner, Some(RunnerOutcome::Interrupted));
+    assert!(record.stop_reason.as_deref().is_some_and(|reason| reason.contains("interrupted")), "{:?}", record.stop_reason);
+    let persisted = repo.run(&interrupted);
+    assert_eq!((persisted.status, persisted.runner, persisted.launched), (RunStatus::Interrupted, Some(RunnerOutcome::Interrupted), true));
+    let resumed = prepare::resume(&repo.loader, interrupted.run_id.as_str()).expect("an interrupted run resumes");
+    assert_eq!(resumed.commands, vec![vec!["messenger".into(), "research".into(), "run".into(), interrupted.run_id.to_string()]]);
+
+    // Stopped (exit 1): an undecided run fails with the exit named.
+    let stopped = repo.prepare(PlatformId::Telegram, &on);
+    let record = runner::execute_with(&repo.loader, stopped.run_id.as_str(), &exit_command(1)).expect("run");
+    assert_eq!(record.status, RunStatus::Failed);
+    assert_eq!(record.runner, Some(RunnerOutcome::Stopped));
+    assert!(record.stop_reason.as_deref().is_some_and(|reason| reason.contains("exit 1")), "{:?}", record.stop_reason);
+
+    // Finished (exit 0): the status the checks decided is kept, nothing is rested.
+    let finished = repo.prepare(PlatformId::Discord, &on);
+    let agent = Agent { repo: &repo, run: &finished };
+    agent.discovery();
+    agent.reconcile(&raised("2026-09-18"), &agent.checks("2026-09-18", &[]));
+    agent.sources(false);
+    let report = check_run(&repo.loader, finished.run_id.as_str(), Stage::Validation, &on).expect("check");
+    assert!(report.passed, "{:#?}", report.stages);
+    let record = runner::execute_with(&repo.loader, finished.run_id.as_str(), &exit_command(0)).expect("run");
+    assert_eq!(record.status, RunStatus::Active, "a partial run stays active when the sequence finishes");
+    assert_eq!(record.runner, Some(RunnerOutcome::Finished));
+    assert_eq!(record.stop_reason, None);
+
+    // The runner's statuses guard re-entry: only an active run can be run.
+    let refused = runner::execute_with(&repo.loader, stopped.run_id.as_str(), &exit_command(0)).expect_err("a failed run cannot be run");
+    assert!(matches!(refused, RefreshError::WrongStatus { status: RunStatus::Failed, action: "running", .. }), "{refused}");
+}
+
+/// The per-refresh elapsed-time limit is enforced by the runner itself.
+#[test]
+fn the_runner_stops_a_sequence_that_exceeds_the_elapsed_time_limit() {
+    let repo = Repo::published();
+    let run = repo.prepare_with(PlatformId::Discord, RunLimits { max_seconds: 1, max_invocations: 8 }, &day("2026-09-18"));
+    let record = runner::execute_with(&repo.loader, run.run_id.as_str(), &sleep_command()).expect("run");
+    assert_eq!(record.status, RunStatus::Failed);
+    assert_eq!(record.runner, Some(RunnerOutcome::Stopped));
+    assert!(record.stop_reason.as_deref().is_some_and(|reason| reason.contains("elapsed-time limit")), "{:?}", record.stop_reason);
+}
+
+/// Criterion 22: a stale `active` record — launched by a runner that is gone —
+/// is recovered explicitly, never silently, and an unlaunched run is refused.
+#[test]
+fn a_stale_active_run_is_recovered_explicitly_and_never_silently() {
+    let repo = Repo::published();
+    let on = day("2026-09-18");
+    let run = repo.prepare(PlatformId::Discord, &on);
+    let state = repo.state();
+
+    // A prepared run was never launched; there is nothing to recover.
+    let refused = cleanup::recover(&state, run.run_id.as_str()).expect_err("never launched");
+    assert!(matches!(&refused, RefreshError::NotLaunched { run_id } if run_id == run.run_id.as_str()), "{refused}");
+    assert_eq!(repo.run(&run).status, RunStatus::Active, "the refusal changed nothing");
+
+    // A crashed runner: it marked the run launched, then died with the lock.
+    let mut record = repo.run(&run);
+    record.launched = true;
+    state.save(&record).expect("save");
+    let recovered = cleanup::recover(&state, run.run_id.as_str()).expect("recover");
+    assert_eq!(recovered.status, RunStatus::Interrupted);
+    assert!(recovered.stop_reason.as_deref().is_some_and(|reason| reason.contains("recovered")), "{:?}", recovered.stop_reason);
+    assert_eq!(repo.run(&run).status, RunStatus::Interrupted, "the recovery is persisted");
+    assert!(
+        repo.select("2026-09-18", &Request::default())[&PlatformId::Discord]
+            .skip
+            .as_ref()
+            .is_some_and(|skip| matches!(skip, Skip::OpenRun { status: RunStatus::Interrupted, .. })),
+        "a recovered run still protects its platform until resumed or rejected"
+    );
+
+    // The recovered run resumes like any interrupted run.
+    prepare::resume(&repo.loader, run.run_id.as_str()).expect("resume");
+    assert_eq!(repo.run(&run).status, RunStatus::Active);
+    assert!(!repo.run(&run).launched, "the new attempt starts unlaunched");
+
+    // A decided run is never recoverable.
+    let rejected = repo.prepare(PlatformId::Slack, &on);
+    assert!(!check_run(&repo.loader, rejected.run_id.as_str(), Stage::Validation, &on).expect("check").passed);
+    reject(&repo, rejected.run_id.as_str(), "Maintainer", "not needed", &on).expect("reject");
+    let refused = cleanup::recover(&state, rejected.run_id.as_str()).expect_err("decided");
+    assert!(matches!(refused, RefreshError::WrongStatus { status: RunStatus::Rejected, action: "recovering", .. }), "{refused}");
+}
+
+/// Criterion 22: cleanup, promotion, and stale recovery are refused during a
+/// live run, and stop being refused once the runner exits.
+#[test]
+fn cleanup_and_promotion_are_refused_during_a_live_run() {
+    let repo = Repo::published();
+    let on = day("2026-09-18");
+    let run = repo.prepare(PlatformId::Discord, &on);
+    let state = repo.state();
+    fs::create_dir_all(state.runs_dir()).expect("mkdir");
+    let holder = fs::File::create(state.fleet_lock()).expect("fleet lock");
+    holder.try_lock().expect("hold the fleet lock");
+    let by = Maintainer::new("maintainer").expect("a named maintainer");
+    for refused in [
+        cleanup::plan(&state, &on, cleanup::DEFAULT_THRESHOLD_DAYS).map(|_| ()),
+        cleanup::recover(&state, run.run_id.as_str()).map(|_| ()),
+        promote::promote(&repo.loader, &[run.run_id.to_string()], &Approve::Human { by: by.clone() }, &on, Options::default()).map(|_| ()),
+    ] {
+        assert!(matches!(&refused, Err(RefreshError::RunnerLive { path }) if path == "messenger/.research-state/runs/fleet.lock"), "{refused:?}");
+    }
+    assert_eq!(repo.run(&run).status, RunStatus::Active, "nothing was recorded or removed");
+    drop(holder);
+    cleanup::plan(&state, &on, cleanup::DEFAULT_THRESHOLD_DAYS).expect("cleanup plans again after the runner exits");
+}
+
+/// Criterion 22: a ledger-era `exhausted` record stays readable, resumable
+/// like `interrupted`, and is never promotable and never successful.
+#[test]
+fn a_ledger_era_exhausted_run_is_readable_resumable_and_never_promotable() {
+    let repo = Repo::published();
+    let on = day("2026-09-18");
+    let run = repo.prepare(PlatformId::Discord, &on);
+    // A record rested `exhausted` by the removed budget ledger.
+    let mut record = repo.run(&run);
+    record.status = RunStatus::Exhausted;
+    record.stop_reason = Some("execution budget exhausted before or during stage reconcile".to_string());
+    repo.state().save(&record).expect("save");
+    let reread = repo.run(&run);
+    assert_eq!(reread.status, RunStatus::Exhausted, "the record loads");
+    assert!(matches!(
+        approve(&repo, &[&run], "2026-09-18"),
+        Err(RefreshError::WrongStatus { status: RunStatus::Exhausted, action: "promotion", .. })
+    ));
+    // A ledger-era budget artifact beside the record changes nothing: it is
+    // left in place, and the record still resumes. Its bytes are never read;
+    // the shape only recalls what the removed ledger wrote.
+    let dir = repo.run_dir(&run);
+    let stopped_ledger = json!({
+        "format": "claudine-run-budget/1", "run_id": run.run_id.as_str(), "platform": "discord", "state": "stopped",
+        "stop_reason": "ledger era", "stage": null, "limits": { "invocations": 8, "active_ms": 600000 },
+        "used": { "invocations": 8, "active_ms": 412000 }, "grants": [], "heartbeat_ms": 5000, "runs": 1,
+        "segment": null, "in_flight": [], "events": [], "exclusive_lock": "../../fleet.lock"
+    });
+    fs::write(dir.join("budget.json"), stopped_ledger.to_string()).expect("write");
+    assert_eq!(repo.run(&run).status, RunStatus::Exhausted, "a leftover ledger changes nothing");
+    // A check on an exhausted record never shows it as successful.
+    let report = check_run(&repo.loader, run.run_id.as_str(), Stage::Discovery, &on).expect("check");
+    assert!(!report.passed, "an exhausted run is never shown as successful");
+    assert_eq!(report.status, RunStatus::Exhausted, "the resting status survives a check");
+    prepare::resume(&repo.loader, run.run_id.as_str()).expect("resumable like interrupted");
+    assert_eq!(repo.run(&run).status, RunStatus::Active);
+    assert!(dir.join("budget.json").exists(), "the artifact is left in place");
+}
+
+// ---- run-record input robustness matrix ------------------------------------------
+
+/// The input-robustness matrix for `run.json`, walked from a real record the
+/// current code produced: one edit per cell, each asserted through the public
+/// load. A control row proves the unedited record loads.
+#[test]
+fn the_run_record_matrix_is_typed_for_every_load_bearing_field() {
+    let repo = Repo::published();
+    let run = repo.prepare(PlatformId::Discord, &day("2026-09-18"));
+    let path = repo.run_dir(&run).join("run.json");
+    let pristine = fs::read_to_string(&path).expect("run.json");
+    let control: RunRecord = serde_json::from_str(&pristine).expect("control: the unedited record loads");
+    assert_eq!(control.status, RunStatus::Active);
+
+    // Every cell is load-bearing through the public load: a typed refusal,
+    // never an empty default.
+    let refused = |text: String, expect: &str| {
+        assert_ne!(text, pristine, "the edit applies");
+        fs::write(&path, &text).expect("write");
+        match repo.state().load(run.run_id.as_str()) {
+            Err(StateError::Corrupt { message, .. }) => {
+                assert!(message.contains(expect), "expected `{expect}` in: {message}");
+            }
+            other => panic!("expected a corrupt record naming `{expect}`, got {other:?}"),
+        }
+    };
+    // One edit of a whole field, from the pristine JSON value.
+    fn edit(pristine: &str, edit: impl FnOnce(&mut serde_json::Value)) -> String {
+        let mut value: serde_json::Value = serde_json::from_str(pristine).expect("parse");
+        edit(&mut value);
+        serde_json::to_string(&value).expect("serialize")
+    }
+    let set = |v: &mut serde_json::Value, field: &str, value: serde_json::Value| {
+        v[field] = value;
+    };
+
+    // `status`: absent, explicit null, wrong type, empty, unknown, duplicate.
+    refused(edit(&pristine, |v| {
+        v.as_object_mut().expect("object").remove("status");
+    }), "missing field `status`");
+    refused(edit(&pristine, |v| set(v, "status", serde_json::Value::Null)), "expected value");
+    // A non-string where a status string belongs: the same typed parse error,
+    // naming the position of the offending token.
+    refused(edit(&pristine, |v| set(v, "status", json!(123))), "expected value");
+    refused(edit(&pristine, |v| set(v, "status", json!(""))), "unknown variant");
+    refused(edit(&pristine, |v| set(v, "status", json!("reticent"))), "unknown variant");
+    let duplicated = pristine.replace("\"status\": \"active\",", "\"status\": \"active\",\n  \"status\": \"active\",");
+    refused(duplicated, "duplicate field `status`");
+
+    // `recovery_attempts` (resumptions): absent, null, wrong type.
+    refused(edit(&pristine, |v| {
+        v.as_object_mut().expect("object").remove("recovery_attempts");
+    }), "missing field `recovery_attempts`");
+    refused(edit(&pristine, |v| set(v, "recovery_attempts", serde_json::Value::Null)), "invalid type: null");
+    refused(edit(&pristine, |v| set(v, "recovery_attempts", json!("two"))), "invalid type");
+    refused(edit(&pristine, |v| set(v, "recovery_attempts", json!(-1))), "invalid value");
+
+    // `stages`: absent, null, wrong type whole, one element, every element;
+    // `[]` is "no stages", distinct from absent.
+    refused(edit(&pristine, |v| {
+        v.as_object_mut().expect("object").remove("stages");
+    }), "missing field `stages`");
+    refused(edit(&pristine, |v| set(v, "stages", serde_json::Value::Null)), "invalid type: null");
+    refused(edit(&pristine, |v| set(v, "stages", json!(123))), "invalid type");
+    refused(edit(&pristine, |v| set(v, "stages", json!([123]))), "invalid type");
+    refused(edit(&pristine, |v| set(v, "stages", json!([123, 456]))), "invalid type");
+    refused(edit(&pristine, |v| set(v, "stages", json!(["pending", 5]))), "invalid type");
+    let duplicated = pristine.replace("\"stages\": [", "\"stages\": [\n    ],\n  \"stages\": [");
+    refused(duplicated, "duplicate field `stages`");
+    fs::write(&path, edit(&pristine, |v| set(v, "stages", json!([])))).expect("write");
+    let empty: RunRecord = serde_json::from_str(&fs::read_to_string(&path).expect("read")).expect("an empty stage list loads");
+    assert_eq!(empty.next_stage(), Some(Stage::Discovery), "`[]` means no stages done, distinct from absent");
+
+    // `run_id` and `platform_id`: malformed, unknown, and mismatched directory.
+    refused(edit(&pristine, |v| set(v, "run_id", json!("not-an-id"))), "invalid run ID");
+    refused(edit(&pristine, |v| set(v, "platform_id", json!("myspace"))), "unknown variant");
+    let swapped = pristine.replace(&format!("\"platform_id\": \"{}\"", PlatformId::Discord), "\"platform_id\": \"slack\"");
+    fs::write(&path, swapped).expect("write");
+    match repo.state().list().into_iter().find(|(_, _, record)| record.is_err()) {
+        Some((_, _, Err(StateError::Corrupt { message, .. }))) => {
+            assert!(message.contains("not its directory"), "{message}");
+        }
+        other => panic!("expected the directory disagreement to be refused, got {other:?}"),
+    }
+
+    // Trailing or invalid content after a valid document.
+    refused(format!("{pristine}garbage"), "trailing characters");
+
+    // Absence is the explicit ledger-era migration value (zero); malformed
+    // present counts must never reset the spent allowance.
+    for value in [json!(null), json!("1"), json!(""), json!(true), json!(1.5), json!(-1), json!([]), json!({})] {
+        refused(edit(&pristine, |v| set(v, "invocations", value)), "invalid");
+    }
+    refused(pristine.replace("\"invocations\": 0,", "\"invocations\": 0, \"invocations\": 1,"), "duplicate field `invocations`");
+    fs::write(&path, edit(&pristine, |v| { v.as_object_mut().unwrap().remove("invocations"); })).expect("legacy record");
+    assert_eq!(repo.state().load(run.run_id.as_str()).expect("legacy count").invocations, 0);
+
+    // The control row's record is restored and loads again.
+    fs::write(&path, &pristine).expect("restore");
+    assert_eq!(repo.run(&run).status, RunStatus::Active);
 }
 
 #[test]
@@ -1166,43 +1475,37 @@ fn cleanup_previews_exact_removals_and_protects_open_runs() {
     let renewal_dir = state.renewals_dir();
     fs::create_dir_all(&renewal_dir).expect("mkdir");
     fs::write(renewal_dir.join("broken.json"), "{}").expect("write");
-    // Hold the Signal run's ledger lock, as a running Claudine would.
-    let lock_path = repo.run_dir(&runs[&PlatformId::Signal]).join("budget.json.lock");
-    let lock = fs::File::create(&lock_path).expect("lock file");
-    lock.lock().expect("hold the ledger lock");
 
     let before = repo.tree();
-    let plan = cleanup::plan(&state, &day("2026-09-17"), cleanup::DEFAULT_THRESHOLD_DAYS);
+    let plan = cleanup::plan(&state, &day("2026-09-17"), cleanup::DEFAULT_THRESHOLD_DAYS).expect("plan");
     let removal_paths: Vec<&str> = plan.removals.iter().map(|r| r.path.as_str()).collect();
     assert_eq!(
         removal_paths,
-        [runs[&PlatformId::Discord].run_dir.as_str(), runs[&PlatformId::Telegram].run_dir.as_str()],
+        [
+            runs[&PlatformId::Discord].run_dir.as_str(),
+            runs[&PlatformId::Telegram].run_dir.as_str(),
+            runs[&PlatformId::Signal].run_dir.as_str(),
+        ],
         "{plan:#?}"
     );
     assert!(plan.removals[0].loses_resumability, "a failed run can no longer be resumed");
     assert!(!plan.removals[1].loses_resumability);
+    assert!(plan.removals[2].loses_resumability, "an exhausted ledger-era run is still resumable");
     assert_eq!(plan.removals[0].age_days, 47);
     let protected: BTreeMap<&str, &str> = plan.protected.iter().map(|p| (p.path.as_str(), p.reason.as_str())).collect();
     assert_eq!(protected[runs[&PlatformId::Slack].run_dir.as_str()], "the candidate awaits review");
-    assert_eq!(protected[runs[&PlatformId::Signal].run_dir.as_str()], "a Claudine runner holds the ledger lock");
     assert!(protected["messenger/.research-state/renewals/broken.json"].contains("unreadable"));
     assert_eq!(plan.younger, 1, "the recent rejected run is kept");
     assert!(repo.run_dir(&runs[&PlatformId::Discord]).exists(), "a preview deletes nothing");
 
-    drop(lock);
     let removed = cleanup::apply(&state, &plan).expect("apply");
     assert_eq!(removed, removal_paths);
     assert!(!repo.run_dir(&runs[&PlatformId::Discord]).exists());
     assert!(!repo.run_dir(&runs[&PlatformId::Telegram]).exists());
-    for platform in [PlatformId::Slack, PlatformId::WhatsApp, PlatformId::Signal] {
+    for platform in [PlatformId::Slack, PlatformId::WhatsApp] {
         assert!(repo.run_dir(&runs[&platform]).exists(), "{platform} kept");
     }
     assert_eq!(repo.tree(), before, "cleanup never touches accepted research");
-    // The Signal run was released after the preview; it was not in the plan,
-    // so it survives until a new preview lists it.
-    let again = cleanup::plan(&state, &day("2026-09-17"), cleanup::DEFAULT_THRESHOLD_DAYS);
-    assert_eq!(again.removals.len(), 1);
-    assert!(again.removals[0].loses_resumability, "an exhausted run can be resumed after a grant");
 }
 
 #[test]

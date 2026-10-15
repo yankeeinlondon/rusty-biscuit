@@ -121,8 +121,8 @@ fn mapping_envelopes_resolve_identically_with_origin_metadata() {
     assert_eq!(pure_resolved.json_schema, tagged_resolved.json_schema);
     assert_eq!(pure_resolved.referenced_files, vec![biscuit_file::canonicalize_simplified(&pure).unwrap()]);
     assert_eq!(tagged_resolved.referenced_files, vec![biscuit_file::canonicalize_simplified(&tagged).unwrap()]);
-    assert_eq!(pure_resolved.origin.uri.as_deref(), Some(pure.as_path()));
-    assert_eq!(tagged_resolved.origin.uri.as_deref(), Some(tagged.as_path()));
+    assert_eq!(pure_resolved.origin.file(), Some(pure.as_path()));
+    assert_eq!(tagged_resolved.origin.file(), Some(tagged.as_path()));
 }
 
 #[test]

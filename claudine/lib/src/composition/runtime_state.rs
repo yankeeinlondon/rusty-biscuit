@@ -1,32 +1,9 @@
-//! The invocation-local runtime state cell.
+//! Invocation-local mutations, output accumulation, and lexical sequence data.
 //!
-//! One [`RuntimeState`] is created per composition *invocation* — a standalone
-//! `compose`/`inline-compose` run, a `--loop` run across all of its iterations,
-//! or a whole sequence across all of its steps — and is shared by every
-//! lifecycle action, loop rematerialization, and (from phase 8) every sequence
-//! step. It owns the two things that outlive a single provider attempt:
-//!
-//! - **accumulated mutations** — what lifecycle `set:` mappings write
-//! - **`outputs`** — the append-only task-output accumulator
-//!
-//! Neither touches the process environment, the process working directory, or
-//! the filesystem: `set` is the in-memory counterpart of `set_frontmatter`.
-//!
-//! ## Layer precedence
-//!
-//! A just-in-time composition folds four layers into one [`LayeredOverrides`],
-//! lowest precedence first (spec → *Execution Architecture*):
-//!
-//! 1. the live source document's frontmatter (Darkmatter's own base — not
-//!    represented here)
-//! 2. evaluated task `params` (data), then sequence user setters (authored)
-//! 3. accumulated runtime mutations and `outputs` (data)
-//! 4. the reserved per-step overlay (`state`/`previous`/`next`/`sequence_id`,
-//!    data)
-//!
-//! [`layered_set_overrides`] is the single place that ordering is encoded.
-//! Only user setters are authored templates; every data value reaches
-//! Darkmatter raw and is never scanned for `{{ … }}` or `$( … )`.
+//! Frontmatter layers contain authored values and runtime `set` writes.
+//! Sequence values travel separately through `LayeredOverrides`, so compose
+//! cannot persist them or overwrite an authored `fm.seq` property. The live
+//! runtime cell supplies event-time outputs; a snapshot supplies a reread.
 
 use std::collections::BTreeSet;
 use std::sync::Mutex;
@@ -39,7 +16,7 @@ use serde_json::{Map, Value};
 
 use super::sequence::reserved::ROOT_OVERLAY_KEYS;
 
-/// The reserved frontmatter key holding the accumulating output array.
+/// The output member name within the sequence runtime root.
 pub const OUTPUTS_KEY: &str = "outputs";
 
 /// A poisoned cell means a task panicked mid-write; there is no partial state
@@ -75,6 +52,10 @@ pub struct RuntimeSnapshot {
     pub mutations: FrontmatterMap,
     /// Committed output entries, in execution order.
     pub outputs: Vec<Value>,
+    /// Innermost sequence position, separate from authored mutations.
+    pub seq: Option<Value>,
+    /// Active container handoffs, inherited by parallel runtime branches.
+    pub proxy_chain: Vec<std::path::PathBuf>,
 }
 
 /// The shared runtime cell. See the [module docs](self).
@@ -100,12 +81,56 @@ impl RuntimeState {
     ///
     /// This is how a parallel group gives each member a private buffer that
     /// *starts* from the group's shared view: the member reads
-    /// `{{ last(outputs) }}` as it stood at group start and its own writes land
+    /// `{{ last(seq.outputs) }}` as it stood at group start and its own writes land
     /// where only the post-group merge can see them.
     pub fn from_snapshot(snapshot: RuntimeSnapshot) -> Self {
         Self {
             inner: Mutex::new(snapshot),
         }
+    }
+
+    /// Install a child position without publishing it as frontmatter.
+    pub fn set_sequence_binding(&self, value: Value) {
+        self.inner.lock().expect(POISONED).seq = Some(value);
+    }
+
+    /// Discard an abandoned container attempt's results while retaining its writes.
+    pub fn clear_outputs(&self) {
+        self.inner.lock().expect(POISONED).outputs.clear();
+    }
+
+    /// Restore the enclosing lexical accumulator without undoing child mutations.
+    pub fn replace_sequence_scope(&self, seq: Option<Value>, outputs: Vec<Value>) {
+        let mut inner = self.inner.lock().expect(POISONED);
+        inner.seq = seq;
+        inner.outputs = outputs;
+    }
+
+    /// Enter a container handoff and restore its enclosing chain on drop.
+    pub(crate) fn enter_container_proxy<'a>(
+        &'a self, source: &std::path::Path, target: &std::path::Path, authored: &str,
+    ) -> Result<ContainerProxyGuard<'a>, super::error::CompositionError> {
+        let mut inner = self.inner.lock().expect(POISONED);
+        let before = inner.proxy_chain.len();
+        if inner.proxy_chain.is_empty() {
+            inner.proxy_chain.push(biscuit_file::canonicalize_simplified(source).unwrap_or_else(|_| source.to_path_buf()));
+        }
+        if !super::lifecycle::control::proxy_handoff_allowed(&inner.proxy_chain, target) {
+            let error = super::error::CompositionError::LifecycleProxyCycle {
+                source_path: source.to_path_buf(), target: authored.into(),
+                chain: inner.proxy_chain.iter().map(|path| biscuit_file::to_portable_string(path)).collect(),
+                limit: super::lifecycle::control::MAX_PROXY_HOPS,
+            };
+            inner.proxy_chain.truncate(before);
+            return Err(error);
+        }
+        inner.proxy_chain.push(target.to_path_buf());
+        Ok(ContainerProxyGuard { runtime: self, before })
+    }
+
+    /// The lexical sequence with the current committed outputs.
+    pub fn sequence_value(&self) -> Value {
+        self.snapshot().sequence_value()
     }
 
     /// Copy the current layers out of the cell.
@@ -184,13 +209,12 @@ impl RuntimeState {
         self.append_output_entry(Value::String(trim_transport_newline(text).to_string()));
     }
 
-    /// Commit an already-shaped entry — a string for an atomic task, an array
-    /// of strings for a completed parallel group.
+    /// Commit a native result: text, a sequence array, or a named group object.
     pub fn append_output_entry(&self, entry: Value) {
         self.inner.lock().expect(POISONED).outputs.push(entry);
     }
 
-    /// The committed entries as the `outputs` frontmatter value.
+    /// The committed entries as the `seq.outputs` value.
     pub fn outputs_value(&self) -> Value {
         Value::Array(self.inner.lock().expect(POISONED).outputs.clone())
     }
@@ -202,8 +226,7 @@ impl RuntimeState {
 
     /// The most recent entry, when it is a plain string.
     ///
-    /// A completed parallel group commits an array entry; there is no single
-    /// text for it, so this yields `None` rather than a flattened join.
+    /// Container results have no single text, so they yield `None` without flattening.
     pub fn last_output_text(&self) -> Option<String> {
         match self.inner.lock().expect(POISONED).outputs.last() {
             Some(Value::String(text)) => Some(text.clone()),
@@ -213,7 +236,16 @@ impl RuntimeState {
 }
 
 impl RuntimeSnapshot {
-    /// The committed entries as the `outputs` frontmatter value.
+    /// Whole-root replacement prevents fallback to an enclosing accumulator.
+    pub fn sequence_value(&self) -> Value {
+        let mut value = self.seq.clone().unwrap_or_else(||
+            crate::composition::lifecycle::bindings::SequenceBinding::standalone(Vec::new()).to_value());
+        value.as_object_mut().expect("sequence bindings are objects")
+            .insert("outputs".into(), self.outputs_value());
+        value
+    }
+
+    /// The committed entries as the `seq.outputs` value.
     pub fn outputs_value(&self) -> Value {
         Value::Array(self.outputs.clone())
     }
@@ -247,6 +279,7 @@ pub fn trim_transport_newline(text: &str) -> &str {
 pub struct LayeredOverrides {
     values: Map<String, Value>,
     data_keys: BTreeSet<String>,
+    sequence_value: Option<Value>,
 }
 
 impl LayeredOverrides {
@@ -296,7 +329,7 @@ impl LayeredOverrides {
             .filter(|key| values.contains_key(*key))
             .cloned()
             .collect();
-        Self { values, data_keys }
+        Self { values, data_keys, sequence_value: None }
     }
 
     /// Layer every key of `layer` on top: each replaces any earlier value and
@@ -311,6 +344,7 @@ impl LayeredOverrides {
 
     /// Layer `other` on top, keeping the origin of each of its keys.
     pub fn extend(&mut self, other: &LayeredOverrides) {
+        if other.sequence_value.is_some() { self.sequence_value = other.sequence_value.clone(); }
         for (key, value) in &other.values {
             self.insert(other.origin_of(key), key.clone(), value.clone());
         }
@@ -325,19 +359,22 @@ impl LayeredOverrides {
         self.values.insert(key, value);
     }
 
-    /// Guarantee an `outputs` key without disturbing one a layer supplied.
-    ///
-    /// Preparation applies this to every composition so library-only callers
-    /// and tests — which never build layers through [`layered_set_overrides`]
-    /// — still see an initialized accumulator rather than an undefined root.
+    /// Initialize standalone sequence data when no lexical root was supplied.
     pub fn initialize_outputs(&mut self) {
-        if !self.values.contains_key(OUTPUTS_KEY) {
-            self.insert(
-                OverrideOrigin::Data,
-                OUTPUTS_KEY.to_string(),
-                Value::Array(Vec::new()),
-            );
+        if self.sequence_value.is_none() {
+            self.sequence_value = Some(crate::composition::lifecycle::bindings::SequenceBinding::standalone(Vec::new()).to_value());
         }
+    }
+
+    /// Runtime sequence data never enters the frontmatter override map.
+    pub fn with_sequence_value(mut self, value: Option<Value>) -> Self {
+        self.sequence_value = value;
+        self
+    }
+
+    /// The read-only sequence value carried alongside the override layers.
+    pub fn sequence_value(&self) -> Option<&Value> {
+        self.sequence_value.as_ref()
     }
 
     /// Where `key`'s value came from. An absent key reads as authored.
@@ -382,15 +419,10 @@ impl LayeredOverrides {
     }
 }
 
-/// Fold the just-in-time composition layers into one [`LayeredOverrides`].
-///
-/// Later arguments win. `base` keeps its own origins (user setters are
-/// authored; a loop's carried values or a `proxy.with:` overlay are data);
-/// runtime mutations, `outputs`, and the reserved overlay are always data.
-/// `outputs` is always present in the result — a document composed outside any
-/// sequence still resolves `{{ last(outputs) }}` — so this is the single
-/// guarantee behind the spec's "single-document `compose` / `inline-compose`
-/// use the same key" rule.
+/// Fold authored setters, runtime mutations, and reserved runtime bindings.
+/// Later frontmatter layers win; sequence data stays outside that map. A
+/// reserved overlay replaces the complete position while outputs come from
+/// the same runtime snapshot as the mutations.
 pub fn layered_set_overrides(
     base: LayeredOverrides,
     runtime: Option<&RuntimeSnapshot>,
@@ -402,14 +434,31 @@ pub fn layered_set_overrides(
             merged.insert(OverrideOrigin::Data, key.clone(), value.clone());
         }
     }
-    merged.insert(
-        OverrideOrigin::Data,
-        OUTPUTS_KEY.to_string(),
-        runtime.map_or_else(|| Value::Array(Vec::new()), RuntimeSnapshot::outputs_value),
-    );
-    merged.push(OverrideOrigin::Data, reserved_overlay);
+    let mut seq = reserved_overlay.and_then(|overlay| overlay.get("seq")).cloned()
+        .or_else(|| merged.sequence_value.clone()).unwrap_or_else(||
+            runtime.map_or_else(|| crate::composition::lifecycle::bindings::SequenceBinding::standalone(Vec::new()).to_value(), RuntimeSnapshot::sequence_value));
+    if let Some(Value::Object(overlay)) = reserved_overlay {
+        for (key, value) in overlay {
+            if key != "seq" { merged.insert(OverrideOrigin::Data, key.clone(), value.clone()); }
+        }
+    }
+    seq.as_object_mut().expect("sequence bindings are objects").insert("outputs".into(),
+        runtime.map_or_else(|| Value::Array(Vec::new()), RuntimeSnapshot::outputs_value));
+    merged.sequence_value = Some(seq);
     merged
 }
 
 #[cfg(test)]
 mod tests;
+
+/// Restores a lexical handoff chain without discarding runtime mutations.
+pub(crate) struct ContainerProxyGuard<'a> {
+    runtime: &'a RuntimeState,
+    before: usize,
+}
+
+impl Drop for ContainerProxyGuard<'_> {
+    fn drop(&mut self) {
+        self.runtime.inner.lock().expect(POISONED).proxy_chain.truncate(self.before);
+    }
+}

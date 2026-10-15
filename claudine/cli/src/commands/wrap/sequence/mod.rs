@@ -18,6 +18,7 @@ use tracing::info_span;
 use crate::commands::compose::SharedComposeArgs;
 use crate::log;
 
+mod container;
 mod iterate;
 mod jit;
 mod phase1c;
@@ -25,6 +26,7 @@ mod report;
 mod resolve;
 mod review;
 mod task_frames;
+mod task_prewarm;
 mod task_run;
 
 use jit::StepComposeContext;
@@ -53,13 +55,18 @@ pub(super) fn run_was_interrupted(exit_code: i32, interrupted: &AtomicBool) -> b
 
 /// Approve every shell command the preflight graph can reach.
 ///
-/// The graph's own commands arrive already resolved, so what the gate approves
-/// is byte-identical to what execution runs. Referenced prompt documents
-/// contribute their template `::shell` directives through the same pass, which
-/// is what makes "no approval prompts once the sequence starts" honest for work
-/// several hops from the sequence document. Schema verdicts are deferred during
-/// this discovery-only compose because prompt-task `params` bind just in time;
-/// the task's canonical prepare validates the resulting effective values.
+/// The graph's resolved-byte commands arrive already resolved, so what the
+/// gate approves is byte-identical to what runs; every other task command is
+/// approved by its typed shape. Referenced prompt documents contribute their
+/// `::shell` directives through the same pass, once per reference: each
+/// declares the sequence's late roots (and the task's late `params`) to
+/// Darkmatter's discovery, carries the task's approval-time `params` as data,
+/// and, for a later task, requires every command with a placeholder to be a
+/// template. That is what makes "no approval prompts once the sequence starts"
+/// honest for work several hops from the sequence document. Schema verdicts are
+/// deferred during this discovery-only compose because prompt-task `params`
+/// bind just in time; the task's canonical prepare validates the resulting
+/// effective values.
 #[allow(clippy::too_many_arguments, clippy::result_large_err)]
 fn approve_preflight_graph(
     graph: &composition::PreflightGraph,
@@ -70,9 +77,13 @@ fn approve_preflight_graph(
     launch_area: Option<&std::path::Path>,
     invocation: &claudine::invocation_context::InvocationContext,
     graph_context: &darkmatter::markdown::compose::ComposeContext,
-) -> Result<HashSet<String>> {
-    if graph.shell_commands.is_empty() && graph.prompt_documents.is_empty() {
-        return Ok(HashSet::new());
+    closed: Option<&darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals>,
+) -> Result<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals> {
+    if graph.shell_commands.is_empty()
+        && graph.template_candidates.is_empty()
+        && graph.prompt_documents.is_empty()
+    {
+        return Ok(closed.cloned().unwrap_or_default());
     }
 
     let approval_options = super::apply_composition_shell_overrides(
@@ -85,6 +96,12 @@ fn approve_preflight_graph(
         shared.yolo,
     );
 
+    let mut approval_options = approval_options;
+    if let Some(approved) = closed {
+        approval_options.closed_approvals = Some(approved.clone());
+        approval_options.approval_handler = None;
+    }
+
     // The document the graph walk is composing, so a failure can name it.
     let composing = std::cell::RefCell::new(None::<std::path::PathBuf>);
     // This approval pass is one discovery run: every referenced document (and
@@ -92,10 +109,11 @@ fn approve_preflight_graph(
     // it. Extending through the invocation instead makes each extension a run
     // of its own, which re-observed the working tree once per prompt document.
     let approval_epoch = invocation.begin_document_epoch();
-    let compose_options = |path: &std::path::Path| -> Result<
+    let compose_options = |reference: &composition::PromptReference| -> Result<
         darkmatter::markdown::compose::ComposeRequest,
         claudine::composition::CompositionError,
     > {
+        let path = reference.path.as_path();
         composing.replace(Some(path.to_path_buf()));
         let source_context = invocation
             .derive_source(path)
@@ -119,7 +137,16 @@ fn approve_preflight_graph(
             // directives, and resolving a deferred `success:`/`failure:` read
             // -side file reference here would trip on a file that event has
             // not created yet.
-            .with_exclude_keys(claudine::composition::LIFECYCLE_EVENT_KEYS.iter().copied());
+            .with_exclude_keys(claudine::composition::LIFECYCLE_EVENT_KEYS.iter().copied())
+            .with_deferred_shell_roots(reference.deferred_shell_roots());
+        // The task's approval-time `params` reach its document as data, as
+        // they do at the task's turn.
+        if !reference.params.is_empty() {
+            opts = composition::LayeredOverrides::data(Some(&serde_json::Value::Object(
+                reference.params.clone(),
+            )))
+            .apply_to(opts);
+        }
         if let Some(area) = launch_area {
             opts = opts.with_file_ref_fallback_dir(area.to_path_buf());
         }
@@ -139,6 +166,42 @@ fn approve_preflight_graph(
                 }
             })?;
     Ok(result.approved_commands)
+}
+
+/// Submit every early lifecycle phrase the preflight graph reaches for TTS
+/// pre-warm, before step one launches.
+///
+/// Settings load only when pre-warm is live; submission never waits for
+/// synthesis.
+fn submit_preflight_prewarm(
+    graph: &composition::PreflightGraph,
+    source: &ResolvedCompositionSource,
+    user_set_overrides: Option<&serde_json::Value>,
+    repo_root: Option<&std::path::Path>,
+    invocation: &claudine::invocation_context::InvocationContext,
+    graph_context: &darkmatter::markdown::compose::ComposeContext,
+) {
+    let handle = invocation.prewarm();
+    if !handle.is_enabled() {
+        return;
+    }
+    // As lifecycle playback does, an unreadable configuration plays with the
+    // defaults.
+    let settings = claudine::dispatch::loader::load_claudine_config(None, repo_root)
+        .map(|config| claudine::dispatch::loader::bridge_tts_settings(&config))
+        .unwrap_or_default();
+    let caller_keys = user_set_overrides
+        .and_then(serde_json::Value::as_object)
+        .map(|setters| setters.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    claudine::composition::lifecycle::prewarm::submit_sequence_preflight(
+        handle,
+        &settings,
+        graph,
+        source,
+        caller_keys,
+        graph_context,
+    );
 }
 
 /// Whether static preflight failed because a prompt document's `::file`
@@ -194,6 +257,87 @@ pub(crate) fn execute_sequence(
     source_context: claudine::invocation_context::SourceContext,
     file_resolution_context: biscuit_file::FileResolutionContext,
 ) -> Result<i32> {
+    use claudine::composition::lifecycle::{DefaultLifecycleEmitter, LifecycleRuntimeContext, LifecycleSignal, parse_lifecycle_config};
+    use claudine::composition::lifecycle::bindings::SequenceBinding;
+    use claudine::composition::lifecycle::executor::StackExecutionContext;
+    use claudine::composition::lifecycle::runtime::ContainerEventDecision;
+    use claudine::composition::lifecycle::context::LifecycleErrorInfo;
+    let runtime = Arc::new(composition::RuntimeState::new());
+    let seq = SequenceBinding::container(&plan.sequence_id, Vec::new()).to_value();
+    runtime.set_sequence_binding(seq.clone());
+    let mut frontmatter: serde_json::Map<String, serde_json::Value> = source.markdown.frontmatter().as_map().iter().map(|(k,v)| (k.clone(),v.clone())).collect();
+    if let Some(values) = user_set_overrides.as_ref().and_then(serde_json::Value::as_object) {
+        frontmatter.extend(values.clone());
+    }
+    let lifecycle = parse_lifecycle_config(&serde_json::Value::Object(frontmatter.clone()), &source.resolved_path)?;
+    let config = claudine::dispatch::loader::load_claudine_config(None, source_context.repository_root()).ok();
+    let settings = config.as_ref().map(claudine::dispatch::loader::bridge_tts_settings).unwrap_or_default();
+    let messaging = config.as_ref().map(claudine::dispatch::loader::bridge_messaging_settings).unwrap_or_else(|| claudine::messaging::RuntimeMessagingSettings { user: None, repo: None });
+    let term = log::terminal();
+    let emitter = DefaultLifecycleEmitter;
+    let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
+    let context = invocation.capture_launch_context(&requirements);
+    let engine = darkmatter::effects::EffectEngine::builder().mutation_root(source_context.base_dir()).build();
+    let live = Mutex::new(frontmatter.clone());
+    let lifecycle_context = LifecycleRuntimeContext { settings: &settings, messaging: &messaging, term: &term,
+        source_path: &source.resolved_path, repo_root: source_context.repository_root(), launch_area: Some(file_resolution_context.request_cwd()), context: Some(&context) };
+    let stack = StackExecutionContext { seq: Some(&seq), signal: LifecycleSignal::Initialize, scope: None,
+        frontmatter: &frontmatter, live_frontmatter: Some(&live), runtime_state: Some(&runtime), err: None,
+        timing: None, current: Some(invocation.current_authority().memoized()), group: None, loop_values: None, base_dir: Some(source_context.base_dir()),
+        ctx_base_dir: Some(file_resolution_context.request_cwd()), prepared_context: Some(&context), file_resolution_context: &file_resolution_context,
+        effect_engine: &engine, shell_runner: invocation.shell_runner(), emitter: &emitter, term: &term,
+        source_path: &source.resolved_path, repo_root: source_context.repository_root(), messaging: &messaging, settings: &settings };
+    let mut root = container::RootRun::new(&lifecycle, &lifecycle_context, stack, Arc::clone(&runtime));
+    if !shared.dry_run {
+        match root.event(LifecycleSignal::Initialize, None)? {
+            ContainerEventDecision::Continue => {},
+            ContainerEventDecision::Skip => return Ok(0),
+            ContainerEventDecision::Proxy { target, overlay } => return container::run_proxy(source, shared, &invocation, &source_context, &file_resolution_context, user_set_overrides.as_ref(), &caller_input_records, &runtime, root.proxy_location.take().expect("proxy decision carries its authored location"), target, overlay, verbose, root.approved.as_ref()),
+            ContainerEventDecision::Finished { failed } => return Ok(if root.runner.is_cancelled() { 130 } else { i32::from(failed) }),
+            other => return Err(color_eyre::eyre::eyre!("invalid initialize transition: {other:?}")),
+        }
+    }
+    let mut startup_timings = startup_timings;
+    loop {
+        let outcome = execute_sequence_inner(source, plan.clone(), shared, user_set_overrides.clone(), caller_input_records.clone(), execution_options.clone(), verbose, perf_enabled, startup_timings.take(), invocation.clone(), source_context.clone(), file_resolution_context.clone(), &mut root);
+        if shared.dry_run { return outcome; }
+        let (signal, error) = match &outcome {
+            Ok(130) => {
+                root.runner.cancel(claudine::composition::lifecycle::cancellation::CancellationCause::Interrupt);
+                (LifecycleSignal::Cancelled, root.runner.primary_error().cloned())
+            },
+            Ok(0) => (LifecycleSignal::Success, None),
+            Ok(_) => (LifecycleSignal::Failure, root.child_error.take().or_else(|| Some(LifecycleErrorInfo::from_action_failure("sequence", "a sequence child failed")))),
+            Err(error) => (if root.started { LifecycleSignal::Failure } else { LifecycleSignal::Blocked }, Some(LifecycleErrorInfo::from_error_or_action("sequence", error.as_ref()))),
+        };
+        runtime.set_sequence_binding(seq.clone());
+        let decision = root.pending.take().map(Ok).unwrap_or_else(|| root.event(signal, error));
+        match decision? {
+            ContainerEventDecision::Retry { delay, overlay } => root.retry(delay, &overlay)?,
+            ContainerEventDecision::Proxy { target, overlay } => return container::run_proxy(source, shared, &invocation, &source_context, &file_resolution_context, user_set_overrides.as_ref(), &caller_input_records, &runtime, root.proxy_location.take().expect("proxy decision carries its authored location"), target, overlay, verbose, root.approved.as_ref()),
+            ContainerEventDecision::Finished { failed } => return if root.runner.is_cancelled() { Ok(130) } else if failed { outcome.and(Ok(1)) } else { Ok(0) },
+            ContainerEventDecision::Skip => return Ok(0),
+            other => return Err(color_eyre::eyre::eyre!("invalid terminal transition: {other:?}")),
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_sequence_inner(
+    source: &ResolvedCompositionSource,
+    plan: SequencePlan,
+    shared: &SharedComposeArgs,
+    user_set_overrides: Option<serde_json::Value>,
+    caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
+    execution_options: SequenceExecutionOptions,
+    verbose: u8,
+    perf_enabled: bool,
+    startup_timings: Option<crate::perf::StartupTimings>,
+    invocation: claudine::invocation_context::InvocationContext,
+    source_context: claudine::invocation_context::SourceContext,
+    file_resolution_context: biscuit_file::FileResolutionContext,
+    root: &mut container::RootRun<'_>,
+) -> Result<i32> {
     let silent = shared.silent;
 
     // Inline vs compose is decided once for the whole sequence by the
@@ -244,8 +388,8 @@ pub(crate) fn execute_sequence(
     if !silent {
         let term = log::terminal();
         let status = Status::from_prose(format!(
-            "<b>Sequence:</b> <yellow>{}</yellow> step(s), <i>fail_fast</i> is set to <blue>{}</blue>",
-            total_steps, effective_fail_fast
+            "<b>Sequence:</b> <yellow>{}</yellow> step(s)",
+            total_steps
         ))
         .state(StatusState::Info);
         log::message(&status.render(&term));
@@ -274,9 +418,6 @@ pub(crate) fn execute_sequence(
             ))
         }
     };
-
-    // A budgeted run stops through the same flag when its budget runs out.
-    crate::budget::attach_stop_flag(&interrupted);
 
     let shared_approval_cache: composition::SharedApprovalCache =
         Arc::new(Mutex::new(HashMap::new()));
@@ -307,9 +448,10 @@ pub(crate) fn execute_sequence(
     // resolved or a provider is launched: every referenced task, group,
     // catalog entry, and prompt document is loaded transitively; blocked
     // constructs are rejected; and every reachable shell command — including
-    // ones behind `when:` guards that read false today — is resolved to bytes
-    // and approved. A failure at this point is abort-all regardless of
-    // `fail_fast`, and `--dry-run` performs this identical walk.
+    // ones behind `when:` guards that read false today — is approved: the
+    // first task's as resolved bytes when every value exists now, every other
+    // command with a placeholder by its typed shape. A failure blocks the root
+    // container before any child starts; `--dry-run` performs the same walk.
     // One base launch context for the whole graph, captured before per-task
     // target selection: every launch-facing graph expression (`when:` guards,
     // command interpolation, task/group variable defaults) projects the
@@ -331,11 +473,20 @@ pub(crate) fn execute_sequence(
         graph_context.clone(),
         &prep_context.invocation,
         &prep_context.source_context,
+        user_set_overrides.as_ref(),
     )?;
     // A referenced prompt document composes only at its own turn, so its
     // single-pass lifecycle literals are checked here, before any approval
     // prompt or step can run.
     graph.validate_prompt_lifecycle_literals()?;
+    submit_preflight_prewarm(
+        &graph,
+        source,
+        user_set_overrides.as_ref(),
+        source_repo_root.as_deref(),
+        &prep_context.invocation,
+        &graph_context,
+    );
     let preflight_approved = approve_preflight_graph(
         &graph,
         source,
@@ -345,7 +496,10 @@ pub(crate) fn execute_sequence(
         Some(prep_context.launch_workspace.launch_cwd.as_path()),
         &prep_context.invocation,
         &graph_context,
+        root.approved.as_ref(),
     )?;
+    root.approved = Some(preflight_approved.clone());
+    if let Some(lifecycle) = &graph.root_lifecycle { root.runner.guard_mut().set_config(lifecycle.clone()); }
     let catalog = match prep_context.selection_config.as_ref() {
         Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(
             cfg.model_overrides.clone(),
@@ -385,7 +539,7 @@ pub(crate) fn execute_sequence(
     // state becomes `None` and the seam renders it from the installed
     // snapshot. No picker fires and no agent-resolution failure aborts.
     let resolved_targets: Vec<Option<claudine::composition::ResolvedExecutionTarget>> = if shared
-        .dry_run
+        .dry_run || total_steps == 0
     {
         let target = dry_run_sequence_target(
             explicit_provider,
@@ -601,6 +755,9 @@ pub(crate) fn execute_sequence(
     // No composition is *retained* here — execution re-composes each step at
     // its turn, and this context is what makes the two passes identical.
     let compose_ctx = StepComposeContext {
+        lifecycle_group: None,
+        prepared_context: None,
+        document_epoch: None,
         source_repo_root: source_repo_root.as_deref(),
         child_cwd: &prep_context.launch_workspace.child_cwd,
         launch_area: Some(prep_context.launch_workspace.launch_cwd.as_path()),
@@ -612,6 +769,9 @@ pub(crate) fn execute_sequence(
         invocation: &prep_context.invocation,
         // Each step opens its own run at its turn.
         run_evidence: None,
+        deferred_shell_roots: Default::default(),
+        validation_probe: false,
+        document_shell_values: None,
     };
 
     let Some(validated) = run_phase_1c_with_schema(
@@ -675,9 +835,23 @@ pub(crate) fn execute_sequence(
         verbose,
         perf_enabled,
     };
+    if !shared.dry_run {
+        root.started = true;
+        let decision = root.event(claudine::composition::LifecycleSignal::Start, None)?;
+        if !matches!(decision, claudine::composition::lifecycle::runtime::ContainerEventDecision::Continue) {
+            root.pending = Some(decision);
+            return Ok(1);
+        }
+    }
     let (summary, interrupt_observed) =
-        iterate::run_sequence_steps(&run_context, &mut perf_accumulator)?;
+        iterate::run_sequence_steps(&run_context, &mut perf_accumulator, &root.runtime)?;
 
+    if let Some(step) = summary.steps.iter().find(|step| !step.success) {
+        let mut error = claudine::composition::lifecycle::context::LifecycleErrorInfo::from_action_failure(
+            "sequence", step.error.clone().unwrap_or_else(|| "a sequence child failed".into()));
+        error.snapshot = step.error_snapshot.clone();
+        root.child_error = Some(error);
+    }
     if let Some(acc) = perf_accumulator.as_mut() {
         acc.set_invocation_work(&prep_context.invocation.work_snapshot());
     }

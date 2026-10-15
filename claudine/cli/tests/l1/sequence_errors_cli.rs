@@ -63,7 +63,7 @@ fn source_doc(workspace: &CliProcessFixture, name: &str, source: &str) -> std::p
     write(
         workspace,
         name,
-        &format!("---\nsequence: \"{source}\"\n---\nStep {{{{ state.name }}}}.\n"),
+        &format!("---\nsequence: \"{source}\"\n---\nStep {{{{ seq.name }}}}.\n"),
     )
 }
 
@@ -350,19 +350,32 @@ fn a_template_operator_producing_an_empty_name_names_the_item_index() {
 // ============================================================================
 
 #[test]
-fn max_parallel_on_a_serial_group_is_rejected() {
+fn removed_serial_execution_names_the_sequence_replacement() {
     let workspace = CliProcessFixture::named("sequence-errors-cli");
     let doc = write(
         &workspace,
         "mp-serial.md",
-        "---\nsequence:\n  - name: g\n    group:\n      name: G\n      execution: serial\n      max_parallel: 2\n      tasks:\n        - shell: echo hi\n---\nBody\n",
+        "---\nsequence:\n  - name: g\n    group:\n      name: G\n      execution: serial\n      max_parallel: 2\n      tasks:\n        - name: member\n          shell: echo hi\n---\nBody\n",
     );
 
     let stderr = run_and_flatten(&workspace, &doc, &[]);
     assert!(
-        stderr.contains("`max_parallel` is only valid on a parallel group"),
-        "a cap on a serial group is an authoring mistake, not a no-op; stderr:\n{stderr}"
+        stderr.contains("removed") && stderr.contains("execution") && stderr.contains("sequence"),
+        "serial groups must migrate to a sequence; stderr:\n{stderr}"
     );
+}
+
+#[test]
+fn removed_parallel_execution_names_the_implicit_concurrency_replacement() {
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
+    let doc = write(
+        &workspace,
+        "parallel.md",
+        "---\nsequence:\n  - name: g\n    group:\n      name: G\n      execution: parallel\n      tasks:\n        - name: member\n          shell: echo hi > ran.txt\n---\nBody\n",
+    );
+    let stderr = run_and_flatten(&workspace, &doc, &[]);
+    assert!(stderr.contains("removed") && stderr.contains("execution") && stderr.contains("omit"), "{stderr}");
+    assert!(!workspace.cwd().join("ran.txt").exists(), "no task ran: {stderr}");
 }
 
 #[test]
@@ -371,7 +384,7 @@ fn max_parallel_below_one_is_rejected() {
     let doc = write(
         &workspace,
         "mp-zero.md",
-        "---\nsequence:\n  - name: g\n    group:\n      name: G\n      execution: parallel\n      max_parallel: 0\n      tasks:\n        - shell: echo hi\n---\nBody\n",
+        "---\nsequence:\n  - name: g\n    group:\n      name: G\n      max_parallel: 0\n      tasks:\n        - name: member\n          shell: echo hi\n---\nBody\n",
     );
 
     let stderr = run_and_flatten(&workspace, &doc, &[]);
@@ -398,19 +411,16 @@ fn a_group_with_no_tasks_is_rejected() {
 }
 
 #[test]
-fn a_group_nested_inside_a_group_is_rejected() {
+fn a_named_group_nested_inside_a_group_passes_preflight() {
     let workspace = CliProcessFixture::named("sequence-errors-cli");
     let doc = write(
         &workspace,
         "g-nested.md",
-        "---\nsequence:\n  - name: g\n    group:\n      name: Outer\n      tasks:\n        - group:\n            name: Inner\n            tasks:\n              - shell: echo hi\n---\nBody\n",
+        "---\nsequence:\n  - name: g\n    group:\n      name: Outer\n      tasks:\n        - name: inner\n          group:\n            name: Inner\n            tasks:\n              - name: member\n                shell: echo hi\n---\nBody\n",
     );
 
-    let stderr = run_and_flatten(&workspace, &doc, &[]);
-    assert!(
-        stderr.to_lowercase().contains("nested"),
-        "groups do not nest in v1; stderr:\n{stderr}"
-    );
+    let output = workspace.command().args(["sequence", "--dry-run", "--yolo", doc.to_str().unwrap()]).assert().success().get_output().clone();
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("not supported"));
 }
 
 #[test]
@@ -419,7 +429,7 @@ fn a_catalog_reference_to_an_undefined_group_lists_what_is_available() {
     write(
         &workspace,
         "catalog.yaml",
-        "kind: group-catalog\ngroups:\n  - name: build\n    tasks:\n      - shell: echo hi\n",
+        "kind: group-catalog\ngroups:\n  - name: build\n    tasks:\n      - name: member\n        shell: echo hi\n",
     );
     let doc = write(
         &workspace,
@@ -453,7 +463,7 @@ fn a_group_document_cannot_be_executed_directly() {
     let group = write(
         &workspace,
         "group.yaml",
-        "kind: group\nname: bundle\ntasks:\n  - shell: echo x\n",
+        "kind: group\nname: bundle\ntasks:\n  - name: member\n    shell: echo x\n",
     );
 
     let stderr = run_and_flatten(&workspace, &group, &[]);
@@ -475,7 +485,7 @@ fn a_nested_sequence_prompt_document_is_rejected() {
 
     let stderr = run_and_flatten(&workspace, &doc, &[]);
     assert!(
-        stderr.contains("nested sequences are not supported"),
+        stderr.contains("prompt task") && stderr.contains("sequence:"),
         "stderr:\n{stderr}"
     );
 }
@@ -508,7 +518,7 @@ fn a_group_carrying_loop_is_rejected() {
     let doc = write(
         &workspace,
         "seq.md",
-        "---\nsequence:\n  - name: one\n    group:\n      name: looper\n      loop:\n        while: \"true\"\n      tasks:\n        - shell: echo x\n---\nBody.\n",
+        "---\nsequence:\n  - name: one\n    group:\n      name: looper\n      loop:\n        while: \"true\"\n      tasks:\n        - name: member\n          shell: echo x\n---\nBody.\n",
     );
 
     let stderr = run_and_flatten(&workspace, &doc, &[]);
@@ -519,19 +529,19 @@ fn a_group_carrying_loop_is_rejected() {
 }
 
 #[test]
-fn a_shell_command_depending_on_outputs_is_rejected() {
+fn a_shell_command_depending_on_outputs_needs_a_template_approval() {
     let workspace = CliProcessFixture::named("sequence-errors-cli");
-    // Approved bytes must equal executed bytes, and `outputs` does not exist at
-    // preflight — so this command could never be approved up front.
+    // `outputs` does not exist at preflight, so the command can be approved
+    // only by its shape; `--dry-run` cannot prompt for that.
     let doc = write(
         &workspace,
         "seq.md",
-        "---\nsequence:\n  - name: one\n    shell: \"echo {{ last(outputs) }}\"\n---\nBody.\n",
+        "---\nsequence:\n  - name: one\n    shell: \"echo {{ last(seq.outputs) }}\"\n---\nBody.\n",
     );
 
     let stderr = run_and_flatten(&workspace, &doc, &[]);
     assert!(
-        stderr.contains("outputs") && stderr.contains("preflight"),
+        stderr.contains("echo {{ last(seq.outputs) }}") && stderr.contains("approval"),
         "stderr:\n{stderr}"
     );
 }
@@ -543,7 +553,7 @@ fn a_parallel_write_back_collision_is_rejected() {
     let doc = write(
         &workspace,
         "seq.md",
-        "---\nsequence:\n  - name: one\n    group:\n      name: racers\n      execution: parallel\n      tasks:\n        - prompt: target.md\n          name: first\n        - prompt: target.md\n          name: second\n---\nBody.\n",
+        "---\nsequence:\n  - name: one\n    group:\n      name: racers\n      tasks:\n        - prompt: target.md\n          name: first\n        - prompt: target.md\n          name: second\n---\nBody.\n",
     );
 
     let stderr = run_and_flatten(&workspace, &doc, &[]);
@@ -593,4 +603,141 @@ fn a_unitless_shell_timeout_is_rejected() {
         stderr.contains("is not a valid duration") && stderr.contains("missing unit"),
         "the unit is part of the grammar; stderr:\n{stderr}"
     );
+}
+
+// ============================================================================
+// Removed budget ledger: usage errors before anything runs
+// ============================================================================
+
+#[test]
+fn the_budget_subcommand_is_an_unknown_subcommand() {
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
+    let output = workspace
+        .command()
+        .args(["budget", "init", "ledger.json"])
+        .assert()
+        .code(2)
+        .get_output()
+        .clone();
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(
+        stderr.contains("unrecognized subcommand") && stderr.contains("budget"),
+        "the removed subcommand is a clap usage error; stderr:\n{stderr}"
+    );
+}
+
+#[test]
+fn the_removed_ledger_option_is_an_unknown_option() {
+    let workspace = CliProcessFixture::named("sequence-errors-cli");
+    let doc = write(
+        &workspace,
+        "ledger.md",
+        "---\nsequence:\n  - name: only\n    shell: printf ok\n---\nBody\n",
+    );
+    let file_arg = doc.to_str().unwrap();
+    let removed_option = concat!("--budget", "-ledger");
+    let output = workspace
+        .command()
+        .args(["sequence", removed_option, "ledger.json", file_arg])
+        .assert()
+        .code(1)
+        .get_output()
+        .clone();
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(
+        stderr.contains(&format!("'{removed_option}'")) && stderr.contains("Supported order"),
+        "the removed option is refused as an unowned switch with usage guidance before anything runs; stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("Sequence:"),
+        "no step ran; stderr:\n{stderr}"
+    );
+    assert!(
+        !workspace.cwd().join("ledger.json").exists(),
+        "no ledger file is created by the refusal"
+    );
+}
+
+/// Messenger's generated admission-hook shape must refuse before a provider
+/// launches, even when the sequence continues after a failed prompt.
+#[cfg(unix)]
+#[test]
+fn a_refused_messenger_admission_prevents_every_provider_launch() {
+    let workspace = CliProcessFixture::named("messenger-admission");
+    let launches = common::launch_recorder::install(&workspace, "claude", "exit 0");
+    common::write_executable(&workspace.bin_dir().join("messenger"), "#!/bin/sh\necho 'agent-invocation limit reached' >&2\nexit 1\n");
+    write(&workspace, "prompt.md", "---\nstart:\n  - shell: messenger research admit-agent 2026-09-18-12345678 --root .\n---\nResearch.\n");
+    let sequence = write(&workspace, "run.md", "---\nsequence:\n  - name: first\n    prompt: './prompt.md'\n  - name: second\n    prompt: './prompt.md'\n---\n");
+    let output = workspace.command().args(["sequence", "--yolo", "--claude", sequence.to_str().unwrap()]).assert().failure().get_output().clone();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("agent-invocation limit"), "{stderr}");
+    assert!(common::launch_recorder::launches(&launches).is_empty(), "a denied admission launched a provider");
+}
+
+macro_rules! removed_fail_fast {
+    ($name:ident, $value:literal) => {
+        #[test]
+        fn $name() {
+            let workspace = CliProcessFixture::named("removed-fail-fast");
+            let stderr = run_and_flatten(&workspace, &workspace.cwd().join("missing.md"), &["--fail-fast", $value]);
+            assert!(stderr.contains("removed") && stderr.contains("--fail-fast") && stderr.contains("failure"), "{stderr}");
+            assert!(!stderr.contains("Sequence:"), "{stderr}");
+            assert!(!workspace.cwd().join("missing.md").exists());
+        }
+    };
+}
+
+removed_fail_fast!(criterion_2_fail_fast_true_is_a_removed_grammar_error, "true");
+removed_fail_fast!(criterion_2_fail_fast_false_is_a_removed_grammar_error, "false");
+removed_fail_fast!(criterion_2_fail_fast_malformed_is_still_a_removed_grammar_error, "invalid");
+
+#[test]
+fn removed_fail_fast_is_absent_from_sequence_help() {
+    let workspace = CliProcessFixture::named("removed-fail-fast-help");
+    let output = workspace.command().args(["sequence", "--help"]).assert().success().get_output().clone();
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("--fail-fast"));
+}
+
+macro_rules! sequence_rename_error {
+    ($name:ident, $old:literal, $new:literal) => {
+        #[test]
+        fn $name() {
+            let fixture = CliProcessFixture::named("sequence-rename");
+            let path = write(&fixture, "seq.md", &format!(
+                "---\nsequence: [alpha]\n---\nOriginal read: {{{{ {} }}}}.\n", $old));
+            let stderr = run_and_flatten(&fixture, &path, &[]);
+            assert!(stderr.contains("removed grammar") && stderr.contains($new), "{stderr}");
+            assert!(!fixture.audio_spool().exists());
+        }
+    };
+}
+sequence_rename_error!(rename_state, "state", "seq");
+sequence_rename_error!(rename_state_member, "state.name", "seq.name");
+sequence_rename_error!(rename_state_static_index, "state['sequence_id']", "seq.run_id");
+sequence_rename_error!(rename_previous, "previous", "seq.previous");
+sequence_rename_error!(rename_previous_state, "previous_state", "seq.previous");
+sequence_rename_error!(rename_next, "next", "seq.next");
+sequence_rename_error!(rename_next_state, "next_state", "seq.next");
+sequence_rename_error!(rename_outputs, "outputs", "seq.outputs");
+sequence_rename_error!(rename_sequence_id, "sequence_id", "seq.run_id");
+sequence_rename_error!(rename_step, "step", "seq.index");
+sequence_rename_error!(rename_total_steps, "total_steps", "seq.count");
+sequence_rename_error!(rename_is_first, "is_first", "seq.is_first");
+sequence_rename_error!(rename_is_last, "is_last", "seq.is_last");
+
+#[test]
+fn rename_cli_matrix_covers_the_catalog() {
+    let covered = ["state", "previous", "previous_state", "next", "next_state", "outputs",
+        "sequence_id", "step", "total_steps", "is_first", "is_last"];
+    let declared: Vec<_> = claudine::composition::lifecycle::bindings::RETIRED_SEQUENCE_NAMES.iter().map(|(name, _)| *name).collect();
+    assert_eq!(declared, covered);
+}
+
+#[test]
+fn a_rename_error_precedes_dynamic_sequence_source_effects() {
+    let fixture = CliProcessFixture::named("sequence-rename-before-source");
+    let path = write(&fixture, "seq.md", "---\nsequence: '$(must-not-run)'\n---\n{{ outputs }}\n");
+    let stderr = run_and_flatten(&fixture, &path, &[]);
+    assert!(stderr.contains("removed grammar") && stderr.contains("seq.outputs"), "{stderr}");
+    assert!(!stderr.contains("command not found"), "{stderr}");
 }

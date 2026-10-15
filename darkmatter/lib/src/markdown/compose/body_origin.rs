@@ -1,18 +1,20 @@
 //! Where each byte of a partially composed body came from.
 //!
-//! Two maps ride beside the body while the stages that scan it for
+//! Three maps ride beside the body while the stages that scan it for
 //! instructions run:
 //!
 //! - [`BodyOrigin`] maps the current text back to the loaded document, so a
 //!   failing expression can be anchored to its authored span. It is advisory:
 //!   when it stops describing the text it is dropped.
+//! - [`AuthoredBody`] maps it back to the body before any stage rewrote it, so
+//!   a shell command's placeholders can be read as authored. Advisory too.
 //! - [`DataRanges`] records which bytes are **data**: text an expression, a
 //!   shell command, a literal escape, or a data value inserted. No stage treats
 //!   data as an instruction. It is not advisory: a stage that finds it no
 //!   longer describes the text fails rather than treat data as authored.
 //!
 //! Every stage that rewrites the body reports the [`TextEdit`]s it applied,
-//! and [`BodyProvenance::advance`] carries both maps past them. Provenance
+//! and [`BodyProvenance::advance`] carries the maps past them. Provenance
 //! ends after the transclusion directive parse, the last stage that scans the
 //! body for instructions; later stages rewrite whole text and scan nothing.
 
@@ -122,6 +124,17 @@ impl BodyOrigin {
             text_len: body.len(),
             text_hash: hash_text(body),
         })
+    }
+
+    /// The map of `text` onto itself.
+    fn identity(text: &str) -> Self {
+        let mut segments = Vec::new();
+        push_segment(&mut segments, 0, 0, text.len());
+        Self {
+            segments,
+            text_len: text.len(),
+            text_hash: hash_text(text),
+        }
     }
 
     /// Whether this map was built for exactly `text`.
@@ -301,11 +314,55 @@ impl DataRanges {
     }
 }
 
-/// Both provenance maps of a body between the stages that scan it.
+/// The body as it was before any stage rewrote it, with a map from the
+/// current body back into it.
+///
+/// A shell command's placeholders are read from this text: the stages before
+/// shell expansion interpolate them into the current body, where a value's
+/// quotes, spaces, or operators would read as command syntax. Advisory like
+/// [`BodyOrigin`]: once it stops describing the current text, no authored
+/// command can be recovered and a shell site runs only as resolved bytes.
+#[derive(Debug, Clone)]
+pub(crate) struct AuthoredBody {
+    text: std::sync::Arc<str>,
+    map: BodyOrigin,
+}
+
+impl AuthoredBody {
+    fn capture(text: &str) -> Self {
+        Self {
+            text: text.into(),
+            map: BodyOrigin::identity(text),
+        }
+    }
+
+    /// The body before any stage rewrote it.
+    pub(crate) fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// The range of [`text`](Self::text) that `range` of `current` was copied
+    /// from, when all of it was and this map describes `current`.
+    pub(crate) fn project(&self, current: &str, range: &Range<usize>) -> Option<Range<usize>> {
+        self.map.describes(current).then(|| self.map.project(range)).flatten()
+    }
+
+    /// Carries the map past a stage; a map that does not describe `before`
+    /// is dropped.
+    pub(crate) fn advanced(self, before: &str, edits: &[TextEdit], after: &str) -> Option<Self> {
+        self.map.describes(before).then(|| Self {
+            map: self.map.after_edits(edits, after),
+            text: self.text,
+        })
+    }
+}
+
+/// The provenance maps of a body between the stages that scan it.
 #[derive(Debug, Clone)]
 pub(crate) struct BodyProvenance {
     pub(crate) origin: Option<BodyOrigin>,
     pub(crate) data: DataRanges,
+    pub(crate) authored: Option<AuthoredBody>,
 }
 
 impl BodyProvenance {
@@ -315,10 +372,11 @@ impl BodyProvenance {
         Self {
             origin: BodyOrigin::capture(markdown),
             data: DataRanges::none_for(markdown.content()),
+            authored: Some(AuthoredBody::capture(markdown.content())),
         }
     }
 
-    /// Carries both maps past a stage that rewrote `before` into `after` by
+    /// Carries every map past a stage that rewrote `before` into `after` by
     /// applying `edits`.
     ///
     /// ## Errors
@@ -328,6 +386,7 @@ impl BodyProvenance {
         self.data.ensure_describes(before)?;
         self.data = self.data.after_edits(edits, after);
         advance(&mut self.origin, before, edits, after);
+        self.authored = self.authored.take().and_then(|authored| authored.advanced(before, edits, after));
         Ok(())
     }
 }

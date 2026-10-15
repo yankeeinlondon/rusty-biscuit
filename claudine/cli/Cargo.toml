@@ -46,6 +46,14 @@ name = "claudine-fake-relay"
 path = "tests/bin/fake_relay/main.rs"
 required-features = ["test-fixtures"]
 
+# Test-only native executable that records its argv, for the shell template
+# tests that prove one argument per placeholder through Claudine's runners;
+# gated like the others.
+[[bin]]
+name = "claudine-argv-recorder"
+path = "tests/bin/argv_recorder/main.rs"
+required-features = ["test-fixtures"]
+
 [features]
 # Keep the bundled DuckDB build out of the ordinary local test graph. CI and
 # the explicit daemon-test recipe enable this feature on every supported OS.
@@ -57,7 +65,7 @@ real-tests = []
 prompt-tests = []
 # Test-only fixture binaries and process-level seams (the library's included):
 # never part of a default build or `cargo install`.
-test-fixtures = ["claudine/test-fixtures"]
+test-fixtures = ["claudine/test-fixtures", "dep:test-toolkit"]
 
 [dependencies]
 biscuit-file = { path = "../../biscuit-file/lib" }
@@ -67,6 +75,8 @@ biscuit-file = { path = "../../biscuit-file/lib" }
 biscuit-hash = { path = "../../biscuit-hash/lib", features = ["xx_hash"] }
 biscuit-speaks = { path = "../../biscuit-speaks/lib" }
 claudine = { path = "../lib" }
+# Only for the `claudine-argv-recorder` fixture binary (`test-fixtures`).
+test-toolkit = { path = "../../tools/test-toolkit", optional = true }
 playa = { path = "../../playa/lib", features = ["sound-effects", "native-playback"] }
 sniff = { path = "../../sniff/lib" }
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }

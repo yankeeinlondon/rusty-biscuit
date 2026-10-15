@@ -101,11 +101,16 @@ pub(crate) fn parse_lifecycle_config_with(
         LifecycleSignal::Blocked,
         LifecycleSignal::Failure,
         LifecycleSignal::Finalize,
+        LifecycleSignal::Cancelled,
     ] {
         let event = signal.property_name();
         let Some(value) = fm_obj.get(event) else {
             continue;
         };
+        if signal == LifecycleSignal::Cancelled && value.is_null() {
+            return Err(shape_error(source_file, &LifecyclePath::root(event),
+                "`cancelled` must be a stack; use `[]` for an empty cancellation opt-in".to_string()));
+        }
         let parser = StackParser {
             signal,
             source_file,
@@ -116,6 +121,9 @@ pub(crate) fn parse_lifecycle_config_with(
             refuse_initialize_shells(&nodes, source_file)?;
         }
         *config.stack_mut(signal) = nodes;
+        if signal == LifecycleSignal::Cancelled {
+            config.cancelled_declared = true;
+        }
     }
 
     if let Some(loop_value) = fm_obj.get("loop")
@@ -177,21 +185,17 @@ pub(crate) fn parse_task_action_stack_with(
         source_file,
         options,
     };
-    let nodes = parser.parse_stack(raw, &LifecyclePath::root(property), authored)?;
-    let mut refused = Ok(());
-    for_each_action(&nodes, &mut |action| {
-        if refused.is_ok() {
-            refused = refuse_task_set_shell(action, source_file);
-        }
-    });
-    refused.map(|()| nodes)
+    // A stack's whole-value `set` `$( … )` is parsed like any other; sequence
+    // preflight approves it, and an unapproved one refuses to run at its turn.
+    parser.parse_stack(raw, &LifecyclePath::root(property), authored)
 }
 
-/// A sequence task's `set` stores data; it cannot run a command.
+/// A `side_effect:` task's `set` stores data; it cannot run a command.
 ///
-/// A task's actions are parsed when the task runs, after the sequence's
-/// preflight approved its commands, so a whole-value `$( … )` there would have
-/// no approved bytes. It is refused rather than stored as its own text.
+/// Sequence preflight approves the commands of a task's `setup:`/`teardown:`
+/// stacks, not of its `side_effect:` action, so a whole-value `$( … )` there
+/// would have no approved bytes. It is refused rather than stored as its own
+/// text.
 fn refuse_task_set_shell(action: &LifecycleAction, source_file: &Path) -> Result<(), CompositionError> {
     let LifecycleActionKind::RuntimeSet(set) = &action.kind else {
         return Ok(());
@@ -203,9 +207,9 @@ fn refuse_task_set_shell(action: &LifecycleAction, source_file: &Path) -> Result
             property: action.path.parent().to_string(),
             action: "set".to_string(),
             message: format!(
-                "`{key}` is a whole-value `$( … )`, and a sequence task's `set` cannot run a \
-                 command; use a `shell:` task, or assign it with `set` in the task document's \
-                 own lifecycle"
+                "`{key}` is a whole-value `$( … )`, and a `side_effect:` task's `set` cannot \
+                 run a command; use a `shell:` task, or assign it with `set` in the task's \
+                 `setup:`/`teardown:` or in the task document's own lifecycle"
             ),
             source: None,
         }),
@@ -898,7 +902,7 @@ impl StackParser<'_> {
         parse_runtime_set(value, self.source_file, path, authored_order)
     }
 
-    /// The per-event "Where valid" matrix: only `skip` is placement-limited.
+    /// Cancellation permits only `stop`; `skip` belongs to initialization.
     fn check_placement(&self, action: &LifecycleAction) -> Result<(), CompositionError> {
         if let LifecycleActionKind::LifecycleControl(control) = &action.kind
             && !control.is_valid_for(self.signal)

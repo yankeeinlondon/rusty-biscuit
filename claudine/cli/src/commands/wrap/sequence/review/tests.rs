@@ -131,6 +131,7 @@ fn eligibility_follows_the_outer_executable() {
         (Some(ExecutableField::Group), true),
         (Some(ExecutableField::Shell), false),
         (Some(ExecutableField::SideEffect), false),
+        (Some(ExecutableField::Sequence), false),
     ];
     for (field, expected) in cases {
         assert_eq!(

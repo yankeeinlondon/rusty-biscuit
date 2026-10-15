@@ -23,7 +23,7 @@ pub mod types;
 pub mod yaml_scalar;
 
 pub use alphanumeric::{AlphanumericOption, AlphanumericOptions, AsciiCharSet};
-pub use subtype::is_subtype;
+pub use subtype::{is_string_like, is_subtype};
 pub use convert::{DRAFT_2020_12, to_json_schema};
 pub use cursor::{
     SchemaCursor, SchemaCursorRole, is_union_arm_path, locate_schema_declaration_cursor,
