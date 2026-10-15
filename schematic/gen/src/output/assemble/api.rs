@@ -250,6 +250,20 @@ fn split_parts(
         .collect();
     let api_structs = apis.iter().map(|api| generate_api_struct(api));
     let requests = apis.iter().map(|api| api_requests(api, module_path));
+    let needs_response_import = apis.iter().any(|api| api.endpoints.iter().any(|endpoint| {
+        let untyped_response = matches!(&endpoint.response, schematic_define::ApiResponse::Json(schema) if schema.descriptor.is_none());
+        let untyped_request = match &endpoint.request {
+            Some(schematic_define::ApiRequest::Json(schema)) => schema.descriptor.is_none(),
+            Some(schematic_define::ApiRequest::FormData { fields } | schematic_define::ApiRequest::UrlEncoded { fields }) => fields.iter().any(|field|
+                matches!(&field.kind, schematic_define::FormFieldKind::Json(schema) if schema.descriptor.is_none())),
+            _ => false,
+        };
+        let resolution = schematic_define::pagination::resolve(api, endpoint);
+        let local_pager_item = resolution.strategy().is_some()
+            && resolution.list().and_then(|list| list.item_type.as_deref()).is_some_and(|name| !name.contains("::"));
+        untyped_response || untyped_request || local_pager_item
+    }));
+    let response_import = needs_response_import.then(|| quote! { use super::responses::*; });
 
     let mod_rs = quote! {
         #docs
@@ -266,7 +280,7 @@ fn split_parts(
     let requests_rs = quote! {
         use serde::{Deserialize, Serialize};
 
-        use super::responses::*;
+        #response_import
         use super::{#(#api_items),*};
 
         #(#requests)*

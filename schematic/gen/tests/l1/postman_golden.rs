@@ -129,27 +129,7 @@ fn rest_api(
     module_path: Option<&str>,
     endpoints: Vec<Endpoint>,
 ) -> RestApi {
-    RestApi {
-        name: name.to_string(),
-        description: format!("{} test API", name),
-        base_url: base_url.to_string(),
-        docs_url: None,
-        auth,
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        headers: vec![],
-        endpoints,
-        module_path: module_path.map(str::to_string),
-        request_suffix: None,
-        version: None,
-        env_mapping: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    }
+    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{} test API", name); fixture.base_url = base_url.to_string(); fixture.docs_url = None; fixture.auth = auth; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = module_path.map(str::to_string); fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture }
 }
 
 fn endpoint(
@@ -161,17 +141,7 @@ fn endpoint(
     response: ApiResponse,
     params: Option<EndpointParams>,
 ) -> Endpoint {
-    Endpoint {
-        id: id.to_string(),
-        method,
-        path: path.to_string(),
-        description: description.to_string(),
-        request,
-        response,
-        headers: vec![],
-        params,
-        oauth_scopes: None, cross_origin: None, pagination: None,
-    }
+    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = method; fixture.path = path.to_string(); fixture.description = description.to_string(); fixture.request = request; fixture.response = response; fixture.headers = vec![]; fixture.params = params; fixture.cross_origin = None; fixture.pagination = None; fixture }
 }
 
 // --- Scenario builders -----------------------------------------------------

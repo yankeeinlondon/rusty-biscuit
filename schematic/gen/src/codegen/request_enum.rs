@@ -224,27 +224,7 @@ mod tests {
     };
 
     fn make_api(name: &str, endpoints: Vec<Endpoint>) -> RestApi {
-        RestApi {
-            name: name.to_string(),
-            description: format!("{} API", name),
-            base_url: "https://api.example.com".to_string(),
-            docs_url: None,
-            auth: AuthStrategy::None,
-            auth_policy: None,
-            env_auth: vec![],
-            env_username: None,
-            env_mapping: None,
-            headers: vec![],
-            endpoints,
-            module_path: None,
-            request_suffix: None,
-            version: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
-        }
+        { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{} API", name); fixture.base_url = "https://api.example.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture }
     }
 
     fn make_endpoint(
@@ -253,17 +233,7 @@ mod tests {
         path: &str,
         request: Option<ApiRequest>,
     ) -> Endpoint {
-        Endpoint {
-            id: id.to_string(),
-            method,
-            path: path.to_string(),
-            description: format!("{} endpoint", id),
-            request,
-            response: ApiResponse::json_type("TestResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        }
+        { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = method; fixture.path = path.to_string(); fixture.description = format!("{} endpoint", id); fixture.request = request; fixture.response = ApiResponse::json_type("TestResponse"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }
     }
 
     #[test]
@@ -386,17 +356,7 @@ mod tests {
     fn generate_enum_doc_comments() {
         let api = make_api(
             "Documented",
-            vec![Endpoint {
-                id: "GetUser".to_string(),
-                method: RestMethod::Get,
-                path: "/users/{id}".to_string(),
-                description: "Retrieve a user by ID".to_string(),
-                request: None,
-                response: ApiResponse::json_type("User"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            }],
+            vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetUser".to_string(); fixture.method = RestMethod::Get; fixture.path = "/users/{id}".to_string(); fixture.description = "Retrieve a user by ID".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("User"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }],
         );
 
         let tokens = generate_request_enum(&api);

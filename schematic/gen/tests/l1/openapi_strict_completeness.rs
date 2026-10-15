@@ -30,37 +30,7 @@ use schematic_gen::validation::validate_openapi_registry;
 /// scenario without depending on the real definitions in
 /// `schematic-definitions`.
 fn synthetic_api(name: &str, response_type: &str) -> RestApi {
-    RestApi {
-        name: name.to_string(),
-        description: format!("Synthetic API for {} regression test", name),
-        base_url: "https://example.test".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::None,
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        headers: vec![],
-        endpoints: vec![Endpoint {
-            id: "DanglingResponse".to_string(),
-            method: RestMethod::Get,
-            path: "/dangling".to_string(),
-            description: String::new(),
-            request: None,
-            response: ApiResponse::json_type(response_type),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        }],
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        env_mapping: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    }
+    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("Synthetic API for {} regression test", name); fixture.base_url = "https://example.test".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.headers = vec![]; fixture.endpoints = vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "DanglingResponse".to_string(); fixture.method = RestMethod::Get; fixture.path = "/dangling".to_string(); fixture.description = String::new(); fixture.request = None; fixture.response = ApiResponse::json_type(response_type); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture }
 }
 
 /// Renders the OpenAPI validator's diagnostic for `api` against `registry`,
@@ -116,13 +86,13 @@ fn single_api_with_missing_schema_fails_validation() {
 fn grouped_module_with_missing_schema_in_one_member_fails() {
     // Two APIs sharing a module. The first is fine (its schema is registered);
     // the second references a type that is NOT in the merged registry.
-    let good = synthetic_api("MemberA", "GoodResponse");
+    let mut context = schematic_define::DefinitionContext::types_in("::fixture");
+    let endpoint = Endpoint::get("GoodResponse", "/good").describes("Good response")
+        .returns_json::<schematic_definitions::openai::Model>(&mut context).build().unwrap();
+    let good = RestApi::builder(&context, "MemberA", "https://example.test")
+        .describes("Good member").no_auth().endpoints([endpoint]).build().unwrap();
     let bad = synthetic_api("MemberB", "TotallyMissing");
-
-    let mut merged = SchemaRegistry::new();
-    // Use any concrete JsonSchema type — content does not matter, only the
-    // name does, because validate_completeness only checks key presence.
-    merged = merged.register::<u32>("GoodResponse");
+    let merged = SchemaRegistry::from_context(&context).unwrap();
 
     // Member A validates against the merged registry.
     merged
@@ -234,37 +204,7 @@ fn request_body_types_must_be_registered() {
     // An API with a JSON request body whose type is not in the registry must
     // fail validation. This is the request-side counterpart to the response
     // schema checks above.
-    let api = RestApi {
-        name: "RequestBodyTest".to_string(),
-        description: "Test API with missing request body type".to_string(),
-        base_url: "https://example.test".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::None,
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        headers: vec![],
-        endpoints: vec![Endpoint {
-            id: "Create".to_string(),
-            method: RestMethod::Post,
-            path: "/create".to_string(),
-            description: String::new(),
-            request: Some(ApiRequest::json_type("SomeBody")),
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        }],
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        env_mapping: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    };
+    let api = { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "RequestBodyTest".to_string(); fixture.description = "Test API with missing request body type".to_string(); fixture.base_url = "https://example.test".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.headers = vec![]; fixture.endpoints = vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "Create".to_string(); fixture.method = RestMethod::Post; fixture.path = "/create".to_string(); fixture.description = String::new(); fixture.request = Some(ApiRequest::json_type("SomeBody")); fixture.response = ApiResponse::Empty; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture };
 
     let registry = SchemaRegistry::new();
     let result = registry.validate_completeness(&api);

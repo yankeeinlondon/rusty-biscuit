@@ -1,8 +1,7 @@
 use schematic_define::pagination::{
     Collection, CursorLeg, CursorSource, InputParam, KeepAlive, LinkSource, MoreSignal, PageSize,
-    PaginationException, Partition, Session, SessionStep, Strategy, ValueSource,
+    Partition, Session, SessionStep, Strategy, ValueSource,
 };
-use schematic_define::params::PaginationStyle;
 use schematic_define::{
     ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EndpointParams, ParamDef, ParamStyle,
     QueryParamType, RestApi, RestMethod,
@@ -27,44 +26,14 @@ fn param(name: &str, required: bool) -> ParamDef {
 }
 
 fn get(id: &str, path: &str, response: &str, query: Vec<ParamDef>) -> Endpoint {
-    Endpoint {
-        id: id.to_string(),
-        method: RestMethod::Get,
-        path: path.to_string(),
-        description: format!("{id} endpoint"),
-        request: None,
-        response: ApiResponse::json_type(response),
-        headers: vec![],
-        params: (!query.is_empty()).then(|| EndpointParams {
+    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = RestMethod::Get; fixture.path = path.to_string(); fixture.description = format!("{id} endpoint"); fixture.request = None; fixture.response = ApiResponse::json_type(response); fixture.headers = vec![]; fixture.params = (!query.is_empty()).then(|| EndpointParams {
             query,
             ..Default::default()
-        }),
-        oauth_scopes: None, cross_origin: None, pagination: None,
-    }
+        }); fixture.cross_origin = None; fixture.pagination = None; fixture }
 }
 
 fn api(endpoints: Vec<Endpoint>) -> RestApi {
-    RestApi {
-        name: "Shelf".to_string(),
-        description: "Shelf API".to_string(),
-        base_url: "https://api.example.com".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::None,
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        env_mapping: None,
-        headers: vec![],
-        endpoints,
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    }
+    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "Shelf".to_string(); fixture.description = "Shelf API".to_string(); fixture.base_url = "https://api.example.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture }
 }
 
 /// A GitHub-like API: page numbers ended by a `Link` relation, a bounded
@@ -300,13 +269,13 @@ fn an_ordinary_send_carries_required_adopted_defaults_and_omits_optional_ones() 
             .page_size(PageSize::new("per_page").sent_default(50))
             .build(),
     );
-    api.pagination_exceptions = vec![PaginationException::new(
+    { let (id, collection) = (
         "ListBooks",
         Collection::at("books").item_type("Book").paginate(
             Strategy::offset("offset", MoreSignal::NonEmptyPage)
                 .page_size(PageSize::new("limit").sent_default(20)),
         ),
-    )];
+    );  api.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection);  };
 
     let module = module(&api);
     let shelves = squash(item(&module, "impl schematic_runtime::EndpointSpec for ListShelvesRequest"));
@@ -382,12 +351,12 @@ fn composite_inclusive_cursor_with_backward_leg_and_total() {
 #[test]
 fn next_link_with_body_prev_on_a_wrapper_list() {
     let mut api = api(vec![get("ListRepos", "/repositories/{workspace}", "RepoPage", vec![])]);
-    api.pagination_exceptions = vec![PaginationException::new(
+    { let (id, collection) = (
         "ListRepos",
         Collection::at("values").item_type("Repo").paginate(
             Strategy::next_link(LinkSource::body("next")).prev(LinkSource::body("previous")),
         ),
-    )];
+    );  api.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection);  };
 
     let code = squash(&impls(&api));
     for expected in [
@@ -547,8 +516,7 @@ fn unpaginated_lists_and_non_lists_emit_nothing_pagination_related() {
     let mut opted_out = plain.clone();
     opted_out.default_pagination =
         Some(Strategy::page_number("page", MoreSignal::NonEmptyPage).build());
-    opted_out.pagination_exceptions =
-        vec![PaginationException::new("ListShelves", Collection::root().unpaginated())];
+    { let (id, collection) = ("ListShelves", Collection::root().unpaginated());  opted_out.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection);  };
 
     for api in [&plain, &opted_out] {
         assert!(generate_pagination_impls(api, "Request").is_empty());
@@ -569,7 +537,7 @@ fn alternates_do_not_change_the_output() {
             "Vec<Project>",
             vec![param("page", false), param("order_by", false)],
         )]);
-        api.pagination_exceptions = vec![PaginationException::new("ListProjects", collection)];
+        { let (id, collection) = ("ListProjects", collection);  api.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection);  };
         api
     };
     let primary = row(Collection::root().paginate(strategy()));
@@ -584,14 +552,7 @@ fn alternates_do_not_change_the_output() {
     assert!(!module(&with_alternate).contains("keyset"));
 }
 
-#[test]
-fn legacy_pagination_metadata_does_not_change_the_output() {
-    let without = github_like();
-    let mut with = github_like();
-    with.endpoints[0].params.as_mut().unwrap().pagination = Some(PaginationStyle::github());
 
-    assert_eq!(module(&without), module(&with));
-}
 
 #[test]
 fn repeated_generation_is_identical() {
@@ -662,12 +623,12 @@ fn an_unpaginated_endpoint_reserves_only_the_pager_entry_points() {
 fn wrapper_item_types_are_emitted_as_authored() {
     for item_type in ["serde_json::Value", "crate::types::Thing", "Vec<String>"] {
         let mut api = api(vec![get("ListThings", "/things", "ThingPage", vec![])]);
-        api.pagination_exceptions = vec![PaginationException::new(
+        { let (id, collection) = (
             "ListThings",
             Collection::at("data")
                 .item_type(item_type)
                 .paginate(Strategy::next_link(LinkSource::link_header("next"))),
-        )];
+        );  api.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection);  };
 
         let code = impls(&api);
         assert!(code.contains(&format!("    type Item = {item_type};\n")), "{code}");

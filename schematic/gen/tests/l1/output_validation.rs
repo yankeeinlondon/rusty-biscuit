@@ -12,7 +12,7 @@ use std::process::Command;
 use biscuit_test_harness::bin_exe;
 use schematic_define::auth::ApiKeyLocation;
 use schematic_define::params::{EndpointParams, ParamDef, ParamStyle, QueryParamType};
-use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
+use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi};
 use schematic_definitions::registry::{SchemaRegistry, get_registries_for_module};
 use schematic_gen::codegen::endpoint_methods::{endpoint_method_renames, resolve_names};
 use schematic_gen::diagnostics::{Feature, Output, Severity, ValidationDiagnostic};
@@ -28,37 +28,17 @@ use schematic_gen::validation::{
 use crate::common::fresh_output::{TreeSnapshot, snapshot_tree};
 
 fn fixture_api(name: &str, module: &str, response_type: &str) -> RestApi {
-    RestApi {
-        name: name.to_string(),
-        description: format!("{name} fixture"),
-        base_url: "https://fixture.example/v1".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::None,
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        env_mapping: None,
-        headers: vec![],
-        endpoints: vec![Endpoint {
-            id: "ListThings".to_string(),
-            method: RestMethod::Get,
-            path: "/things".to_string(),
-            description: "List things".to_string(),
-            request: None,
-            response: ApiResponse::json_type(response_type),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        }],
-        module_path: Some(module.to_string()),
-        request_suffix: None,
-        version: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
+    let mut context = schematic_define::DefinitionContext::types_in("::fixture");
+    let endpoint = Endpoint::get("ListThings", "/things").describes("List things")
+        .returns_json::<serde_json::Value>(&mut context).build().unwrap();
+    let mut api = RestApi::builder(&context, name, "https://fixture.example/v1")
+        .describes(format!("{name} fixture")).no_auth().module_path(module)
+        .endpoints([endpoint]).build().unwrap();
+    // Stored Rust spelling may be malformed while its inline wire schema is valid.
+    if let ApiResponse::Json(schema) = &mut api.endpoints[0].response {
+        schema.type_name = response_type.into();
     }
+    api
 }
 
 /// Output roots for one batch run, under one temporary directory.
@@ -116,9 +96,8 @@ fn malformed_rust_type_blocks_only_the_rust_client() {
     let valid = fixture_api("Inventory", "inventory", "serde_json::Value");
     let broken = fixture_api("Broken", "broken", "Vec<Thing");
     let registry_for = |module: &str| match module {
-        // The export carries the malformed name as plain data.
-        "broken" => Some(SchemaRegistry::new().register::<serde_json::Value>("Vec<Thing")),
-        "inventory" => Some(SchemaRegistry::new()),
+        // Value is inline; its malformed stored Rust spelling is export data.
+        "broken" | "inventory" => Some(SchemaRegistry::new()),
         _ => None,
     };
 
@@ -650,14 +629,11 @@ fn grouped_document_renames_a_shared_raw_id() {
     );
 }
 
-/// The two providers awaiting migration still embed query strings.
-const EMBEDDED_QUERY_ENDPOINTS: [(&str, &str); 2] = [
-    ("Gitea", "GetGitTreeRecursive"),
-    ("GitLab", "GetRepositoryFile"),
-];
+/// All nine original query-bearing routes have been normalized or merged.
+const EMBEDDED_QUERY_ENDPOINTS: [(&str, &str); 0] = [];
 
 #[test]
-fn live_definitions_warn_once_per_output_for_each_embedded_query() {
+fn live_definitions_have_no_embedded_queries_or_validation_gaps() {
     let apis = resolve_all_apis();
     let refs: Vec<&RestApi> = apis.iter().collect();
 
@@ -765,7 +741,7 @@ fn run_cli(args: &[&str]) -> std::process::Output {
 }
 
 #[test]
-fn cli_warnings_alone_exit_successfully() {
+fn cli_migrated_provider_generates_all_outputs_without_warnings() {
     let roots = Roots::new();
     let output = run_cli(&[
         "generate",
@@ -783,14 +759,9 @@ fn cli_warnings_alone_exit_successfully() {
 
     assert!(output.status.success(), "stdout:\n{stdout}\nstderr:\n{stderr}");
     for target in ["rust", "openapi", "postman"] {
-        let line = format!(
-            "severity=warning api=Gitea endpoint=GetGitTreeRecursive feature=query-in-path \
-             output={target}: "
-        );
-        assert_eq!(stderr.matches(&line).count(), 1, "{target}:\n{stderr}");
         assert!(stdout.contains(&format!("[OK] {target} output")), "{stdout}");
     }
-    assert!(!stderr.contains("severity=error"), "{stderr}");
+    assert!(!stderr.contains("severity="), "{stderr}");
     assert!(Path::new(&roots.openapi).join("gitea.json").is_file());
 }
 

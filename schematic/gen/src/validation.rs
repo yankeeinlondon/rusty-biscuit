@@ -57,11 +57,8 @@ use crate::parser::extract_path_params;
 
 /// Severity of the `query-in-path` check.
 ///
-/// A path template that embeds a query string (`/tree?recursive=true`) is
-/// reported but does not block any output while the shipped definitions still
-/// contain such templates. Raising this to [`Severity::Error`] is the single
-/// change needed once they are migrated to declared query parameters.
-pub const QUERY_IN_PATH_SEVERITY: Severity = Severity::Warning;
+/// Query inputs must be declared separately from the path template.
+pub const QUERY_IN_PATH_SEVERITY: Severity = Severity::Error;
 
 /// Names every generated module brings into scope with `use`.
 ///
@@ -135,7 +132,7 @@ pub fn validate_rust_client(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
 
 /// Validates a batch of APIs for OpenAPI export.
 ///
-/// Checks route identity, the `query-in-path` warning, and the document file
+/// Checks route identity, the `query-in-path` error, and the document file
 /// name. Schema-registry completeness is checked separately by
 /// [`validate_openapi_registry`], because the registry is chosen per module.
 pub fn validate_openapi(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
@@ -180,9 +177,8 @@ pub fn validate_openapi_registry(
                 Output::OpenApi,
                 format!(
                     "module `{module_name}` registry is missing schema(s) {missing:?}; add a \
-                     JsonSchema derive and a register::<T>(\"{}\") entry in \
-                     schematic-definitions, or skip with --no-openapi",
-                    missing.first().map(String::as_str).unwrap_or_default()
+                     JsonSchema derive and typed registration in the destination context \
+                     in schematic-definitions, or skip with --no-openapi",
                 ),
             ))
         })
@@ -191,7 +187,7 @@ pub fn validate_openapi_registry(
 
 /// Validates a batch of APIs for Postman export.
 ///
-/// Checks route identity, the `query-in-path` warning, and the collection
+/// Checks route identity, the `query-in-path` error, and the collection
 /// file name.
 pub fn validate_postman(apis: &[&RestApi]) -> Vec<ValidationDiagnostic> {
     let mut diagnostics = Vec::new();
@@ -395,7 +391,7 @@ fn check_rust_api(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
 /// qualified type, an unresolvable reference), the check is skipped and the
 /// runtime enforces the location instead; nothing is reported as checked.
 fn check_pagination(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) {
-    if api.default_pagination.is_none() && api.pagination_exceptions.is_empty() {
+    if api.default_pagination.is_none() && api.endpoints.iter().all(|endpoint| endpoint.pagination.is_none()) {
         return;
     }
     let error = |endpoint: Option<&str>, feature: Feature, message: String| {
@@ -419,11 +415,7 @@ fn check_pagination(api: &RestApi, diagnostics: &mut Vec<ValidationDiagnostic>) 
             continue;
         };
         let id = Some(endpoint.id.as_str());
-        let authored_type = api
-            .pagination_exceptions
-            .iter()
-            .find(|entry| entry.endpoint == endpoint.id)
-            .and_then(|entry| entry.collection.item_type.as_deref());
+        let authored_type = endpoint.pagination.as_ref().and_then(|collection| collection.item_type.as_deref());
 
         if let Some(item_type) = authored_type.filter(|ty| !ty.trim().is_empty()) {
             if syn::parse_str::<syn::Type>(item_type).is_err() {
@@ -1080,10 +1072,11 @@ mod tests {
 
     fn endpoint(id: &str, method: RestMethod, path: &str) -> Endpoint {
         {
-            let mut endpoint = Endpoint::new(id.to_string(), method, path.to_string())
+            let mut endpoint = Endpoint::new(id.to_string(), method, "/fixture")
                 .describes(format!("Test endpoint {id}"))
                 .returns_empty()
                 .build().expect("valid endpoint fixture");
+            endpoint.path = path.to_owned();
             endpoint.response = ApiResponse::json_type("Response");
             endpoint
         }
@@ -1117,8 +1110,7 @@ mod tests {
             query,
             header,
             cookie,
-            pagination: None,
-            response_pagination: None,
+
         }
     }
 
@@ -1802,7 +1794,7 @@ mod tests {
     }
 
     #[test]
-    fn query_in_path_is_one_warning_per_output() {
+    fn query_in_path_is_one_error_per_output() {
         let api = api_with(vec![
             endpoint("Tree", RestMethod::Get, "/tree?recursive=true"),
             get("Clean"),
@@ -1820,8 +1812,8 @@ mod tests {
     }
 
     #[test]
-    fn query_in_path_severity_is_a_warning() {
-        assert_eq!(QUERY_IN_PATH_SEVERITY, Severity::Warning);
+    fn query_in_path_severity_is_an_error() {
+        assert_eq!(QUERY_IN_PATH_SEVERITY, Severity::Error);
     }
 
     #[test]

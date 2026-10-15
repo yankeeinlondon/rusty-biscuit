@@ -43,30 +43,14 @@ pub use collection::{build_postman_collection, build_postman_collection_grouped}
 ///
 /// ```no_run
 /// use std::path::Path;
-/// use schematic_define::{RestApi, RestMethod, AuthStrategy, ApiResponse, CrossOrigin};
+/// use schematic_define::{DefinitionContext, RestApi};
 /// use schematic_gen::export::postman::write_postman;
 ///
-/// let api = RestApi {
-///     name: "TestApi".to_string(),
-///     description: "Test API".to_string(),
-///     base_url: "https://api.test.com".to_string(),
-///     docs_url: None,
-///     auth: AuthStrategy::None,
-///     auth_policy: None,
-///     env_auth: vec![],
-///     env_username: None,
-///     headers: vec![],
-///     endpoints: vec![],
-///     module_path: None,
-///     request_suffix: None,
-///     version: None,
-///     env_mapping: None,
-///     cross_origin: CrossOrigin::default(),
-///     request_id_header: None,
-///     secret_names: vec![],
-///     default_pagination: None,
-///     pagination_exceptions: vec![],
-/// };
+/// let ctx = DefinitionContext::types_in("crate::types");
+/// let api = RestApi::builder(&ctx, "TestApi", "https://api.test.com")
+///     .describes("Test API")
+///     .no_auth()
+///     .build().unwrap();
 ///
 /// let path = write_postman(&api, Path::new("/tmp"), false).unwrap();
 /// assert_eq!(path.file_name().unwrap(), "testapi.postman_collection.json");
@@ -107,30 +91,15 @@ pub fn write_postman(api: &RestApi, dir: &Path, dry_run: bool) -> Result<PathBuf
 ///
 /// ```no_run
 /// use std::path::Path;
-/// use schematic_define::{RestApi, AuthStrategy, CrossOrigin};
+/// use schematic_define::{DefinitionContext, RestApi};
 /// use schematic_gen::export::postman::write_postman_grouped;
 ///
-/// let api1 = RestApi {
-///     name: "OllamaNative".to_string(),
-///     description: "Native API".to_string(),
-///     base_url: "http://localhost:11434".to_string(),
-///     docs_url: None,
-///     auth: AuthStrategy::None,
-///     auth_policy: None,
-///     env_auth: vec![],
-///     env_username: None,
-///     headers: vec![],
-///     endpoints: vec![],
-///     module_path: Some("ollama".to_string()),
-///     request_suffix: None,
-///     version: None,
-///     env_mapping: None,
-///     cross_origin: CrossOrigin::default(),
-///     request_id_header: None,
-///     secret_names: vec![],
-///     default_pagination: None,
-///     pagination_exceptions: vec![],
-/// };
+/// let ctx = DefinitionContext::types_in("crate::types");
+/// let api1 = RestApi::builder(&ctx, "OllamaNative", "http://localhost:11434")
+///     .describes("Native API")
+///     .no_auth()
+///     .module_path("ollama")
+///     .build().unwrap();
 ///
 /// let path = write_postman_grouped(&[&api1], "ollama", Path::new("/tmp"), false).unwrap();
 /// assert_eq!(path.file_name().unwrap(), "ollama.postman_collection.json");

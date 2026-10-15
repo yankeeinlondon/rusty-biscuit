@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use biscuit_test_harness::bin_exe;
-use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
+use schematic_define::{DefinitionContext, Endpoint, RestApi};
 use schematic_definitions::registry::SchemaRegistry;
 use schematic_gen::diagnostics::Output;
 use schematic_gen::errors::GeneratorError;
@@ -25,41 +25,18 @@ use schematic_gen::pipeline::{BatchScope, GenerateOpts, OpenApiFormat, generate_
 use crate::common::fresh_output::{TreeSnapshot, diff_summary, snapshot_tree};
 
 fn endpoint(id: &str, path: &str) -> Endpoint {
-    Endpoint {
-        id: id.to_string(),
-        method: RestMethod::Get,
-        path: path.to_string(),
-        description: format!("{id} fixture endpoint"),
-        request: None,
-        response: ApiResponse::json_type("serde_json::Value"),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None, cross_origin: None, pagination: None,
-    }
+    let mut context = DefinitionContext::types_in("::fixture");
+    Endpoint::get(id, path).describes(format!("{id} fixture endpoint"))
+        .returns_json::<serde_json::Value>(&mut context).build().unwrap()
 }
 
 fn api(name: &str, module: &str, suffix: Option<&str>, endpoints: Vec<Endpoint>) -> RestApi {
-    RestApi {
-        name: name.to_string(),
-        description: format!("{name} fixture API"),
-        base_url: "https://fixture.example/v1".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::None,
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        env_mapping: None,
-        headers: vec![],
-        endpoints,
-        module_path: Some(module.to_string()),
-        request_suffix: suffix.map(str::to_string),
-        version: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    }
+    let mut context = DefinitionContext::types_in("::fixture");
+    context.register::<serde_json::Value>().unwrap();
+    let builder = RestApi::builder(&context, name, "https://fixture.example/v1")
+        .describes(format!("{name} fixture API")).no_auth().module_path(module).endpoints(endpoints);
+    if let Some(suffix) = suffix { builder.request_suffix(suffix).build().unwrap() }
+    else { builder.build().unwrap() }
 }
 
 /// Four APIs in three module groups: `alpha` holds two APIs, like Ollama.

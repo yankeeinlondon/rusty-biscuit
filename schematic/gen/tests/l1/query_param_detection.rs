@@ -79,17 +79,7 @@ fn no_query_params_in_nested_path() {
 #[test]
 fn github_style_pagination_path() {
     // Current GitHub pattern with hardcoded per_page
-    let endpoint = Endpoint {
-        id: "ListTags".to_string(),
-        method: RestMethod::Get,
-        path: "/repos/{owner}/{repo}/tags?per_page=100".to_string(),
-        description: "List repository tags".to_string(),
-        request: None,
-        response: ApiResponse::json_vec_type("RepoTag"),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None, cross_origin: None, pagination: None,
-    };
+    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "ListTags".to_string(); fixture.method = RestMethod::Get; fixture.path = "/repos/{owner}/{repo}/tags?per_page=100".to_string(); fixture.description = "List repository tags".to_string(); fixture.request = None; fixture.response = ApiResponse::json_vec_type("RepoTag"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
     assert!(path_has_hardcoded_query_params(&endpoint.path));
     assert_eq!(
@@ -101,17 +91,7 @@ fn github_style_pagination_path() {
 #[test]
 fn gitlab_style_pagination_with_recursive() {
     // GitLab pattern with multiple hardcoded params
-    let endpoint = Endpoint {
-        id: "ListRepositoryTree".to_string(),
-        method: RestMethod::Get,
-        path: "/projects/{id}/repository/tree?per_page=100&recursive=true".to_string(),
-        description: "List repository tree recursively".to_string(),
-        request: None,
-        response: ApiResponse::json_vec_type("TreeNode"),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None, cross_origin: None, pagination: None,
-    };
+    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "ListRepositoryTree".to_string(); fixture.method = RestMethod::Get; fixture.path = "/projects/{id}/repository/tree?per_page=100&recursive=true".to_string(); fixture.description = "List repository tree recursively".to_string(); fixture.request = None; fixture.response = ApiResponse::json_vec_type("TreeNode"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
     assert!(path_has_hardcoded_query_params(&endpoint.path));
     assert_eq!(
@@ -133,17 +113,7 @@ fn gitlab_style_pagination_with_recursive() {
 #[test]
 fn gitea_style_pagination_path() {
     // Gitea uses 'limit' instead of 'per_page'
-    let endpoint = Endpoint {
-        id: "ListTags".to_string(),
-        method: RestMethod::Get,
-        path: "/repos/{owner}/{repo}/tags?limit=50".to_string(),
-        description: "List repository tags".to_string(),
-        request: None,
-        response: ApiResponse::json_vec_type("Tag"),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None, cross_origin: None, pagination: None,
-    };
+    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "ListTags".to_string(); fixture.method = RestMethod::Get; fixture.path = "/repos/{owner}/{repo}/tags?limit=50".to_string(); fixture.description = "List repository tags".to_string(); fixture.request = None; fixture.response = ApiResponse::json_vec_type("Tag"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
     assert!(path_has_hardcoded_query_params(&endpoint.path));
     assert_eq!(

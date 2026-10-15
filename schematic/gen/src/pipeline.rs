@@ -83,44 +83,7 @@ pub fn resolve_api(name: &str) -> Result<RestApi, GeneratorError> {
 
 /// Returns all available API definitions for batch generation.
 pub fn resolve_all_apis() -> Vec<RestApi> {
-    use schematic_definitions::anthropic::define_anthropic_api;
-    use schematic_definitions::artificial_analysis::{
-        define_artificial_analysis_critpt_api, define_artificial_analysis_data_api,
-    };
-    use schematic_definitions::bitbucket::define_bitbucket_api;
-    use schematic_definitions::elevenlabs::define_elevenlabs_rest_api;
-    use schematic_definitions::emqx::{define_emqx_basic_api, define_emqx_bearer_api};
-    use schematic_definitions::eversolo::define_eversolo_api;
-    use schematic_definitions::gitea::define_gitea_api;
-    use schematic_definitions::github::define_github_api;
-    use schematic_definitions::gitlab::define_gitlab_api;
-    use schematic_definitions::huggingface::define_huggingface_hub_api;
-    use schematic_definitions::lmstudio::define_lmstudio_api;
-    use schematic_definitions::ollama::{define_ollama_native_api, define_ollama_openai_api};
-    use schematic_definitions::openai::define_openai_api;
-    use schematic_definitions::samsung_smart_tv::define_samsung_smart_tv_api;
-    use schematic_definitions::unfolded_circle::define_unfolded_circle_core_rest_api;
-
-    vec![
-        define_anthropic_api(),
-        define_artificial_analysis_data_api(),
-        define_artificial_analysis_critpt_api(),
-        define_bitbucket_api(),
-        define_openai_api(),
-        define_elevenlabs_rest_api(),
-        define_gitea_api(),
-        define_github_api(),
-        define_gitlab_api(),
-        define_huggingface_hub_api(),
-        define_lmstudio_api(),
-        define_ollama_native_api(),
-        define_ollama_openai_api(),
-        define_emqx_basic_api(),
-        define_emqx_bearer_api(),
-        define_eversolo_api(),
-        define_samsung_smart_tv_api(),
-        define_unfolded_circle_core_rest_api(),
-    ]
+    schematic_definitions::all_apis()
 }
 
 /// Resolves default export directories for OpenAPI and Postman.

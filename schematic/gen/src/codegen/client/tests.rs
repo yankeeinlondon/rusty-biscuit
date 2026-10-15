@@ -5,96 +5,16 @@ use crate::codegen::request_structs::{format_generated_code, validate_generated_
 use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestMethod};
 
 fn make_api(name: &str, auth: AuthStrategy, env_auth: Vec<String>) -> RestApi {
-    RestApi {
-        name: name.to_string(),
-        description: format!("{} API", name),
-        base_url: "https://api.example.com".to_string(),
-        docs_url: None,
-        auth,
-        auth_policy: None,
-        env_auth,
-        env_username: None,
-        env_mapping: None,
-        headers: vec![],
-        endpoints: vec![Endpoint {
-            id: "ListItems".to_string(),
-            method: RestMethod::Get,
-            path: "/items".to_string(),
-            description: "List items".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ListItemsResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        }],
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    }
+    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{} API", name); fixture.base_url = "https://api.example.com".to_string(); fixture.docs_url = None; fixture.auth = auth; fixture.auth_policy = None; fixture.env_auth = env_auth; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "ListItems".to_string(); fixture.method = RestMethod::Get; fixture.path = "/items".to_string(); fixture.description = "List items".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("ListItemsResponse"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture }
 }
 
 fn make_api_with_endpoints(name: &str, endpoints: Vec<Endpoint>) -> RestApi {
-    RestApi {
-        name: name.to_string(),
-        description: format!("{} API", name),
-        base_url: "https://api.example.com".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::None,
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        env_mapping: None,
-        headers: vec![],
-        endpoints,
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    }
+    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{} API", name); fixture.base_url = "https://api.example.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture }
 }
 
 /// Creates a basic auth API where password comes from env_auth[0]
 fn make_basic_auth_api(name: &str, username_env: &str, password_env: &str) -> RestApi {
-    RestApi {
-        name: name.to_string(),
-        description: format!("{} API", name),
-        base_url: "https://api.example.com".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::Basic,
-        auth_policy: None,
-        env_auth: vec![password_env.to_string()], // Password from env_auth[0]
-        env_username: Some(username_env.to_string()),
-        env_mapping: None,
-        headers: vec![],
-        endpoints: vec![Endpoint {
-            id: "ListItems".to_string(),
-            method: RestMethod::Get,
-            path: "/items".to_string(),
-            description: "List items".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ListItemsResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        }],
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    }
+    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{} API", name); fixture.base_url = "https://api.example.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::Basic; fixture.auth_policy = None; fixture.env_auth = vec![password_env.to_string()]; fixture.env_username = Some(username_env.to_string()); fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "ListItems".to_string(); fixture.method = RestMethod::Get; fixture.path = "/items".to_string(); fixture.description = "List items".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("ListItemsResponse"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture }
 }
 
 #[test]
@@ -349,17 +269,7 @@ fn generate_request_method_has_merge_headers() {
 fn generate_request_method_binary_endpoint() {
     let api = make_api_with_endpoints(
         "BinaryApi",
-        vec![Endpoint {
-            id: "CreateSpeech".to_string(),
-            method: RestMethod::Post,
-            path: "/speech".to_string(),
-            description: "Creates speech audio".to_string(),
-            request: None,
-            response: ApiResponse::Binary,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        }],
+        vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "CreateSpeech".to_string(); fixture.method = RestMethod::Post; fixture.path = "/speech".to_string(); fixture.description = "Creates speech audio".to_string(); fixture.request = None; fixture.response = ApiResponse::Binary; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }],
     );
     let tokens = generate_request_method(&api);
     let code = format_generated_code(&tokens).expect("Failed to format code");
@@ -395,17 +305,7 @@ fn generate_request_method_binary_endpoint() {
 fn generate_request_method_text_endpoint() {
     let api = make_api_with_endpoints(
         "TextApi",
-        vec![Endpoint {
-            id: "GetText".to_string(),
-            method: RestMethod::Get,
-            path: "/text".to_string(),
-            description: "Gets plain text".to_string(),
-            request: None,
-            response: ApiResponse::Text,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        }],
+        vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetText".to_string(); fixture.method = RestMethod::Get; fixture.path = "/text".to_string(); fixture.description = "Gets plain text".to_string(); fixture.request = None; fixture.response = ApiResponse::Text; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }],
     );
     let tokens = generate_request_method(&api);
     let code = format_generated_code(&tokens).expect("Failed to format code");
@@ -435,17 +335,7 @@ fn generate_request_method_text_endpoint() {
 fn generate_request_method_empty_endpoint() {
     let api = make_api_with_endpoints(
         "EmptyApi",
-        vec![Endpoint {
-            id: "DeleteItem".to_string(),
-            method: RestMethod::Delete,
-            path: "/items/{id}".to_string(),
-            description: "Deletes an item".to_string(),
-            request: None,
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        }],
+        vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "DeleteItem".to_string(); fixture.method = RestMethod::Delete; fixture.path = "/items/{id}".to_string(); fixture.description = "Deletes an item".to_string(); fixture.request = None; fixture.response = ApiResponse::Empty; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }],
     );
     let tokens = generate_request_method(&api);
     let code = format_generated_code(&tokens).expect("Failed to format code");
@@ -472,28 +362,8 @@ fn generate_request_method_mixed_endpoints() {
     let api = make_api_with_endpoints(
         "MixedApi",
         vec![
-            Endpoint {
-                id: "ListItems".to_string(),
-                method: RestMethod::Get,
-                path: "/items".to_string(),
-                description: "Lists items".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ListItemsResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "CreateSpeech".to_string(),
-                method: RestMethod::Post,
-                path: "/speech".to_string(),
-                description: "Creates speech audio".to_string(),
-                request: None,
-                response: ApiResponse::Binary,
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
+            { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "ListItems".to_string(); fixture.method = RestMethod::Get; fixture.path = "/items".to_string(); fixture.description = "Lists items".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("ListItemsResponse"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+            { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "CreateSpeech".to_string(); fixture.method = RestMethod::Post; fixture.path = "/speech".to_string(); fixture.description = "Creates speech audio".to_string(); fixture.request = None; fixture.response = ApiResponse::Binary; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
         ],
     );
     let tokens = generate_request_method(&api);
@@ -528,50 +398,10 @@ fn generate_request_method_has_must_use() {
     let api = make_api_with_endpoints(
         "MustUseApi",
         vec![
-            Endpoint {
-                id: "ListItems".to_string(),
-                method: RestMethod::Get,
-                path: "/items".to_string(),
-                description: "Lists items".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ListItemsResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "CreateSpeech".to_string(),
-                method: RestMethod::Post,
-                path: "/speech".to_string(),
-                description: "Creates speech audio".to_string(),
-                request: None,
-                response: ApiResponse::Binary,
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "GetText".to_string(),
-                method: RestMethod::Get,
-                path: "/text".to_string(),
-                description: "Gets plain text".to_string(),
-                request: None,
-                response: ApiResponse::Text,
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "DeleteItem".to_string(),
-                method: RestMethod::Delete,
-                path: "/items/{id}".to_string(),
-                description: "Deletes an item".to_string(),
-                request: None,
-                response: ApiResponse::Empty,
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
+            { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "ListItems".to_string(); fixture.method = RestMethod::Get; fixture.path = "/items".to_string(); fixture.description = "Lists items".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("ListItemsResponse"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+            { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "CreateSpeech".to_string(); fixture.method = RestMethod::Post; fixture.path = "/speech".to_string(); fixture.description = "Creates speech audio".to_string(); fixture.request = None; fixture.response = ApiResponse::Binary; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+            { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetText".to_string(); fixture.method = RestMethod::Get; fixture.path = "/text".to_string(); fixture.description = "Gets plain text".to_string(); fixture.request = None; fixture.response = ApiResponse::Text; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+            { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "DeleteItem".to_string(); fixture.method = RestMethod::Delete; fixture.path = "/items/{id}".to_string(); fixture.description = "Deletes an item".to_string(); fixture.request = None; fixture.response = ApiResponse::Empty; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
         ],
     );
     let tokens = generate_request_method(&api);
@@ -625,28 +455,8 @@ fn generate_convenience_methods_snake_case() {
     let api = make_api_with_endpoints(
         "TestApi",
         vec![
-            Endpoint {
-                id: "CreateSpeechWithTimestamps".to_string(),
-                method: RestMethod::Post,
-                path: "/speech".to_string(),
-                description: "Creates speech with timestamps".to_string(),
-                request: None,
-                response: ApiResponse::Binary,
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "GetVoiceSampleAudio".to_string(),
-                method: RestMethod::Get,
-                path: "/audio".to_string(),
-                description: "Gets voice sample audio".to_string(),
-                request: None,
-                response: ApiResponse::Binary,
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
+            { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "CreateSpeechWithTimestamps".to_string(); fixture.method = RestMethod::Post; fixture.path = "/speech".to_string(); fixture.description = "Creates speech with timestamps".to_string(); fixture.request = None; fixture.response = ApiResponse::Binary; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+            { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetVoiceSampleAudio".to_string(); fixture.method = RestMethod::Get; fixture.path = "/audio".to_string(); fixture.description = "Gets voice sample audio".to_string(); fixture.request = None; fixture.response = ApiResponse::Binary; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
         ],
     );
     let tokens = generate_request_method(&api);

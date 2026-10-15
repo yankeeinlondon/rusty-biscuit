@@ -18,42 +18,19 @@ use super::variables::merge_variables;
 /// ## Examples
 ///
 /// ```
-/// use schematic_define::{RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse, CrossOrigin};
+/// use schematic_define::{DefinitionContext, RestApi, Endpoint};
 /// use schematic_gen::export::postman::build_postman_collection;
 ///
-/// let api = RestApi {
-///     name: "TestApi".to_string(),
-///     description: "Test API".to_string(),
-///     base_url: "https://api.test.com/v1".to_string(),
-///     docs_url: None,
-///     auth: AuthStrategy::None,
-///     auth_policy: None,
-///     env_auth: vec![],
-///     env_username: None,
-///     headers: vec![],
-///     endpoints: vec![
-///         Endpoint {
-///             id: "GetUser".to_string(),
-///             method: RestMethod::Get,
-///             path: "/users/{id}".to_string(),
-///             description: "Get a user by ID".to_string(),
-///             request: None,
-///             response: ApiResponse::json_type("User"),
-///             headers: vec![],
-///             params: None,
-///             oauth_scopes: None, cross_origin: None, pagination: None,
-///         },
-///     ],
-///     module_path: None,
-///     request_suffix: None,
-///     version: None,
-///     env_mapping: None,
-///     cross_origin: CrossOrigin::default(),
-///     request_id_header: None,
-///     secret_names: vec![],
-///     default_pagination: None,
-///     pagination_exceptions: vec![],
-/// };
+/// let mut ctx = DefinitionContext::types_in("crate::types");
+/// let endpoint = Endpoint::get("GetUser", "/users/{id}")
+///     .describes("Get a user by ID")
+///     .returns_json::<serde_json::Value>(&mut ctx)
+///     .build().unwrap();
+/// let api = RestApi::builder(&ctx, "TestApi", "https://api.test.com/v1")
+///     .describes("Test API")
+///     .no_auth()
+///     .endpoints([endpoint])
+///     .build().unwrap();
 ///
 /// let collection = build_postman_collection(&api);
 /// assert_eq!(collection.info.name, "TestApi");
@@ -136,52 +113,21 @@ pub fn build_postman_collection(api: &RestApi) -> PostmanCollection {
 /// ## Examples
 ///
 /// ```
-/// use schematic_define::{RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse, CrossOrigin};
+/// use schematic_define::{DefinitionContext, RestApi};
 /// use schematic_gen::export::postman::build_postman_collection_grouped;
 ///
-/// let api1 = RestApi {
-///     name: "OllamaNative".to_string(),
-///     description: "Native API".to_string(),
-///     base_url: "http://localhost:11434".to_string(),
-///     docs_url: None,
-///     auth: AuthStrategy::None,
-///     auth_policy: None,
-///     env_auth: vec![],
-///     env_username: None,
-///     headers: vec![],
-///     endpoints: vec![],
-///     module_path: Some("ollama".to_string()),
-///     request_suffix: None,
-///     version: None,
-///     env_mapping: None,
-///     cross_origin: CrossOrigin::default(),
-///     request_id_header: None,
-///     secret_names: vec![],
-///     default_pagination: None,
-///     pagination_exceptions: vec![],
-/// };
+/// let ctx = DefinitionContext::types_in("crate::types");
+/// let api1 = RestApi::builder(&ctx, "OllamaNative", "http://localhost:11434")
+///     .describes("Native API")
+///     .no_auth()
+///     .module_path("ollama")
+///     .build().unwrap();
 ///
-/// let api2 = RestApi {
-///     name: "OllamaOpenAI".to_string(),
-///     description: "OpenAI-compatible API".to_string(),
-///     base_url: "http://localhost:11434/v1".to_string(),
-///     docs_url: None,
-///     auth: AuthStrategy::None,
-///     auth_policy: None,
-///     env_auth: vec![],
-///     env_username: None,
-///     headers: vec![],
-///     endpoints: vec![],
-///     module_path: Some("ollama".to_string()),
-///     request_suffix: None,
-///     version: None,
-///     env_mapping: None,
-///     cross_origin: CrossOrigin::default(),
-///     request_id_header: None,
-///     secret_names: vec![],
-///     default_pagination: None,
-///     pagination_exceptions: vec![],
-/// };
+/// let api2 = RestApi::builder(&ctx, "OllamaOpenAI", "http://localhost:11434/v1")
+///     .describes("OpenAI-compatible API")
+///     .no_auth()
+///     .module_path("ollama")
+///     .build().unwrap();
 ///
 /// let collection = build_postman_collection_grouped(&[&api1, &api2], "ollama");
 /// assert_eq!(collection.info.name, "Ollama");

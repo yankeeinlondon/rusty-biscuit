@@ -28,7 +28,7 @@ use schematic_define::{
     ParamDef, ParamStyle, PkceRequirement, QueryParamType, RestApi, RestMethod,
 };
 use schematic_define::pagination::{
-    Collection, CursorSource, InputParam, KeepAlive, LinkSource, MoreSignal, PageSize, PaginationException,
+    Collection, CursorSource, InputParam, KeepAlive, LinkSource, MoreSignal, PageSize,
     Partition, Session, SessionStep, Strategy, ValueSource,
 };
 use schematic_gen::output::{
@@ -159,41 +159,11 @@ pub struct EntryLinkPage {
 ];
 
 fn endpoint(id: &str, method: RestMethod, path: &str, response: ApiResponse) -> Endpoint {
-    Endpoint {
-        id: id.to_string(),
-        method,
-        path: path.to_string(),
-        description: format!("{id} fixture endpoint"),
-        request: None,
-        response,
-        headers: vec![],
-        params: None,
-        oauth_scopes: None, cross_origin: None, pagination: None,
-    }
+    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = method; fixture.path = path.to_string(); fixture.description = format!("{id} fixture endpoint"); fixture.request = None; fixture.response = response; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }
 }
 
 fn fixture_api(name: &str, module: &str, auth: AuthStrategy, endpoints: Vec<Endpoint>) -> RestApi {
-    RestApi {
-        name: name.to_string(),
-        description: format!("{name} fixture API"),
-        base_url: "http://127.0.0.1:1".to_string(),
-        docs_url: None,
-        auth,
-        auth_policy: None,
-        env_auth: vec![format!("{}_TOKEN", module.to_uppercase())],
-        env_username: None,
-        env_mapping: None,
-        headers: vec![],
-        endpoints,
-        module_path: Some(module.to_string()),
-        request_suffix: None,
-        version: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    }
+    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{name} fixture API"); fixture.base_url = "http://127.0.0.1:1".to_string(); fixture.docs_url = None; fixture.auth = auth; fixture.auth_policy = None; fixture.env_auth = vec![format!("{}_TOKEN", module.to_uppercase())]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = Some(module.to_string()); fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture }
 }
 
 fn named_param(name: &str, param_type: QueryParamType) -> ParamDef {
@@ -208,7 +178,7 @@ fn named_param(name: &str, param_type: QueryParamType) -> ParamDef {
 }
 
 fn located_params(query: Vec<ParamDef>, header: Vec<ParamDef>, cookie: Vec<ParamDef>) -> EndpointParams {
-    EndpointParams { query, header, cookie, ..Default::default() }
+    EndpointParams { query, header, cookie }
 }
 
 /// A page-number default (adopting `page` and `per_page`, keeping `state`),
@@ -250,8 +220,8 @@ fn pages_fixture() -> RestApi {
             .page_size(PageSize::new("per_page").max(100))
             .build(),
     );
-    api.pagination_exceptions = vec![
-        PaginationException::new(
+    for (id, collection) in [
+        (
             "ListCursor",
             Collection::at("data").item_type("Entry").paginate(
                 Strategy::cursor("after", CursorSource::last_item("id"))
@@ -259,26 +229,26 @@ fn pages_fixture() -> RestApi {
                     .resumable(),
             ),
         ),
-        PaginationException::new(
+        (
             "ListLinked",
             Collection::at("values")
                 .item_type("Entry")
                 .paginate(Strategy::next_link(LinkSource::body("next"))),
         ),
-        PaginationException::new(
+        (
             "ListAllowedLinked",
             Collection::at("values")
                 .item_type("Entry")
                 .paginate(Strategy::next_link(LinkSource::body("next"))),
         ),
-        PaginationException::new(
+        (
             "ListRequired",
             Collection::root().paginate(
                 Strategy::page_number("page", MoreSignal::NonEmptyPage)
                     .page_size(PageSize::new("limit").sent_default(25)),
             ),
         ),
-        PaginationException::new(
+        (
             "ScanEntries",
             Collection::root().paginate(
                 Strategy::cursor("after", CursorSource::last_item("id"))
@@ -293,7 +263,7 @@ fn pages_fixture() -> RestApi {
                     .partition(Partition::new(InputParam::query("slice"), InputParam::query("slices")).max(2)),
             ),
         ),
-    ];
+    ] { api.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection); };
     api
 }
 
@@ -1614,6 +1584,8 @@ fn slow_real_apis_compile_offline() {
 /// it must fail with, and text its diagnostic must name. Entry `i` becomes
 /// the fixture crate's test target `tests/misuse_<i>.rs`.
 const MISUSES: &[(&str, &str, &str, &str)] = &[
+    ("external Endpoint literal", "fn misuse(endpoint: schematic_define::Endpoint) { let _ = schematic_define::Endpoint { id: String::new(), ..endpoint }; }", "E0639", "non-exhaustive"),
+    ("external RestApi literal", "fn misuse(api: schematic_define::RestApi) { let _ = schematic_define::RestApi { name: String::new(), ..api }; }", "E0639", "non-exhaustive"),
     ("Endpoint has no Default", "fn misuse() { let _ = schematic_define::Endpoint::default(); }", "E0599", "Endpoint"),
     ("RestApi has no Default", "fn misuse() { let _ = schematic_define::RestApi::default(); }", "E0599", "RestApi"),
     ("endpoint description is required", "fn misuse() { let _ = schematic_define::Endpoint::get(\"Get\", \"/\").returns_empty().build(); }", "E0599", "build"),
@@ -2130,7 +2102,7 @@ use std::net::TcpListener;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use schematic_schema::gitea::{GetGitTreeRecursiveRequest, Gitea, ListPullRequestsRequest};
+use schematic_schema::gitea::{GetGitTreeRequest, Gitea, ListPullRequestsRequest};
 use schematic_schema::gitlab::{GetRepositoryFileRequest, GitLab};
 use schematic_schema::openai::{CreateResponseRequest, GetResponseRequest, DeleteResponseRequest, CancelResponseRequest, CompactconversationRequest, GetinputtokencountsRequest, ListInputItemsRequest, ListConversationItemsRequest, OpenAI};
 use schematic_schema::prelude::*;
@@ -2188,8 +2160,19 @@ async fn capture_query_request_lines() {
     let _ = gitea.send(ListPullRequestsRequest::new("o", "r")).credential(key.clone()).full().await;
     record("no-query");
 
-    let _ = gitea.send(GetGitTreeRecursiveRequest::new("o", "r", "a b")).credential(key.clone()).full().await;
+    let mut tree = GetGitTreeRequest::new("o", "r", "a b");
+    tree.recursive = Some(true);
+    let _ = gitea.send(tree).credential(key.clone()).full().await;
     record("legacy-embedded-literal-query");
+    for (label, recursive) in [("tree-recursive-omitted", None), ("tree-recursive-false", Some(false))] {
+        let mut tree = GetGitTreeRequest::new("o", "r", "a b");
+        tree.recursive = recursive;
+        let parts = tree.clone().into_parts().unwrap();
+        assert_eq!(parts.path, "/repos/o/r/git/trees/a%20b");
+        assert_eq!(parts.query, recursive.map(|value| pairs(&[("recursive", if value { "true" } else { "false" })])).unwrap_or_default());
+        let _ = gitea.send(tree).credential(key.clone()).full().await;
+        record(label);
+    }
 
     let tenant = Gitea::new().base_url(format!("{base}/api/v1?tenant=a b")).build().unwrap();
     let paged = ListPullRequestsRequest::new("o", "r");
@@ -2199,12 +2182,24 @@ async fn capture_query_request_lines() {
     let gitlab = GitLab::new().base_url(format!("{base}/api/v4")).build().unwrap();
     let _ = gitlab
         .send(
-            GetRepositoryFileRequest::new("group/project", "dir/file name.rs", "feature/x y+z"),
+            GetRepositoryFileRequest::new("group/project", "dir/file name.rs").with_git_ref("feature/x y+z".to_string()),
         )
         .credential(key.clone())
         .full()
         .await;
     record("legacy-embedded-query-with-placeholder");
+    let omitted = GetRepositoryFileRequest::new("group/project", "dir/file name.rs");
+    assert!(omitted.clone().into_parts().unwrap().query.is_empty());
+    let _ = gitlab.send(omitted).credential(key.clone()).full().await;
+    record("file-ref-omitted");
+    for (label, git_ref) in [("file-ref-unicode", "ünï+%&=/?#"), ("file-ref-empty", "")] {
+        let request = GetRepositoryFileRequest::new("group/project", "dir/file name.rs").with_git_ref(git_ref.to_string());
+        let parts = request.clone().into_parts().unwrap();
+        assert_eq!(parts.path, "/projects/group%2Fproject/repository/files/dir%2Ffile%20name.rs");
+        assert_eq!(parts.query, pairs(&[("ref", git_ref)]));
+        let _ = gitlab.send(request).credential(key.clone()).full().await;
+        record(label);
+    }
 
     let openai = OpenAI::new().base_url(format!("{base}/v1")).build().unwrap();
     let token = Credential::access_token("test-token");
@@ -2285,15 +2280,16 @@ fn into_parts_returns_unencoded_query_pairs_apart_from_the_path() {
     let parts = ListPullRequestsRequest::new("o", "r").into_parts().unwrap();
     assert_eq!((parts.path.as_str(), parts.query), ("/repos/o/r/pulls", vec![]));
 
-    // Legacy templates keep their embedded query, with its escaping, in the path.
-    let parts = GetGitTreeRecursiveRequest::new("o", "r", "a b").into_parts().unwrap();
-    assert_eq!((parts.path.as_str(), parts.query), ("/repos/o/r/git/trees/a%20b?recursive=true", vec![]));
-    let parts = GetRepositoryFileRequest::new("group/project", "dir/file name.rs", "feature/x y+z")
+    let mut tree = GetGitTreeRequest::new("o", "r", "a b");
+    tree.recursive = Some(true);
+    let parts = tree.into_parts().unwrap();
+    assert_eq!((parts.path.as_str(), parts.query), ("/repos/o/r/git/trees/a%20b", pairs(&[("recursive", "true")])));
+    let parts = GetRepositoryFileRequest::new("group/project", "dir/file name.rs").with_git_ref("feature/x y+z".to_string())
         .into_parts()
         .unwrap();
     assert_eq!(
         (parts.path.as_str(), parts.query),
-        ("/projects/group%2Fproject/repository/files/dir%2Ffile%20name.rs?ref=feature%2Fx%20y%2Bz", vec![])
+        ("/projects/group%2Fproject/repository/files/dir%2Ffile%20name.rs", pairs(&[("ref", "feature/x y+z")]))
     );
 
     let mut items = ListConversationItemsRequest::new("conv 1");

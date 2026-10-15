@@ -98,10 +98,9 @@ pub fn api_pager_view(api: &RestApi) -> Cow<'_, RestApi> {
         return Cow::Borrowed(api);
     }
     let endpoints = views.into_iter().map(Cow::into_owned).collect();
-    Cow::Owned(RestApi {
-        endpoints,
-        ..api.clone()
-    })
+    let mut resolved = api.clone();
+    resolved.endpoints = endpoints;
+    Cow::Owned(resolved)
 }
 
 /// A pager control the call type forwards, in emission order.

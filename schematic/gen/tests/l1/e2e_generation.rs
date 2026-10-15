@@ -297,147 +297,17 @@ fn generate_code_for_various_api_configurations() {
 
     let test_cases = [
         // Simple API with no auth
-        RestApi {
-            name: "SimpleApi".to_string(),
-            description: "A simple test API".to_string(),
-            base_url: "https://api.simple.com".to_string(),
-            docs_url: None,
-            auth: AuthStrategy::None,
-            auth_policy: None,
-            env_auth: vec![],
-            env_username: None,
-            env_mapping: None,
-            headers: vec![],
-            endpoints: vec![Endpoint {
-                id: "GetRoot".to_string(),
-                method: RestMethod::Get,
-                path: "/".to_string(),
-                description: "Get root".to_string(),
-                request: None,
-                response: ApiResponse::json_type("RootResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            }],
-            module_path: None,
-            request_suffix: None,
-            version: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
-        },
+        { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "SimpleApi".to_string(); fixture.description = "A simple test API".to_string(); fixture.base_url = "https://api.simple.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetRoot".to_string(); fixture.method = RestMethod::Get; fixture.path = "/".to_string(); fixture.description = "Get root".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("RootResponse"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture },
         // API with all HTTP methods
-        RestApi {
-            name: "AllMethods".to_string(),
-            description: "API with all HTTP methods".to_string(),
-            base_url: "https://api.methods.com".to_string(),
-            docs_url: None,
-            auth: AuthStrategy::None,
-            auth_policy: None,
-            env_auth: vec![],
-            env_username: None,
-            env_mapping: None,
-            headers: vec![],
-            endpoints: vec![
-                Endpoint {
-                    id: "Get".to_string(),
-                    method: RestMethod::Get,
-                    path: "/resource".to_string(),
-                    description: "GET".to_string(),
-                    request: None,
-                    response: ApiResponse::json_type("Response"),
-                    headers: vec![],
-                    params: None,
-                    oauth_scopes: None, cross_origin: None, pagination: None,
-                },
-                Endpoint {
-                    id: "Post".to_string(),
-                    method: RestMethod::Post,
-                    path: "/resource".to_string(),
-                    description: "POST".to_string(),
-                    request: Some(ApiRequest::json_type("CreateRequest")),
-                    response: ApiResponse::json_type("Response"),
-                    headers: vec![],
-                    params: None,
-                    oauth_scopes: None, cross_origin: None, pagination: None,
-                },
-                Endpoint {
-                    id: "Put".to_string(),
-                    method: RestMethod::Put,
-                    path: "/resource/{id}".to_string(),
-                    description: "PUT".to_string(),
-                    request: Some(ApiRequest::json_type("UpdateRequest")),
-                    response: ApiResponse::json_type("Response"),
-                    headers: vec![],
-                    params: None,
-                    oauth_scopes: None, cross_origin: None, pagination: None,
-                },
-                Endpoint {
-                    id: "Patch".to_string(),
-                    method: RestMethod::Patch,
-                    path: "/resource/{id}".to_string(),
-                    description: "PATCH".to_string(),
-                    request: Some(ApiRequest::json_type("PatchBody")),
-                    response: ApiResponse::json_type("Response"),
-                    headers: vec![],
-                    params: None,
-                    oauth_scopes: None, cross_origin: None, pagination: None,
-                },
-                Endpoint {
-                    id: "Delete".to_string(),
-                    method: RestMethod::Delete,
-                    path: "/resource/{id}".to_string(),
-                    description: "DELETE".to_string(),
-                    request: None,
-                    response: ApiResponse::json_type("Response"),
-                    headers: vec![],
-                    params: None,
-                    oauth_scopes: None, cross_origin: None, pagination: None,
-                },
-            ],
-            module_path: None,
-            request_suffix: None,
-            version: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
-        },
+        { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "AllMethods".to_string(); fixture.description = "API with all HTTP methods".to_string(); fixture.base_url = "https://api.methods.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = vec![
+                { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "Get".to_string(); fixture.method = RestMethod::Get; fixture.path = "/resource".to_string(); fixture.description = "GET".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("Response"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+                { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "Post".to_string(); fixture.method = RestMethod::Post; fixture.path = "/resource".to_string(); fixture.description = "POST".to_string(); fixture.request = Some(ApiRequest::json_type("CreateRequest")); fixture.response = ApiResponse::json_type("Response"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+                { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "Put".to_string(); fixture.method = RestMethod::Put; fixture.path = "/resource/{id}".to_string(); fixture.description = "PUT".to_string(); fixture.request = Some(ApiRequest::json_type("UpdateRequest")); fixture.response = ApiResponse::json_type("Response"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+                { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "Patch".to_string(); fixture.method = RestMethod::Patch; fixture.path = "/resource/{id}".to_string(); fixture.description = "PATCH".to_string(); fixture.request = Some(ApiRequest::json_type("PatchBody")); fixture.response = ApiResponse::json_type("Response"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+                { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "Delete".to_string(); fixture.method = RestMethod::Delete; fixture.path = "/resource/{id}".to_string(); fixture.description = "DELETE".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("Response"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+            ]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture },
         // API with multiple path parameters
-        RestApi {
-            name: "NestedPaths".to_string(),
-            description: "API with nested path parameters".to_string(),
-            base_url: "https://api.nested.com".to_string(),
-            docs_url: None,
-            auth: AuthStrategy::BearerToken { header: None },
-            auth_policy: None,
-            env_auth: vec!["NESTED_API_KEY".to_string()],
-            env_username: None,
-            env_mapping: None,
-            headers: vec![],
-            endpoints: vec![Endpoint {
-                id: "GetItem".to_string(),
-                method: RestMethod::Get,
-                path: "/orgs/{org}/repos/{repo}/items/{item}".to_string(),
-                description: "Get deeply nested item".to_string(),
-                request: None,
-                response: ApiResponse::json_type("Item"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            }],
-            module_path: None,
-            request_suffix: None,
-            version: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
-        },
+        { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "NestedPaths".to_string(); fixture.description = "API with nested path parameters".to_string(); fixture.base_url = "https://api.nested.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::BearerToken { header: None }; fixture.auth_policy = None; fixture.env_auth = vec!["NESTED_API_KEY".to_string()]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetItem".to_string(); fixture.method = RestMethod::Get; fixture.path = "/orgs/{org}/repos/{repo}/items/{item}".to_string(); fixture.description = "Get deeply nested item".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("Item"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture },
     ];
 
     for api in test_cases {
@@ -506,37 +376,7 @@ fn binary_response_declares_bytes_success_and_binary_decoder() {
     use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
 
     // Note: "BinaryTest" avoids the "Api" suffix which triggers module path inference
-    let api = RestApi {
-        name: "BinaryTest".to_string(),
-        description: "API with binary response".to_string(),
-        base_url: "https://api.binary.com".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::None,
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        env_mapping: None,
-        headers: vec![],
-        endpoints: vec![Endpoint {
-            id: "GetAudio".to_string(),
-            method: RestMethod::Get,
-            path: "/audio".to_string(),
-            description: "Get audio file".to_string(),
-            request: None,
-            response: ApiResponse::Binary,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        }],
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    };
+    let api = { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "BinaryTest".to_string(); fixture.description = "API with binary response".to_string(); fixture.base_url = "https://api.binary.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetAudio".to_string(); fixture.method = RestMethod::Get; fixture.path = "/audio".to_string(); fixture.description = "Get audio file".to_string(); fixture.request = None; fixture.response = ApiResponse::Binary; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture };
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let src_dir = temp_dir.path().join("src");
@@ -566,37 +406,7 @@ fn binary_response_declares_bytes_success_and_binary_decoder() {
 fn text_response_declares_string_success_and_text_decoder() {
     use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
 
-    let api = RestApi {
-        name: "TextTest".to_string(),
-        description: "API with text response".to_string(),
-        base_url: "https://api.text.com".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::None,
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        env_mapping: None,
-        headers: vec![],
-        endpoints: vec![Endpoint {
-            id: "GetPlainText".to_string(),
-            method: RestMethod::Get,
-            path: "/text".to_string(),
-            description: "Get plain text".to_string(),
-            request: None,
-            response: ApiResponse::Text,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        }],
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    };
+    let api = { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "TextTest".to_string(); fixture.description = "API with text response".to_string(); fixture.base_url = "https://api.text.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetPlainText".to_string(); fixture.method = RestMethod::Get; fixture.path = "/text".to_string(); fixture.description = "Get plain text".to_string(); fixture.request = None; fixture.response = ApiResponse::Text; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture };
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let src_dir = temp_dir.path().join("src");
@@ -621,37 +431,7 @@ fn text_response_declares_string_success_and_text_decoder() {
 fn empty_response_declares_unit_success_and_empty_decoder() {
     use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
 
-    let api = RestApi {
-        name: "EmptyTest".to_string(),
-        description: "API with empty response".to_string(),
-        base_url: "https://api.empty.com".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::None,
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        env_mapping: None,
-        headers: vec![],
-        endpoints: vec![Endpoint {
-            id: "DeleteItem".to_string(),
-            method: RestMethod::Delete,
-            path: "/items/{id}".to_string(),
-            description: "Delete an item".to_string(),
-            request: None,
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        }],
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    };
+    let api = { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "EmptyTest".to_string(); fixture.description = "API with empty response".to_string(); fixture.base_url = "https://api.empty.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "DeleteItem".to_string(); fixture.method = RestMethod::Delete; fixture.path = "/items/{id}".to_string(); fixture.description = "Delete an item".to_string(); fixture.request = None; fixture.response = ApiResponse::Empty; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture };
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let src_dir = temp_dir.path().join("src");
@@ -677,72 +457,12 @@ fn empty_response_declares_unit_success_and_empty_decoder() {
 fn mixed_response_types_declare_each_endpoint_decoder() {
     use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
 
-    let api = RestApi {
-        name: "MixedTest".to_string(),
-        description: "API with mixed response types".to_string(),
-        base_url: "https://api.mixed.com".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::None,
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        env_mapping: None,
-        headers: vec![],
-        endpoints: vec![
-            Endpoint {
-                id: "GetJson".to_string(),
-                method: RestMethod::Get,
-                path: "/json".to_string(),
-                description: "Get JSON".to_string(),
-                request: None,
-                response: ApiResponse::json_type("JsonResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "GetBinary".to_string(),
-                method: RestMethod::Get,
-                path: "/binary".to_string(),
-                description: "Get binary".to_string(),
-                request: None,
-                response: ApiResponse::Binary,
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "GetText".to_string(),
-                method: RestMethod::Get,
-                path: "/text".to_string(),
-                description: "Get text".to_string(),
-                request: None,
-                response: ApiResponse::Text,
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            Endpoint {
-                id: "DeleteItem".to_string(),
-                method: RestMethod::Delete,
-                path: "/item".to_string(),
-                description: "Delete item".to_string(),
-                request: None,
-                response: ApiResponse::Empty,
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-        ],
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    };
+    let api = { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "MixedTest".to_string(); fixture.description = "API with mixed response types".to_string(); fixture.base_url = "https://api.mixed.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = vec![
+            { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetJson".to_string(); fixture.method = RestMethod::Get; fixture.path = "/json".to_string(); fixture.description = "Get JSON".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("JsonResponse"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+            { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetBinary".to_string(); fixture.method = RestMethod::Get; fixture.path = "/binary".to_string(); fixture.description = "Get binary".to_string(); fixture.request = None; fixture.response = ApiResponse::Binary; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+            { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetText".to_string(); fixture.method = RestMethod::Get; fixture.path = "/text".to_string(); fixture.description = "Get text".to_string(); fixture.request = None; fixture.response = ApiResponse::Text; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+            { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "DeleteItem".to_string(); fixture.method = RestMethod::Delete; fixture.path = "/item".to_string(); fixture.description = "Delete item".to_string(); fixture.request = None; fixture.response = ApiResponse::Empty; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+        ]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture };
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let src_dir = temp_dir.path().join("src");
@@ -896,77 +616,7 @@ fn multiple_apis_compile() {
 // Legacy Pagination Metadata
 // =============================================================================
 
-/// Legacy `with_pagination` metadata is inert for pager emission (R8): it
-/// adds ordinary query parameters and nothing pagination-related.
-#[test]
-fn legacy_pagination_metadata_emits_no_pager() {
-    use schematic_define::params::{EndpointParams, PaginationStyle};
-    use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
 
-    let api = RestApi {
-        name: "PaginatedTest".to_string(),
-        description: "API with pagination".to_string(),
-        base_url: "https://api.pagination.com".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::None,
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        env_mapping: None,
-        headers: vec![],
-        endpoints: vec![
-            // Paginated endpoint
-            Endpoint {
-                id: "ListItems".to_string(),
-                method: RestMethod::Get,
-                path: "/items".to_string(),
-                description: "List items with pagination".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ListItemsResponse"),
-                headers: vec![],
-                params: Some(EndpointParams::default().with_pagination(PaginationStyle::github())),
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-            // Non-paginated endpoint
-            Endpoint {
-                id: "GetItem".to_string(),
-                method: RestMethod::Get,
-                path: "/items/{id}".to_string(),
-                description: "Get a single item".to_string(),
-                request: None,
-                response: ApiResponse::json_type("Item"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            },
-        ],
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    };
-
-    let temp_dir = TempDir::new().expect("Failed to create temp directory");
-    let src_dir = temp_dir.path().join("src");
-
-    generate_and_write(&api, &src_dir, false).expect("Failed to generate code");
-
-    let api_content = std::fs::read_to_string(src_dir.join("paginatedtest.rs"))
-        .expect("Failed to read paginatedtest.rs");
-
-    assert!(
-        !api_content.contains("schematic_runtime::pager") && !api_content.contains("Paginated for"),
-        "legacy metadata must not emit a pager:\n{api_content}"
-    );
-    assert!(
-        api_content.contains("pub per_page: Option<i64>"),
-        "the materialized query parameters stay ordinary fields:\n{api_content}"
-    );
-}
 
 /// shared.rs holds request helpers only; paging is the runtime's.
 #[test]
@@ -1091,37 +741,7 @@ fn grouped_export_fails_when_module_registry_missing() {
     use schematic_gen::errors::GeneratorError;
 
     fn synth(name: &str) -> RestApi {
-        RestApi {
-            name: name.to_string(),
-            description: format!("{} synthetic", name),
-            base_url: "https://synthetic.example.com".to_string(),
-            docs_url: None,
-            auth: AuthStrategy::None,
-            auth_policy: None,
-            env_auth: vec![],
-            env_username: None,
-            env_mapping: None,
-            headers: vec![],
-            endpoints: vec![Endpoint {
-                id: format!("{}Endpoint", name),
-                method: RestMethod::Get,
-                path: format!("/{}", name.to_lowercase()),
-                description: String::new(),
-                request: None,
-                response: ApiResponse::Empty,
-                headers: vec![],
-                params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
-            }],
-            module_path: Some("synthetic_unknown_module".to_string()),
-            request_suffix: None,
-            version: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
-        }
+        { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{} synthetic", name); fixture.base_url = "https://synthetic.example.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = format!("{}Endpoint", name); fixture.method = RestMethod::Get; fixture.path = format!("/{}", name.to_lowercase()); fixture.description = String::new(); fixture.request = None; fixture.response = ApiResponse::Empty; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }]; fixture.module_path = Some("synthetic_unknown_module".to_string()); fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture }
     }
 
     // Confirm the module is NOT known to apis_by_module().

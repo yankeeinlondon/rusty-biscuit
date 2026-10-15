@@ -8,7 +8,7 @@
 use std::path::Path;
 
 use schematic_define::pagination::{
-    Collection, CursorSource, LinkSource, MoreSignal, PageSize, PaginationException, Partition, Session, Strategy, ValueSource,
+    Collection, CursorSource, LinkSource, MoreSignal, PageSize, Partition, Session, Strategy, ValueSource,
 };
 use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EndpointParams, QueryParamType, RestApi, RestMethod};
 use schematic_definitions::registry::SchemaRegistry;
@@ -17,41 +17,11 @@ use schematic_gen::pipeline::{BatchScope, GenerateOpts, OpenApiFormat, generate_
 use schematic_gen::validation::{validate_openapi, validate_postman, validate_rust_client};
 
 fn endpoint(id: &str, path: &str, response: &str) -> Endpoint {
-    Endpoint {
-        id: id.to_string(),
-        method: RestMethod::Get,
-        path: path.to_string(),
-        description: String::new(),
-        request: None,
-        response: ApiResponse::json_type(response),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None, cross_origin: None, pagination: None,
-    }
+    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = RestMethod::Get; fixture.path = path.to_string(); fixture.description = String::new(); fixture.request = None; fixture.response = ApiResponse::json_type(response); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }
 }
 
 fn api(name: &str, endpoints: Vec<Endpoint>) -> RestApi {
-    RestApi {
-        name: name.to_string(),
-        description: format!("{name} fixture"),
-        base_url: "https://fixture.example/v1".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::None,
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        env_mapping: None,
-        headers: vec![],
-        endpoints,
-        module_path: Some(name.to_lowercase()),
-        request_suffix: None,
-        version: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    }
+    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{name} fixture"); fixture.base_url = "https://fixture.example/v1".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = Some(name.to_lowercase()); fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture }
 }
 
 fn page_default() -> Strategy {
@@ -78,7 +48,7 @@ fn pagination_lines(api: &RestApi) -> Vec<String> {
 fn each_rule_group_renders_as_its_feature_on_the_rust_client_only() {
     let mut forge = api("Forge", vec![endpoint("ListReleases", "/releases", "Vec<Release>")]);
     forge.default_pagination = Some(Strategy::cursor("after", CursorSource::last_item("id")).build());
-    forge.pagination_exceptions = vec![PaginationException::new("ListReleaze", Collection::root().unpaginated())];
+    { let (id, collection) = ("ListReleases", Collection::at(""));  forge.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection);  };
 
     assert_eq!(
         pagination_lines(&forge),
@@ -87,10 +57,15 @@ fn each_rule_group_renders_as_its_feature_on_the_rust_client_only() {
              cursor-without-end-signal: a cursor read only from items has no end signal; add \
              `more_when(..)`"
                 .to_string(),
-            "severity=error api=Forge endpoint=ListReleaze feature=pagination-exception \
-             output=rust: unknown-exception-id: exception names `ListReleaze`, which is not an \
-             endpoint of this API; did you mean `ListReleases`?"
+            "severity=error api=Forge endpoint=ListReleases feature=pagination-exception \
+             output=rust: invalid-item-selector: item selector `\"\"[*]` is invalid: a key is empty or contains `[` or `]`"
                 .to_string(),
+            "severity=error api=Forge endpoint=ListReleases feature=pagination-exception \
+             output=rust: not-an-array-location: the item location is not an array: the response \
+             `Vec<Release>` is a root array, so it has no key `\"\"[*]`".to_string(),
+            "severity=error api=Forge endpoint=ListReleases feature=pagination-exception \
+             output=rust: missing-item-type: a paginated list must name its item type unless \
+             its response is an explicit `Vec<T>` root array".to_string(),
         ]
     );
     assert!(validate_rust_client(&[&forge]).iter().all(|d| d.severity == Severity::Error && d.output == Output::Rust));
@@ -117,7 +92,7 @@ fn each_rule_group_renders_as_its_feature_on_the_rust_client_only() {
 fn item_type_must_be_rust_type_syntax() {
     let mut forge = api("Forge", vec![endpoint("ListRuns", "/runs", "RunsResponse")]);
     forge.default_pagination = Some(page_default());
-    forge.pagination_exceptions = vec![PaginationException::new("ListRuns", Collection::at("runs").item_type("Vec<Run"))];
+    { let (id, collection) = ("ListRuns", Collection::at("runs").item_type("Vec<Run"));  forge.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection);  };
     assert_eq!(
         pagination_lines(&forge),
         vec![
@@ -127,7 +102,7 @@ fn item_type_must_be_rust_type_syntax() {
         ]
     );
     // Without a registry, a well-formed name is left to the compiler.
-    forge.pagination_exceptions = vec![PaginationException::new("ListRuns", Collection::at("runs").item_type("Run"))];
+    { let (id, collection) = ("ListRuns", Collection::at("runs").item_type("Run"));  forge.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection);  };
     assert_eq!(pagination_lines(&forge), Vec::<String>::new());
 }
 
@@ -139,7 +114,7 @@ fn github_runs(collection: Collection) -> RestApi {
         vec![endpoint("ListWorkflowRuns", "/repos/{owner}/{repo}/actions/runs", "WorkflowRunsResponse")],
     );
     github.default_pagination = Some(page_default());
-    github.pagination_exceptions = vec![PaginationException::new("ListWorkflowRuns", collection)];
+    { let (id, collection) = ("ListWorkflowRuns", collection);  github.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection);  };
     github
 }
 
@@ -213,9 +188,13 @@ fn a_pagination_error_blocks_only_the_rust_client() {
         no_openapi: false,
         no_postman: false,
     };
-    let mut forge = api("Forge", vec![endpoint("ListReleases", "/releases", "Vec<Release>")]);
+    let mut ctx = schematic_define::DefinitionContext::types_in("::fixture");
+    let releases = Endpoint::get("ListReleases", "/releases").describes("List releases")
+        .returns_json::<Vec<serde_json::Value>>(&mut ctx).build().unwrap();
+    let mut forge = RestApi::builder(&ctx, "Forge", "https://fixture.example/v1")
+        .describes("Forge fixture").no_auth().module_path("forge").endpoints([releases]).build().unwrap();
     forge.default_pagination = Some(Strategy::next_link(LinkSource::link_header("")).build());
-    let registry_for = |_: &str| Some(SchemaRegistry::new().register::<serde_json::Value>("Vec<Release>"));
+    let registry_for = |_: &str| Some(SchemaRegistry::from_context(&ctx).unwrap());
 
     let report = generate_batch(&[forge], &BatchScope::Complete, &opts, &registry_for);
 

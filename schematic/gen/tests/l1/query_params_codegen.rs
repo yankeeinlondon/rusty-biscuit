@@ -49,22 +49,12 @@ fn make_endpoint_with_query(
                 .collect(),
             header: vec![],
             cookie: vec![],
-            pagination: None,
-            response_pagination: None,
+
+
         })
     };
 
-    Endpoint {
-        id: id.to_string(),
-        method,
-        path: path.to_string(),
-        description: format!("Test endpoint for {}", id),
-        request: None,
-        response: ApiResponse::json_type("TestResponse"),
-        headers: vec![],
-        params,
-        oauth_scopes: None, cross_origin: None, pagination: None,
-    }
+    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = method; fixture.path = path.to_string(); fixture.description = format!("Test endpoint for {}", id); fixture.request = None; fixture.response = ApiResponse::json_type("TestResponse"); fixture.headers = vec![]; fixture.params = params; fixture.cross_origin = None; fixture.pagination = None; fixture }
 }
 
 // =============================================================================
@@ -430,17 +420,7 @@ fn path_is_immutable_when_query_params_present() {
 
 #[test]
 fn path_immutable_when_no_query_params() {
-    let endpoint = Endpoint {
-        id: "GetUser".to_string(),
-        method: RestMethod::Get,
-        path: "/users/{user_id}".to_string(),
-        description: "Get a user".to_string(),
-        request: None,
-        response: ApiResponse::json_type("User"),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None, cross_origin: None, pagination: None,
-    };
+    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetUser".to_string(); fixture.method = RestMethod::Get; fixture.path = "/users/{user_id}".to_string(); fixture.description = "Get a user".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("User"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
     let tokens = generate_request_struct(&endpoint);
     let code = format_tokens(&tokens);

@@ -18,27 +18,7 @@ use super::variables::merge_variables;
 use super::write_postman;
 
 fn minimal_api() -> RestApi {
-    RestApi {
-        name: "TestApi".to_string(),
-        description: "A test API".to_string(),
-        base_url: "https://api.test.com/v1".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::None,
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        headers: vec![],
-        endpoints: vec![],
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        env_mapping: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    }
+    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "TestApi".to_string(); fixture.description = "A test API".to_string(); fixture.base_url = "https://api.test.com/v1".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.headers = vec![]; fixture.endpoints = vec![]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture }
 }
 
 #[test]
@@ -64,28 +44,8 @@ fn build_minimal_collection() {
 fn build_collection_with_endpoints() {
     let mut api = minimal_api();
     api.endpoints = vec![
-        Endpoint {
-            id: "GetUser".to_string(),
-            method: RestMethod::Get,
-            path: "/users/{id}".to_string(),
-            description: "Get a user".to_string(),
-            request: None,
-            response: ApiResponse::json_type("User"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "ListUsers".to_string(),
-            method: RestMethod::Get,
-            path: "/users".to_string(),
-            description: "List all users".to_string(),
-            request: None,
-            response: ApiResponse::json_type("UserList"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
+        { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetUser".to_string(); fixture.method = RestMethod::Get; fixture.path = "/users/{id}".to_string(); fixture.description = "Get a user".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("User"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+        { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "ListUsers".to_string(); fixture.method = RestMethod::Get; fixture.path = "/users".to_string(); fixture.description = "List all users".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("UserList"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
     ];
 
     let collection = build_postman_collection(&api);
@@ -405,17 +365,7 @@ fn body_binary() {
 
 #[test]
 fn url_with_path_params() {
-    let endpoint = Endpoint {
-        id: "GetModel".to_string(),
-        method: RestMethod::Get,
-        path: "/models/{model}".to_string(),
-        description: "Get a model".to_string(),
-        request: None,
-        response: ApiResponse::json_type("Model"),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None, cross_origin: None, pagination: None,
-    };
+    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetModel".to_string(); fixture.method = RestMethod::Get; fixture.path = "/models/{model}".to_string(); fixture.description = "Get a model".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("Model"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
     let path_params = extract_path_params(&endpoint.path);
     let url = build_url(
@@ -437,17 +387,7 @@ fn url_with_path_params() {
 #[test]
 fn reserved_path_param_strips_marker_in_collection() {
     let mut api = minimal_api();
-    api.endpoints = vec![Endpoint {
-        id: "GetModel".to_string(),
-        method: RestMethod::Get,
-        path: "/models/{+repo_id}".to_string(),
-        description: "Get a model".to_string(),
-        request: None,
-        response: ApiResponse::json_type("Model"),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None, cross_origin: None, pagination: None,
-    }];
+    api.endpoints = vec![{ let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetModel".to_string(); fixture.method = RestMethod::Get; fixture.path = "/models/{+repo_id}".to_string(); fixture.description = "Get a model".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("Model"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }];
 
     let collection = build_postman_collection(&api);
     let json = serde_json::to_string(&collection).unwrap();
@@ -463,39 +403,9 @@ fn reserved_path_param_strips_marker_in_collection() {
 fn folder_grouping() {
     let mut api = minimal_api();
     api.endpoints = vec![
-        Endpoint {
-            id: "ListModels".to_string(),
-            method: RestMethod::Get,
-            path: "/models".to_string(),
-            description: String::new(),
-            request: None,
-            response: ApiResponse::json_type("ModelList"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "GetModel".to_string(),
-            method: RestMethod::Get,
-            path: "/models/{model}".to_string(),
-            description: String::new(),
-            request: None,
-            response: ApiResponse::json_type("Model"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "GetHealth".to_string(),
-            method: RestMethod::Get,
-            path: "/health".to_string(),
-            description: String::new(),
-            request: None,
-            response: ApiResponse::json_type("Health"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
+        { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "ListModels".to_string(); fixture.method = RestMethod::Get; fixture.path = "/models".to_string(); fixture.description = String::new(); fixture.request = None; fixture.response = ApiResponse::json_type("ModelList"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+        { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetModel".to_string(); fixture.method = RestMethod::Get; fixture.path = "/models/{model}".to_string(); fixture.description = String::new(); fixture.request = None; fixture.response = ApiResponse::json_type("Model"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+        { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "GetHealth".to_string(); fixture.method = RestMethod::Get; fixture.path = "/health".to_string(); fixture.description = String::new(); fixture.request = None; fixture.response = ApiResponse::json_type("Health"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
     ];
 
     let collection = build_postman_collection(&api);
@@ -566,30 +476,10 @@ fn postman_collection_json_structure() {
     let mut api = minimal_api();
     api.auth = AuthStrategy::BearerToken { header: None };
     api.endpoints = vec![
-        Endpoint {
-            id: "ListModels".to_string(),
-            method: RestMethod::Get,
-            path: "/models".to_string(),
-            description: "List all models".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ModelList"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
-        Endpoint {
-            id: "CreateCompletion".to_string(),
-            method: RestMethod::Post,
-            path: "/chat/completions".to_string(),
-            description: "Create a chat completion".to_string(),
-            request: Some(schematic_define::ApiRequest::json_type(
+        { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "ListModels".to_string(); fixture.method = RestMethod::Get; fixture.path = "/models".to_string(); fixture.description = "List all models".to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("ModelList"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
+        { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "CreateCompletion".to_string(); fixture.method = RestMethod::Post; fixture.path = "/chat/completions".to_string(); fixture.description = "Create a chat completion".to_string(); fixture.request = Some(schematic_define::ApiRequest::json_type(
                 "CreateCompletionRequest",
-            )),
-            response: ApiResponse::json_type("Completion"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        },
+            )); fixture.response = ApiResponse::json_type("Completion"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture },
     ];
 
     let collection = build_postman_collection(&api);
@@ -759,17 +649,7 @@ fn build_postman_collection_grouped_uniform_bearer_declares_bearer_token() {
 /// Helper: build a minimal endpoint with a given id and path so the
 /// grouped-auth tests can construct realistic API surfaces.
 fn endpoint(id: &str, path: &str) -> Endpoint {
-    Endpoint {
-        id: id.to_string(),
-        method: RestMethod::Get,
-        path: path.to_string(),
-        description: String::new(),
-        request: None,
-        response: ApiResponse::json_type("Resp"),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None, cross_origin: None, pagination: None,
-    }
+    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = RestMethod::Get; fixture.path = path.to_string(); fixture.description = String::new(); fixture.request = None; fixture.response = ApiResponse::json_type("Resp"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }
 }
 
 /// Helper: collect every request item out of a built collection so

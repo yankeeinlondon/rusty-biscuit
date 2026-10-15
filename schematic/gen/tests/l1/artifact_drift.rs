@@ -142,6 +142,14 @@ fn generated_postman_artifacts_are_up_to_date() {
             committed_path.display(),
         );
     }
+
+    let generated = source_files(temp_dir.path());
+    let committed = source_files(&postman_committed);
+    assert_eq!(
+        generated.keys().collect::<Vec<_>>(),
+        committed.keys().collect::<Vec<_>>(),
+        "Postman artifact file-set drift; run `just -f schematic/justfile generate`",
+    );
 }
 
 /// Regression guard: the seven legacy per-API OpenAPI filenames produced by
@@ -403,4 +411,14 @@ fn generated_rust_artifacts_are_up_to_date() {
             == fs::read(schematic_root().join("schema/Cargo.toml")).unwrap(),
         "Rust manifest byte drift; run `just -f schematic/justfile generate`",
     );
+}
+
+#[test]
+fn qualified_typed_split_modules_need_no_unused_response_imports() {
+    let api = schematic_gen::pipeline::resolve_api("emqx-basic").unwrap();
+    let out = tempfile::TempDir::new().unwrap();
+    schematic_gen::output::generate_and_write(&api, out.path(), false).unwrap();
+    let requests = std::fs::read_to_string(out.path().join("emqx/requests.rs")).unwrap();
+    assert!(!requests.contains("use super::responses::*;"), "typed paths already name their defining crate");
+    assert!(requests.contains("::schematic_definitions::emqx::NodeInfo"));
 }

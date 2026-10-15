@@ -216,7 +216,7 @@ fn endpoint_tokens(endpoint: &Endpoint) -> TokenStream {
     let mut builder = quote! { Endpoint::new(#id, #method, #path).describes(#description) };
     builder = match &endpoint.response {
         ApiResponse::Json(schema) => {
-            let ty: syn::Type = syn::parse_str(&schema.full_path()).expect("validated response type");
+            let ty: syn::Type = syn::parse_str(&schema.type_name).expect("validated response type");
             quote! { #builder.returns_json::<#ty>(ctx) }
         }
         ApiResponse::Text => quote! { #builder.returns_text() },
@@ -226,7 +226,7 @@ fn endpoint_tokens(endpoint: &Endpoint) -> TokenStream {
     if let Some(request) = &endpoint.request {
         builder = match request {
             ApiRequest::Json(schema) => {
-                let ty: syn::Type = syn::parse_str(&schema.full_path()).expect("validated request type");
+                let ty: syn::Type = syn::parse_str(&schema.type_name).expect("validated request type");
                 quote! { #builder.request_json::<#ty>(ctx) }
             }
             ApiRequest::FormData { fields } | ApiRequest::UrlEncoded { fields } => {
@@ -282,7 +282,7 @@ fn form_field_tokens(field: &FormField) -> TokenStream {
         }
         FormFieldKind::Files { .. } => quote! { FormField::files(#name) },
         FormFieldKind::Json(schema) => {
-            let ty: syn::Type = syn::parse_str(&schema.full_path()).expect("validated form type");
+            let ty: syn::Type = syn::parse_str(&schema.type_name).expect("validated form type");
             quote! { FormField::json_desc(#name, ctx.register::<#ty>()?) }
         }
         _ => quote! { FormField::text(#name) },

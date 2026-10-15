@@ -7,17 +7,7 @@ fn make_endpoint(
     path: &str,
     request: Option<ApiRequest>,
 ) -> Endpoint {
-    Endpoint {
-        id: id.to_string(),
-        method,
-        path: path.to_string(),
-        description: format!("Test endpoint for {}", id),
-        request,
-        response: ApiResponse::json_type("TestResponse"),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None, cross_origin: None, pagination: None,
-    }
+    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = method; fixture.path = path.to_string(); fixture.description = format!("Test endpoint for {}", id); fixture.request = request; fixture.response = ApiResponse::json_type("TestResponse"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }
 }
 
 #[test]
@@ -803,22 +793,12 @@ fn make_endpoint_with_query(
                 .collect(),
             header: vec![],
             cookie: vec![],
-            pagination: None,
-            response_pagination: None,
+
+
         })
     };
 
-    Endpoint {
-        id: id.to_string(),
-        method,
-        path: path.to_string(),
-        description: format!("Test endpoint for {}", id),
-        request,
-        response: ApiResponse::json_type("TestResponse"),
-        headers: vec![],
-        params,
-        oauth_scopes: None, cross_origin: None, pagination: None,
-    }
+    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = method; fixture.path = path.to_string(); fixture.description = format!("Test endpoint for {}", id); fixture.request = request; fixture.response = ApiResponse::json_type("TestResponse"); fixture.headers = vec![]; fixture.params = params; fixture.cross_origin = None; fixture.pagination = None; fixture }
 }
 
 #[test]
@@ -1054,28 +1034,17 @@ fn generates_snake_case_query_param_fields_from_camel_case() {
 
 mod pagination_doc_tests {
     use super::*;
-    use schematic_define::params::{EndpointParams, PaginationStyle};
+    use schematic_define::params::{EndpointParams, QueryParamType};
 
-    fn make_endpoint_with_pagination(id: &str, path: &str, style: PaginationStyle) -> Endpoint {
-        let params = EndpointParams::default().with_pagination(style);
+    fn make_endpoint_with_pagination(id: &str, path: &str, params: EndpointParams) -> Endpoint {
 
-        Endpoint {
-            id: id.to_string(),
-            method: RestMethod::Get,
-            path: path.to_string(),
-            description: format!("Test endpoint for {}", id),
-            request: None,
-            response: ApiResponse::json_type("TestResponse"),
-            headers: vec![],
-            params: Some(params),
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        }
+        { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = RestMethod::Get; fixture.path = path.to_string(); fixture.description = format!("Test endpoint for {}", id); fixture.request = None; fixture.response = ApiResponse::json_type("TestResponse"); fixture.headers = vec![]; fixture.params = Some(params); fixture.cross_origin = None; fixture.pagination = None; fixture }
     }
 
     #[test]
     fn github_pagination_docs_include_default_and_max_values() {
         let endpoint =
-            make_endpoint_with_pagination("ListRepos", "/repos", PaginationStyle::github());
+            make_endpoint_with_pagination("ListRepos", "/repos", EndpointParams::new().with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)")).with_query_param("per_page", QueryParamType::Integer, false, Some("Items per page (default: 100, max: 100)")));
         let tokens = generate_request_struct(&endpoint);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
@@ -1098,7 +1067,7 @@ mod pagination_doc_tests {
         let endpoint = make_endpoint_with_pagination(
             "ListPullRequests",
             "/pullrequests",
-            PaginationStyle::bitbucket(),
+            EndpointParams::new().with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)")).with_query_param("pagelen", QueryParamType::Integer, false, Some("Items per page (default: 50, max: 100)")),
         );
         let tokens = generate_request_struct(&endpoint);
         let code = format_generated_code(&tokens).expect("Failed to format code");
@@ -1126,7 +1095,7 @@ mod pagination_doc_tests {
     #[test]
     fn gitea_pagination_docs_have_limit_param() {
         let endpoint =
-            make_endpoint_with_pagination("ListIssues", "/issues", PaginationStyle::gitea());
+            make_endpoint_with_pagination("ListIssues", "/issues", EndpointParams::new().with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)")).with_query_param("limit", QueryParamType::Integer, false, Some("Items per page (default: 50, max: 100)")));
         let tokens = generate_request_struct(&endpoint);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
@@ -1149,7 +1118,7 @@ mod pagination_doc_tests {
         let endpoint = make_endpoint_with_pagination(
             "ListItems",
             "/items",
-            PaginationStyle::offset_limit("offset", "limit", 25, 200),
+            EndpointParams::new().with_query_param("offset", QueryParamType::Integer, false, Some("Number of items to skip")).with_query_param("limit", QueryParamType::Integer, false, Some("Maximum items to return (default: 25, max: 200)")),
         );
         let tokens = generate_request_struct(&endpoint);
         let code = format_generated_code(&tokens).expect("Failed to format code");
@@ -1173,7 +1142,7 @@ mod pagination_doc_tests {
         let endpoint = make_endpoint_with_pagination(
             "ListEvents",
             "/events",
-            PaginationStyle::cursor("after", Some("limit"), 20),
+            EndpointParams::new().with_query_param("after", QueryParamType::String, false, Some("Pagination cursor from previous response")).with_query_param("limit", QueryParamType::Integer, false, Some("Maximum items to return (default: 20)")),
         );
         let tokens = generate_request_struct(&endpoint);
         let code = format_generated_code(&tokens).expect("Failed to format code");
@@ -1267,15 +1236,11 @@ fn endpoint_with_named_params(
     headers: Vec<schematic_define::ParamDef>,
     cookies: Vec<schematic_define::ParamDef>,
 ) -> Endpoint {
-    Endpoint {
-        headers: vec![("X-Mode".to_string(), "static".to_string())],
-        params: Some(schematic_define::EndpointParams {
+    { let mut fixture = make_endpoint("Search", RestMethod::Get, "/search", None); fixture.headers = vec![("X-Mode".to_string(), "static".to_string())]; fixture.params = Some(schematic_define::EndpointParams {
             header: headers,
             cookie: cookies,
             ..Default::default()
-        }),
-        ..make_endpoint("Search", RestMethod::Get, "/search", None)
-    }
+        }); fixture }
 }
 
 #[test]
@@ -1347,13 +1312,10 @@ fn cookie_parameters_are_encoded_and_folded_into_one_cookie_header() {
 
 #[test]
 fn named_parameters_start_unset_in_every_constructor() {
-    let endpoint = Endpoint {
-        path: "/search/{scope}".to_string(),
-        ..endpoint_with_named_params(
+    let endpoint = { let mut fixture = endpoint_with_named_params(
             vec![named_param("X-Trace-Id", QueryParamType::String)],
             vec![named_param("session", QueryParamType::String)],
-        )
-    };
+        ); fixture.path = "/search/{scope}".to_string(); fixture };
     let code = format_generated_code(&generate_request_struct(&endpoint)).unwrap();
 
     assert!(code.contains("x_trace_id: None"), "{code}");

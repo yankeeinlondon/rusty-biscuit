@@ -1038,40 +1038,10 @@ mod tests {
     ) -> schematic_define::RestApi {
         use schematic_define::{ApiResponse, Endpoint, RestApi};
 
-        RestApi {
-            name: name.to_string(),
-            description: format!("{} synthetic API", name),
-            base_url: format!("https://{}.example.com", name.to_lowercase()),
-            docs_url: None,
-            auth,
-            auth_policy: None,
-            env_auth: vec![],
-            env_username: None,
-            headers: vec![],
-            endpoints: endpoints
+        { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{} synthetic API", name); fixture.base_url = format!("https://{}.example.com", name.to_lowercase()); fixture.docs_url = None; fixture.auth = auth; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.headers = vec![]; fixture.endpoints = endpoints
                 .iter()
-                .map(|(id, method, path)| Endpoint {
-                    id: id.to_string(),
-                    method: *method,
-                    path: path.to_string(),
-                    description: format!("Endpoint {}", id),
-                    request: None,
-                    response: ApiResponse::Empty,
-                    headers: vec![],
-                    params: None,
-                    oauth_scopes: None, cross_origin: None, pagination: None,
-                })
-                .collect(),
-            module_path: Some(module.to_string()),
-            request_suffix: None,
-            version: None,
-            env_mapping: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
-        }
+                .map(|(id, method, path)| { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = *method; fixture.path = path.to_string(); fixture.description = format!("Endpoint {}", id); fixture.request = None; fixture.response = ApiResponse::Empty; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture })
+                .collect(); fixture.module_path = Some(module.to_string()); fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture }
     }
 
     /// Empty registry: synthetic APIs use `ApiResponse::Empty` so no schemas

@@ -15,17 +15,7 @@ use crate::output::options::OutputOptions;
 use crate::validation::validate_rust_client;
 
 fn endpoint(id: &str, method: RestMethod, path: &str, description: &str) -> Endpoint {
-    Endpoint {
-        id: id.to_string(),
-        method,
-        path: path.to_string(),
-        description: description.to_string(),
-        request: None,
-        response: ApiResponse::json_type("Widget"),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None, cross_origin: None, pagination: None,
-    }
+    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = method; fixture.path = path.to_string(); fixture.description = description.to_string(); fixture.request = None; fixture.response = ApiResponse::json_type("Widget"); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }
 }
 
 fn param(name: &str, param_type: QueryParamType, description: Option<&str>) -> ParamDef {
@@ -40,27 +30,7 @@ fn param(name: &str, param_type: QueryParamType, description: Option<&str>) -> P
 }
 
 fn api(name: &str, endpoints: Vec<Endpoint>) -> RestApi {
-    RestApi {
-        name: name.to_string(),
-        description: format!("{name} API"),
-        base_url: "https://api.example.com".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::BearerToken { header: None },
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        env_mapping: None,
-        headers: vec![],
-        endpoints,
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    }
+    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{name} API"); fixture.base_url = "https://api.example.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::BearerToken { header: None }; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture }
 }
 
 /// The fixture: required arguments in order, every optional-value location,
@@ -81,7 +51,6 @@ fn widgets() -> RestApi {
         ],
         header: vec![param("X-Trace-Id", QueryParamType::String, None)],
         cookie: vec![param("session", QueryParamType::String, None)],
-        ..Default::default()
     });
 
     let mut create_widget = endpoint("CreateWidget", RestMethod::Post, "/owners/{owner}/widgets", "Creates a widget.");

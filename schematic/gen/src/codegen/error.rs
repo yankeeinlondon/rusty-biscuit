@@ -22,9 +22,8 @@ pub fn generate_request_parts_type() -> TokenStream {
         ///
         /// This tuple contains all information needed to execute an API request:
         /// - `0`: HTTP method (e.g., "GET", "POST", "DELETE")
-        /// - `1`: URL path with path parameters substituted. Declared query
-        ///   parameters are not in it; a query written into the endpoint's path
-        ///   template (`/trees/{sha}?recursive=true`) is.
+        /// - `1`: URL path with path parameters substituted. Query parameters
+        ///   are declared separately from the endpoint path template.
         /// - `2`: Request body, if the endpoint sends one
         /// - `3`: Additional headers as (name, value) pairs
         /// - `4`: Declared query parameters as (name, value) pairs, in

@@ -16,9 +16,9 @@
 //! use schematic_gen::diagnostics::{Feature, Output, Severity, ValidationDiagnostic};
 //!
 //! let diagnostic = ValidationDiagnostic::new(
-//!     Severity::Warning,
-//!     "Gitea",
-//!     Some("GetGitTreeRecursive"),
+//!     Severity::Error,
+//!     "FixtureApi",
+//!     Some("Tree"),
 //!     Feature::QueryInPath,
 //!     Output::OpenApi,
 //!     "path template embeds a query string",
@@ -26,7 +26,7 @@
 //!
 //! assert_eq!(
 //!     diagnostic.to_string(),
-//!     "severity=warning api=Gitea endpoint=GetGitTreeRecursive feature=query-in-path \
+//!     "severity=error api=FixtureApi endpoint=Tree feature=query-in-path \
 //!      output=openapi: path template embeds a query string"
 //! );
 //! ```
@@ -140,8 +140,8 @@ pub enum Feature {
     IncompleteSchemaRegistry,
     /// The shape of a pagination strategy, alone or on its endpoint.
     PaginationStrategy,
-    /// A pagination exceptions row or the list shape it names: unknown or
-    /// duplicate ids, item selectors, item types.
+    /// An endpoint collection: invalid item selectors or item types.
+    /// Retains the existing serialized diagnostic category.
     PaginationException,
     /// A pagination strategy input against the endpoint's declared parameters.
     PaginationParameter,
