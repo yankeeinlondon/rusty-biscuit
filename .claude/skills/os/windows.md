@@ -449,3 +449,13 @@ at the end of every `just install`.
   endpoint**, while `Get-CimInstance Win32_SoundDevice` is empty. cpal then
   reports no output device, and playa reports that error directly instead
   of falling back to host players.
+
+## Sequence lifecycle shell fixtures
+
+Template-mode commands resolve native executables directly. Windows `echo`
+is a `cmd.exe` builtin and has no native executable in the hermetic fixture
+PATH, so `shell: 'echo {{ value }}'` fails there even when macOS finds
+`/bin/echo`. Use the existing `claudine-argv-recorder` binary, copied as
+`argv-recorder.exe`, and assert its recorded argument vectors for lifecycle
+and task template tests. Literal shell commands may still use builtins.
+Do not add an interpreter fallback to make a template test pass.
