@@ -315,3 +315,35 @@ sessions keep the latest observed rotating handle and close once. See
 ## Definition migration safety net
 
 `just -f schematic/justfile migration-check` checks historical JSON definition/pagination/ordered-registry snapshots and current Rust/OpenAPI/Postman artifacts without updating them. The normal L1 artifact suite includes a complete Rust source file-set/byte and Cargo.toml comparison. REST definition and parameter types implement plain Serde; optional omission/null means None and required collection omissions are errors. Read `schematic/docs/definition-snapshots.md` before changing the format or capture tooling.
+
+## Typed registration
+
+`schematic-define` now has additive `DefinitionContext`, `TypeDesc`, `Registration`,
+`definition_type!`, and typed `rust_path!` APIs. Declare nominal implementations
+beside model declarations; no blanket JsonSchema dispatcher or type_name parsing.
+Register exceptional aliases first: first canonical registration fixes name/path/order.
+Containers recurse, primitives/Value stay inline, and explicit unused components survive.
+Call `validate_reference(api, endpoint, &desc)` on transfer data: the destination must
+have registered the whole matching wrapper shape. Reserved Option<TypeRef> structure
+is always None for authored registrations; non-null data fails validation.
+`schematic-definitions::registry::{assemble_module_group, SchemaRegistry::from_context}`
+produce definitions and ordered schemas from one context; current literal lookups
+remain until migration. Read `schematic/docs/typed-registration.md`. Shipped Ollama
+PullModelProgress/PushModelProgress currently lack JsonSchema; alias coverage uses a
+small fixture pending their migration. `just doctest` runs descriptor compile-fail
+examples; the existing fresh-output misuse guard also checks their diagnostic codes.
+
+## Required-fact REST builders
+
+Use `Endpoint::{get,post,put,patch,delete,head,options}` or `new(id, method, path)`,
+then `describes` and one success declaration before fallible `build`. JSON methods
+receive `&mut DefinitionContext`; build endpoints before borrowing that context
+with `RestApi::builder(&ctx, name, base_url)`. API description and one explicit
+no_auth/bearer_env/basic_env/authentication choice are required. Repeated success
+or auth choices fail; explicit env mappings must agree independent of setter order.
+`Success` and `ErrorSet` are non-exhaustive placeholders; only `ErrorSet::none()`
+is available. Typed Schema descriptor evidence survives lowering and is validated
+at API build; JSON schemas without evidence fail the builder too. OpenAPI export consumes its wire shape. Root typed Vec responses
+retain GET list inference, while Option/nominal wrappers do not. Legacy providers,
+import emitter and external literals remain until migration. Read
+`schematic/docs/definition-builders.md` for accepted forms and the Default allow-list.
