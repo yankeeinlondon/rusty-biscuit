@@ -1723,3 +1723,5 @@ This is a Rust workspace with the following modules:
 - `scripts/ci/artifacts/` pins `@actions/artifact` 2.3.2 and its transitive Node
   dependencies with `package-lock.json`. Hosted owners use it to upload multiple
   package-keyed artifacts from a shared compilation job.
+
+- `schematic-gen` uses `biscuit-hash` with the `blake3` feature as a dev dependency for canonical definition and schema baseline fingerprints. This adds no runtime dependency or new external crate.

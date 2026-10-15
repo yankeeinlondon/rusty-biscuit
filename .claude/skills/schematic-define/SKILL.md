@@ -111,7 +111,7 @@ For `AuthStrategy::Basic`:
 
 ### 6) API-Level Runtime Policy Fields
 
-Every `RestApi` literal sets three fields (no `Default` for `RestApi`, no serde,
+Every `RestApi` literal sets three fields (no `Default` for `RestApi`,
 no per-endpoint override):
 
 - `cross_origin: CrossOrigin` — redirects and followed next-page links.
@@ -178,6 +178,11 @@ The canonical behavior page is `schematic/docs/pagination.md`.
   runtime `Pager`, so endpoint setters come first. A remaining setter named
   like a forwarded knob becomes `<name>_param`. Traversal and session logic
   live only in `schematic-runtime`'s `pager` module.
+- A session with partitions must use `Session::opened_by(..)` (a separate
+  open request). `Session::opened_by_first_page()` is valid only without
+  partitions; validation reports `partitioned-first-page-session` on defaults,
+  overrides, and alternates. Shared partition sessions retain the latest
+  observed handle, including rotating handles, and close once.
 - The committed generated crate carries its own pager evidence, run only by
   `just test-schema` (CI does not build `schematic-schema`):
   `schematic/schema/tests/pagination.rs` pages GitHub `ListReleases`, OpenAI
@@ -375,3 +380,7 @@ For legacy detailed notes that may still be useful, see:
 
 - [`schematic/define.md`](./schematic/define.md) and the other pages in
   [`schematic/`](./schematic/SKILL.md)
+
+## Definition snapshots
+
+REST definitions and parameter types now derive plain Serde, including policy and pagination evidence types. Optional fields define omission/null as None; required collections reject missing/null input. This is data transfer, not semantic validation or a self-contained schema bundle. `just -f schematic/justfile migration-check` compares historical JSON values and regenerates all artifacts into temporary directories without mutating fixtures. Baselines use biscuit-hash BLAKE3 on canonical JSON above the 5 MB raw threshold; see `schematic/docs/definition-snapshots.md`.

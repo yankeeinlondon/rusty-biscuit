@@ -137,8 +137,8 @@ Three things change for such a caller:
   wrapper's items are `page.items`; its total, when the definition authors
   one, is `page.total`; the reply's metadata is `page.meta`.
 - **The error is a `PagerError`,** whose `Transport` and `Api { error, meta }`
-  variants carry the same evidence as `CallError`'s. A retry is still an
-  explicit second call: `call.anonymous().page_size(n).fetch_page()`.
+  variants carry the same evidence as `CallError`'s. Single-page calls can be
+  repeated explicitly; a retained traversal also offers `pages.retry().await`.
 - **A size outside the authored bounds is refused before sending.**
   Previously an out-of-range `per_page` went to the provider unchecked; now
   `page_size(0)` or `page_size(101)` on GitHub fails without a request. Clamp
@@ -210,7 +210,8 @@ flowchart TD
     cont -->|yes| req
     cont -->|no| fail
     fail --> inc["collect_all → Incomplete<br/>{ reason, items, pages, error }"]
-    fail --> stays["the pager stays failed:<br/>AlreadyFailed, no request"]
+    fail --> stays["next/prev return the retained error:<br/>no request"]
+    stays -->|"optional explicit retry()"| req
 ```
 
 ## A complete list or an honest failure
@@ -299,13 +300,18 @@ reports as `RepeatedContinuation`).
   are returned (and kept by `collect_all`); the failure is returned by the
   next request, before anything is sent. A page whose collection or items do
   not decode contributes no items.
-- **A failed pager stays failed.** After any error, every further `next()`
-  returns `PagerError::AlreadyFailed { first }` without a request.
+- **Failure evidence stays available.** After any error, further `next()`
+  and `prev()` calls return that specific error with the same details without
+  sending. An explicit `retry().await` is always available, regardless of the
+  error category; each failed retry replaces the retained error with its own
+  complete evidence. Retry is optional and never automatic.
 - **One deadline covers the traversal.** A `.deadline(&deadline)` on the call
   or the pager bounds every page request; see
   [Deadlines and timeouts](./runtime/deadlines-and-timeouts.md).
 - **The global JSON hook runs on every page,** before items and continuations
-  are read; an endpoint's typed mutator does not; see
+  are read; an endpoint's typed mutator does not. This applies to `.pages()`,
+  `.fetch_page()`, and `.collect_all()`, including session pages. Ordinary
+  endpoint sends still run both hooks; see
   [Response hooks](./runtime/hooks.md).
 
 ### Bounds are checked before sending
@@ -324,6 +330,49 @@ let refused = gh.list_releases("o", "r").page_size(101).fetch_page().await;
 `collect_all` reports the same refusal as `IncompleteReason::InvalidArgument`
 with `pages` counting the refused request.
 
+### Explicit recovery of a traversal
+
+Use a retained traversal when you need to decide whether to retry:
+
+```rust
+let mut pages = client.list_files().pages();
+if let Err(error) = pages.next().await {
+    report(&error);
+    pages.retry().await?; // optional; immediately attempts the failed position
+}
+let recovered = pages.next().await?; // the recovered page is delivered once
+```
+
+`retry()` returns `Result<(), PagerError<_>>` and sends nothing when no failure
+is retained. On success, the next iteration call yields the recovered page.
+Earlier pages, their delivered-item identities, and the failed page's number
+are preserved; `pages_fetched()` counts every attempted request, including
+retries. `items_delivered()` excludes a recovered page until iteration yields
+it; on `Items`, it counts each item only when `next()` returns it.
+`Items::retry()` offers the same recovery for item iteration.
+
+When a page's items were already delivered but its continuation failed,
+retry refreshes that source page to recover continuation evidence and discards
+its replayed items. The next iteration continues from the repaired continuation;
+no item from that source page is delivered again. If the refreshed continuation
+is still unusable or loops, retry returns the new specific error and metadata.
+This refresh also applies after loop detection; it does not erase loop history.
+
+Retries retain credentials, origin policy, partition, direction, and deadline.
+They cannot guarantee recovery: an expired deadline remains expired, an invalid
+argument remains invalid unless an available setter corrects it, and a refused
+origin remains refused. The caller can still retry every such error and inspect
+the new attempt's evidence. `collect_all()` and `fetch_page()` consume their
+traversal and return its error; use `.pages()` or `.items()` to retain a position
+for recovery. Renew failures are ordinary independent calls and may be retried
+by calling `renew()` again; cleanup still makes one bounded close attempt.
+
+The `Api` variant shares its `ApiError` through `Arc`, retaining decoded provider
+errors and exact raw response bytes without requiring the provider error to
+implement `Clone`. Paginated endpoint failure types must implement `Sync`, so
+shared evidence can cross tasks; ordinary endpoint failure types still require
+only `Send`.
+
 ## Errors and the evidence they keep
 
 | `PagerError` variant | When | Keeps |
@@ -337,7 +386,6 @@ with `pages` counting the refused request.
 | `EmptyPageClaimsMore { meta }` | an empty page-number or offset page said more follows | the response metadata |
 | `MissingSessionHandle { meta }` | a session's open request succeeded without a usable handle | the response metadata |
 | `DeadlineExceeded { completed_pages, error }` | the shared deadline expired before the next page's head | the pages received and the transport error |
-| `AlreadyFailed { first }` | the pager had already failed | the kind of the first error; no request was sent |
 
 `error.kind()` gives the variant without its evidence, `error.response_meta()`
 the response when one arrived, and `error.incomplete_reason()` the reason
@@ -398,8 +446,9 @@ sequenceDiagram
 
 - **Open.** The session opens with the first page request, not before the
   closure runs. A failed open is that page's error inside the closure, and
-  every later traversal in the scope gets `AlreadyFailed`. An open reply
-  without a handle is `MissingSessionHandle`.
+  later traversals retain that same complete open error. `pages.retry().await`
+  can explicitly retry opening; a successful open is shared by later traversals.
+  An open reply without a handle is `MissingSessionHandle`.
 - **Handle.** Each page may return a new handle; the latest one received
   wins, and is used by the next request and by the close.
 - **Keep-alive.** The authored default is sent on the open request and on
@@ -424,7 +473,7 @@ sequenceDiagram
 
 ## Partitions
 
-A partitioned list (such as a sliced scroll) is read as `n` independent
+A partitioned list (such as a sliced point-in-time search) is read as `n` independent
 traversals. Traversal `i` sends slice index `i` (from 0) and the count `n`
 on every request, including followed links. Each has its own continuation
 and loop detection, so one partition can fail while the others complete.
@@ -456,9 +505,14 @@ handle, and its single close. The latest handle is the one whose response
 complete out of order, that may not be the provider's newest handle; a
 provider that invalidates older handles could then reject a request or keep a
 newer handle open until its lease expires. The pager neither serializes
-partitions nor guards against this. For a session that the first page opens,
-each partition's first request opens server-side state of its own, and only
-the latest handle is closed.
+partitions nor guards against this.
+
+Definitions combining partitions with `Session::opened_by_first_page()` are
+rejected with `partitioned-first-page-session`: each partition would open
+independent server state, while the scope closes only one handle. Use a
+separate open request for a shared partition session. First-page sessions
+remain supported without partitions. Independent-session tracking and cleanup
+must be designed before the combination can be supported.
 
 ## Authoring pagination
 

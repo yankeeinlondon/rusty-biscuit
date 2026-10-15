@@ -159,7 +159,10 @@ sent.
 `pre_response_json(..)` (client-global) and
 `mutate_response::<Request, _>(..)` run on 2xx replies to JSON
 endpoints of the same API only; naming a text, binary, or empty endpoint, or
-another API's request, does not compile.
+another API's request, does not compile. Paging (`pages`, `fetch_page`,
+`collect_all`, including session pages) runs only the global JSON hook, before
+items and continuations are extracted; it skips the typed endpoint mutator.
+Ordinary endpoint sends still run both hooks.
 
 ## Defining New APIs
 
@@ -265,6 +268,28 @@ cargo check --manifest-path schematic/schema/Cargo.toml
 grep -rn "type Decoder" schematic/schema/src/
 ```
 
+## Pagination recovery
+
+`Pages::retry().await` explicitly retries every failure category and returns
+`Result<(), PagerError<_>>`; the next iteration yields a recovered page once.
+`Items::retry()` forwards recovery. Other iteration calls retain the specific
+latest error with complete evidence and send nothing. An unusable continuation
+on an already delivered page is repaired by refreshing that source page without
+redelivering its items. Loop history, direction, partition, and deadline remain;
+retry never promises success. `PagerError::Api` shares `Arc<ApiError<E>>`, so
+provider errors need no `Clone`; `Paginated` requires `Failure: Sync`.
+Collection and single-page fetch consume their traversal; retain `pages()` for
+manual recovery. Full rules: `schematic/docs/pagination.md`.
+
+## Pagination sessions
+
+Session partitions require a shared session opened by a separate request
+(`Session::opened_by(..)`). Definition validation rejects partitions combined
+with `Session::opened_by_first_page()` as `partitioned-first-page-session`.
+First-page sessions without partitions remain supported; shared partition
+sessions keep the latest observed rotating handle and close once. See
+`schematic/docs/pagination.md` for lifecycle and cleanup guarantees.
+
 ## Detailed Documentation
 
 - [Define Package](./define.md) - API definition primitives, Headers builder
@@ -286,3 +311,7 @@ grep -rn "type Decoder" schematic/schema/src/
 | Send fails with `InvalidArgument` before any request | Request sets a same-named query/cookie/header value | Drop the request value or the credential |
 | `endpoint-method-rename` warning / `generated-name-collision` error | Endpoint id or parameter clashes with a generated method name | See [gen.md](./gen.md#endpoint-methods-and-call-types); rename the id or parameter |
 | Build fails naming two `schematic-runtime` ABIs | Generated crate older than the runtime | Regenerate (`just generate`) |
+
+## Definition migration safety net
+
+`just -f schematic/justfile migration-check` checks historical JSON definition/pagination/ordered-registry snapshots and current Rust/OpenAPI/Postman artifacts without updating them. The normal L1 artifact suite includes a complete Rust source file-set/byte and Cargo.toml comparison. REST definition and parameter types implement plain Serde; optional omission/null means None and required collection omissions are errors. Read `schematic/docs/definition-snapshots.md` before changing the format or capture tooling.

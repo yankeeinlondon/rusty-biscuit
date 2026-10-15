@@ -56,6 +56,12 @@ is typed by the endpoint's own response, and a page is decoded as a
 `Page<Item>` instead, so it never sees one. A global hook that refuses a
 page fails it with `ErrorKind::Hook` and the original bytes.
 
+This distinction applies to `.pages()`, `.fetch_page()`, and `.collect_all()`,
+including pages fetched inside a session. An ordinary `client.list_items().await`
+still runs both hooks: switching it to `client.list_items().collect_all().await`
+skips the typed mutator. Put transformations needed by both paths in the global
+JSON hook.
+
 ## Misuse does not compile
 
 A mutator is typed by its endpoint's success type and requires the

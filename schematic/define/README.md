@@ -8,6 +8,8 @@ REST and WebSocket API definition types for the Schematic code generation system
 
 The definition process is intentionally **data-driven**: you describe *what* the API looks like (endpoints, methods, schemas) rather than *how* to call it. The generator handles the implementation details.
 
+REST definitions also support lossless Serde data transfer; see [definition serialization and migration checks](../docs/definition-snapshots.md).
+
 ## Core Types
 
 ### REST API Types

@@ -425,3 +425,5 @@ stream, not a library response.
     _Compile-fail cases of the generated pager surface, run on the real generated endpoints and checked against their expected diagnostics. The generator writes this dev-dependency into the crate's manifest._
 
     _Tags: testing, compile-fail_
+
+- `schematic-gen` uses `biscuit-hash` with the `blake3` feature as a dev dependency for canonical definition and schema baseline fingerprints. This adds no runtime dependency or new external crate.
