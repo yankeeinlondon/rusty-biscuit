@@ -14,7 +14,7 @@ use crate::response::ApiResponse;
 use crate::types::{Endpoint, RestApi, RestMethod};
 
 /// What decided an endpoint's pagination.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ResolutionOrigin {
     /// A row of the API's exceptions table (an override or an opt-out).
     Exception,
@@ -25,7 +25,7 @@ pub enum ResolutionOrigin {
 }
 
 /// Where a list's items are and what type they decode to.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ResolvedList {
     pub items: ItemSelector,
     /// `None` only when nothing names it: a wrapper or non-`Vec` root without
@@ -37,7 +37,7 @@ pub struct ResolvedList {
 // Built once per definition at generation time; boxing would only make
 // authoring and matching clumsier.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum Resolution {
     /// Not a list: no row, and not a GET with an explicit `Vec<T>` response.
@@ -212,7 +212,7 @@ pub fn root_array_item_type(response: &ApiResponse) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 /// A cursor direction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Direction {
     Forward,
     Backward,
@@ -222,7 +222,7 @@ pub enum Direction {
 ///
 /// An endpoint has exactly the knobs its strategy authors; any other control
 /// does not compile on its generated call.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum Knob {
     /// `.page(n)` before iterating.
@@ -332,7 +332,7 @@ pub fn caller_knobs(resolution: &Resolution) -> Vec<Knob> {
 // ---------------------------------------------------------------------------
 
 /// The part a strategy input plays on the endpoint's own requests.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum ManagedRole {
     Page,
@@ -398,7 +398,7 @@ impl ManagedRole {
 }
 
 /// Where an endpoint declares a plain parameter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ParamLocation {
     Query,
     Header,
@@ -407,7 +407,7 @@ pub enum ParamLocation {
 }
 
 /// What happens to a declared parameter a strategy input also names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum AdoptionOutcome {
     /// Same location and name, with a matching knob: the strategy manages it
     /// and the request struct omits it.
@@ -422,7 +422,7 @@ pub enum AdoptionOutcome {
 }
 
 /// One declared parameter that a strategy input names.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParamAdoption {
     pub role: ManagedRole,
     pub input: InputParam,
