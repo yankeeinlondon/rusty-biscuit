@@ -54,15 +54,18 @@
 //!
 //! [`Pager::partitioned`] and [`SessionScope::partitioned`] give `n`
 //! independent traversals, each sending its slice index and the slice count
-//! on every request; the caller polls them, and nothing is spawned.
+//! on every request; the caller polls them, and nothing is spawned. Session
+//! partitions require a separately opened shared session; definition validation
+//! rejects first-page opening with partitions.
 //!
 //! ## Completeness
 //!
 //! [`Pager::collect_all`] returns `Ok` only after the provider signaled the
 //! end of the list. Otherwise it returns [`Incomplete`] with the reason, the
 //! items gathered, and the error, never a partial list presented as complete.
-//! A pager that returned an error stays failed. See [`PagerError`] for what
-//! each failure keeps.
+//! After a failure, iteration returns the same complete error without sending
+//! until the caller explicitly invokes [`Pages::retry`]. Retry is optional and
+//! available for every failure category. See [`PagerError`] for the evidence.
 
 mod engine;
 mod error;
@@ -91,13 +94,14 @@ pub use spec::{ItemSelector, Strategy};
 /// pagination is a strategy. Its constants must agree with its associated
 /// types: [`Kind`](Self::Kind) names the kind of
 /// [`STRATEGY`](Self::STRATEGY), and [`Session`](Self::Session) whether it
-/// has a session.
+/// has a session. Failure bodies must be `Sync` so retained error evidence can
+/// be shared across tasks; they need not implement `Clone`.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not paginated",
     label = "no pagination strategy is authored for this endpoint",
     note = "the definition authors no pagination strategy for `{Self}`, so the generated client has no pager for it"
 )]
-pub trait Paginated: EndpointSpec {
+pub trait Paginated: EndpointSpec<Failure: Sync> {
     /// The type of one item of a page.
     type Item: DeserializeOwned + Send + 'static;
     /// The strategy's kind: [`PageNumberKind`], [`OffsetKind`],

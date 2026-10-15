@@ -18,6 +18,7 @@ mod pager_mechanisms;
 mod pager_outside;
 mod pager_partition;
 mod pager_rules;
+mod pager_retry;
 mod pager_session;
 mod pager_surface;
 mod pager_support;

@@ -55,6 +55,7 @@ pub enum PaginationError {
     SessionStepNeedsHandle(String),
     KeepAliveWithoutInput,
     InvalidPartitionMax,
+    PartitionedFirstPageSession,
     // Exceptions table and list shape
     UnknownExceptionId { id: String, nearest: Option<String> },
     DuplicateExceptionId(String),
@@ -96,6 +97,7 @@ impl PaginationError {
             Self::SessionStepNeedsHandle(_) => "session-step-needs-handle",
             Self::KeepAliveWithoutInput => "keep-alive-without-input",
             Self::InvalidPartitionMax => "invalid-partition-max",
+            Self::PartitionedFirstPageSession => "partitioned-first-page-session",
             Self::UnknownExceptionId { .. } => "unknown-exception-id",
             Self::DuplicateExceptionId(_) => "duplicate-exception-id",
             Self::InvalidItemSelector { .. } => "invalid-item-selector",
@@ -200,6 +202,10 @@ impl fmt::Display for PaginationError {
                 f.write_str("keep-alive is sent neither on open nor on pages")
             }
             Self::InvalidPartitionMax => f.write_str("the partition maximum must be at least 1"),
+            Self::PartitionedFirstPageSession => f.write_str(
+                "partitions require a session opened by a separate request; first-page opening \
+                 creates independent sessions without shared cleanup",
+            ),
             Self::UnknownExceptionId { id, nearest } => {
                 write!(f, "exception names `{id}`, which is not an endpoint of this API")?;
                 match nearest {
@@ -524,6 +530,9 @@ pub fn validate_strategy(strategy: &Strategy) -> Vec<PaginationError> {
 
     if let Some(session) = &strategy.session {
         errors.extend(session_errors(session, kind));
+        if strategy.partition.is_some() && matches!(session.open, SessionOpen::FirstPage) {
+            errors.push(PaginationError::PartitionedFirstPageSession);
+        }
     }
 
     if let Some(partition) = &strategy.partition

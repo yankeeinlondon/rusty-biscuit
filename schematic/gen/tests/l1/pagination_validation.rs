@@ -8,7 +8,7 @@
 use std::path::Path;
 
 use schematic_define::pagination::{
-    Collection, CursorSource, LinkSource, MoreSignal, PageSize, PaginationException, Strategy,
+    Collection, CursorSource, LinkSource, MoreSignal, PageSize, PaginationException, Partition, Session, Strategy, ValueSource,
 };
 use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EndpointParams, QueryParamType, RestApi, RestMethod};
 use schematic_definitions::registry::SchemaRegistry;
@@ -228,4 +228,40 @@ fn a_pagination_error_blocks_only_the_rust_client() {
     assert!(!Path::new(&rust).join("lib.rs").exists());
     assert!(Path::new(&openapi).join("forge.json").is_file());
     assert!(Path::new(&postman).join("forge.postman_collection.json").is_file());
+}
+
+#[test]
+fn partitioned_first_page_sessions_report_a_strategy_error() {
+    let mut search = api("Search", vec![endpoint("Search", "/search", "Vec<Hit>")]);
+    search.default_pagination = Some(
+        Strategy::cursor("after", CursorSource::body("next"))
+            .session(Session::opened_by_first_page()
+                .handle_from_page(ValueSource::body("session"))
+                .send_handle_as("session"))
+            .partition(Partition::new("slice", "slices").max(4)),
+    );
+    assert_eq!(pagination_lines(&search), vec![
+        "severity=error api=Search endpoint=<none> feature=pagination-strategy output=rust: \
+         partitioned-first-page-session: partitions require a session opened by a separate request; \
+         first-page opening creates independent sessions without shared cleanup".to_string(),
+    ]);
+
+    let temp = tempfile::tempdir().expect("temp dir");
+    let output = temp.path().join("schema");
+    let output = output.to_str().unwrap();
+    let opts = GenerateOpts {
+        output,
+        dry_run: false,
+        verbose: 0,
+        openapi_out: None,
+        openapi_format: OpenApiFormat::Json,
+        openapi_version: None,
+        postman_out: None,
+        no_openapi: true,
+        no_postman: true,
+    };
+    let registry_for = |_: &str| Some(SchemaRegistry::new().register::<serde_json::Value>("Vec<Hit>"));
+    let report = generate_batch(&[search], &BatchScope::Complete, &opts, &registry_for);
+    assert_eq!(report.failed(), vec![Output::Rust]);
+    assert!(!Path::new(output).join("lib.rs").exists());
 }

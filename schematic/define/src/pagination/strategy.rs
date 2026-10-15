@@ -622,6 +622,7 @@ impl SessionStep {
 #[serde(tag = "open", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionOpen {
     /// The first page request opens the session (Elasticsearch scroll).
+    /// This opening mode cannot be combined with partitions.
     FirstPage,
     /// A separate request opens it and returns the handle (point in time).
     Request { step: SessionStep, handle: ValueSource },

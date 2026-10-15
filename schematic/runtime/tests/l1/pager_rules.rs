@@ -6,7 +6,7 @@
 use serde_json::json;
 use wiremock::{MockServer, ResponseTemplate};
 
-use schematic_runtime::pager::{ContinuationProblem, DEFAULT_PAGE_LIMIT, IncompleteReason, PagerError, PagerErrorKind};
+use schematic_runtime::pager::{ContinuationProblem, DEFAULT_PAGE_LIMIT, IncompleteReason, PagerError};
 use schematic_runtime::{ErrorKind, TransportError, TransportErrorKind};
 
 use crate::pager_support::{
@@ -550,7 +550,7 @@ async fn a_failed_pager_stays_failed_without_another_request() {
     assert_eq!(api.declared(), Some(&ProviderError { message: "boom".into() }));
     for _ in 0..2 {
         let again = pages.next().await.expect_err("still failed");
-        assert_eq!(again, PagerError::AlreadyFailed { first: PagerErrorKind::Api });
+        assert_eq!(again, error);
         assert_eq!(again.incomplete_reason(), IncompleteReason::HttpError);
     }
     assert_eq!(hits(&server).await, 1);

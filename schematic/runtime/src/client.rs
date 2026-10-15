@@ -348,7 +348,8 @@ impl<A: Api> Client<A> {
     ///
     /// It runs only for a 2xx reply to an endpoint whose codec supports
     /// hooks, and only once the body has parsed as JSON; registering again
-    /// replaces it. See [`crate::hooks`] for the full order.
+    /// replaces it. Paging runs it before extracting items and continuations.
+    /// See [`crate::hooks`] for the full order.
     #[must_use]
     pub fn pre_response_json<F>(self, hook: F) -> Self
     where
@@ -358,7 +359,8 @@ impl<A: Api> Client<A> {
     }
 
     /// Runs `hook` on the decoded success value of endpoint `R`, after the
-    /// global JSON hook; registering again for `R` replaces it.
+    /// global JSON hook; registering again for `R` replaces it. Paging skips
+    /// this hook, including single-page fetches and collection.
     ///
     /// `R` must be an endpoint of this client's API whose codec supports
     /// hooks; a text, binary, or empty endpoint does not compile.

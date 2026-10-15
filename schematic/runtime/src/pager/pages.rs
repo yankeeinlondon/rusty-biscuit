@@ -6,8 +6,8 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::time::Duration;
 
-use super::engine::{Deferred, DeferredKind, Direction, Engine, PageView, Planned, Rejected};
-use super::error::{Incomplete, Page, PagerError, PagerErrorKind};
+use super::engine::{Deferred, DeferredKind, Direction, Engine, PageView, Plan, Planned, Rejected};
+use super::error::{Incomplete, Page, PagerError};
 use super::request::{PageRequest, build_parts, decode_items, write_input};
 use super::session::{DEFAULT_CLOSE_GRACE, SessionShared};
 use super::{
@@ -303,22 +303,34 @@ impl<A: Api, R: EndpointSpec + fmt::Debug> fmt::Debug for Pager<'_, A, R> {
     }
 }
 
+#[derive(Clone)]
+struct Retry {
+    engine: Engine,
+    plan: Plan,
+    delivered: bool,
+}
+
 /// A traversal in progress: one page per [`next`](Self::next).
 ///
 /// Every page request is an ordinary send through the client, with the
 /// call's credential, deadline, and the API's origin policy, and its request
 /// metadata carries the page's number. Once a request fails, every later
-/// call returns [`PagerError::AlreadyFailed`] without sending.
-pub struct Pages<'a, A: Api, R: EndpointSpec> {
+/// call returns the same complete error without sending, until an explicit
+/// [`retry`](Self::retry).
+pub struct Pages<'a, A: Api, R: Paginated> {
     client: &'a Client<A>,
     base: Result<RequestParts, InvalidArgument>,
     options: CallOptions,
     engine: Engine,
     /// The scope's session, for a traversal inside `with_session`.
-    session: Option<&'a SessionShared>,
+    session: Option<&'a SessionShared<R::Failure>>,
     /// This traversal's slice index and the slice count.
     partition: Option<(u32, u32)>,
-    failed: Option<PagerErrorKind>,
+    failed: Option<PagerError<R::Failure>>,
+    retry: Option<Retry>,
+    last_delivered: Option<Retry>,
+    buffered: Option<Page<R::Item>>,
+    attempted: u32,
     received: u32,
     endpoint: PhantomData<fn() -> R>,
 }
@@ -329,7 +341,7 @@ impl<'a, A: Api, R: Paginated<Api = A>> Pages<'a, A, R> {
         base: Result<RequestParts, InvalidArgument>,
         options: CallOptions,
         engine: Engine,
-        session: Option<&'a SessionShared>,
+        session: Option<&'a SessionShared<R::Failure>>,
         partition: Option<(u32, u32)>,
     ) -> Self {
         Self {
@@ -340,6 +352,10 @@ impl<'a, A: Api, R: Paginated<Api = A>> Pages<'a, A, R> {
             session,
             partition,
             failed: None,
+            retry: None,
+            last_delivered: None,
+            buffered: None,
+            attempted: 0,
             received: 0,
             endpoint: PhantomData,
         }
@@ -383,16 +399,21 @@ impl<'a, A: Api, R: Paginated<Api = A>> Pages<'a, A, R> {
         R: AdjustablePageSize,
     {
         self.engine.adjust_page_size(size);
+        // A continuation failure may select the last delivered checkpoint
+        // after this setter, so both recovery snapshots need the new setting.
+        for retry in self.retry.iter_mut().chain(self.last_delivered.iter_mut()) {
+            retry.engine.adjust_retry_size(&mut retry.plan, size);
+        }
     }
 
     /// Page requests made so far, including any that failed.
     pub fn pages_fetched(&self) -> u32 {
-        self.engine.pages()
+        self.attempted
     }
 
-    /// Items delivered so far.
+    /// Items delivered so far, excluding a recovered page awaiting iteration.
     pub fn items_delivered(&self) -> u64 {
-        self.engine.items()
+        self.engine.items() - self.buffered.as_ref().map_or(0, |page| page.items.len() as u64)
     }
 
     /// Whether the provider has signaled the end of the list.
@@ -434,26 +455,93 @@ impl<'a, A: Api, R: Paginated<Api = A>> Pages<'a, A, R> {
         self.engine.has_deferred_failure()
     }
 
-    async fn fetch(&mut self, direction: Direction) -> Result<Option<Page<R::Item>>, PagerError<R::Failure>> {
-        if let Some(first) = self.failed {
-            return Err(PagerError::AlreadyFailed { first });
+    /// Explicitly retries the failed position, for every error category.
+    ///
+    /// A recovered page is returned by the next iteration call. If items of
+    /// the source page were already delivered before its continuation failed,
+    /// this refreshes only its continuation and never delivers those items again.
+    /// Calling this without a failure sends nothing. A failed attempt replaces
+    /// the retained error. An expired deadline remains expired.
+    pub async fn retry(&mut self) -> Result<(), PagerError<R::Failure>> {
+        if self.failed.is_none() {
+            return Ok(());
         }
-        let result = self.fetch_once(direction).await;
-        if let Err(error) = &result {
-            self.failed = Some(error.kind());
+        let retry = self.retry.clone().expect("every failure has a retry position");
+        let retained = self.engine.clone();
+        let mut working = retry.engine.clone();
+        let result = self.send_plan(&mut working, retry.plan.clone(), true).await;
+        match result {
+            Ok(Some(_)) if retry.delivered => {
+                self.received = self.received.saturating_sub(1);
+                let mut probe = working.clone();
+                if let Planned::Failed(deferred) = probe.plan(retry.plan.direction) {
+                    let error = deferred_error(deferred);
+                    self.failed = Some(error.clone());
+                    return Err(error);
+                }
+                // Refreshing continuation evidence must not rewrite delivery
+                // counters or the identities of items already handed to callers.
+                working.restore_delivery_from(&retained);
+                self.engine = working;
+                self.failed = None;
+                self.retry = None;
+                Ok(())
+            }
+            Ok(page) => {
+                self.engine = working;
+                self.last_delivered = Some(Retry { delivered: true, ..retry });
+                self.buffered = page;
+                self.failed = None;
+                self.retry = None;
+                Ok(())
+            }
+            Err(error) => {
+                self.failed = Some(error.clone());
+                Err(error)
+            }
+        }
+    }
+
+    async fn fetch(&mut self, direction: Direction) -> Result<Option<Page<R::Item>>, PagerError<R::Failure>> {
+        if let Some(error) = &self.failed {
+            return Err(error.clone());
+        }
+        if let Some(page) = self.buffered.take() {
+            return Ok(Some(page));
+        }
+        let plan = match self.engine.plan(direction) {
+            Planned::Done => return Ok(None),
+            Planned::Failed(deferred) => {
+                self.retry = self.last_delivered.clone();
+                let error = deferred_error(deferred);
+                self.failed = Some(error.clone());
+                return Err(error);
+            }
+            Planned::Send(plan) => plan,
+        };
+        let checkpoint = Retry { engine: self.engine.clone(), plan: plan.clone(), delivered: false };
+        let mut working = self.engine.clone();
+        let result = self.send_plan(&mut working, plan, false).await;
+        match &result {
+            Err(error) => {
+                self.engine = checkpoint.engine.clone();
+                self.retry = Some(checkpoint);
+                self.failed = Some(error.clone());
+            }
+            Ok(Some(_)) => {
+                self.engine = working;
+                self.last_delivered = Some(Retry { delivered: true, ..checkpoint });
+            }
+            Ok(None) => {}
         }
         result
     }
 
-    async fn fetch_once(&mut self, direction: Direction) -> Result<Option<Page<R::Item>>, PagerError<R::Failure>> {
-        let plan = match self.engine.plan(direction) {
-            Planned::Done => return Ok(None),
-            Planned::Failed(deferred) => return Err(deferred_error(deferred)),
-            Planned::Send(plan) => plan,
-        };
-        let number = self.engine.pages();
+    async fn send_plan(&mut self, engine: &mut Engine, plan: Plan, retry: bool) -> Result<Option<Page<R::Item>>, PagerError<R::Failure>> {
+        self.attempted = self.attempted.saturating_add(1);
+        let number = engine.pages();
         if let Some(session) = self.session
-            && let Err(error) = session.ensure_open::<A, R>(self.client, &self.base, &self.options).await
+            && let Err(error) = session.ensure_open::<A, R>(self.client, &self.base, &self.options, retry).await
         {
             return Err(match error {
                 PagerError::Transport(error) => self.transport_error(error),
@@ -501,7 +589,7 @@ impl<'a, A: Api, R: Paginated<Api = A>> Pages<'a, A, R> {
             Outcome::Success(document) => document,
             Outcome::Failure(error) => {
                 return Err(PagerError::Api {
-                    error,
+                    error: error.into(),
                     meta: Box::new(meta),
                 });
             }
@@ -515,7 +603,7 @@ impl<'a, A: Api, R: Paginated<Api = A>> Pages<'a, A, R> {
             url: url.as_ref(),
             meta: &meta,
         };
-        let accepted = match self.engine.accept(&view) {
+        let accepted = match engine.accept(&view) {
             Ok(accepted) => accepted,
             Err(Rejected::Malformed) => return Err(malformed(document.bytes, meta)),
             Err(Rejected::BoundaryNoProgress) => return Err(PagerError::BoundaryNoProgress { meta: Box::new(meta) }),
@@ -544,13 +632,13 @@ impl<'a, A: Api, R: Paginated<Api = A>> Pages<'a, A, R> {
     }
 }
 
-impl<A: Api, R: EndpointSpec> fmt::Debug for Pages<'_, A, R> {
+impl<A: Api, R: Paginated> fmt::Debug for Pages<'_, A, R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Pages")
             .field("api", &A::NAME)
             .field("endpoint", &R::ENDPOINT_ID)
             .field("pages", &self.engine.pages())
-            .field("failed", &self.failed)
+            .field("failed", &self.failed.as_ref().map(PagerError::kind))
             .finish_non_exhaustive()
     }
 }
@@ -562,7 +650,7 @@ fn malformed<E>(body: bytes::Bytes, meta: ResponseMeta) -> PagerError<E> {
         error: ApiError {
             kind: ErrorKind::MalformedSuccess,
             body,
-        },
+        }.into(),
         meta: Box::new(meta),
     }
 }
@@ -599,6 +687,11 @@ impl<A: Api, R: Paginated<Api = A>> Items<'_, A, R> {
                 None => return Ok(None),
             }
         }
+    }
+
+    /// See [`Pages::retry`]. A recovered page is consumed by [`next`](Self::next).
+    pub async fn retry(&mut self) -> Result<(), PagerError<R::Failure>> {
+        self.pages.retry().await
     }
 
     /// Page requests made so far.

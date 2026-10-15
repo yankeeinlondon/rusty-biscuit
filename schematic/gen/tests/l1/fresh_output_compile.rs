@@ -1100,6 +1100,102 @@ async fn request_id_secret_names_and_cross_origin_policy_come_from_the_definitio
 // ---- pagination ----
 
 #[tokio::test]
+async fn generated_paging_runs_only_the_global_hook_before_items_and_continuations() {
+    use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+    use schematic_schema::fixture_pages::{Entry, ListCursorRequest};
+    use wiremock::matchers::query_param;
+
+    let server = MockServer::start().await;
+    Mock::given(path("/cursor"))
+        .and(query_param("after", "hook-first"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "wire_id": "second", "wire_more": false
+        })))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    Mock::given(path("/cursor"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "wire_id": "first", "wire_more": true
+        })))
+        .mount(&server)
+        .await;
+    let global_calls = Arc::new(AtomicUsize::new(0));
+    let typed_calls = Arc::new(AtomicUsize::new(0));
+    let global_count = global_calls.clone();
+    let typed_count = typed_calls.clone();
+    let client = FixturePages::new()
+        .base_url(server.uri())
+        .pre_response_json(move |_, json| {
+            global_count.fetch_add(1, Ordering::SeqCst);
+            Ok(serde_json::json!({
+                "data": [{"id": format!("hook-{}", json["wire_id"].as_str().unwrap())}],
+                "has_more": json["wire_more"]
+            }))
+        })
+        .mutate_response::<ListCursorRequest, _>(move |_, response| {
+            typed_count.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(response.data[0].id, "hook-first", "the global hook runs first");
+            response.data[0].id = "typed-first".to_string();
+            Ok(())
+        })
+        .build()
+        .unwrap();
+    let expected = [Entry { id: "hook-first".to_string() }, Entry { id: "hook-second".to_string() }];
+
+    let mut pager = client.list_cursor().pages();
+    assert_eq!(pager.next().await.unwrap().unwrap().items, expected[..1]);
+    assert_eq!(pager.next().await.unwrap().unwrap().items, expected[1..]);
+    assert!(pager.next().await.unwrap().is_none(), "the hook's terminal signal stops requests");
+    assert_eq!(global_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(typed_calls.load(Ordering::SeqCst), 0);
+
+    let page = client.list_cursor().fetch_page().await.unwrap();
+    assert_eq!(page.items, expected[..1]);
+    let collected = client.list_cursor().collect_all().await.unwrap();
+    assert_eq!(collected, expected);
+    assert_eq!(global_calls.load(Ordering::SeqCst), 5);
+    assert_eq!(typed_calls.load(Ordering::SeqCst), 0);
+
+    let ordinary = client.list_cursor().await.unwrap();
+    assert_eq!(ordinary.data, [Entry { id: "typed-first".to_string() }]);
+    assert!(ordinary.has_more);
+    assert_eq!(global_calls.load(Ordering::SeqCst), 6);
+    assert_eq!(typed_calls.load(Ordering::SeqCst), 1);
+    let received = server.received_requests().await.unwrap();
+    assert_eq!(received.iter().map(query).collect::<Vec<_>>(),
+        ["", "after=hook-first", "", "", "after=hook-first", ""],
+        "follow-ups use the transformed item identity; exhaustion sends nothing");
+}
+
+#[tokio::test]
+async fn generated_pager_retains_api_evidence_and_explicitly_retries() {
+    use schematic_runtime::pager::PagerError;
+    let server = MockServer::start().await;
+    Mock::given(path("/cursor"))
+        .respond_with(ResponseTemplate::new(503).set_body_string("first evidence"))
+        .mount(&server).await;
+    let client = FixturePages::new().base_url(server.uri()).build().unwrap();
+    let mut pages = client.list_cursor().pages();
+    let error = pages.next().await.unwrap_err();
+    assert_eq!(pages.next().await.unwrap_err(), error);
+    let PagerError::Api { error: api, meta } = error else { panic!("expected API failure") };
+    assert_eq!(meta.status, 503);
+    assert_eq!(&api.body[..], b"first evidence");
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    server.reset().await;
+    Mock::given(path("/cursor"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data":[{"id":"recovered"}],"has_more":false})))
+        .mount(&server).await;
+    pages.retry().await.unwrap();
+    let page = pages.next().await.unwrap().unwrap();
+    assert_eq!(page.number, 1);
+    assert_eq!(page.items[0].id, "recovered");
+    assert!(pages.next().await.unwrap().is_none());
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn required_adopted_parameters_are_sent_once_by_an_ordinary_send_and_by_the_pager() {
     let server = MockServer::start().await;
     Mock::given(any())
@@ -1213,6 +1309,8 @@ const REQUEST_SIDE_TESTS: &[&str] = &[
     "an_endpoint_method_sends_its_values_and_awaits_to_the_data",
     "renamed_endpoint_methods_and_setters_send_under_their_wire_names",
     "request_id_secret_names_and_cross_origin_policy_come_from_the_definition",
+    "generated_paging_runs_only_the_global_hook_before_items_and_continuations",
+    "generated_pager_retains_api_evidence_and_explicitly_retries",
     "required_adopted_parameters_are_sent_once_by_an_ordinary_send_and_by_the_pager",
     "a_generated_session_opens_pages_and_closes_inside_its_scope",
 ];

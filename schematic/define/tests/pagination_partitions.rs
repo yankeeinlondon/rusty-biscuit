@@ -12,7 +12,7 @@ mod pagination_support;
 use pagination_support::{api, post, resolution, row};
 use schematic_define::RestMethod;
 use schematic_define::pagination::{
-    Collection, CursorSource, InputParam, KeepAlive, Knob, MoreSignal, PageSize, Partition, ResolutionOrigin,
+    Collection, CursorSource, InputParam, KeepAlive, Knob, MoreSignal, PageSize, PaginationError, Partition, ResolutionOrigin, SessionOpen,
     Session, SessionStep, Strategy, ValueSource, caller_knobs, validate_pagination,
 };
 
@@ -55,4 +55,40 @@ fn a_rotating_handle_point_in_time_with_four_partitions_inherited_from_the_api_d
     assert!(knobs.contains(&Knob::Session), "{knobs:?}");
     assert!(knobs.contains(&Knob::Partitions { max: Some(4) }), "{knobs:?}");
     assert!(knobs.contains(&Knob::KeepAlive { default: "1m".into() }), "{knobs:?}");
+}
+
+#[test]
+fn first_page_sessions_require_no_partitions_in_defaults_overrides_and_alternates() {
+    for site in ["default", "override", "alternate"] {
+        for partitioned in [false, true] {
+            let mut strategy = sliced_point_in_time();
+            strategy.session.as_mut().unwrap().open = SessionOpen::FirstPage;
+            if !partitioned {
+                strategy.partition = None;
+            }
+            let mut search = api("Search");
+            search.endpoints = vec![post("SearchLogs", "/{index}/_search", "SearchResponse")];
+            let collection = Collection::at("hits.hits[*]._source").item_type("Hit");
+            search.pagination_exceptions = vec![row("SearchLogs", match site {
+                "default" => {
+                    search.default_pagination = Some(strategy);
+                    collection
+                }
+                "override" => collection.paginate(strategy),
+                "alternate" => collection.paginate(sliced_point_in_time()).or_paginate("scroll", strategy),
+                _ => unreachable!(),
+            })];
+            let diagnostics = validate_pagination(&search);
+            if partitioned {
+                assert_eq!(diagnostics.len(), 1, "{site}: {diagnostics:?}");
+                let diagnostic = &diagnostics[0];
+                assert_eq!(diagnostic.error, PaginationError::PartitionedFirstPageSession, "{site}");
+                assert_eq!(diagnostic.error.rule(), "partitioned-first-page-session");
+                assert_eq!(diagnostic.endpoint.as_deref(), (site != "default").then_some("SearchLogs"));
+                assert_eq!(diagnostic.alternate.as_deref(), (site == "alternate").then_some("scroll"));
+            } else {
+                assert_eq!(diagnostics, vec![], "first-page session without partitions at {site}");
+            }
+        }
+    }
 }
