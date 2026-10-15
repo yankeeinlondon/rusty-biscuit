@@ -289,6 +289,82 @@ docs_created_during_phase_5:
     - claudine/docs/examples/sequence-containers.md
 skills_files_updated_during_phase_5:
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_6:
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline/tests.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/exec/termination/unix.rs
+    - claudine/cli/src/commands/wrap/exec/termination/windows.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/error_routing.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/tests/common/review_screen.rs
+    - claudine/cli/tests/common/terminal_interrupt.rs
+    - claudine/cli/tests/l1/sequence_containers.rs
+    - claudine/cli/tests/l1/wrap_sigint.rs
+    - claudine/cli/tests/level2/level2_auto_complete_operation_file.rs
+    - claudine/cli/tests/level2/level2_lifecycle_control.rs
+    - claudine/cli/tests/level2/level2_perf_capture.rs
+    - claudine/cli/tests/level2/level2_sequence_container_ctrl_c.rs
+    - claudine/cli/tests/level2/level2_sequence_task_stream_capture.rs
+    - claudine/cli/tests/level2/main.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/lifecycle/cancellation.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/runtime.rs
+    - claudine/lib/src/composition/lifecycle/structured_shell.rs
+    - claudine/lib/src/composition/lifecycle/tests/container_runtime.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/sequence/task/container_regressions.rs
+    - claudine/lib/src/composition/sequence/task/group.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/sequence/task/shell.rs
+    - claudine/lib/src/diagnostics/registry.rs
+docs_updated_during_phase_6:
+    - claudine/README.md
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/docs/topics/error-architecture.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/features/2026-10-24-sequence-containers/implementation-log.md
+    - claudine/features/2026-10-24-sequence-containers/plan.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/claudine/SKILL.md
+source_files_during_phase_7:
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/src/harness/shell.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/containers.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/tests/l1/sequence_containers.rs
+docs_updated_during_phase_7:
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/features/2026-10-24-sequence-containers/plan.md
+    - claudine/features/2026-10-24-sequence-containers/implementation-log.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/os/windows.md
 ---
 
 # Plan: Sequence containers
@@ -822,30 +898,30 @@ Goal: section 4. Depends on Phase 5's runner and the Ruling 5 decision.
 
 #### Wave 1
 
-- [ ] **6.1 Cancel call.** Add the host-neutral "cancel this primitive with
+- [x] **6.1 Cancel call.** Add the host-neutral "cancel this primitive with
   this cause" call between Claudine's runtime and the lift-ready event model;
   the cause is a structured diagnostic (originating group and leg for
   sibling failure; interrupt for Ctrl-C). First observed failure is the
   recorded cause.
-- [ ] **6.2 Sibling cancellation.** On a `fail_fast: true` group failure,
+- [x] **6.2 Sibling cancellation.** On a `fail_fast: true` group failure,
   stop admission, cancel only running legs that declared `cancelled`
   (terminate the child process, or cancel a container leg's running children
   and all descendants), wait for descendants to settle before the owner's
   terminal events; fire `cancelled` then `finalize`; outcome `cancelled`;
   `err` set. Non-opted legs run to completion (Ruling 3).
-- [ ] **6.3 Ctrl-C.** Interrupt every running primitive through the existing
+- [x] **6.3 Ctrl-C.** Interrupt every running primitive through the existing
   signal ladder; run declared `cancelled` actions then `finalize` for every
   primitive whose lifecycle was entered (children before parents); exit
   `130`; a second Ctrl-C keeps force-exit. Entered-but-not-started primitives
   get cleanup with shells disabled; unadmitted primitives fire nothing.
-- [ ] **6.4 Cancellation is terminal.** Recovery directives in a following
+- [x] **6.4 Cancellation is terminal.** Recovery directives in a following
   `finalize` raise the typed cancellation-recovery error; cleanup errors are
   retained as secondary diagnostics; a cleanup-shell timeout is a cleanup
   error, not a new cancellation.
 
 #### Wave 2 (tests)
 
-- [ ] **6.5** Criterion 5 (cancel parts), 7 (L2: a sequence containing a
+- [x] **6.5** Criterion 5 (cancel parts), 7 (L2: a sequence containing a
   group with one cancellable and one non-cancellable running leg; assert no
   later step starts, the non-cancellable leg does not complete, declared
   `cancelled` actions precede `finalize`, `finalize` runs innermost first,
@@ -866,16 +942,16 @@ Goal: requirement 3 and criteria 18 (cycles) and 21.
 
 #### Wave 1 (disjoint files)
 
-- [ ] **7.1 Transitive walk.** `sequence/preflight/{mod,shape}.rs` walk every
+- [x] **7.1 Transitive walk.** `sequence/preflight/{mod,shape}.rs` walk every
   nested container, validate container events, freeze discovered task
   graphs, and retain transitive write-back collision checks (including
   nested same-target inline writes).
-- [ ] **7.2 Cycle detection.** Active-reference-chain detection across
+- [x] **7.2 Cycle detection.** Active-reference-chain detection across
   sequence, task, group, and catalog references; the error prints the
   complete chain; reuse of the same sequence twice and distinct groups in
   one catalog are legal. References keep request-scoped `biscuit-file`
   resolution and authoring-file origin (use `FileReference`).
-- [ ] **7.3 Shell approval positions.** Late roots become `seq.outputs`,
+- [x] **7.3 Shell approval positions.** Late roots become `seq.outputs`,
   `loop.*`, `group.*`; container terminal-event commands and commands
   reading `group.*` are typed templates; first-task resolved-value approval
   follows the execution position (group-first: all legs; nested-sequence
@@ -886,7 +962,7 @@ Goal: requirement 3 and criteria 18 (cycles) and 21.
 
 #### Wave 2
 
-- [ ] **7.4 Tests:** criterion 1 (cycle), 18, 21, and the refusal after
+- [x] **7.4 Tests:** criterion 1 (cycle), 18, 21, and the refusal after
   approval closes.
 
 **Checkpoint 7:** `just test` and `just lint` in `claudine/`.

@@ -68,17 +68,7 @@ packages:
     - darkmatter
 
 message_to_agent: |-
-    Phase 5 implements the root, nested sequence, and concurrent group runners using ContainerRunner and LifecycleRunGuard. Native arrays/dictionaries publish after finalize; group atomic/tolerant state and retry semantics are covered by current-grammar tests. See the Phase 5 section for final gate results and the full inventory.
-
-    Phase 6 must wire cancellation into RootRun (CLI sequence/container.rs), run_sequence_attempts (lib sequence/task/sequence.rs), and run_group_container (group.rs). Interrupted child paths currently return Interrupted/130 without cancelled cleanup. Descendants must settle and cleanup must run before each lexical scope is restored; preserve unadmitted cancelled outcomes and cancelled_declared, including empty stacks.
-
-    RuntimeSnapshot.proxy_chain carries proxy ancestry across group worker threads; RuntimeState.enter_container_proxy restores it on scope exit. RuntimeSnapshot.seq remains separate from frontmatter; never flatten it into setters. Sequence scope restoration keeps mutations while restoring the enclosing outputs.
-
-    PreflightGraph captures authored source bytes. Unchanged group sources reuse audited nodes but reevaluate variables; changed nested/group sources are reparsed and checked against the original graph's approvals. Container event shell discovery and full approval-position semantics remain Phase 7 work. Prompt corpus migration remains Phase 8; do not interpret internal legacy setup/teardown test models as valid grammar.
-
-    Root proxy handoffs retain CallerInputRecords so target file schemas validate partial caller paths before initialize. Preserve these records alongside the separate sequence-value channel.
-
-    Ordinary document retry/resume already dispatches before finalize; two event-recorder regressions protect that ordering. The existing pre-start document catch protocol is separate from the new container driver. No formatting, staging, commits, or lifecycle-directory moves were performed.
+    Phase 7 adds parsed container event shell discovery in lib/src/composition/sequence/preflight/containers.rs. Terminal event placeholders require templates; group event roots are late. The audited root_lifecycle is installed on RootRun after graph approval. Graph lifecycle clones share settled template authorization; reread graphs settle only against original membership. Catalog ancestry includes the selected entry (catalog#name diagnostics), permitting distinct entries in the same catalog and independent sequence reuse. Closed ShellApprovalOptions membership travels through StepScope and CompositionExecutionRequest.closed_shell_approvals, including root retries, root proxies, and concurrent descendants; preserve it before policy evaluation so --yolo cannot approve new commands after execution begins. The shipped-example corpus now passively builds its approval graph. Native Windows template tests use the compiled argv recorder because echo is a shell builtin there, not a native executable. Phase 8 still owns the broader prompt/docs migration. Preserve separate seq bindings, caller input records, cancellation scopes, and RuntimeSnapshot.proxy_chain. No formatting, staging, branch commit, or lifecycle move was performed.
 source_files_during_phase_3:
     - claudine/cli/src/argv/partition.rs
     - claudine/cli/src/argv/partition/tests.rs
@@ -301,6 +291,82 @@ docs_created_during_phase_5:
     - claudine/docs/examples/sequence-containers.md
 skills_files_updated_during_phase_5:
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_6:
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline/tests.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/exec/termination/unix.rs
+    - claudine/cli/src/commands/wrap/exec/termination/windows.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/error_routing.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/tests/common/review_screen.rs
+    - claudine/cli/tests/common/terminal_interrupt.rs
+    - claudine/cli/tests/l1/sequence_containers.rs
+    - claudine/cli/tests/l1/wrap_sigint.rs
+    - claudine/cli/tests/level2/level2_auto_complete_operation_file.rs
+    - claudine/cli/tests/level2/level2_lifecycle_control.rs
+    - claudine/cli/tests/level2/level2_perf_capture.rs
+    - claudine/cli/tests/level2/level2_sequence_container_ctrl_c.rs
+    - claudine/cli/tests/level2/level2_sequence_task_stream_capture.rs
+    - claudine/cli/tests/level2/main.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/lifecycle/cancellation.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/runtime.rs
+    - claudine/lib/src/composition/lifecycle/structured_shell.rs
+    - claudine/lib/src/composition/lifecycle/tests/container_runtime.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/sequence/task/container_regressions.rs
+    - claudine/lib/src/composition/sequence/task/group.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/sequence/task/shell.rs
+    - claudine/lib/src/diagnostics/registry.rs
+docs_updated_during_phase_6:
+    - claudine/README.md
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/docs/topics/error-architecture.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/features/2026-10-24-sequence-containers/implementation-log.md
+    - claudine/features/2026-10-24-sequence-containers/plan.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/claudine/SKILL.md
+source_files_during_phase_7:
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/src/harness/shell.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/containers.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/tests/l1/sequence_containers.rs
+docs_updated_during_phase_7:
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/features/2026-10-24-sequence-containers/plan.md
+    - claudine/features/2026-10-24-sequence-containers/implementation-log.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/os/windows.md
 ---
 
 # Implementation Log for 2026-10-24-sequence-containers (9 phases)
@@ -2146,3 +2212,269 @@ All observed development failures have been resolved. The final proxy schema reg
 - `git diff --check`: passed. Both plan and log metadata were read back with `md get`; all requested keys parse, the source inventory contains 38 unique paths, and the cumulative package list is preserved. Updated documentation includes the current sequence/lifecycle topics, README, executable example, generated dispatch inventory, plan/log, and Claudine skill.
 
 Implementation complete, ready for review. `human_review` is false. The replacement `message_to_agent` identifies the cancellation entry points for Phase 6 and the binding, source-reread, proxy, and caller-record invariants to preserve. No outstanding Phase 5 functionality or failing gate remains. No formatting, staging, commits, or feature-completion moves were performed.
+
+
+## Phase 6
+
+### Test mapping before implementation
+
+- 6.1: public lifecycle driver tests will assert first-cause retention and exactly-once cancelled/finalize routing.
+- 6.2: deterministic group regressions will coordinate failure with admitted opt-in (including empty stacks), non-opt-in, nested descendants, and unadmitted legs; assert terminal summaries, no publication, and cleanup order.
+- 6.3: the normal CLI in a non-focusing L2 terminal will receive Ctrl-C while both types of leg run; assert exit 130, descendant settlement, innermost-first cleanup, and no subsequent step.
+- 6.4: driver and nested execution regressions will assert recovery never launches work and cleanup errors stay secondary to cancellation, including cleanup timeout.
+- No new file-format fields or parser changes are planned; the configuration robustness matrix does not apply. Existing shipped-artifact corpus coverage remains applicable.
+
+Implementation uses the existing portable process-tree and signal machinery. No formatting, staging, commits, or focus-taking tests are authorized.
+
+### Cancellation driver and concurrent settlement
+
+- Added a host-neutral cancellation cause/token and a first-cause `ContainerRunner::cancel` transition. Cancellation owns the terminal result, refuses retry/resume/proxy/defer recovery, and retains cleanup failures separately. Sibling diagnostics carry the originating group/leg and original diagnostic.
+- Group admission now stops on atomic failure, cancels only admitted opt-in legs (including empty handlers), and settles all workers before group terminal events. Parent cancellation crosses worker boundaries and reaches all nested descendants. Non-opted siblings complete; unadmitted legs run no events.
+- Nested sequence and group cleanup now runs before restoring lexical scopes. Root Ctrl-C cleans up and returns 130; prompt/provider cancellation and lifecycle-shell cancellation are being checked at all preparation boundaries.
+- `container_runtime`: 6 tests passed after correcting an emitter assertion to use actual authored emissions. `container_regressions`: 12 passed, including coordinated sibling cancellation and interrupted cleanup/retry refusal; all new cases took under 0.2 s.
+- The new non-focusing L2 criterion-7 test passed in 1.061 s. It checks both types of running leg, dead child PIDs, no later step, exact-once innermost-first cleanup, and exit 130. Native Windows explicitly reports its Unix-harness capability skip per Ruling 5.
+- The first broad run stopped on the new fixture's omitted step names; the fixture was corrected. The next broad run reached 6,439 tests and exposed a sequence drain regression: keeping the root interrupt guard in shutdown changed its drain notice. The root guard now has invocation lifetime, preserving the existing drain-specific handler and notice. This remains scheduled for rerun.
+- Review identified two additional paths: lifecycle shells used blocking waits, and pre-provider prompt cancellation could enter failure recovery. Lifecycle shells now reuse task shells' portable owned-tree execution; prompt preparation routing is being corrected with focused CLI coverage.
+
+### Prompt setup and terminal grace
+
+- Lifecycle exact and structured shell actions now share task shells' owned process trees and cooperative cancellation, with inherited streams preserved. No new platform-specific tree implementation was introduced.
+- Prompt preparation checks cancellation around initialize/start and before provider execution. Cancellation-aware error routing also handles materialization, bootstrap, plan, and launch errors; cleanup uses the entered guard so pre-start shells remain disabled.
+- Consolidated prompt cleanup bypasses failure recovery, preserves exit 130 even when cleanup fails, and reports typed recovery refusals through the existing terminal emitter.
+- `wrap_sigint` targeted suite: **15/15 passed**, total 3.102 s, slowest 3.095 s. Added `compose_cancelled_start_runs_cancelled_finalize_without_failure_retry`: the original blocked-start input receives SIGINT, exposes `provider.interrupted`, runs its cleanup shell/finalize once, never runs failure/retry, and never launches a provider.
+- Migrated interrupted orphan-teardown expectations to cancelled/finalize while retaining ordinary failure cases. All terminal events preserve the existing repeat-interrupt grace; a first interrupt does not kill an already-running terminal action. Fixed the success/blocked adapter bypass so those events use the same guarded execution.
+- Expanded driver regressions cover retry/resume/proxy/defer refusal, inherited first-cause diagnostics, scope restoration, and cleanup timeout. **42 focused container tests passed** in 1.021 s, including schema, corpus, and nested execution tests.
+- Current sequence/lifecycle docs and the Claudine skill now describe implemented cancellation, with a Mermaid flow and explicit OS exit table. No parser/configuration fields were added.
+
+### Gate progress
+
+- Area L1 passed **9,759/9,759** in 152.577 s with nine pre-existing ignored performance tests. The sequence drain regression is resolved. The only slow warnings were unchanged embedded schema combinator tests.
+- Added a final CLI regression for sibling failure cancelling a running provider, with the normal `sequence` invocation, source prompt cleanup, structured group/leg cause, refused finalize retry, stopped provider PID, no completion, and no later step. A settled-tree L1 run includes this new test.
+- Preserved interrupted child stdout while keeping native publication withheld. Group summaries now derive an interrupt diagnostic even for injected interruption flags without a process-global signal.
+
+### Cross-platform checks
+
+- `just cross-check claudine --os linux --features test-fixtures container_`: **42/42 passed** in 0.632 s. This is filtered native Linux behavioral evidence, not a CI receipt.
+- Native Windows compiled the CLI and library successfully. The first `sequence_containers` run passed 12/14 and exposed two Phase 5 fixtures installing only a POSIX Goose script. Added the corresponding `goose.cmd` fixtures in the same touched test file, including the dry-run stub for consistency; the targeted Windows suite is rerunning.
+- Initial cross-check attempts with a nextest expression hit the just recipe's shell interpolation before execution; reran using ordinary positional test filters. No test was skipped to mask a failure.
+
+### Requirement-to-test mapping
+
+| Requirement | Targeted tests |
+| --- | --- |
+| 6.1: first structured cause and exactly-once cleanup | `cancellation_keeps_first_cause_and_refuses_finalize_recovery`; `cancellation_scope_inherits_first_cause_and_restores_its_caller` |
+| 6.2: opted-in siblings, all descendants, non-opted siblings, no new admission | `sibling_failure_cancels_opted_container_descendants_and_preserves_other_legs`; `sibling_failure_terminates_an_opted_prompt_and_refuses_its_finalize_retry`; existing `markdown_and_sequence_yaml_fields_matrix` retains empty-vs-absent grammar coverage |
+| 6.3: Ctrl-C, pre-start restrictions, cleanup order, exit 130 and repeat force-exit | `level2_ctrl_c_cancels_group_descendants_and_finalizes_innermost_first`; `compose_cancelled_start_runs_cancelled_finalize_without_failure_retry`; `cancellation_before_start_runs_cleanup_with_shells_disabled`; all 15 `wrap_sigint` cases |
+| 6.4: terminal cancellation and secondary diagnostics | `cancellation_refuses_every_recovery_and_retains_cleanup_timeout`; `interrupted_sequence_keeps_cleanup_errors_secondary_and_never_retries`; `cleanup_shell_timeout_stays_secondary_to_cancellation`; both new CLI cancellation regressions |
+| 6.5: criteria 5, 7 and 19, plus timeout distinction | Tests above and existing `timed_out_nested_leg_uses_failure_retry_and_never_cancellation` |
+
+The new L1 tests compile in the existing library unit target and the declared CLI `l1` target. The L2 file is declared by `cli/tests/level2/main.rs` and is selected by the live `test-l2` recipe. No new feature gate, ignore, timeout extension, focus-taking operation, parser, persisted value, or shipped prompt was introduced. Existing passive corpus and real shipped-example invocation tests remain in the full L1 gate.
+
+### Phase 6 source inventory
+
+- `claudine/cli/src/commands/compose/prep.rs`
+- `claudine/cli/src/commands/sequence.rs`
+- `claudine/cli/src/commands/wrap/composition/pipeline.rs`
+- `claudine/cli/src/commands/wrap/composition/pipeline/tests.rs`
+- `claudine/cli/src/commands/wrap/composition/staged_boot.rs`
+- `claudine/cli/src/commands/wrap/exec/termination/unix.rs`
+- `claudine/cli/src/commands/wrap/exec/termination/windows.rs`
+- `claudine/cli/src/commands/wrap/harness_orch/loop_control.rs`
+- `claudine/cli/src/commands/wrap/harness_orch/loop_control/error_routing.rs`
+- `claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs`
+- `claudine/cli/src/commands/wrap/sequence/container.rs`
+- `claudine/cli/src/commands/wrap/sequence/mod.rs`
+- `claudine/cli/tests/common/review_screen.rs`
+- `claudine/cli/tests/common/terminal_interrupt.rs`
+- `claudine/cli/tests/l1/sequence_containers.rs`
+- `claudine/cli/tests/l1/wrap_sigint.rs`
+- `claudine/cli/tests/level2/level2_auto_complete_operation_file.rs`
+- `claudine/cli/tests/level2/level2_lifecycle_control.rs`
+- `claudine/cli/tests/level2/level2_perf_capture.rs`
+- `claudine/cli/tests/level2/level2_sequence_container_ctrl_c.rs`
+- `claudine/cli/tests/level2/level2_sequence_task_stream_capture.rs`
+- `claudine/cli/tests/level2/main.rs`
+- `claudine/lib/src/composition/error/mod.rs`
+- `claudine/lib/src/composition/error/render/mod.rs`
+- `claudine/lib/src/composition/lifecycle/cancellation.rs`
+- `claudine/lib/src/composition/lifecycle/executor.rs`
+- `claudine/lib/src/composition/lifecycle/mod.rs`
+- `claudine/lib/src/composition/lifecycle/runtime.rs`
+- `claudine/lib/src/composition/lifecycle/structured_shell.rs`
+- `claudine/lib/src/composition/lifecycle/tests/container_runtime.rs`
+- `claudine/lib/src/composition/looping/engine.rs`
+- `claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs`
+- `claudine/lib/src/composition/sequence/task/container_regressions.rs`
+- `claudine/lib/src/composition/sequence/task/group.rs`
+- `claudine/lib/src/composition/sequence/task/mod.rs`
+- `claudine/lib/src/composition/sequence/task/sequence.rs`
+- `claudine/lib/src/composition/sequence/task/shell.rs`
+- `claudine/lib/src/diagnostics/registry.rs`
+
+### Final gate findings and repairs
+
+- The final normal CLI container suite passed **15/15** in 1.813 s, including the running-provider cancellation regression and its assertion that sibling failure is not reported as a user interrupt.
+- Native Windows CLI container suite passed **14/14** in 4.803 s after installing the existing compiled provider relay. A `.cmd` attempt hit Windows' already documented multiline-argument restriction; the final fixture uses `.exe`, without an interpreter wrapper around the prompt argument. Native Windows library container coverage also passed **42/42** in 3.167 s.
+- Added the catalog code `composition.cancelled` for sibling cancellation, with declared `group`, `leg`, and `cause` detail, unrecoverable disposition and warning severity. The cause regression asserts both the projected values and exact catalog key set. Ctrl-C keeps `provider.interrupted`. This avoids attaching undeclared fields to the generic composition-failure payload.
+- Lint passed all five area packages and diagnostic/documentation guards before the final catalog/fixture updates; its settled-tree rerun is queued after tests.
+- Full L2 first found three stale `state.name` YAML fixtures. The complete diagnostic run then exercised **287 tests: 274 passed, 13 failed**. The new cancellation test passed in 1.337 s. The remaining failures were older fixture/helper drift: six lifecycle tests accepted an echoed, terminal-wrapped exit marker before execution; two tests still attached per-step proxy behavior to the root sequence; four review-screen tests used retired group grammar; one proxy/merge stream test needed its pre-proxy mutation at the enclosing leg-container scope.
+- Corrected the helper marker to use split printf arguments and require actual completion. Migrated per-step proxy fixtures to explicit prompt documents, retained all target-count/loop assertions, migrated implicit-concurrency/serial-shell stream fixtures, and replaced retired task setup with leg-container initialize handlers. The tolerant-group expectation now matches the current success contract while retaining failed-leg attribution and downstream merge assertions.
+- Review-screen targeted verification passed **4/4**, preserving catalog/free-text model selection, Escape, Ctrl-C, and no-work cancellation assertions. No test was dropped, ignored, moved to another tier, or given a longer deadline.
+- A settled-tree full L2 → L1 → lint → tier audit sequence is running after these repairs.
+
+### L2 completion
+
+- Settled-tree `just --justfile claudine/justfile test-l2 --no-fail-fast`: **287/287 CLI tests passed**, plus **3/3 generator L2 tests passed**. All earlier L2 failures are resolved. The new criterion-7 test passed in 1.463 s, including terminal exit 130 and refused root-finalize retry; the proxy/merge stream regression passed in 3.338 s.
+- Non-focusing tmux and background terminal harnesses were used; no keyboard-focus test or L3 recipe ran. The canonical tier filter excluded other tiers; no selected macOS L2 test was skipped. Native Windows' criterion-7 function retains its explicit Unix-backend skip under Ruling 5.
+- All five Phase 6 implementation/test tasks are now checked. Final L1, lint, and tier audit remain running sequentially before closeout.
+
+### Staged initialize cancellation audit
+
+- Added the cancellation checkpoint to the shared initialize router and staged-read adapters before skip/proxy/error recovery is committed. Cancelled/finalize cleanup remains shell-disabled before start, and terminal exit remains 130 even when cleanup fails.
+- Three targeted regressions passed: `cancelled_initialize_skip_keeps_exit_130_and_refuses_cleanup_shell`, `cancelled_initialize_proxy_never_commits_handoff_or_cleanup_recovery`, and `cancelled_initialize_error_never_dispatches_failure_catch`. They assert event order, no handoff/start/failure catch, visible secondary diagnostics, and no cleanup shell side effect.
+- The first compilation caught three fixture type/import mismatches; those are corrected and the targeted run passed 3/3 in 0.059 s. Full settled-code gates are rerunning.
+
+### Loop cancellation audit
+
+- Inspection found that the existing prompt-loop coordinator could run its gate or another iteration after an executor reported cancellation, and initialization could route skip/proxy/error before observing cancellation. Moved the shared cancellation cleanup into `LifecycleRunGuard::cancel_if_requested`; both staged single prompts and loops now use it. Staged loop reread failure also checks cancellation before entering blocked catch.
+- Added five declared L1 regressions: `cancelled_loop_initialize_skip_has_priority_over_routing`, `cancelled_loop_initialize_proxy_has_priority_over_routing`, `cancelled_loop_initialize_error_has_priority_over_routing`, `cancelled_loop_executor_stops_without_gate_or_mutation`, and `cancelled_loop_executor_error_stops_even_when_fail_fast_is_false`. All five passed in 0.049 s. They preserve partial output and structured sibling cause, refuse cleanup recovery/shells before start, and prove no handoff, gate, mutation, or second iteration even with `fail_fast: false`.
+- Added normal-invocation `compose_cancelled_loop_start_never_runs_another_iteration`, using the same blocked start/SIGINT input as the single-prompt regression with `loop: { while: 'true', fail_fast: false }` and two permitted iterations. This extends requirements 6.3/6.4 to looping prompts.
+- A full L1 run after staged-initialize changes stopped at the expected generated dispatch-inventory drift: 6,032 passed and one inventory mismatch, with 3,730 not run because of fail-fast. The prescribed inventory regeneration is included before the final full rerun; no behavioral test failed in that run.
+
+### Final L1 result and existing exclusions
+
+- Final area `just test`: **9,769/9,769 passed** in 204.093 s. The new CLI SIGINT tests passed in 1.605/1.687 s, the running-provider sibling-cancellation regression in 1.549 s, and the three staged-initialize tests in 0.045–0.065 s. No new or changed cancellation test exceeded the L1 five-second budget.
+- Nine pre-existing opt-in performance tests were excluded by their existing ignore attributes: `compose_emits_first_stderr_byte_within_budget`; `bench_system_prompt_resolution_cold_and_warm`; `bench_resolve_and_prepare_step_by_step`; `bench_request_topology_probe_and_reuse`; `bench_raw_darkmatter_compose_passes`; `perf_compose_empty_partial_meets_target`; `perf_compose_long_prefix_meets_target`; `perf_inline_compose_empty_partial_meets_target`; `perf_enter_compose_partial_meets_target`. None was added or changed in this phase.
+- The run reported 14 existing slow tests in unchanged test files (all passed; no timeout/ignore/tier change was used):
+
+- `claudine::l1 claudine_schemas_embedded::embedded_json_trigger_combinator`
+- `claudine::l1 claudine_schemas_embedded::embedded_yaml_trigger_combinator`
+- `claudine-cli::l1 agent_text_is_data::malformed_structured_agent_values_are_refused_not_saved_as_text`
+- `claudine-cli::l1 compose_initialize_staged_boot::early_catch_shells_cannot_run_or_enable_another_catch_shell`
+- `claudine-cli::l1 compose_schema_cli::compose_late_caller_file_verdict_names_the_launch_directory`
+- `claudine-cli::l1 compose_schema_cli::compose_unresolved_caller_file_fails_before_initialize_when_non_interactive`
+- `claudine-cli::l1 inline_completion_lifecycle::sequence_step_params_satisfy_the_referenced_documents_completion_schema`
+- `claudine-cli::l1 provider_tail_launch::embedded_credentials_reach_the_child_and_no_display_surface`
+- `claudine-cli::l1 provider_tail_launch::other_failures_are_not_attributed_to_the_tail`
+- `claudine-cli::l1 provider_tail_notice::a_switch_whose_record_is_typed_unknown_is_not_called_known`
+- `claudine-cli::l1 sequence_sources_cli::every_string_list_form_classifies_through_the_real_invocation_path`
+- `claudine-cli::l1 sequence_sources_cli::yaml_json_json5_jsonl_and_ndjson_sources_produce_the_same_plan`
+- `claudine-cli::l1 tts_prewarm::every_accepted_playa_dry_run_spelling_prepares_nothing`
+- `claudine-cli::l1 wrap_sequence_composition::sequence_composition_dry_run_for_every_provider`
+
+### Final L2 capture boundary repair
+
+- Final full L2 ran all 287 CLI cases: 286 passed, including the new cancellation test in 1.427 s; one existing WezTerm perf capture failed because the dominant `HOT` leaf scrolled above its viewport under host load. This is a capture-boundary failure, not a missing production marker: the captured report began mid-tree.
+- The WezTerm perf test now captures the complete report from scrollback after completion. Its command clears shared-pane history as well as the viewport, preserving exactly-one-marker and no-stale-duration assertions. No timing threshold, retry, styling assertion, backend gate, or production rendering behavior changed. The existing three perf-capture cases provide targeted regression coverage.
+
+### Final L2 result
+
+- The corrected perf-capture target passed **3/3** in 2.008 s. Full area `just test-l2 --no-fail-fast` then passed **287/287 CLI cases** in 74.635 s and **3/3 generator cases** in 0.830 s. The new Ctrl-C container test passed in 1.361 s. All selected macOS L2 tests passed; canonical tier filters exclude other tiers, and no capability skip was reported on this host.
+- The earlier perf viewport failure is resolved without weakening assertions. The complete WezTerm styling case also passed under full-suite load (5.843 s; L2 resource tier).
+- Native Windows evidence remains the earlier targeted container suites (14 CLI and 42 library cases), and Linux evidence remains 42 targeted library cases. Those preceded the host-neutral initialize/loop audit refinements; they are targeted behavioral evidence, not final-tree CI receipts. WSL2 was not run. Native Windows console Ctrl-C is not claimed: the Unix-terminal criterion-7 test has the explicit capability skip required by Ruling 5.
+
+### Final lint result
+
+- Final area `just lint` passed all five packages: `claudine-catalog-types`, `claudine`, `claudine-contract`, `claudine-cli`, and `claudine-gen`. All nine diagnostic transport/catalog guards passed in 2.205 s, and the lifecycle documentation facet guard passed.
+- No dependency, parser, configuration-field, persisted-format, or live prompt changes were added. No robustness-matrix or persistence-round-trip additions were required. Existing passive corpus, schema, and shipped-artifact invocation tests passed in the full L1 run.
+
+### Phase 6 closeout
+
+- `just check-tier-coverage claudine` passed: the area was listed and **zero stranded tests** were found. Added tests compile through the existing declared targets, and the new L2 file is declared in its tier binary. The browser recipe remains an existing stub with no stranded cases.
+- All tasks 6.1–6.5 are checked. Required gates are green: **9,769 L1**, **290 L2**, area lint, diagnostic/documentation guards, and tier coverage. All earlier reported test failures were repaired; only the explicitly recorded pre-existing performance exclusions, slow warnings, linker warning, and platform coverage limits remain.
+- Both plan and log inventories list all **38 source/test files**, **seven updated documentation files**, **no created documentation files**, and the updated Claudine skill. Cumulative `packages` retains prior phases and includes the two packages changed here (`claudine`, `claudine-cli`). Requested metadata was read back successfully with `md get`; no duplicate frontmatter key was introduced.
+- Implementation complete, ready for review. `human_review` remains false; `message_to_agent` contains the replacement Phase 6 handoff and Phase 7 boundaries. No formatting, staging, branch commits, or lifecycle-directory moves were performed. Final diff whitespace and unchanged-index checks passed.
+
+## Phase 7
+
+### Requirement-to-test map before implementation
+
+- 7.1 / criteria 1, 18: retain recursive graph and collision tests; add container lifecycle shell discovery (short/long shell, conditional branches, shell-valued set), malformed lifecycle rejection, and nested cross-leg collision coverage.
+- 7.2 / criterion 18: add a mixed sequence/task/catalog cycle with its complete chain, distinct catalog entries within one active catalog, and repeated sequence reuse. Existing origin-relative FileReference tests remain applicable.
+- 7.3 / criterion 21: add all-first ancestry and all-leg approval assertions, terminal-event and group-read template assertions, illegal err/timing/current reads, and CLI filesystem assertions for event-time values.
+- 7.4: retain existing nested reread/proxy refusal tests and extend refusal to newly introduced container event shells. L1 hermetic CLI subprocess tests cover the invocation/filesystem boundary; no terminal interaction is introduced. Existing grammar robustness matrices cover unchanged input loading; this phase changes discovery and approval policy, not file-format parsing.
+
+Earlier-phase changes are already present in the worktree and will be preserved. The plan names CLI preflight paths; the implementation lives in `lib/src/composition/sequence/preflight/`.
+
+### Discovery and cycle implementation
+
+- The first targeted run reproduced both regressions: distinct catalog entries were rejected as a file cycle, and a group finalize command was absent from discovery (two candidates instead of three). After implementation both passed, followed by all seven `preflight::tests::phase7` tests (0.043–0.051 s each).
+- Added `preflight/containers.rs` to discover and prepare parsed container actions without evaluating lifecycle conditions. Terminal placeholders require templates; group event roots stay late. Shell-value commands retain normalized approval keys. Root guards receive the audited lifecycle; fresh nested lifecycles settle against the original authorization.
+- Reference ancestry now includes a catalog entry selector. Mixed cycles report the root, sequence, task, catalog entry, and repeated sequence; two distinct active entries and repeated independent sequence references are legal. Existing request-scoped FileReference resolution remains unchanged.
+- The recursive graph, retained source snapshots, authoring origins, and nested write-back collision checks are preserved. Tasks 7.1 and 7.2 are checked.
+- CLI container coverage passed 17/17, including the existing shipped-example corpus and normal invocation. An initial new CLI fixture incorrectly used the array `group.succeeded` as one shell argument; that correctly failed. The success fixture now uses `first(group.succeeded)`, and a separate negative regression retains the original input and asserts failed publication.
+- Root proxies were found to create fresh approval coordinators. A closed approval membership now travels through root/step proxy scope and is enforced before policy or prompts; `--yolo` cannot authorize newly introduced commands. This is a Phase 7 repair to the prior implementation, not a grammar change.
+
+### Targeted tests and broad verification
+
+New declared L1 tests (all compiled and selected by the full area recipe):
+
+| Requirement | Exact tests added |
+| --- | --- |
+| 7.1 transitive discovery and collisions | `preflight::tests::phase7::container_shell_discovery_walks_both_branches_and_shell_values`; `preflight::tests::phase7::nested_inline_write_back_collision_is_rejected` |
+| 7.2 active reference identity and full chain | `preflight::tests::phase7::distinct_groups_in_one_active_catalog_are_legal`; `preflight::tests::phase7::mixed_reference_cycle_names_every_active_reference`; `preflight::tests::phase7::sequence_reuse_is_legal_and_only_all_first_descendants_offer_bytes` |
+| 7.3 position, late roots, illegal roots | `preflight::tests::phase7::container_events_are_discovered_and_terminal_commands_require_templates`; `preflight::tests::phase7::container_shells_refuse_unavailable_roots_even_beside_late_values`; `sequence_containers::container_shells_use_event_time_values_and_lexical_group_outcomes`; `sequence_containers::container_outcome_collection_cannot_be_used_as_one_shell_argument`; `sequence_containers::nested_event_command_is_rejected_before_any_child_effect` |
+| 7.3/7.4 closed approval | `task::tests::group_preparation_contract::new_container_event_command_is_refused`; `task::tests::group_preparation_contract::new_container_event_template_is_refused`; `sequence_containers::root_proxy_refuses_a_new_shell_after_approval_closes_even_with_yolo` |
+
+Existing complementary coverage retained: `a_first_group_qualifies_with_every_leg_and_group_readers_are_templates`, nested sequence position tests, source-origin resolution tests, changed nested source refusal, proxy cycle/refusal tests, and persisted scripted approval choice round trips. No new persisted format or parser field was added, so the input robustness matrix is unchanged. The existing passive `shipped_container_example_corpus_has_parseable_lifecycles` and end-to-end `shipped_container_example_runs_through_the_normal_sequence_command` now cover an actual shipped terminal-event shell template (`completed-3`).
+
+- Full `just --justfile claudine/justfile test`: **9,782/9,782 passed** in **111.853 s**, across all five area packages. New preflight/refusal unit tests took 0.020–0.023 s; the four new CLI regressions took 0.322–0.839 s. No new/changed L1 test exceeded five seconds.
+- Nine pre-existing ignored performance tests remain excluded: `compose_emits_first_stderr_byte_within_budget`; `bench_system_prompt_resolution_cold_and_warm`; `bench_resolve_and_prepare_step_by_step`; `bench_request_topology_probe_and_reuse`; `bench_raw_darkmatter_compose_passes`; `perf_compose_empty_partial_meets_target`; `perf_compose_long_prefix_meets_target`; `perf_inline_compose_empty_partial_meets_target`; `perf_enter_compose_partial_meets_target`. No test was dropped, retried, ignored, or moved to another tier in this phase. No unresolved test failure was observed.
+- Targeted preflight run passed 7/7; group-preparation run passed 10/10; final CLI container run passed 19/19. The root-proxy regression first reproduced an unexpected success, then passed after carrying closed membership into the wrapper's rebuilt shell options as well as the coordinator's audit.
+- Dispatch inventory was refreshed through its prescribed `CLAUDINE_UPDATE_INVENTORY=1 just test-cli dispatch_inventory::` route; all 12 inventory tests passed. Existing linker warnings about the large macOS unwind section appeared during builds; they did not fail tests.
+- `git diff --check` passed. No formatter, staging operation, branch commit, feature lifecycle move, or focusing terminal/browser harness was used.
+- Supplemental Linux/library and native-Windows/CLI checks are running through `just cross-check`. The first invocation failed before execution because `just` expands its variadic recipe arguments through a shell; preserving quotes around the nextest expression corrected it. The current runs use identical source trees and focused nextest selections. Lint and tier audit results follow below.
+
+### Final audit repairs and platform findings
+
+- Added `sequence_containers::root_retry_keeps_approval_closed_when_a_referenced_task_changes`. The original input rewrites a referenced task with `set_frontmatter`, then fails and retries the root. It failed before the fix because root graph approval reopened; it now passes because root retries pass the original membership into graph approval, including the empty-graph fast path. The test observes the rewritten source, refusal, and absence of the unapproved shell's file. The settled CLI container selection passes **20/20**.
+- The passive shipped-example test now builds each example's public sequence plan and preflight graph in addition to walking every parsed container lifecycle. The shipped example's existing normal-invocation test remains in place.
+- Native Windows ran 18 container tests and found two failures in newly authored `echo` template inputs. This was fixture drift from the existing direct-template contract: Windows `echo` is a `cmd.exe` builtin; template dispatch correctly requires a native executable. The successful event-time test now uses the compiled `claudine-argv-recorder`, checks all five exact argument vectors and downstream group output, and stays portable. The shipped example's added `echo` template was removed, leaving its original portable output behavior; it is therefore absent from this phase's changed-document inventory. The earlier log's `completed-3` statement describes the abandoned example edit, not the final implementation.
+- Added this OS-specific lesson to `.claude/skills/os/windows.md`, as required by the repository's OS instructions. User docs now use a native Git example and explicitly name the native-executable requirement. No interpreter fallback was added.
+- Supplemental Linux archive run passed **7/7** targeted preflight tests in **0.057 s**. The first Linux/Windows expression-filter attempts compiled successfully but failed in the shared runner's shell argument expansion before tests; positional test-name filters avoid that defect. The Windows fixture failures above are being rechecked with the final native fixture and root-retry regression.
+- `just lint` passed all five area packages and both documentation/transport guard recipes. `just check-tier-coverage claudine` passed with **zero stranded tests**. The 13 initial new tests plus the root-retry regression are in existing declared L1 targets; no new target, feature, or CI cell was introduced.
+- The full rerun after strengthening the corpus passed **9,782/9,782** in **286.194 s** with the same nine existing ignored tests. It reported 46 slow tests in unchanged code, versus no slow report in the earlier 111.853 s run. None of the new/changed container tests exceeded five seconds. The settled-source full L1 and lint reruns follow below, after the root-retry repair and portable fixture correction.
+- Comment drift repaired in touched preflight symbols: `outputs` became `seq.outputs`; first position now explicitly includes all first-group legs; the outdated count of executable shapes was removed; ancestry documentation now includes catalog entry identity. Plan/log frontmatter properties were read back with `md get` after every edit; cumulative package membership was preserved. No spec status or lifecycle location was changed.
+
+### Settled-source results
+
+- Final area `just test`: **9,783/9,783 passed** in **241.301 s**, with the same nine pre-existing ignored performance tests. Every Phase 7 test passed, including the native-recorder lifecycle test, passive shipped corpus, and root-retry regression. No changed container test exceeded five seconds.
+- Native Windows final archive run: **19/19 passed** in **4.850 s** (individual tests 1.181–3.548 s); Linux targeted archive run: **7/7 passed**. Native Windows excludes the existing Unix-only running-provider cancellation test at compilation; no selected test was skipped. These are local source-snapshot results, not reusable branch-head CI receipts: cross-check correctly declined to publish a Windows observation because the uncommitted snapshot differs from branch HEAD. WSL2 was not exercised in this phase and relies on the repository's scheduled CI; no WSL-specific implementation changed.
+- Final L1 reported 26 slow tests in unchanged functions. Their passing results do not erase the repository's five-second performance debt. No timeout, retry, ignore, tier move, or deadline increase was used. Nextest counted 26 slow tests; 27 completed durations exceeded five seconds (including one threshold-boundary result). All 27 are listed below.
+
+| Existing test | Seconds |
+| --- | ---: |
+| `claudine::l1 claudine_schemas_embedded::embedded_json_trigger_combinator` | 6.757 |
+| `claudine::l1 claudine_schemas_embedded::embedded_yaml_trigger_combinator` | 6.590 |
+| `claudine-cli::l1 agent_text_is_data::inline_agent_values_are_stored_as_data_and_read_back_exactly` | 6.433 |
+| `claudine-cli::l1 authored_text_rendering::header_document_label_and_model_render_exactly_as_authored` | 5.850 |
+| `claudine-cli::l1 agent_text_is_data::malformed_structured_agent_values_are_refused_not_saved_as_text` | 9.666 |
+| `claudine-cli::l1 compose_initialize_staged_boot::early_catch_shells_cannot_run_or_enable_another_catch_shell` | 7.008 |
+| `claudine-cli::l1 compose_schema_cli::compose_and_inline_bare_sidecar_advisory_render_once_and_silent_suppresses_it` | 5.179 |
+| `claudine-cli::l1 compose_schema_cli::compose_late_caller_file_verdict_names_the_launch_directory` | 6.436 |
+| `claudine-cli::l1 compose_schema_cli::compose_unresolved_caller_file_fails_before_initialize_when_non_interactive` | 8.322 |
+| `claudine-cli::l1 ctx_launch_anchor::caller_file_anchor_survives_direct_and_proxy_success_guards` | 5.160 |
+| `claudine-cli::l1 ctx_launch_anchor::loop_route_keeps_launch_area_for_root_and_package_documents` | 6.118 |
+| `claudine-cli::l1 document_environment_routes::re_entering_a_document_reads_its_map_without_capturing_again` | 5.277 |
+| `claudine-cli::l1 entry_point_parity::claudine_entry_points_agree_on_every_reference_shard_1` | 5.002 |
+| `claudine-cli::l1 entry_point_parity::claudine_entry_points_agree_on_every_reference` | 5.036 |
+| `claudine-cli::l1 inline_completion_lifecycle::a_proxy_with_overlay_satisfies_the_targets_completion_schema` | 5.170 |
+| `claudine-cli::l1 inline_completion_lifecycle::sequence_step_params_satisfy_the_referenced_documents_completion_schema` | 5.730 |
+| `claudine-cli::l1 provider_tail_launch::embedded_credentials_reach_the_child_and_no_display_surface` | 7.367 |
+| `claudine-cli::l1 provider_tail_launch::other_failures_are_not_attributed_to_the_tail` | 6.909 |
+| `claudine-cli::l1 provider_tail_notice::a_switch_whose_record_is_typed_unknown_is_not_called_known` | 8.582 |
+| `claudine-cli::l1 sequence_sources_cli::the_three_operators_each_produce_a_usable_name` | 5.297 |
+| `claudine-cli::l1 sequence_sources_cli::every_string_list_form_classifies_through_the_real_invocation_path` | 8.244 |
+| `claudine-cli::l1 shell_missing_values::a_missing_value_fails_pre_flight_on_every_shell_surface` | 5.013 |
+| `claudine-cli::l1 sequence_sources_cli::yaml_json_json5_jsonl_and_ndjson_sources_produce_the_same_plan` | 8.178 |
+| `claudine-cli::l1 tts_prewarm::every_accepted_playa_dry_run_spelling_prepares_nothing` | 5.981 |
+| `claudine-cli::l1 wrap_compose_validation::predicates_operands_and_proxy_with_values_are_rejected_before_launch` | 5.084 |
+| `claudine-cli::l1 wrap_sequence_composition::sequence_composition_dry_run_for_every_provider` | 8.444 |
+| `claudine-cli::l1 wrap_watchdog_startup_stall::watchdog_startup_bytes_move_the_deadline` | 5.035 |
+
+### Phase 7 closeout
+
+- Settled-source `just lint` passed all five area packages, transport guards, and lifecycle documentation guards. The tier audit passed with zero stranded tests, and the final full L1 selected and passed the added root-retry test in the existing declared target.
+- All Phase 7 tasks (7.1–7.4) are checked. The requirement-to-test mapping, initial failures, fixes, skipped tests, existing slow tests, platform results, source inventory, and handoff are recorded above and in frontmatter. No unresolved Phase 7 implementation or test failure remains.
+- All requested plan/log frontmatter keys parse and retain a single occurrence. The cumulative `packages` list is unchanged because `claudine` and `claudine-cli` were already present. `human_review` is false. The spec's status is left for its author.
+- Implementation complete, ready for review. Phase 8 owns the remaining migration sweep. No formatting, staging, branch commit, or feature lifecycle move was performed.
