@@ -68,3 +68,5 @@ pub use crate::websocket::{
     HeartbeatHints, MessageDirection, MessageSchema, ParamType, RequestIdType, WebSocketApi,
     WebSocketEndpoint, WebSocketEndpointHints, WebSocketRuntimeHints,
 };
+
+pub use crate::{DefinitionContext, DefinitionError, Registration, TypeDesc, Success, ErrorSet, EndpointBuilder, RestApiBuilder};

@@ -100,6 +100,9 @@ pub struct EndpointParams {
 }
 
 impl EndpointParams {
+    /// An endpoint with no declared parameters.
+    pub fn new() -> Self { Self::default() }
+
     /// Appends a superseded [`PaginationStyle`]'s query parameters and records
     /// the style.
     ///

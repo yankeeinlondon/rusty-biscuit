@@ -1332,8 +1332,17 @@ let openapi_doc = export(&api, &registry, &options)?;
 
 See the [schematic-gen README](../gen/README.md) for CLI usage and the full import/export pipeline.
 
+## Typed registration
+
+`DefinitionContext` provides ordered typed registrations, alias paths checked by
+`rust_path!`, and destination validation for Serde descriptors. This API is
+additive alongside existing definitions. See [typed registration](../docs/typed-registration.md)
+for authoring, container, and module-group assembly rules.
+
 ## Dependencies
 
+- `schemars` - OpenAPI-compatible schema generation for typed registrations
+- `serde_json` - Inline schemas and descriptor transfer data
 - `serde` - Serialization/deserialization
 - `strum` - Enum utilities (Display, FromStr, Iterator)
 - `thiserror` - Error types
@@ -1341,3 +1350,5 @@ See the [schematic-gen README](../gen/README.md) for CLI usage and the full impo
 ## License
 
 AGPL-3.0-only
+
+REST required-fact authoring is covered in [definition builders](../docs/definition-builders.md).

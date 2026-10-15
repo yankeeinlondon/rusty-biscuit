@@ -192,12 +192,14 @@ pub fn resolve(api: &RestApi, endpoint: &Endpoint) -> Resolution {
 
 /// The `T` of an explicit `Vec<T>` JSON response, as written.
 ///
-/// Only the literal `Vec<..>` spelling is recognized; an alias, a qualified
-/// `std::vec::Vec`, or `serde_json::Value` is not a list without a row.
+/// Typed authoring recognizes the descriptor's root Vec shape. Legacy strings
+/// recognize only `Vec<..>`; aliases, qualified strings, and free-form JSON
+/// still need an authored collection.
 pub fn root_array_item_type(response: &ApiResponse) -> Option<String> {
     let ApiResponse::Json(schema) = response else {
         return None;
     };
+    if let Some(desc) = &schema.descriptor { return desc.root_array_item(); }
     let inner = schema
         .type_name
         .trim()

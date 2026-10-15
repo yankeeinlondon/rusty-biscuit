@@ -4,14 +4,14 @@ use openapiv3::{MediaType, ReferenceOr, RequestBody};
 use crate::request::{ApiRequest, FormField, FormFieldKind};
 
 /// Maps request body to OpenAPI RequestBody.
-pub(super) fn map_request_body(request: &ApiRequest) -> RequestBody {
+pub(super) fn map_request_body(request: &ApiRequest) -> Result<RequestBody, crate::openapi::OpenApiError> {
     let content = match request {
         ApiRequest::Json(schema) => {
             let mut content = IndexMap::new();
             content.insert(
                 "application/json".to_string(),
                 MediaType {
-                    schema: Some(super::responses::schema_reference(&schema.type_name)),
+                    schema: Some(super::responses::body_schema(schema)?),
                     ..Default::default()
                 },
             );
@@ -22,7 +22,7 @@ pub(super) fn map_request_body(request: &ApiRequest) -> RequestBody {
             content.insert(
                 "multipart/form-data".to_string(),
                 MediaType {
-                    schema: Some(ReferenceOr::Item(map_form_fields_to_schema(fields))),
+                    schema: Some(ReferenceOr::Item(map_form_fields_to_schema(fields)?)),
                     ..Default::default()
                 },
             );
@@ -33,7 +33,7 @@ pub(super) fn map_request_body(request: &ApiRequest) -> RequestBody {
             content.insert(
                 "application/x-www-form-urlencoded".to_string(),
                 MediaType {
-                    schema: Some(ReferenceOr::Item(map_form_fields_to_schema(fields))),
+                    schema: Some(ReferenceOr::Item(map_form_fields_to_schema(fields)?)),
                     ..Default::default()
                 },
             );
@@ -78,16 +78,16 @@ pub(super) fn map_request_body(request: &ApiRequest) -> RequestBody {
         }
     };
 
-    RequestBody {
+    Ok(RequestBody {
         description: None,
         content,
         required: true,
         ..Default::default()
-    }
+    })
 }
 
 /// Maps form fields to an OpenAPI schema.
-pub(super) fn map_form_fields_to_schema(fields: &[FormField]) -> openapiv3::Schema {
+pub(super) fn map_form_fields_to_schema(fields: &[FormField]) -> Result<openapiv3::Schema, crate::openapi::OpenApiError> {
     let mut properties = IndexMap::new();
     let mut required = Vec::new();
 
@@ -148,7 +148,7 @@ pub(super) fn map_form_fields_to_schema(fields: &[FormField]) -> openapiv3::Sche
                     ..Default::default()
                 },
                 schema_kind: openapiv3::SchemaKind::AllOf {
-                    all_of: vec![super::responses::schema_reference(&schema.type_name)],
+                    all_of: vec![super::responses::body_schema(schema)?],
                 },
             },
         };
@@ -163,14 +163,14 @@ pub(super) fn map_form_fields_to_schema(fields: &[FormField]) -> openapiv3::Sche
         }
     }
 
-    openapiv3::Schema {
+    Ok(openapiv3::Schema {
         schema_data: openapiv3::SchemaData::default(),
         schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::Object(openapiv3::ObjectType {
             properties,
             required,
             ..Default::default()
         })),
-    }
+    })
 }
 
 #[cfg(test)]
@@ -180,7 +180,7 @@ mod tests {
     #[test]
     fn map_request_body_json() {
         let request = ApiRequest::json_type("CreateUserBody");
-        let body = map_request_body(&request);
+        let body = map_request_body(&request).unwrap();
 
         assert!(body.content.contains_key("application/json"));
         assert!(body.required);
@@ -190,7 +190,7 @@ mod tests {
     fn map_request_body_form_data() {
         let request =
             ApiRequest::form_data(vec![FormField::file("document"), FormField::text("name")]);
-        let body = map_request_body(&request);
+        let body = map_request_body(&request).unwrap();
 
         assert!(body.content.contains_key("multipart/form-data"));
     }
@@ -201,7 +201,7 @@ mod tests {
             FormField::text("username"),
             FormField::text("password"),
         ]);
-        let body = map_request_body(&request);
+        let body = map_request_body(&request).unwrap();
 
         assert!(
             body.content
@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn map_request_body_text() {
         let request = ApiRequest::text("text/csv");
-        let body = map_request_body(&request);
+        let body = map_request_body(&request).unwrap();
 
         assert!(body.content.contains_key("text/csv"));
     }
@@ -220,7 +220,7 @@ mod tests {
     #[test]
     fn map_request_body_binary() {
         let request = ApiRequest::binary("application/octet-stream");
-        let body = map_request_body(&request);
+        let body = map_request_body(&request).unwrap();
 
         assert!(body.content.contains_key("application/octet-stream"));
     }

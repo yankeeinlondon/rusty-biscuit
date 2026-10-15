@@ -274,39 +274,24 @@ pub(crate) fn lines_to_doc_comments(doc: &str) -> TokenStream {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schematic_define::{ApiResponse, CrossOrigin, Endpoint};
+    use schematic_define::{ApiResponse, Endpoint};
 
     fn make_test_api() -> RestApi {
-        RestApi {
-            name: "TestApi".to_string(),
-            description: "A test API for documentation.".to_string(),
-            base_url: "https://api.test.com".to_string(),
-            docs_url: Some("https://docs.test.com".to_string()),
-            auth: AuthStrategy::BearerToken { header: None },
-            auth_policy: None,
-            env_auth: vec!["TEST_API_KEY".to_string()],
-            env_username: None,
-            env_mapping: None,
-            headers: vec![],
-            endpoints: vec![Endpoint {
-                id: "ListItems".to_string(),
-                method: RestMethod::Get,
-                path: "/items".to_string(),
-                description: "List all items".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ListItemsResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            }],
-            module_path: None,
-            request_suffix: None,
-            version: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
+        {
+            let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "TestApi".to_string(), "https://api.test.com".to_string())
+                .describes("A test API for documentation.".to_string())
+                .authentication(AuthStrategy::BearerToken { header: None }, vec!["TEST_API_KEY".to_string()])
+                .build().expect("valid API fixture");
+            api.docs_url = Some("https://docs.test.com".to_string());
+            api.endpoints = vec![{
+                let mut endpoint = Endpoint::new("ListItems".to_string(), RestMethod::Get, "/items".to_string())
+                    .describes("List all items".to_string())
+                    .returns_empty()
+                    .build().expect("valid endpoint fixture");
+                endpoint.response = ApiResponse::json_type("ListItemsResponse");
+                endpoint
+            }];
+            api
         }
     }
 
@@ -403,27 +388,21 @@ mod tests {
     #[test]
     fn features_section_groups_by_method() {
         let mut api = make_test_api();
-        api.endpoints.push(Endpoint {
-            id: "CreateItem".to_string(),
-            method: RestMethod::Post,
-            path: "/items".to_string(),
-            description: "Create a new item".to_string(),
-            request: None,
-            response: ApiResponse::json_type("CreateItemResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
+        api.endpoints.push({
+            let mut endpoint = Endpoint::new("CreateItem".to_string(), RestMethod::Post, "/items".to_string())
+                .describes("Create a new item".to_string())
+                .returns_empty()
+                .build().expect("valid endpoint fixture");
+            endpoint.response = ApiResponse::json_type("CreateItemResponse");
+            endpoint
         });
-        api.endpoints.push(Endpoint {
-            id: "GetItem".to_string(),
-            method: RestMethod::Get,
-            path: "/items/{id}".to_string(),
-            description: "Get a specific item".to_string(),
-            request: None,
-            response: ApiResponse::json_type("Item"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
+        api.endpoints.push({
+            let mut endpoint = Endpoint::new("GetItem".to_string(), RestMethod::Get, "/items/{id}".to_string())
+                .describes("Get a specific item".to_string())
+                .returns_empty()
+                .build().expect("valid endpoint fixture");
+            endpoint.response = ApiResponse::json_type("Item");
+            endpoint
         });
 
         let builder = ModuleDocBuilder::new(&api);
@@ -450,16 +429,13 @@ mod tests {
         let mut api = make_test_api();
         api.endpoints.insert(
             0,
-            Endpoint {
-                id: "CreateItem".to_string(),
-                method: RestMethod::Post,
-                path: "/items".to_string(),
-                description: "Create a new item".to_string(),
-                request: None,
-                response: ApiResponse::json_type("CreateItemResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
+            {
+                let mut endpoint = Endpoint::new("CreateItem".to_string(), RestMethod::Post, "/items".to_string())
+                    .describes("Create a new item".to_string())
+                    .returns_empty()
+                    .build().expect("valid endpoint fixture");
+                endpoint.response = ApiResponse::json_type("CreateItemResponse");
+                endpoint
             },
         );
 
@@ -480,16 +456,13 @@ mod tests {
     #[test]
     fn example_section_fallback_to_first_endpoint() {
         let mut api = make_test_api();
-        api.endpoints = vec![Endpoint {
-            id: "CreateItem".to_string(),
-            method: RestMethod::Post,
-            path: "/items".to_string(),
-            description: "Create a new item".to_string(),
-            request: None,
-            response: ApiResponse::json_type("CreateItemResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
+        api.endpoints = vec![{
+            let mut endpoint = Endpoint::new("CreateItem".to_string(), RestMethod::Post, "/items".to_string())
+                .describes("Create a new item".to_string())
+                .returns_empty()
+                .build().expect("valid endpoint fixture");
+            endpoint.response = ApiResponse::json_type("CreateItemResponse");
+            endpoint
         }];
 
         let builder = ModuleDocBuilder::new(&api);

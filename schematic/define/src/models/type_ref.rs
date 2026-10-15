@@ -21,7 +21,7 @@
 /// assert_eq!(primitives.len(), 6);
 /// ```
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum PrimitiveType {
     /// UTF-8 string.
     String,
@@ -69,7 +69,7 @@ pub enum PrimitiveType {
 /// ]);
 /// ```
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TypeRef {
     /// A primitive type.
     Primitive(PrimitiveType),

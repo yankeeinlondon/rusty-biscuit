@@ -116,6 +116,10 @@ pub struct Schema {
     pub type_name: String,
     /// Module path where this type is defined (e.g., "crate::models").
     pub module_path: Option<String>,
+    /// Typed authoring evidence, checked against the destination context at API build.
+    /// Legacy schemas have no evidence until their authoring is migrated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub descriptor: Option<crate::TypeDesc>,
 }
 
 impl Schema {
@@ -137,6 +141,7 @@ impl Schema {
         Self {
             type_name: type_name.into(),
             module_path: None,
+            descriptor: None,
         }
     }
 
@@ -157,6 +162,7 @@ impl Schema {
         Self {
             type_name: type_name.into(),
             module_path: Some(module_path.into()),
+            descriptor: None,
         }
     }
 

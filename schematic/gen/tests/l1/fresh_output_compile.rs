@@ -47,6 +47,8 @@ const FIXTURE_COVERAGE: &[(&str, &[&str])] = &[
         "FixtureBearer",
         &[
             "bearer-auth",
+            "typed-registration-paths",
+            "typed-nullable-containers",
             "json-body",
             "query-parameters",
             "array-query-parameter",
@@ -363,12 +365,17 @@ fn fixture_apis() -> Vec<RestApi> {
         vec![named_param("sid", QueryParamType::String), named_param("theme", QueryParamType::String)],
     ));
 
-    let mut bearer = fixture_api(
-        "FixtureBearer",
-        "fixture_bearer",
-        AuthStrategy::BearerToken { header: None },
-        vec![list_widgets, create_widget, get_widget, search],
-    );
+    let mut types = schematic_define::DefinitionContext::types_in("::unused");
+    let typed_durations = Endpoint::get("TypedDurations", "/typed-durations")
+        .describes("Typed durations")
+        .returns_json::<Option<Vec<std::collections::HashMap<String, std::time::Duration>>>>(&mut types)
+        .build().unwrap();
+    let mut bearer = RestApi::builder(&types, "FixtureBearer", "http://127.0.0.1:1")
+        .describes("FixtureBearer fixture API").bearer_env(["FIXTURE_BEARER_TOKEN"])
+        .module_path("fixture_bearer")
+        .endpoints([typed_durations])
+        .build().unwrap();
+    bearer.endpoints.splice(0..0, [list_widgets, create_widget, get_widget, search]);
     bearer.headers = vec![
         ("X-Client".to_string(), "fixture".to_string()),
         ("Cookie".to_string(), "api=1; theme=api".to_string()),
@@ -1273,6 +1280,24 @@ async fn a_generated_session_opens_pages_and_closes_inside_its_scope() {
         "one open, every page with the handle and keep-alive, one close"
     );
 }
+
+#[tokio::test]
+async fn typed_registration_paths_preserve_nullable_nested_wire_shape() {
+    let server = MockServer::start().await;
+    Mock::given(path("/typed-durations"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{"elapsed":{"secs":2,"nanos":3}}])))
+        .mount(&server).await;
+    let client = FixtureBearer::new().base_url(server.uri());
+    let result: Option<Vec<std::collections::HashMap<String, std::time::Duration>>> = client.typed_durations().await.unwrap();
+    assert_eq!(result.unwrap()[0]["elapsed"], std::time::Duration::new(2, 3));
+    assert_eq!(only_request(&server).await.url.path(), "/typed-durations");
+    server.reset().await;
+    Mock::given(path("/typed-durations"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("null"))
+        .mount(&server).await;
+    assert!(client.typed_durations().await.unwrap().is_none());
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
 "##;
 
 /// Environment for the child test process; see [`REQUEST_SIDE_TEST`].
@@ -1313,6 +1338,7 @@ const REQUEST_SIDE_TESTS: &[&str] = &[
     "generated_pager_retains_api_evidence_and_explicitly_retries",
     "required_adopted_parameters_are_sent_once_by_an_ordinary_send_and_by_the_pager",
     "a_generated_session_opens_pages_and_closes_inside_its_scope",
+    "typed_registration_paths_preserve_nullable_nested_wire_shape",
 ];
 
 #[test]
@@ -1423,6 +1449,37 @@ fn slow_real_apis_compile_offline() {
 /// it must fail with, and text its diagnostic must name. Entry `i` becomes
 /// the fixture crate's test target `tests/misuse_<i>.rs`.
 const MISUSES: &[(&str, &str, &str, &str)] = &[
+    ("Endpoint has no Default", "fn misuse() { let _ = schematic_define::Endpoint::default(); }", "E0599", "Endpoint"),
+    ("RestApi has no Default", "fn misuse() { let _ = schematic_define::RestApi::default(); }", "E0599", "RestApi"),
+    ("endpoint description is required", "fn misuse() { let _ = schematic_define::Endpoint::get(\"Get\", \"/\").returns_empty().build(); }", "E0599", "build"),
+    ("endpoint success is required", "fn misuse() { let _ = schematic_define::Endpoint::get(\"Get\", \"/\").describes(\"Get\").build(); }", "E0599", "build"),
+    ("API description is required", "fn misuse() { let c = schematic_define::DefinitionContext::types_in(\"::models\"); let _ = schematic_define::RestApi::builder(&c, \"Api\", \"https://example.com\").no_auth().build(); }", "E0599", "build"),
+    ("API authentication is required", "fn misuse() { let c = schematic_define::DefinitionContext::types_in(\"::models\"); let _ = schematic_define::RestApi::builder(&c, \"Api\", \"https://example.com\").describes(\"Api\").build(); }", "E0599", "build"),
+    ("ErrorSet only supports none", "fn misuse() { let _ = schematic_define::ErrorSet::status(400); }", "E0599", "ErrorSet"),
+    (
+        "a descriptor cannot be constructed from a bare name",
+        "fn misuse() { let _ = schematic_define::TypeDesc::new(\"Model\"); }",
+        "E0599",
+        "TypeDesc",
+    ),
+    (
+        "reserved structure has no authoring setter",
+        "fn misuse() { let mut c = schematic_define::DefinitionContext::types_in(\"::models\"); let _ = c.register::<String>().unwrap().structure(schematic_define::TypeRef::Named(\"Model\".into())); }",
+        "E0599",
+        "structure",
+    ),
+    (
+        "rust_path rejects a misspelled type",
+        "fn misuse() { let _ = schematic_define::rust_path!(::std::time::Misspelled); }",
+        "E0425",
+        "Misspelled",
+    ),
+    (
+        "rust_path must name the registration type",
+        "fn misuse() { let mut c = schematic_define::DefinitionContext::types_in(\"::models\"); let _ = c.register_as::<std::time::Duration>(schematic_define::rust_path!(::std::ops::Range<u64>)); }",
+        "E0308",
+        "RustPath",
+    ),
     (
         "a success type other than the declared one",
         "async fn misuse(client: FixtureBearer) {

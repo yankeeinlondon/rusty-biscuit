@@ -153,6 +153,8 @@ pub mod request;
 pub mod response;
 pub mod schema;
 pub mod types;
+pub mod registration;
+pub mod builders;
 pub mod websocket;
 
 #[cfg(feature = "openapi")]
@@ -175,8 +177,11 @@ pub use request::{ApiRequest, FormField, FormFieldKind};
 pub use response::ApiResponse;
 pub use schema::{Schema, SchemaObject};
 pub use types::{Endpoint, RestApi, RestMethod};
+pub use registration::{DefinitionContext, DefinitionError, MapKey, Registration, RustPath, TypeDesc, TypeRegistration};
 pub use websocket::{
     AuthFlowHints, ConnectionLifecycle, ConnectionParam, CorrelationHints, FrameFormat,
     HeartbeatHints, MessageDirection, MessageSchema, ParamType, RequestIdType, WebSocketApi,
     WebSocketEndpoint, WebSocketEndpointHints, WebSocketRuntimeHints,
 };
+
+pub use builders::{EndpointBuilder, RestApiBuilder, Success, ErrorSet};

@@ -630,4 +630,44 @@ mod tests {
 
         assert_eq!(path_item.parameters.len(), 1, "item_id declared twice");
     }
+    #[test]
+    fn typed_builder_exports_named_wrapped_request_response_and_form_schemas() {
+        use crate::{DefinitionContext, Success, FormField};
+        use std::{collections::HashMap, time::Duration};
+        let mut ctx = DefinitionContext::types_in("::models");
+        let desc = ctx.register::<Vec<Duration>>().unwrap();
+        let mut json = Endpoint::post("Json", "/json").describes("Json")
+            .returns_json::<Option<Vec<Duration>>>(&mut ctx)
+            .request_json::<HashMap<String, Duration>>(&mut ctx).build().unwrap();
+        json.headers.push(("x-fixture".into(), "one".into()));
+        let form = Endpoint::post("Form", "/form").describes("Form")
+            .returns(Success::empty()).request_form(vec![FormField::json_desc("metadata", desc)
+                .optional().with_description("metadata")]).build().unwrap();
+        let api = RestApi::builder(&ctx, "Typed", "https://example.com").describes("Typed")
+            .no_auth().endpoints([json, form]).build().unwrap();
+        let doc = export(&api, &TestRegistry::new().with_schema("Duration"), &ExportOptions::new()).unwrap();
+        let value = serde_json::to_value(doc).unwrap();
+        let response = &value["paths"]["/json"]["post"]["responses"]["200"]["content"]["application/json"]["schema"];
+        assert_eq!(response["anyOf"][0]["type"], "array");
+        assert_eq!(response["anyOf"][1]["nullable"], true);
+        assert_eq!(response["anyOf"][0]["items"]["$ref"], "#/components/schemas/Duration");
+        let request = &value["paths"]["/json"]["post"]["requestBody"]["content"]["application/json"]["schema"];
+        assert_eq!(request["additionalProperties"]["$ref"], "#/components/schemas/Duration");
+        let form = &value["paths"]["/form"]["post"]["requestBody"]["content"]["multipart/form-data"]["schema"];
+        assert_eq!(form["properties"]["metadata"]["allOf"][0]["items"]["$ref"], "#/components/schemas/Duration");
+        assert!(form["required"].as_array().is_none_or(|v| v.is_empty()));
+        assert!(matches!(export(&api, &TestRegistry::new(), &ExportOptions::new()), Err(OpenApiError::UnresolvedRefs { .. })));
+    }
+
+    #[test]
+    fn malformed_typed_wire_schema_returns_export_error() {
+        let mut api = create_test_api();
+        let desc = serde_json::from_value(serde_json::json!({
+            "shape": {"Inline": {"rust_path": "::std::string::String", "schema": {"type": 123}}}, "structure": null
+        })).unwrap();
+        api.endpoints.push(Endpoint::get("Malformed", "/malformed").describes("Malformed")
+            .returns(crate::Success::json(desc)).build().unwrap());
+        assert!(matches!(export(&api, &TestRegistry::new(), &ExportOptions::new()), Err(OpenApiError::Validation { .. })), "{:?}", export(&api, &TestRegistry::new(), &ExportOptions::new()));
+    }
+
 }

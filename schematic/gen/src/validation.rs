@@ -14,42 +14,17 @@
 //! ## Examples
 //!
 //! ```
-//! use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod, CrossOrigin};
+//! use schematic_define::{ApiResponse, DefinitionContext, Endpoint, RestApi};
 //! use schematic_gen::diagnostics::{Feature, Severity};
 //! use schematic_gen::validation::{validate_postman, validate_rust_client};
 //!
-//! let api = RestApi {
-//!     name: "TestApi".to_string(),
-//!     description: "Test API".to_string(),
-//!     base_url: "https://api.test.com".to_string(),
-//!     docs_url: None,
-//!     auth: AuthStrategy::None,
-//!     auth_policy: None,
-//!     env_auth: vec![],
-//!     env_username: None,
-//!     env_mapping: None,
-//!     headers: vec![],
-//!     endpoints: vec![Endpoint {
-//!         id: "ListItems".to_string(),
-//!         method: RestMethod::Get,
-//!         path: "/items".to_string(),
-//!         description: "List items".to_string(),
-//!         request: None,
-//!         // Not a Rust type: blocks the Rust client, not the exports.
-//!         response: ApiResponse::json_type("Vec<Item"),
-//!         headers: vec![],
-//!         params: None,
-//!         oauth_scopes: None,
-//!     }],
-//!     module_path: None,
-//!     request_suffix: None,
-//!     version: None,
-//!     cross_origin: CrossOrigin::default(),
-//!     request_id_header: None,
-//!     secret_names: vec![],
-//!     default_pagination: None,
-//!     pagination_exceptions: vec![],
-//! };
+//! let ctx = DefinitionContext::types_in("fixture");
+//! let mut endpoint = Endpoint::get("ListItems", "/items")
+//!     .describes("List items").returns_empty().build().unwrap();
+//! // Malformed stored data blocks the Rust client, not the exports.
+//! endpoint.response = ApiResponse::json_type("Vec<Item");
+//! let api = RestApi::builder(&ctx, "TestApi", "https://api.test.com")
+//!     .describes("Test API").no_auth().endpoints([endpoint]).build().unwrap();
 //!
 //! let rust = validate_rust_client(&[&api]);
 //! assert_eq!(rust.len(), 1);
@@ -1068,43 +1043,25 @@ fn check_group_type_names(group: &[&RestApi], diagnostics: &mut Vec<ValidationDi
 mod tests {
     use super::*;
     use schematic_define::params::{EndpointParams, ParamStyle, QueryParamType};
-    use schematic_define::{ApiKeyLocation, AuthStrategy, CrossOrigin, FormField, RestMethod};
+    use schematic_define::{ApiKeyLocation, AuthStrategy, FormField, RestMethod};
 
     fn make_test_api() -> RestApi {
-        RestApi {
-            name: "TestApi".to_string(),
-            description: "Test API".to_string(),
-            base_url: "https://api.test.com".to_string(),
-            docs_url: None,
-            auth: AuthStrategy::None,
-            auth_policy: None,
-            env_auth: vec![],
-            env_username: None,
-            env_mapping: None,
-            headers: vec![],
-            endpoints: vec![],
-            module_path: None,
-            request_suffix: None,
-            version: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
+        {
+            schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "TestApi".to_string(), "https://api.test.com".to_string())
+                .describes("Test API".to_string())
+                .authentication(AuthStrategy::None, Vec::<String>::new())
+                .build().expect("valid API fixture")
         }
     }
 
     fn endpoint(id: &str, method: RestMethod, path: &str) -> Endpoint {
-        Endpoint {
-            id: id.to_string(),
-            method,
-            path: path.to_string(),
-            description: format!("Test endpoint {id}"),
-            request: None,
-            response: ApiResponse::json_type("Response"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
+        {
+            let mut endpoint = Endpoint::new(id.to_string(), method, path.to_string())
+                .describes(format!("Test endpoint {id}"))
+                .returns_empty()
+                .build().expect("valid endpoint fixture");
+            endpoint.response = ApiResponse::json_type("Response");
+            endpoint
         }
     }
 
@@ -1113,9 +1070,10 @@ mod tests {
     }
 
     fn with_body(id: &str, body_type: &str) -> Endpoint {
-        Endpoint {
-            request: Some(ApiRequest::json_type(body_type)),
-            ..endpoint(id, RestMethod::Post, &format!("/{}", id.to_lowercase()))
+        {
+            let mut endpoint = endpoint(id, RestMethod::Post, &format!("/{}", id.to_lowercase()));
+            endpoint.request = Some(ApiRequest::json_type(body_type));
+            endpoint
         }
     }
 
@@ -1141,9 +1099,10 @@ mod tests {
     }
 
     fn api_with(endpoints: Vec<Endpoint>) -> RestApi {
-        RestApi {
-            endpoints,
-            ..make_test_api()
+        {
+            let mut api = make_test_api();
+            api.endpoints = endpoints;
+            api
         }
     }
 
@@ -1180,26 +1139,30 @@ mod tests {
             (
                 "generic and qualified types",
                 api_with(vec![
-                    Endpoint {
-                        response: ApiResponse::json_type("Vec<Model>"),
-                        ..get("ListModels")
+                    {
+                        let mut endpoint = get("ListModels");
+                        endpoint.response = ApiResponse::json_type("Vec<Model>");
+                        endpoint
                     },
-                    Endpoint {
-                        response: ApiResponse::json_type("serde_json::Value"),
-                        ..get("Raw")
+                    {
+                        let mut endpoint = get("Raw");
+                        endpoint.response = ApiResponse::json_type("serde_json::Value");
+                        endpoint
                     },
-                    Endpoint {
-                        response: ApiResponse::json_type("std::collections::HashMap<String, Vec<Model>>"),
-                        ..get("Map")
+                    {
+                        let mut endpoint = get("Map");
+                        endpoint.response = ApiResponse::json_type("std::collections::HashMap<String, Vec<Model>>");
+                        endpoint
                     },
                     with_body("Patch", "Option<crate::Patch>"),
                 ]),
             ),
             (
                 "a legitimate repeated segment",
-                RestApi {
-                    base_url: "https://host.example/api".to_string(),
-                    ..api_with(vec![endpoint("Nested", RestMethod::Get, "/api/api/items")])
+                {
+                    let mut api = api_with(vec![endpoint("Nested", RestMethod::Get, "/api/api/items")]);
+                    api.base_url = "https://host.example/api".to_string();
+                    api
                 },
             ),
             (
@@ -1211,38 +1174,43 @@ mod tests {
             ),
             (
                 "special characters that sanitize to distinct fields",
-                api_with(vec![Endpoint {
-                    params: Some(params(vec![param("$top", false), param("user.name", false)], vec![], vec![])),
-                    ..endpoint("Search", RestMethod::Get, "/users/{user-id}")
+                api_with(vec![{
+                    let mut endpoint = endpoint("Search", RestMethod::Get, "/users/{user-id}");
+                    endpoint.params = Some(params(vec![param("$top", false), param("user.name", false)], vec![], vec![]));
+                    endpoint
                 }]),
             ),
             (
                 "alphanumeric custom suffix",
-                RestApi {
-                    request_suffix: Some("V2".to_string()),
-                    ..api_with(vec![with_body("CreateUser", "CreateUserBody")])
+                {
+                    let mut api = api_with(vec![with_body("CreateUser", "CreateUserBody")]);
+                    api.request_suffix = Some("V2".to_string());
+                    api
                 },
             ),
             (
                 "form bodies",
-                api_with(vec![Endpoint {
-                    request: Some(ApiRequest::form_data(vec![
+                api_with(vec![{
+                    let mut endpoint = endpoint("UploadFile", RestMethod::Post, "/upload");
+                    endpoint.request = Some(ApiRequest::form_data(vec![
                         FormField::file("document"),
                         FormField::text("title"),
-                    ])),
-                    ..endpoint("UploadFile", RestMethod::Post, "/upload")
+                    ]));
+                    endpoint
                 }]),
             ),
             (
                 "non-JSON responses with distinct methods",
                 api_with(vec![
-                    Endpoint {
-                        response: ApiResponse::Text,
-                        ..get("GetReadme")
+                    {
+                        let mut endpoint = get("GetReadme");
+                        endpoint.response = ApiResponse::Text;
+                        endpoint
                     },
-                    Endpoint {
-                        response: ApiResponse::Binary,
-                        ..get("GetArchive")
+                    {
+                        let mut endpoint = get("GetArchive");
+                        endpoint.response = ApiResponse::Binary;
+                        endpoint
                     },
                 ]),
             ),
@@ -1261,37 +1229,41 @@ mod tests {
         let cases: Vec<(&str, RestApi, Feature, Option<&str>)> = vec![
             (
                 "suffix with hyphen",
-                RestApi {
-                    request_suffix: Some("Request-Type".to_string()),
-                    ..make_test_api()
+                {
+                    let mut api = make_test_api();
+                    api.request_suffix = Some("Request-Type".to_string());
+                    api
                 },
                 Feature::InvalidRequestSuffix,
                 None,
             ),
             (
                 "empty suffix",
-                RestApi {
-                    request_suffix: Some(String::new()),
-                    ..make_test_api()
+                {
+                    let mut api = make_test_api();
+                    api.request_suffix = Some(String::new());
+                    api
                 },
                 Feature::InvalidRequestSuffix,
                 None,
             ),
             (
                 "suffix with underscore",
-                RestApi {
-                    request_suffix: Some("Request_Type".to_string()),
-                    ..make_test_api()
+                {
+                    let mut api = make_test_api();
+                    api.request_suffix = Some("Request_Type".to_string());
+                    api
                 },
                 Feature::InvalidRequestSuffix,
                 None,
             ),
             (
                 "API name starting with a digit",
-                RestApi {
-                    name: "9Lives".to_string(),
-                    module_path: Some("lives".to_string()),
-                    ..make_test_api()
+                {
+                    let mut api = make_test_api();
+                    api.name = "9Lives".to_string();
+                    api.module_path = Some("lives".to_string());
+                    api
                 },
                 Feature::InvalidIdentifier,
                 None,
@@ -1306,18 +1278,20 @@ mod tests {
             ("keyword endpoint id", api_with(vec![get("struct")]), Feature::InvalidIdentifier, Some("struct")),
             (
                 "unrepresentable query parameter",
-                api_with(vec![Endpoint {
-                    params: Some(params(vec![param("", false)], vec![], vec![])),
-                    ..get("ListItems")
+                api_with(vec![{
+                    let mut endpoint = get("ListItems");
+                    endpoint.params = Some(params(vec![param("", false)], vec![], vec![]));
+                    endpoint
                 }]),
                 Feature::InvalidIdentifier,
                 Some("ListItems"),
             ),
             (
                 "unclosed generic response",
-                api_with(vec![Endpoint {
-                    response: ApiResponse::json_type("Vec<Model"),
-                    ..get("ListModels")
+                api_with(vec![{
+                    let mut endpoint = get("ListModels");
+                    endpoint.response = ApiResponse::json_type("Vec<Model");
+                    endpoint
                 }]),
                 Feature::InvalidTypeSyntax,
                 Some("ListModels"),
@@ -1330,63 +1304,70 @@ mod tests {
             ),
             (
                 "form JSON field type",
-                api_with(vec![Endpoint {
-                    request: Some(ApiRequest::form_data(vec![FormField::json("meta", schematic_define::Schema::new("Meta>"))])),
-                    ..endpoint("Upload", RestMethod::Post, "/upload")
+                api_with(vec![{
+                    let mut endpoint = endpoint("Upload", RestMethod::Post, "/upload");
+                    endpoint.request = Some(ApiRequest::form_data(vec![FormField::json("meta", schematic_define::Schema::new("Meta>"))]));
+                    endpoint
                 }]),
                 Feature::InvalidTypeSyntax,
                 Some("Upload"),
             ),
             (
                 "module path with a hyphen",
-                RestApi {
-                    module_path: Some("my-api".to_string()),
-                    ..make_test_api()
+                {
+                    let mut api = make_test_api();
+                    api.module_path = Some("my-api".to_string());
+                    api
                 },
                 Feature::InvalidModulePath,
                 None,
             ),
             (
                 "qualified module path",
-                RestApi {
-                    module_path: Some("vendor::api".to_string()),
-                    ..make_test_api()
+                {
+                    let mut api = make_test_api();
+                    api.module_path = Some("vendor::api".to_string());
+                    api
                 },
                 Feature::InvalidModulePath,
                 None,
             ),
             (
                 "keyword module path",
-                RestApi {
-                    module_path: Some("type".to_string()),
-                    ..make_test_api()
+                {
+                    let mut api = make_test_api();
+                    api.module_path = Some("type".to_string());
+                    api
                 },
                 Feature::InvalidModulePath,
                 None,
             ),
             (
                 "module path naming a shared file",
-                RestApi {
-                    module_path: Some("prelude".to_string()),
-                    ..make_test_api()
+                {
+                    let mut api = make_test_api();
+                    api.module_path = Some("prelude".to_string());
+                    api
                 },
                 Feature::InvalidOutputFilename,
                 None,
             ),
             (
                 "module path naming a WebSocket module",
-                RestApi {
-                    module_path: Some("elevenlabs_ws".to_string()),
-                    ..make_test_api()
+                {
+                    let mut api = make_test_api();
+                    api.module_path = Some("elevenlabs_ws".to_string());
+                    api
                 },
                 Feature::InvalidOutputFilename,
                 None,
             ),
             (
                 "path and query parameter sanitize to one field",
-                api_with(vec![Endpoint {
-                    params: Some(params(vec![param("user_id", false)], vec![], vec![])),
-                    ..endpoint("GetUser", RestMethod::Get, "/users/{user-id}")
+                api_with(vec![{
+                    let mut endpoint = endpoint("GetUser", RestMethod::Get, "/users/{user-id}");
+                    endpoint.params = Some(params(vec![param("user_id", false)], vec![], vec![]));
+                    endpoint
                 }]),
                 Feature::GeneratedNameCollision,
                 Some("GetUser"),
@@ -1399,21 +1380,23 @@ mod tests {
             ),
             (
                 "query parameter named body beside a body",
-                api_with(vec![Endpoint {
-                    params: Some(params(vec![param("body", false)], vec![], vec![])),
-                    ..with_body("Create", "CreateBody")
+                api_with(vec![{
+                    let mut endpoint = with_body("Create", "CreateBody");
+                    endpoint.params = Some(params(vec![param("body", false)], vec![], vec![]));
+                    endpoint
                 }]),
                 Feature::GeneratedNameCollision,
                 Some("Create"),
             ),
             (
                 "form fields sanitize to one field",
-                api_with(vec![Endpoint {
-                    request: Some(ApiRequest::form_data(vec![
+                api_with(vec![{
+                    let mut endpoint = endpoint("Upload", RestMethod::Post, "/upload");
+                    endpoint.request = Some(ApiRequest::form_data(vec![
                         FormField::text("file-name"),
                         FormField::text("file_name"),
-                    ])),
-                    ..endpoint("Upload", RestMethod::Post, "/upload")
+                    ]));
+                    endpoint
                 }]),
                 Feature::GeneratedNameCollision,
                 Some("Upload"),
@@ -1426,9 +1409,10 @@ mod tests {
             ),
             (
                 "body type equals its request struct with a custom suffix",
-                RestApi {
-                    request_suffix: Some("Params".to_string()),
-                    ..api_with(vec![with_body("CreateUser", "CreateUserParams")])
+                {
+                    let mut api = api_with(vec![with_body("CreateUser", "CreateUserParams")]);
+                    api.request_suffix = Some("Params".to_string());
+                    api
                 },
                 Feature::GeneratedNameCollision,
                 Some("CreateUser"),
@@ -1436,13 +1420,15 @@ mod tests {
             (
                 "response type equals another endpoint's form body",
                 api_with(vec![
-                    Endpoint {
-                        request: Some(ApiRequest::form_data(vec![FormField::text("a")])),
-                        ..endpoint("Upload", RestMethod::Post, "/upload")
+                    {
+                        let mut endpoint = endpoint("Upload", RestMethod::Post, "/upload");
+                        endpoint.request = Some(ApiRequest::form_data(vec![FormField::text("a")]));
+                        endpoint
                     },
-                    Endpoint {
-                        response: ApiResponse::json_type("UploadForm"),
-                        ..get("Status")
+                    {
+                        let mut endpoint = get("Status");
+                        endpoint.response = ApiResponse::json_type("UploadForm");
+                        endpoint
                     },
                 ]),
                 Feature::GeneratedNameCollision,
@@ -1450,80 +1436,87 @@ mod tests {
             ),
             (
                 "endpoint struct clashes with an import",
-                RestApi {
-                    request_suffix: Some("ize".to_string()),
-                    ..api_with(vec![get("Serial")])
+                {
+                    let mut api = api_with(vec![get("Serial")]);
+                    api.request_suffix = Some("ize".to_string());
+                    api
                 },
                 Feature::GeneratedNameCollision,
                 Some("Serial"),
             ),
             (
                 "text request body with a control character in its content type",
-                api_with(vec![Endpoint {
-                    request: Some(ApiRequest::Text {
+                api_with(vec![{
+                    let mut endpoint = endpoint("Note", RestMethod::Post, "/note");
+                    endpoint.request = Some(ApiRequest::Text {
                         content_type: "text/plain\r\nX-Injected: 1".to_string(),
-                    }),
-                    ..endpoint("Note", RestMethod::Post, "/note")
+                    });
+                    endpoint
                 }]),
                 Feature::TextRequestBody,
                 Some("Note"),
             ),
             (
                 "binary request body with an empty content type",
-                api_with(vec![Endpoint {
-                    request: Some(ApiRequest::Binary {
+                api_with(vec![{
+                    let mut endpoint = endpoint("Blob", RestMethod::Put, "/blob");
+                    endpoint.request = Some(ApiRequest::Binary {
                         content_type: String::new(),
-                    }),
-                    ..endpoint("Blob", RestMethod::Put, "/blob")
+                    });
+                    endpoint
                 }]),
                 Feature::BinaryRequestBody,
                 Some("Blob"),
             ),
             (
                 "API-key cookie whose name is not a cookie name",
-                RestApi {
-                    auth: AuthStrategy::ApiKeyParam {
+                {
+                    let mut api = make_test_api();
+                    api.auth = AuthStrategy::ApiKeyParam {
                         name: "session id".to_string(),
                         location: ApiKeyLocation::Cookie,
-                    },
-                    ..make_test_api()
+                    };
+                    api
                 },
                 Feature::ApiKeyParam,
                 None,
             ),
             (
                 "API-key query parameter with an empty name",
-                RestApi {
-                    auth: AuthStrategy::ApiKeyParam {
+                {
+                    let mut api = make_test_api();
+                    api.auth = AuthStrategy::ApiKeyParam {
                         name: String::new(),
                         location: ApiKeyLocation::Query,
-                    },
-                    ..make_test_api()
+                    };
+                    api
                 },
                 Feature::ApiKeyParam,
                 None,
             ),
             (
                 "header and query parameters sanitize to one field",
-                api_with(vec![Endpoint {
-                    params: Some(params(
+                api_with(vec![{
+                    let mut endpoint = get("Items");
+                    endpoint.params = Some(params(
                         vec![param("x_id", false)],
                         vec![param("X-Id", false)],
                         vec![],
-                    )),
-                    ..get("Items")
+                    ));
+                    endpoint
                 }]),
                 Feature::GeneratedNameCollision,
                 Some("Items"),
             ),
             (
                 "cookie parameter named like the raw body field",
-                api_with(vec![Endpoint {
-                    request: Some(ApiRequest::Text {
+                api_with(vec![{
+                    let mut endpoint = endpoint("Note", RestMethod::Post, "/note");
+                    endpoint.request = Some(ApiRequest::Text {
                         content_type: "text/plain".to_string(),
-                    }),
-                    params: Some(params(vec![], vec![], vec![param("body", false)])),
-                    ..endpoint("Note", RestMethod::Post, "/note")
+                    });
+                    endpoint.params = Some(params(vec![], vec![], vec![param("body", false)]));
+                    endpoint
                 }]),
                 Feature::GeneratedNameCollision,
                 Some("Note"),
@@ -1564,34 +1557,37 @@ mod tests {
     fn api_key_param_is_found_through_the_effective_policy() {
         use schematic_define::AuthPolicy;
 
-        let explicit = RestApi {
-            auth_policy: Some(AuthPolicy {
+        let explicit = {
+            let mut api = make_test_api();
+            api.auth_policy = Some(AuthPolicy {
                 explicit: vec![AuthMethod::ApiKeyParam {
                     name: "bad name".to_string(),
                     location: ApiKeyLocation::Cookie,
                 }],
                 env_fallback: None,
-            }),
-            ..make_test_api()
+            });
+            api
         };
-        let fallback = RestApi {
-            auth_policy: Some(AuthPolicy {
+        let fallback = {
+            let mut api = make_test_api();
+            api.auth_policy = Some(AuthPolicy {
                 explicit: vec![],
                 env_fallback: Some(EnvAuthStrategy::ApiKeyParam {
                     name: "bad name".to_string(),
                     location: ApiKeyLocation::Cookie,
                 }),
-            }),
-            ..make_test_api()
+            });
+            api
         };
         // A policy override that drops the legacy strategy hides it.
-        let overridden = RestApi {
-            auth: AuthStrategy::ApiKeyParam {
+        let overridden = {
+            let mut api = make_test_api();
+            api.auth = AuthStrategy::ApiKeyParam {
                 name: "bad name".to_string(),
                 location: ApiKeyLocation::Cookie,
-            },
-            auth_policy: Some(AuthPolicy::default()),
-            ..make_test_api()
+            };
+            api.auth_policy = Some(AuthPolicy::default());
+            api
         };
 
         for api in [&explicit, &fallback] {
@@ -1605,26 +1601,29 @@ mod tests {
         let cases: Vec<(&str, RestApi, Feature, Option<&str>)> = vec![
             (
                 "header parameter whose name is not a header name",
-                api_with(vec![Endpoint {
-                    params: Some(params(vec![], vec![param("X Trace", false)], vec![])),
-                    ..get("Items")
+                api_with(vec![{
+                    let mut endpoint = get("Items");
+                    endpoint.params = Some(params(vec![], vec![param("X Trace", false)], vec![]));
+                    endpoint
                 }]),
                 Feature::HeaderParameter,
                 Some("Items"),
             ),
             (
                 "cookie parameter whose name holds a separator",
-                api_with(vec![Endpoint {
-                    params: Some(params(vec![], vec![], vec![param("a;b", false)])),
-                    ..get("Items")
+                api_with(vec![{
+                    let mut endpoint = get("Items");
+                    endpoint.params = Some(params(vec![], vec![], vec![param("a;b", false)]));
+                    endpoint
                 }]),
                 Feature::CookieParameter,
                 Some("Items"),
             ),
             (
                 "header parameter that is an array of arrays",
-                api_with(vec![Endpoint {
-                    params: Some(params(
+                api_with(vec![{
+                    let mut endpoint = get("Items");
+                    endpoint.params = Some(params(
                         vec![],
                         vec![ParamDef {
                             param_type: QueryParamType::Array(Box::new(QueryParamType::Array(
@@ -1633,8 +1632,8 @@ mod tests {
                             ..param("X-Matrix", false)
                         }],
                         vec![],
-                    )),
-                    ..get("Items")
+                    ));
+                    endpoint
                 }]),
                 Feature::HeaderParameter,
                 Some("Items"),
@@ -1657,34 +1656,38 @@ mod tests {
             ..param(name, true)
         };
         let endpoints = vec![
-            Endpoint {
-                request: Some(ApiRequest::Text {
+            {
+                let mut endpoint = endpoint("Note", RestMethod::Post, "/note");
+                endpoint.request = Some(ApiRequest::Text {
                     content_type: "text/plain; charset=utf-8".to_string(),
-                }),
-                ..endpoint("Note", RestMethod::Post, "/note")
+                });
+                endpoint
             },
-            Endpoint {
-                request: Some(ApiRequest::Binary {
+            {
+                let mut endpoint = endpoint("Blob", RestMethod::Put, "/blob");
+                endpoint.request = Some(ApiRequest::Binary {
                     content_type: "application/octet-stream".to_string(),
-                }),
-                ..endpoint("Blob", RestMethod::Put, "/blob")
+                });
+                endpoint
             },
-            Endpoint {
-                params: Some(params(
+            {
+                let mut endpoint = get("Items");
+                endpoint.params = Some(params(
                     vec![param("q", false)],
                     vec![param("X-Trace-Id", true), array("X-Ids"), param("openai-beta", false)],
                     vec![param("session", true), array("prefs"), param("__Host-id", false)],
-                )),
-                ..get("Items")
+                ));
+                endpoint
             },
         ];
         for (location, name) in [(ApiKeyLocation::Query, "api key"), (ApiKeyLocation::Cookie, "sid")] {
-            let api = RestApi {
-                auth: AuthStrategy::ApiKeyParam {
+            let api = {
+                let mut api = api_with(endpoints.clone());
+                api.auth = AuthStrategy::ApiKeyParam {
                     name: name.to_string(),
                     location,
-                },
-                ..api_with(endpoints.clone())
+                };
+                api
             };
             assert!(rust(&api).is_empty(), "{location:?}: {:#?}", rust(&api));
         }
@@ -1756,15 +1759,17 @@ mod tests {
     #[test]
     fn same_route_in_different_apis_is_not_a_duplicate() {
         let route = || endpoint("ById", RestMethod::Get, "/items/{id}");
-        let first = RestApi {
-            name: "First".to_string(),
-            module_path: Some("first".to_string()),
-            ..api_with(vec![route()])
+        let first = {
+            let mut api = api_with(vec![route()]);
+            api.name = "First".to_string();
+            api.module_path = Some("first".to_string());
+            api
         };
-        let second = RestApi {
-            name: "Second".to_string(),
-            module_path: Some("second".to_string()),
-            ..api_with(vec![route()])
+        let second = {
+            let mut api = api_with(vec![route()]);
+            api.name = "Second".to_string();
+            api.module_path = Some("second".to_string());
+            api
         };
 
         assert!(validate_rust_client(&[&first, &second]).is_empty());
@@ -1799,9 +1804,10 @@ mod tests {
     fn export_file_names_must_be_one_safe_component() {
         let bad = ["", ".", "..", "a/b", "a\\b", "C:", "con|x", "x\0y"];
         for module_path in bad {
-            let api = RestApi {
-                module_path: Some(module_path.to_string()),
-                ..make_test_api()
+            let api = {
+                let mut api = make_test_api();
+                api.module_path = Some(module_path.to_string());
+                api
             };
             for (output, diagnostics) in [
                 (Output::OpenApi, validate_openapi(&[&api])),
@@ -1815,9 +1821,10 @@ mod tests {
             }
         }
         for module_path in ["openai", "unfolded_circle_core_rest", "my-api", "v1.2"] {
-            let api = RestApi {
-                module_path: Some(module_path.to_string()),
-                ..make_test_api()
+            let api = {
+                let mut api = make_test_api();
+                api.module_path = Some(module_path.to_string());
+                api
             };
             assert!(validate_openapi(&[&api]).is_empty(), "{module_path}");
             assert!(validate_postman(&[&api]).is_empty(), "{module_path}");
@@ -1827,12 +1834,13 @@ mod tests {
     // ---- module groups ----
 
     fn group_member(name: &str, suffix: Option<&str>, endpoints: Vec<Endpoint>) -> RestApi {
-        RestApi {
-            name: name.to_string(),
-            module_path: Some("shared_group".to_string()),
-            request_suffix: suffix.map(str::to_string),
-            endpoints,
-            ..make_test_api()
+        {
+            let mut api = make_test_api();
+            api.name = name.to_string();
+            api.module_path = Some("shared_group".to_string());
+            api.request_suffix = suffix.map(str::to_string);
+            api.endpoints = endpoints;
+            api
         }
     }
 
@@ -1866,9 +1874,10 @@ mod tests {
         assert!(diagnostics[1].message.starts_with("`ListModelsRequest` is generated for the request struct"));
 
         // Separate modules keep separate namespaces.
-        let elsewhere = RestApi {
-            module_path: Some("other".to_string()),
-            ..second.clone()
+        let elsewhere = {
+            let mut api = second.clone();
+            api.module_path = Some("other".to_string());
+            api
         };
         assert!(validate_rust_client(&[&first, &elsewhere]).is_empty());
     }

@@ -7,7 +7,7 @@ description = "REST API definition types for schematic code generation"
 
 [features]
 default = []
-openapi = ["dep:indexmap", "dep:openapiv3", "dep:serde_json", "biscuit-file"]
+openapi = ["dep:indexmap", "dep:openapiv3", "biscuit-file"]
 
 [dependencies]
 base64 = "0.22"
@@ -15,15 +15,16 @@ biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml"], optional 
 serde = { version = "1.0", features = ["derive"] }
 strum = { version = "0.28", features = ["derive"] }
 thiserror = "2.0"
+serde_json = "1.0"
+schemars = "1"
+url = "2"
 
 # OpenAPI feature dependencies
 indexmap = { version = "2", optional = true }
 openapiv3 = { version = "2", optional = true }
-serde_json = { version = "1.0", optional = true }
 
 [dev-dependencies]
 serial_test = "3.2"
-serde_json = "1.0"
 wiremock = "0.6"
 # default-features = false drops reqwest's system-proxy only; see docs/dependencies.md.
 reqwest = { version = "0.13", default-features = false, features = ["default-tls", "charset", "http2"] }

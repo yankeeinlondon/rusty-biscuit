@@ -20,6 +20,8 @@
 //! ```
 
 mod conversion;
+mod typed;
+pub use typed::{ModuleGroup, assemble_module_group};
 mod lookup;
 
 pub use lookup::*;
@@ -52,6 +54,14 @@ impl SchemaRegistry {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Adapt a validated context without changing order or nested extraction.
+    pub fn from_context(context: &schematic_define::DefinitionContext) -> Result<Self, schematic_define::DefinitionError> {
+        context.finish()?;
+        Ok(Self { types: context.registrations().iter()
+            .map(|entry| (entry.schema_name().to_owned(), entry.schema().clone()))
+            .collect() })
     }
 
     /// Registers a type's JSON schema in the registry.

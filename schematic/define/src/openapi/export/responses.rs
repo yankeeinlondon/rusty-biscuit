@@ -21,15 +21,24 @@ pub(super) fn schema_reference(type_name: &str) -> ReferenceOr<openapiv3::Schema
     }
 }
 
+/// Typed descriptors keep component names and wrapper schemas separate from Rust paths.
+pub(super) fn body_schema(schema: &crate::Schema) -> Result<ReferenceOr<openapiv3::Schema>, crate::openapi::OpenApiError> {
+    if let Some(desc) = &schema.descriptor {
+        serde_json::from_value(desc.wire_schema()).map_err(|error| crate::openapi::OpenApiError::Validation {
+            path: schema.type_name.clone(), message: format!("typed wire schema is not OpenAPI-compatible: {error}"),
+        })
+    } else { Ok(schema_reference(&schema.type_name)) }
+}
+
 /// Maps response type to OpenAPI Responses.
-pub(super) fn map_responses(response: &ApiResponse) -> Responses {
+pub(super) fn map_responses(response: &ApiResponse) -> Result<Responses, crate::openapi::OpenApiError> {
     let mut responses = IndexMap::new();
 
     let (status_code, content_type, schema) = match response {
         ApiResponse::Json(schema_def) => (
             "200",
             "application/json",
-            Some(schema_reference(&schema_def.type_name)),
+            Some(body_schema(schema_def)?),
         ),
         ApiResponse::Text => (
             "200",
@@ -88,10 +97,10 @@ pub(super) fn map_responses(response: &ApiResponse) -> Responses {
         ReferenceOr::Item(response_obj),
     );
 
-    Responses {
+    Ok(Responses {
         responses,
         ..Default::default()
-    }
+    })
 }
 
 #[cfg(test)]
@@ -101,7 +110,7 @@ mod tests {
     #[test]
     fn map_responses_json() {
         let response = ApiResponse::json_type("UserResponse");
-        let responses = map_responses(&response);
+        let responses = map_responses(&response).unwrap();
 
         assert!(responses.responses.contains_key(&StatusCode::Code(200)));
     }
@@ -109,7 +118,7 @@ mod tests {
     #[test]
     fn map_responses_text() {
         let response = ApiResponse::Text;
-        let responses = map_responses(&response);
+        let responses = map_responses(&response).unwrap();
 
         let resp = responses.responses.get(&StatusCode::Code(200)).unwrap();
         if let ReferenceOr::Item(r) = resp {
@@ -120,7 +129,7 @@ mod tests {
     #[test]
     fn map_responses_binary() {
         let response = ApiResponse::Binary;
-        let responses = map_responses(&response);
+        let responses = map_responses(&response).unwrap();
 
         let resp = responses.responses.get(&StatusCode::Code(200)).unwrap();
         if let ReferenceOr::Item(r) = resp {
@@ -131,7 +140,7 @@ mod tests {
     #[test]
     fn map_responses_empty() {
         let response = ApiResponse::Empty;
-        let responses = map_responses(&response);
+        let responses = map_responses(&response).unwrap();
 
         assert!(responses.responses.contains_key(&StatusCode::Code(204)));
     }

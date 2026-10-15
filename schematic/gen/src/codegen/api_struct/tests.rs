@@ -7,26 +7,11 @@ use schematic_define::{
 };
 
 fn make_api(name: &str, auth: AuthStrategy, env_auth: &[&str]) -> RestApi {
-    RestApi {
-        name: name.to_string(),
-        description: format!("{name} API"),
-        base_url: "https://api.example.com/v1".to_string(),
-        docs_url: None,
-        auth,
-        auth_policy: None,
-        env_auth: env_auth.iter().map(|var| var.to_string()).collect(),
-        env_username: None,
-        env_mapping: None,
-        headers: vec![],
-        endpoints: vec![],
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
+    {
+        schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), name.to_string(), "https://api.example.com/v1".to_string())
+            .describes(format!("{name} API"))
+            .authentication(auth, env_auth.iter().copied())
+            .build().expect("valid API fixture")
     }
 }
 

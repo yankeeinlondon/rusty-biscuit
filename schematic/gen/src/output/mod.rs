@@ -682,101 +682,92 @@ pub fn generate_and_write_standalone(
 mod tests {
     use super::*;
     use schematic_define::{
-        ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestMethod,
+        ApiRequest, ApiResponse, AuthStrategy, Endpoint, RestMethod,
     };
     use std::fs;
     use tempfile::TempDir;
 
     fn make_simple_api() -> RestApi {
-        RestApi {
-            name: "TestApi".to_string(),
-            description: "Test API".to_string(),
-            base_url: "https://api.test.com/v1".to_string(),
-            docs_url: None,
-            auth: AuthStrategy::None,
-            auth_policy: None,
-            env_auth: vec![],
-            env_username: None,
-            env_mapping: None,
-            headers: vec![],
-            endpoints: vec![Endpoint {
-                id: "ListItems".to_string(),
-                method: RestMethod::Get,
-                path: "/items".to_string(),
-                description: "List all items".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ListItemsResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            }],
-            module_path: None,
-            request_suffix: None,
-            version: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
+        {
+            let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "TestApi".to_string(), "https://api.test.com/v1".to_string())
+                .describes("Test API".to_string())
+                .authentication(AuthStrategy::None, Vec::<String>::new())
+                .build().expect("valid API fixture");
+            api.endpoints = vec![{
+                let mut endpoint = Endpoint::new("ListItems".to_string(), RestMethod::Get, "/items".to_string())
+                    .describes("List all items".to_string())
+                    .returns_empty()
+                    .build().expect("valid endpoint fixture");
+                endpoint.response = ApiResponse::json_type("ListItemsResponse");
+                endpoint
+            }];
+            api
         }
     }
 
     fn make_complex_api() -> RestApi {
-        RestApi {
-            name: "OpenAI".to_string(),
-            description: "OpenAI REST API".to_string(),
-            base_url: "https://api.openai.com/v1".to_string(),
-            docs_url: Some("https://platform.openai.com/docs".to_string()),
-            auth: AuthStrategy::BearerToken { header: None },
-            auth_policy: None,
-            env_auth: vec!["OPENAI_API_KEY".to_string()],
-            env_username: None,
-            env_mapping: None,
-            headers: vec![],
-            endpoints: vec![
-                Endpoint {
-                    id: "ListModels".to_string(),
-                    method: RestMethod::Get,
-                    path: "/models".to_string(),
-                    description: "Lists available models".to_string(),
-                    request: None,
-                    response: ApiResponse::json_type("ListModelsResponse"),
-                    headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
+        {
+            let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "OpenAI".to_string(), "https://api.openai.com/v1".to_string())
+                .describes("OpenAI REST API".to_string())
+                .authentication(AuthStrategy::BearerToken { header: None }, vec!["OPENAI_API_KEY".to_string()])
+                .build().expect("valid API fixture");
+            api.docs_url = Some("https://platform.openai.com/docs".to_string());
+            api.endpoints = vec![
+                {
+                    let mut endpoint = Endpoint::new("ListModels".to_string(), RestMethod::Get, "/models".to_string())
+                        .describes("Lists available models".to_string())
+                        .returns_empty()
+                        .build().expect("valid endpoint fixture");
+                    endpoint.response = ApiResponse::json_type("ListModelsResponse");
+                    endpoint
                 },
-                Endpoint {
-                    id: "RetrieveModel".to_string(),
-                    method: RestMethod::Get,
-                    path: "/models/{model}".to_string(),
-                    description: "Retrieves a model".to_string(),
-                    request: None,
-                    response: ApiResponse::json_type("Model"),
-                    headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
+                {
+                    let mut endpoint = Endpoint::new("RetrieveModel".to_string(), RestMethod::Get, "/models/{model}".to_string())
+                        .describes("Retrieves a model".to_string())
+                        .returns_empty()
+                        .build().expect("valid endpoint fixture");
+                    endpoint.response = ApiResponse::json_type("Model");
+                    endpoint
                 },
-                Endpoint {
-                    id: "CreateCompletion".to_string(),
-                    method: RestMethod::Post,
-                    path: "/completions".to_string(),
-                    description: "Creates a completion".to_string(),
-                    request: Some(ApiRequest::json_type("CreateCompletionBody")),
-                    response: ApiResponse::json_type("Completion"),
-                    headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
+                {
+                    let mut endpoint = Endpoint::new("CreateCompletion".to_string(), RestMethod::Post, "/completions".to_string())
+                        .describes("Creates a completion".to_string())
+                        .returns_empty()
+                        .build().expect("valid endpoint fixture");
+                    endpoint.request = Some(ApiRequest::json_type("CreateCompletionBody"));
+                    endpoint.response = ApiResponse::json_type("Completion");
+                    endpoint
                 },
-            ],
-            module_path: None,
-            request_suffix: None,
-            version: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
+            ];
+            api
         }
+    }
+
+    #[test]
+    fn typed_builder_fixture_reaches_rust_openapi_and_postman() {
+        let mut ctx = schematic_define::DefinitionContext::types_in("::std::string");
+        let endpoint = Endpoint::get("GetMessage", "/message")
+            .describes("Read a message")
+            .returns_json::<String>(&mut ctx)
+            .build().unwrap();
+        let api = RestApi::builder(&ctx, "MessageApi", "https://api.example.com")
+            .describes("Message API").no_auth().endpoints([endpoint]).build().unwrap();
+        let rust = assemble_api_code(&api).to_string();
+        syn::parse_file(&rust).expect("generated Rust parses");
+        assert!(rust.contains("GetMessage"));
+        assert!(rust.contains("std :: string :: String"));
+
+        let registry = schematic_definitions::registry::SchemaRegistry::new();
+        let openapi = crate::export::openapi::build_openapi_grouped(
+            &[&api], "message_api", &registry,
+            &schematic_define::openapi::ExportOptions::default(),
+        ).unwrap();
+        let document = serde_json::to_value(openapi).unwrap();
+        assert_eq!(document["paths"]["/message"]["get"]["operationId"], "GetMessage");
+        let postman = crate::export::postman::render_postman_module(&[&api], "message_api").unwrap();
+        let collection: serde_json::Value = serde_json::from_str(&postman).unwrap();
+        assert!(collection.to_string().contains("GetMessage"));
+        assert!(collection.to_string().contains("GET"));
     }
 
     #[test]
@@ -1026,36 +1017,21 @@ mod tests {
         ];
 
         for (auth, env_auth, env_username) in test_cases {
-            let api = RestApi {
-                name: "TestApi".to_string(),
-                description: "Test".to_string(),
-                base_url: "https://test.com".to_string(),
-                docs_url: None,
-                auth: auth.clone(),
-                auth_policy: None,
-                env_auth,
-                env_username,
-                env_mapping: None,
-                headers: vec![],
-                endpoints: vec![Endpoint {
-                    id: "Test".to_string(),
-                    method: RestMethod::Get,
-                    path: "/test".to_string(),
-                    description: "Test endpoint".to_string(),
-                    request: None,
-                    response: ApiResponse::json_type("TestResponse"),
-                    headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-                }],
-                module_path: None,
-                request_suffix: None,
-                version: None,
-                cross_origin: CrossOrigin::default(),
-                request_id_header: None,
-                secret_names: vec![],
-                default_pagination: None,
-                pagination_exceptions: vec![],
+            let api = {
+                let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "TestApi".to_string(), "https://test.com".to_string())
+                    .describes("Test".to_string())
+                    .authentication(auth.clone(), env_auth)
+                    .build().expect("valid API fixture");
+                api.env_username = env_username;
+                api.endpoints = vec![{
+                    let mut endpoint = Endpoint::new("Test".to_string(), RestMethod::Get, "/test".to_string())
+                        .describes("Test endpoint".to_string())
+                        .returns_empty()
+                        .build().expect("valid endpoint fixture");
+                    endpoint.response = ApiResponse::json_type("TestResponse");
+                    endpoint
+                }];
+                api
             };
 
             let temp_dir = TempDir::new().unwrap();
@@ -1079,39 +1055,23 @@ mod tests {
         let endpoints: Vec<Endpoint> = methods
             .iter()
             .enumerate()
-            .map(|(i, method)| Endpoint {
-                id: format!("Endpoint{}", i),
-                method: *method,
-                path: format!("/path{}", i),
-                description: format!("{:?} endpoint", method),
-                request: None,
-                response: ApiResponse::json_type("Response"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
+            .map(|(i, method)| {
+                let mut endpoint = Endpoint::new(format!("Endpoint{}", i), *method, format!("/path{}", i))
+                    .describes(format!("{:?} endpoint", method))
+                    .returns_empty()
+                    .build().expect("valid endpoint fixture");
+                endpoint.response = ApiResponse::json_type("Response");
+                endpoint
             })
             .collect();
 
-        let api = RestApi {
-            name: "AllMethods".to_string(),
-            description: "API with all HTTP methods".to_string(),
-            base_url: "https://test.com".to_string(),
-            docs_url: None,
-            auth: AuthStrategy::None,
-            auth_policy: None,
-            env_auth: vec![],
-            env_username: None,
-            env_mapping: None,
-            headers: vec![],
-            endpoints,
-            module_path: None,
-            request_suffix: None,
-            version: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
+        let api = {
+            let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "AllMethods".to_string(), "https://test.com".to_string())
+                .describes("API with all HTTP methods".to_string())
+                .authentication(AuthStrategy::None, Vec::<String>::new())
+                .build().expect("valid API fixture");
+            api.endpoints = endpoints;
+            api
         };
 
         let temp_dir = TempDir::new().unwrap();
@@ -1133,26 +1093,11 @@ mod tests {
 
     #[test]
     fn full_pipeline_empty_api_produces_valid_code() {
-        let api = RestApi {
-            name: "EmptyApi".to_string(),
-            description: "API with no endpoints".to_string(),
-            base_url: "https://empty.com".to_string(),
-            docs_url: None,
-            auth: AuthStrategy::None,
-            auth_policy: None,
-            env_auth: vec![],
-            env_username: None,
-            env_mapping: None,
-            headers: vec![],
-            endpoints: vec![],
-            module_path: None,
-            request_suffix: None,
-            version: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
+        let api = {
+            schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "EmptyApi".to_string(), "https://empty.com".to_string())
+                .describes("API with no endpoints".to_string())
+                .authentication(AuthStrategy::None, Vec::<String>::new())
+                .build().expect("valid API fixture")
         };
 
         let temp_dir = TempDir::new().unwrap();
@@ -1172,68 +1117,40 @@ mod tests {
     }
 
     fn make_shared_module_apis() -> (RestApi, RestApi) {
-        let api_a = RestApi {
-            name: "FooNative".to_string(),
-            description: "Foo native API".to_string(),
-            base_url: "http://localhost:8080".to_string(),
-            docs_url: None,
-            auth: AuthStrategy::None,
-            auth_policy: None,
-            env_auth: vec![],
-            env_username: None,
-            env_mapping: None,
-            headers: vec![],
-            endpoints: vec![Endpoint {
-                id: "ListItems".to_string(),
-                method: RestMethod::Get,
-                path: "/api/items".to_string(),
-                description: "List items".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ListItemsResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            }],
-            module_path: Some("foo".to_string()),
-            request_suffix: Some("NativeRequest".to_string()),
-            version: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
+        let api_a = {
+            let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "FooNative".to_string(), "http://localhost:8080".to_string())
+                .describes("Foo native API".to_string())
+                .authentication(AuthStrategy::None, Vec::<String>::new())
+                .build().expect("valid API fixture");
+            api.endpoints = vec![{
+                let mut endpoint = Endpoint::new("ListItems".to_string(), RestMethod::Get, "/api/items".to_string())
+                    .describes("List items".to_string())
+                    .returns_empty()
+                    .build().expect("valid endpoint fixture");
+                endpoint.response = ApiResponse::json_type("ListItemsResponse");
+                endpoint
+            }];
+            api.module_path = Some("foo".to_string());
+            api.request_suffix = Some("NativeRequest".to_string());
+            api
         };
 
-        let api_b = RestApi {
-            name: "FooCompat".to_string(),
-            description: "Foo compat API".to_string(),
-            base_url: "http://localhost:8080".to_string(),
-            docs_url: None,
-            auth: AuthStrategy::None,
-            auth_policy: None,
-            env_auth: vec![],
-            env_username: None,
-            env_mapping: None,
-            headers: vec![],
-            endpoints: vec![Endpoint {
-                id: "ListItems".to_string(),
-                method: RestMethod::Get,
-                path: "/v1/items".to_string(),
-                description: "List items (compat)".to_string(),
-                request: None,
-                response: ApiResponse::json_type("CompatListItemsResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            }],
-            module_path: Some("foo".to_string()),
-            request_suffix: Some("CompatRequest".to_string()),
-            version: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
+        let api_b = {
+            let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "FooCompat".to_string(), "http://localhost:8080".to_string())
+                .describes("Foo compat API".to_string())
+                .authentication(AuthStrategy::None, Vec::<String>::new())
+                .build().expect("valid API fixture");
+            api.endpoints = vec![{
+                let mut endpoint = Endpoint::new("ListItems".to_string(), RestMethod::Get, "/v1/items".to_string())
+                    .describes("List items (compat)".to_string())
+                    .returns_empty()
+                    .build().expect("valid endpoint fixture");
+                endpoint.response = ApiResponse::json_type("CompatListItemsResponse");
+                endpoint
+            }];
+            api.module_path = Some("foo".to_string());
+            api.request_suffix = Some("CompatRequest".to_string());
+            api
         };
 
         (api_a, api_b)
@@ -1454,51 +1371,37 @@ mod tests {
 
     fn make_large_api() -> RestApi {
         let endpoints: Vec<Endpoint> = (0..500)
-            .map(|i| Endpoint {
-                id: format!("Endpoint{}", i),
-                method: if i % 5 == 0 {
+            .map(|i| {
+                let mut endpoint = Endpoint::new(format!("Endpoint{}", i), if i % 5 == 0 {
                     RestMethod::Post
                 } else {
                     RestMethod::Get
-                },
-                path: if i % 3 == 0 {
+                }, if i % 3 == 0 {
                     format!("/endpoint/{}/{{param}}", i)
                 } else {
                     format!("/endpoint/{}", i)
-                },
-                description: format!("Endpoint {} description with enough text to add some length to the generated documentation comments", i),
-                request: if i % 5 == 0 {
+                })
+                    .describes(format!("Endpoint {} description with enough text to add some length to the generated documentation comments", i))
+                    .returns_empty()
+                    .build().expect("valid endpoint fixture");
+                endpoint.request = if i % 5 == 0 {
                     Some(ApiRequest::json_type(format!("Endpoint{}Body", i)))
                 } else {
                     None
-                },
-                response: ApiResponse::json_type("TestResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
+                };
+                endpoint.response = ApiResponse::json_type("TestResponse");
+                endpoint
             })
             .collect();
 
-        RestApi {
-            name: "LargeApi".to_string(),
-            description: "A large API for testing split output".to_string(),
-            base_url: "https://api.large.com/v1".to_string(),
-            docs_url: Some("https://docs.large.com".to_string()),
-            auth: AuthStrategy::BearerToken { header: None },
-            auth_policy: None,
-            env_auth: vec!["LARGE_API_KEY".to_string()],
-            env_username: None,
-            env_mapping: None,
-            headers: vec![],
-            endpoints,
-            module_path: None,
-            request_suffix: None,
-            version: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
+        {
+            let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "LargeApi".to_string(), "https://api.large.com/v1".to_string())
+                .describes("A large API for testing split output".to_string())
+                .authentication(AuthStrategy::BearerToken { header: None }, vec!["LARGE_API_KEY".to_string()])
+                .build().expect("valid API fixture");
+            api.docs_url = Some("https://docs.large.com".to_string());
+            api.endpoints = endpoints;
+            api
         }
     }
 

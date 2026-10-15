@@ -14,7 +14,7 @@
 
 use proc_macro2::TokenStream;
 use schematic_define::{
-    ApiResponse, AuthMethod, AuthPolicy, AuthStrategy, CrossOrigin, Endpoint, EnvAuthStrategy,
+    ApiResponse, AuthMethod, AuthPolicy, AuthStrategy, Endpoint, EnvAuthStrategy,
     OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement, RestApi, RestMethod,
 };
 use schematic_gen::output::assemble::assemble_shared_module;
@@ -57,85 +57,51 @@ fn definition_body(code: &str) -> String {
 
 /// Creates a test API with the given auth strategy.
 fn make_api(name: &str, auth: AuthStrategy, env_auth: Vec<String>) -> RestApi {
-    RestApi {
-        name: name.to_string(),
-        description: format!("{} API", name),
-        base_url: "https://api.example.com/v1".to_string(),
-        docs_url: None,
-        auth,
-        auth_policy: None,
-        env_auth,
-        env_username: None,
-        env_mapping: None,
-        headers: vec![],
-        endpoints: vec![
-            Endpoint {
-                id: "GetItems".to_string(),
-                method: RestMethod::Get,
-                path: "/items".to_string(),
-                description: "Get items".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ItemsResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
+    {
+        let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), name.to_string(), "https://api.example.com/v1".to_string())
+            .describes(format!("{} API", name))
+            .authentication(auth, env_auth)
+            .build().expect("valid API fixture");
+        api.endpoints = vec![
+            {
+                let mut endpoint = Endpoint::new("GetItems".to_string(), RestMethod::Get, "/items".to_string())
+                    .describes("Get items".to_string())
+                    .returns_empty()
+                    .build().expect("valid endpoint fixture");
+                endpoint.response = ApiResponse::json_type("ItemsResponse");
+                endpoint
             },
-            Endpoint {
-                id: "GetItem".to_string(),
-                method: RestMethod::Get,
-                path: "/items/{item_id}".to_string(),
-                description: "Get a single item".to_string(),
-                request: None,
-                response: ApiResponse::json_type("Item"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
+            {
+                let mut endpoint = Endpoint::new("GetItem".to_string(), RestMethod::Get, "/items/{item_id}".to_string())
+                    .describes("Get a single item".to_string())
+                    .returns_empty()
+                    .build().expect("valid endpoint fixture");
+                endpoint.response = ApiResponse::json_type("Item");
+                endpoint
             },
-        ],
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
+        ];
+        api
     }
 }
 
 /// Creates a test API with basic auth.
 /// Password comes from env_auth[0].
 fn make_basic_auth_api(name: &str, username_env: &str, password_env: &str) -> RestApi {
-    RestApi {
-        name: name.to_string(),
-        description: format!("{} API", name),
-        base_url: "https://api.example.com/v1".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::Basic,
-        auth_policy: None,
-        env_auth: vec![password_env.to_string()], // Password from env_auth[0]
-        env_username: Some(username_env.to_string()),
-        env_mapping: None,
-        headers: vec![],
-        endpoints: vec![Endpoint {
-            id: "GetItems".to_string(),
-            method: RestMethod::Get,
-            path: "/items".to_string(),
-            description: "Get items".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ItemsResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        }],
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
+    {
+        let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), name.to_string(), "https://api.example.com/v1".to_string())
+            .describes(format!("{} API", name))
+            .authentication(AuthStrategy::Basic, vec![password_env.to_string()])
+            .build().expect("valid API fixture");
+        api.env_username = Some(username_env.to_string());
+        api.endpoints = vec![{
+            let mut endpoint = Endpoint::new("GetItems".to_string(), RestMethod::Get, "/items".to_string())
+                .describes("Get items".to_string())
+                .returns_empty()
+                .build().expect("valid endpoint fixture");
+            endpoint.response = ApiResponse::json_type("ItemsResponse");
+            endpoint
+        }];
+        api
     }
 }
 
@@ -151,16 +117,15 @@ fn make_dual_auth_api() -> RestApi {
         client_auth: OAuth2ClientAuthMethod::ClientSecretPost,
     };
 
-    RestApi {
-        name: "DualAuthApi".to_string(),
-        description: "Dual auth API".to_string(),
-        base_url: "https://api.example.com/v1".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::ApiKey {
+    {
+        let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "DualAuthApi".to_string(), "https://api.example.com/v1".to_string())
+            .describes("Dual auth API".to_string())
+            .authentication(AuthStrategy::ApiKey {
             header: "X-API-Key".to_string(),
             value_prefix: None,
-        },
-        auth_policy: Some(AuthPolicy {
+        }, vec!["DUAL_AUTH_API_KEY".to_string()])
+            .build().expect("valid API fixture");
+        api.auth_policy = Some(AuthPolicy {
             explicit: vec![
                 AuthMethod::ApiKey {
                     header: "X-API-Key".to_string(),
@@ -172,30 +137,16 @@ fn make_dual_auth_api() -> RestApi {
                 header: "X-API-Key".to_string(),
                 value_prefix: None,
             }),
-        }),
-        env_auth: vec!["DUAL_AUTH_API_KEY".to_string()],
-        env_username: None,
-        env_mapping: None,
-        headers: vec![],
-        endpoints: vec![Endpoint {
-            id: "GetItems".to_string(),
-            method: RestMethod::Get,
-            path: "/items".to_string(),
-            description: "Get items".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ItemsResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        }],
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
+        });
+        api.endpoints = vec![{
+            let mut endpoint = Endpoint::new("GetItems".to_string(), RestMethod::Get, "/items".to_string())
+                .describes("Get items".to_string())
+                .returns_empty()
+                .build().expect("valid endpoint fixture");
+            endpoint.response = ApiResponse::json_type("ItemsResponse");
+            endpoint
+        }];
+        api
     }
 }
 
@@ -282,16 +233,13 @@ fn each_http_method_becomes_the_request_method_constant() {
     let mut api = make_api("TestApi", AuthStrategy::None, vec![]);
     api.endpoints = methods
         .iter()
-        .map(|(method, name)| Endpoint {
-            id: format!("Do{name}"),
-            method: *method,
-            path: "/items".to_string(),
-            description: format!("{name} items"),
-            request: None,
-            response: ApiResponse::json_type("ItemsResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
+        .map(|(method, name)| {
+            let mut endpoint = Endpoint::new(format!("Do{name}"), *method, "/items".to_string())
+                .describes(format!("{name} items"))
+                .returns_empty()
+                .build().expect("valid endpoint fixture");
+            endpoint.response = ApiResponse::json_type("ItemsResponse");
+            endpoint
         })
         .collect();
     let flat = squash(&format_tokens(&assemble_api_code(&api)));

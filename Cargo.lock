@@ -11745,12 +11745,14 @@ dependencies = [
  "indexmap 2.14.0",
  "openapiv3",
  "reqwest 0.13.2",
+ "schemars 1.2.1",
  "serde",
  "serde_json",
  "serial_test",
  "strum 0.28.0",
  "thiserror 2.0.18",
  "tokio",
+ "url",
  "wiremock",
 ]
 

@@ -506,36 +506,21 @@ mod tests {
     use super::*;
 
     fn sample_api() -> RestApi {
-        RestApi {
-            name: "Sample".to_string(),
-            description: "Sample API".to_string(),
-            base_url: "https://api.example.com/v1".to_string(),
-            docs_url: Some("https://docs.example.com".to_string()),
-            auth: AuthStrategy::BearerToken { header: None },
-            auth_policy: None,
-            env_auth: vec!["SAMPLE_TOKEN".to_string()],
-            env_username: None,
-            headers: vec![],
-            endpoints: vec![Endpoint {
-                id: "ListItems".to_string(),
-                method: RestMethod::Get,
-                path: "/items".to_string(),
-                description: "List items".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ListItemsResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            }],
-            module_path: None,
-            request_suffix: None,
-            version: None,
-            env_mapping: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
+        {
+            let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "Sample".to_string(), "https://api.example.com/v1".to_string())
+                .describes("Sample API".to_string())
+                .authentication(AuthStrategy::BearerToken { header: None }, vec!["SAMPLE_TOKEN".to_string()])
+                .build().expect("valid API fixture");
+            api.docs_url = Some("https://docs.example.com".to_string());
+            api.endpoints = vec![{
+                let mut endpoint = Endpoint::new("ListItems".to_string(), RestMethod::Get, "/items".to_string())
+                    .describes("List items".to_string())
+                    .returns_empty()
+                    .build().expect("valid endpoint fixture");
+                endpoint.response = ApiResponse::json_type("ListItemsResponse");
+                endpoint
+            }];
+            api
         }
     }
 

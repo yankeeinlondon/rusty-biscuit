@@ -75,9 +75,9 @@ pub(super) fn map_operation<R: SchemaRegistryLike>(
     let request_body = endpoint
         .request
         .as_ref()
-        .map(|req| ReferenceOr::Item(map_request_body(req)));
+        .map(|req| map_request_body(req).map(ReferenceOr::Item)).transpose()?;
 
-    let responses = map_responses(&endpoint.response);
+    let responses = map_responses(&endpoint.response)?;
 
     let mut extensions = IndexMap::new();
     if !options.skip_extensions {
