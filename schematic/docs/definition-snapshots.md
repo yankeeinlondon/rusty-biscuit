@@ -24,6 +24,11 @@ The raw corpus measured 8,449,975 bytes. Schema fingerprints reduce the stored c
 
 The explicit capture utility is `cargo run -p schematic-gen --example capture_definition_baseline -- <new-directory>` from the repository root. The destination must be a new directory with an existing parent; existing destinations are refused. Use a new temporary directory to inspect a candidate capture. Replacing historical fixtures is not part of ordinary migration checks.
 
+The retired API exception table, endpoint OAuth scope field, and parameter-level
+pagination fields are absent from current snapshots. Endpoint `pagination` is
+an optional collection: omission and null mean no assignment; malformed shapes,
+duplicate fields, and trailing content reject.
+
 ## JSON field outcomes
 
 These tables define the data-transfer contract for the newly serializable structs. `N` means an optional field restores as `None`; `E` means an error. `V` means a native value is retained, including an empty string, array or object only where its declared type accepts that shape. Object-valued enum payloads still require their declared fields. A duplicate field or trailing garbage always fails typed deserialization. The tests edit shipped GitHub definitions one field at a time, with an unchanged positive control; every shipped API also undergoes two full serialization round trips with equal downstream pagination snapshots.
@@ -72,17 +77,17 @@ These tables define the data-transfer contract for the newly serializable struct
 
 ### RestApi (continued)
 
-| Shape | `request_id_header` | `secret_names` | `default_pagination` | `pagination_exceptions` |
-| --- | --- | --- | --- | --- |
-| native control | V | V | V | V |
-| absent | N | E | N | E |
-| null | N | E | N | E |
-| wrong whole type | E | E | E | E |
-| one wrong element | — | E | — | E |
-| every element wrong | — | E | — | E |
-| empty native | V | V | E | V |
-| duplicate key | E | E | E | E |
-| trailing content | E | E | E | E |
+| Shape | `request_id_header` | `secret_names` | `default_pagination` |
+| --- | --- | --- | --- |
+| native control | V | V | V |
+| absent | N | E | N |
+| null | N | E | N |
+| wrong whole type | E | E | E |
+| one wrong element | — | E | — |
+| every element wrong | — | E | — |
+| empty native | V | V | E |
+| duplicate key | E | E | E |
+| trailing content | E | E | E |
 
 ### Endpoint
 
@@ -100,31 +105,31 @@ These tables define the data-transfer contract for the newly serializable struct
 
 ### Endpoint (continued)
 
-| Shape | `response` | `headers` | `params` | `oauth_scopes` |
-| --- | --- | --- | --- | --- |
-| native control | V | V | V | V |
-| absent | E | E | N | N |
-| null | E | E | N | N |
-| wrong whole type | E | E | E | E |
-| one wrong element | — | E | — | E |
-| every element wrong | — | E | — | E |
-| empty native | E | V | E | V |
-| duplicate key | E | E | E | E |
-| trailing content | E | E | E | E |
+| Shape | `response` | `headers` | `params` |
+| --- | --- | --- | --- |
+| native control | V | V | V |
+| absent | E | E | N |
+| null | E | E | N |
+| wrong whole type | E | E | E |
+| one wrong element | — | E | — |
+| every element wrong | — | E | — |
+| empty native | E | V | E |
+| duplicate key | E | E | E |
+| trailing content | E | E | E |
 
 ### EndpointParams
 
-| Shape | `query` | `header` | `cookie` | `pagination` | `response_pagination` |
-| --- | --- | --- | --- | --- | --- |
-| native control | V | V | V | V | V |
-| absent | E | E | E | N | N |
-| null | E | E | E | N | N |
-| wrong whole type | E | E | E | E | E |
-| one wrong element | E | E | E | — | — |
-| every element wrong | E | E | E | — | — |
-| empty native | V | V | V | E | E |
-| duplicate key | E | E | E | E | E |
-| trailing content | E | E | E | E | E |
+| Shape | `query` | `header` | `cookie` |
+| --- | --- | --- | --- |
+| native control | V | V | V |
+| absent | E | E | E |
+| null | E | E | E |
+| wrong whole type | E | E | E |
+| one wrong element | E | E | E |
+| every element wrong | E | E | E |
+| empty native | V | V | V |
+| duplicate key | E | E | E |
+| trailing content | E | E | E |
 
 ### ParamDef
 

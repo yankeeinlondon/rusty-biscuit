@@ -516,48 +516,35 @@ must be designed before the combination can be supported.
 
 ## Authoring pagination
 
-### A default and a table of exceptions
+### An API default and endpoint collections
 
-`RestApi` has two fields; the types are in `schematic_define::pagination`
-(and its authoring subset in `schematic_define::prelude`):
-
-- `default_pagination: Option<Strategy>`: the strategy a list inherits.
-- `pagination_exceptions: Vec<PaginationException>`: one row per endpoint
-  id that differs: a wrapper list, an opt-out, an override, or a non-GET
-  list.
-
-GitHub's definition is a typical example:
+Use `RestApiBuilder::default_pagination(strategy)` for the inherited strategy
+and `EndpointBuilder::pagination(collection)` for wrapper lists, opt-outs,
+overrides, and non-GET lists. Types live in `schematic_define::pagination`.
 
 ```rust
-use schematic_define::pagination::{
-    Collection, MoreSignal, PageSize, PaginationException, Strategy, ValueSource,
-};
+use schematic_define::prelude::*;
 
-fn github_page_number() -> Strategy {
-    Strategy::page_number("page", MoreSignal::link_rel("next"))
-        .page_size(PageSize::new("per_page").server_default(30).max(100))
-        .build()
-}
-
-// RestApi {
-//     default_pagination: Some(github_page_number()),
-//     pagination_exceptions: vec![PaginationException::new(
-//         "ListWorkflowRuns",
-//         Collection::at("workflow_runs")
-//             .item_type("WorkflowRun")
-//             .paginate(github_page_number().total(ValueSource::body("total_count"))),
-//     )],
-//     ..
-// }
+let mut context = DefinitionContext::types_in("::my_models");
+let endpoint = Endpoint::get("ListItems", "/items")
+    .describes("List items")
+    .returns_json::<Vec<String>>(&mut context)
+    .pagination(Collection::root().unpaginated())
+    .build()?;
 ```
 
-A row's `Collection` says where the items are and how the list pages:
+This endpoint remains an unpaginated list even when the API has a default.
+For a wrapper response, use `Collection::at("data").item_type("Item")`.
+Provider-local strategy helpers supply the paging mechanism and remain local
+to each provider module.
 
-| Row | Meaning |
+An endpoint's `Collection` says where the items are and how the list pages:
+
+| Collection | Meaning |
 | --- | --- |
 | `Collection::root()` | the body is the array of items |
 | `Collection::at("data")` | the items are at a path; `at("edges[*].node")` and `at("data.children[*].data")` reach nested records |
-| `.item_type("WorkflowRun")` | the Rust type of one item; required unless the row is a root array of an explicit `Vec<T>` response, where `T` is used |
+| `.item_type("WorkflowRun")` | the Rust type of one item; required unless the collection is a root array of an explicit `Vec<T>` response, where `T` is used |
 | (nothing more) | inherit the API default; unpaginated when there is none |
 | `.paginate(strategy)` | this strategy instead of the default |
 | `.unpaginated()` | a list without pagination, whatever the default |
@@ -570,8 +557,8 @@ order:
 
 ```mermaid
 flowchart TD
-    e["endpoint"] --> row{"a row in pagination_exceptions<br/>for its id? (the first row wins)"}
-    row -->|yes| kind{"the row's pagination"}
+    e["endpoint"] --> row{"an explicit endpoint collection?"}
+    row -->|yes| kind{"the collection's pagination"}
     kind -->|".paginate(strategy)"| explicit["paginated by that strategy<br/>(origin: Exception)"]
     kind -->|".unpaginated()"| optout["unpaginated list<br/>(origin: Exception)"]
     kind -->|inherit| d1{"default_pagination set?"}
@@ -588,9 +575,9 @@ flowchart TD
 
 - Only the literal spelling `Vec<..>` is recognized. A type alias, a
   qualified `std::vec::Vec`, `serde_json::Value`, or any non-GET endpoint is a
-  list only with a row.
+  list only with an explicit collection.
 - A GET `Vec<T>` endpoint that is not a list the provider pages, such as a
-  lookup, needs an opt-out row: `Collection::root().unpaginated()`.
+  lookup, needs an explicit opt-out: `Collection::root().unpaginated()`.
 - Only a paginated list gets a pager. An unpaginated list and a non-list
   generate no pagination code at all.
 
@@ -696,12 +683,12 @@ let point_in_time = Strategy::cursor(InputParam::body("search_after"), CursorSou
 
 ### Validation
 
-`pagination::validate_pagination(&api)` checks every strategy and row, and
+`pagination::validate_pagination(&api)` checks every strategy and endpoint collection, and
 `schematic-gen` runs it before writing the Rust client. A definition with an
 error generates nothing:
 
 ```text
-severity=error api=GitHub endpoint=ListReleaze feature=pagination-exception output=rust: unknown-exception-id: exception names `ListReleaze`, which is not an endpoint of this API; did you mean `ListReleases`?
+severity=error api=Catalog endpoint=ListItems feature=pagination-exception output=rust: missing-item-type: collection requires an item type
 ```
 
 Every rule is listed in
@@ -710,8 +697,7 @@ Every rule is listed in
 and `pagination::param_adoptions` what happens to each declared parameter a
 strategy names; the generator emits exactly those.
 
-`PaginationStyle`, `PaginationResponse`, and `EndpointParams::with_pagination`
-are superseded and generate no pager.
+Pagination is authored only through strategies and endpoint collections; legacy pagination enums, helpers, and API exception tables are removed.
 
 ### Imported definitions
 
@@ -760,7 +746,6 @@ reason is a distinct state:
 | ElevenLabs | `ListVoices` | definition gap: the definition sends the cursor as `page_token`; the research note names the input `next_page_token` | cursor `next_page_token` from `next_page_token`, more while `has_more`; `page_size` max 100, default 10; total `total_count` | ElevenLabs API reference for `GET /v2/voices`, confirming the cursor's request parameter name |
 | GitLab | `ListIssueParticipants` | unverified | the API default: page number `page`, `per_page`, more while `X-Next-Page`, total `X-Total` | GitLab REST API reference for `GET /projects/:id/issues/:issue_iid/participants` |
 | Gitea | `GetGitTree` | unverified | page number `page`, `per_page`, flag `truncated`; total `total_count` | Gitea API reference (swagger) for `GET /repos/{owner}/{repo}/git/trees/{sha}` |
-| Gitea | `GetGitTreeRecursive` | unverified | as `GetGitTree` | as `GetGitTree` |
 | EMQX basic, EMQX bearer | `ListAlarms` | unverified | page number `page`, `limit`, flag `meta.hasnext`; total `meta.count` | EMQX 5 REST API reference for `GET /api/v5/alarms` |
 | EMQX basic, EMQX bearer | `ListClients` | unverified | as `ListAlarms` | … for `GET /api/v5/clients` |
 | EMQX basic, EMQX bearer | `ListSubscriptions` | unverified | as `ListAlarms` | … for `GET /api/v5/subscriptions` |
@@ -793,12 +778,13 @@ OpenAI's `ListModels` reply has no continuation, and ElevenLabs'
 
 An endpoint can state its collection with `.pagination(Collection::at("data")
 .item_type("Item").paginate(strategy))`. Its collection takes precedence over
-an older API exception row. Without an endpoint collection, the existing
-exception/default/root-array resolution remains in effect.
+root-array inference. Without an endpoint collection, GET root-array inference
+and the API default determine whether the endpoint pages.
 
 OpenAI's importer leaves pagination to its hand-written overlay. The overlay
 finds each named imported endpoint, assigns its collection, and rejects an
 unknown ID. Its seven beta Responses operations share their ordinary endpoint
 IDs with optional `beta` query inputs. `ListInputItems` uses `BetaItemResource`
 for its compatible superset. The serialized resolution origin remains
-`Exception` during the migration of other providers.
+`Exception` for explicit endpoint collections to preserve the transfer format.
+All 93 shipped pagers use the same resolution rules.

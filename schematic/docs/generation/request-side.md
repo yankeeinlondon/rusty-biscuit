@@ -128,16 +128,13 @@ covering every case on this page, with a recorded baseline.
 
 ### Path templates that already contain a query
 
-Some definitions write a query directly into the path template, for example
-Gitea's `/repos/{owner}/{repo}/git/trees/{sha}?recursive=true`. That query is
-not declared query data: it stays in `path` exactly as written, and
-generation reports a `query-in-path` warning for it (see
-[validation](./validation.md#embedded-queries)). Declared pairs are appended
-after it with `&`:
-
-```text
-/repos/o/r/git/trees/abc?recursive=true&page=1
-```
+Route paths must exclude query strings. For example, define
+`/repos/{owner}/{repo}/git/trees/{sha}` and an optional Boolean `recursive`
+query parameter. Omission sends no pair; `false` remains an explicit false.
+Endpoint/API build and all output validators reject `?` in a route path,
+with API, endpoint, and path context. The importer normalizes supported query
+expressions before building definitions; it rejects malformed or conflicting
+inputs. See [validation](./validation.md#embedded-queries).
 
 ### Base URLs that contain a query
 

@@ -92,6 +92,31 @@ paths:
 | `response` | `object \| string` | Response specification. See [Response Types](#response-types). |
 | `headers` | `array<[string, string]>` | Endpoint-specific headers. |
 
+### Typed REST schema evidence
+
+REST JSON schemas contain a qualified `type_name` and typed `descriptor`.
+`module_path` is null for REST; its remaining use is WebSocket compatibility.
+The descriptor preserves wire component identity separately from Rust identity:
+
+```yaml
+response:
+  Json:
+    type_name: ::my_definitions::models::Item
+    module_path: null
+    descriptor:
+      shape:
+        Named:
+          schema_name: Item
+          rust_path: ::my_definitions::models::Item
+      structure: null
+```
+
+This is transfer data, not an authoring constructor. Build with typed JSON
+methods and validate against the destination context. The request/response
+excerpts below omit descriptor blocks and shorten Rust paths for readability;
+they are not complete definition-builder inputs. The endpoint OAuth scope field
+is removed; API authentication policy remains supported.
+
 ### Request Types
 
 ```yaml

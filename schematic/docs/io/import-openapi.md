@@ -490,23 +490,17 @@ paths:
 Schematic import:
 
 ```rust
-Endpoint {
-    id: "GetUser".to_string(),
-    method: RestMethod::Get,
-    path: "/users/{user_id}".to_string(),
-    description: "".to_string(),
-    request: None,
-    response: ApiResponse::json_type("User"),
-    params: EndpointParams::default(),
-    headers: vec![],
-}
+let endpoint = Endpoint::get("GetUser", "/users/{user_id}")
+    .describes("Get a user")
+    .returns_json::<User>(&mut context)
+    .build()?;
 ```
 
 `User` becomes a `ModelDef::Struct` in `ModelCatalog` and can be emitted by the generator.
 
 ## Compatibility notes
 
-- All new primitives are additive and can be marked `#[non_exhaustive]`.
+- `Endpoint` and `RestApi` are non-exhaustive; emitted modules use typed builders.
 - Existing definitions are unaffected; imports are opt-in.
 - The importer should default to safe, conservative mappings and provide
   configuration hooks for customization.

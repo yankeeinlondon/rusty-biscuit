@@ -75,19 +75,19 @@ severity=<severity> api=<api> endpoint=<endpoint> feature=<feature> output=<outp
 output:
 
 ```text
-$ schematic-gen validate --api gitea
-[WARN] severity=warning api=Gitea endpoint=GetGitTreeRecursive feature=query-in-path output=rust: path template `/repos/{owner}/{repo}/git/trees/{sha}?recursive=true` embeds a query string; declare it as query parameters so it can be separated from the path
-[WARN] ... output=openapi: ...
-[WARN] ... output=postman: ...
-  [PASS] rust
-  [PASS] openapi
-  [PASS] postman
+$ schematic-gen validate --api example
+[ERROR] severity=error api=Example endpoint=ReadTree feature=query-in-path output=rust: path template `/repos/{owner}/{repo}/git/trees/{sha}?recursive=true` embeds a query string; declare it as query parameters so it can be separated from the path
+[ERROR] ... output=openapi: ...
+[ERROR] ... output=postman: ...
+  [FAIL] rust
+  [FAIL] openapi
+  [FAIL] postman
 ```
 
 For example:
 
 ```text
-severity=warning api=Gitea endpoint=GetGitTreeRecursive feature=query-in-path output=postman: path template `/repos/{owner}/{repo}/git/trees/{sha}?recursive=true` embeds a query string; declare it as query parameters so it can be separated from the path
+severity=error api=Example endpoint=ReadTree feature=query-in-path output=postman: path template `/repos/{owner}/{repo}/git/trees/{sha}?recursive=true` embeds a query string; declare it as query parameters so it can be separated from the path
 severity=error api=Feed,FeedCompat endpoint=<none> feature=generated-name-collision output=rust: `SubscribeRequest` is generated for the request struct of Feed::Subscribe and the request struct of FeedCompat::Subscribe
 ```
 
@@ -104,9 +104,9 @@ The same fields are available to code as
 
 ```json
 {
-  "severity": "warning",
-  "api": ["Gitea"],
-  "endpoint": "GetGitTreeRecursive",
+  "severity": "error",
+  "api": ["Example"],
+  "endpoint": "ReadTree",
   "feature": "query-in-path",
   "output": "postman",
   "message": "path template ... embeds a query string; ..."
@@ -119,7 +119,7 @@ The same fields are available to code as
 | --- | :-: | :-: | :-: | --- |
 | `duplicate-endpoint-id`: two endpoints of one API share an id | ✓ | ✓ | ✓ | error |
 | `duplicate-method-path`: two endpoints of one API share a method and path | ✓ | ✓ | ✓ | error (see below) |
-| `query-in-path`: a path template contains `?` | ✓ | ✓ | ✓ | warning (see below) |
+| `query-in-path`: a path template contains `?` | ✓ | ✓ | ✓ | error (see below) |
 | `invalid-output-filename`: the file name is not one safe path component, or a module would overwrite a shared generated file | ✓ | ✓ | ✓ | error |
 | `invalid-identifier`: an API name, endpoint id, or parameter name cannot become the Rust identifier generated from it | ✓ | | | error |
 | `invalid-request-suffix`: `request_suffix` is empty or not alphanumeric | ✓ | | | error |
@@ -136,7 +136,7 @@ The same fields are available to code as
 | `header-parameter`, `cookie-parameter`: the name is not an HTTP token | ✓ | | | error |
 | `query-parameter`, `header-parameter`, `cookie-parameter`: the type is an array of arrays | ✓ | | | error |
 | `pagination-strategy`: a pagination strategy is malformed, alone or on its endpoint (see below) | ✓ | | | error |
-| `pagination-exception`: an exceptions row names no endpoint or one already named, or its list shape is unusable: item selector, item type, item location, alternates | ✓ | | | error |
+| `pagination-exception`: an endpoint collection has an unusable item selector, item type, item location, or alternates | ✓ | | | error |
 | `pagination-parameter`: a strategy input collides with a declared parameter it cannot adopt, adopts one without the knob that replaces it, or manages a required one without a value to send | ✓ | | | error |
 
 The Rust client sends text and binary bodies, header and cookie parameters,
@@ -183,7 +183,7 @@ Pagination changes only the Rust client, so only its validator checks it.
 Each message starts with the rule's id, then says what is wrong:
 
 ```text
-severity=error api=GitHub endpoint=ListReleaze feature=pagination-exception output=rust: unknown-exception-id: exception names `ListReleaze`, which is not an endpoint of this API; did you mean `ListReleases`?
+severity=error api=Catalog endpoint=ListItems feature=pagination-exception output=rust: missing-item-type: collection requires an item type
 ```
 
 The rules, by feature id:
@@ -199,9 +199,7 @@ The rules, by feature id:
   `session-handle-unreachable`, `session-handle-not-sent`,
   `session-step-needs-handle`, `keep-alive-without-input`,
   `invalid-partition-max`.
-- `pagination-exception`: `unknown-exception-id` (with the nearest endpoint id
-  when one is a likely typo), `duplicate-exception-id`,
-  `invalid-item-selector`, `not-an-array-location`, `missing-item-type`,
+- `pagination-exception`: `invalid-item-selector`, `not-an-array-location`, `missing-item-type`,
   `invalid-item-type`, `unknown-item-type`, `alternates-without-primary`,
   `alternates-on-unpaginated`, `duplicate-label`, `invalid-label`.
 - `pagination-parameter`: `collides-with-endpoint-param`,
@@ -209,7 +207,7 @@ The rules, by feature id:
 
 An API default's own shape is reported once, with `endpoint=<none>`; each
 endpoint that inherits it is checked only for what depends on the endpoint.
-An item type named by an exceptions row must be valid Rust type syntax, and a
+An item type named by an endpoint collection must be valid Rust type syntax, and a
 single identifier other than a primitive must be a schema of the API's
 registry (nested schemas count). An item location is checked against the
 response type's registered schema when there is one; when the registry cannot
@@ -232,23 +230,14 @@ response does not make a second endpoint on the same route. Declare one
 endpoint instead, with the distinguishing input as an optional parameter:
 
 ```rust
-// Rejected: both are GET /repos/{owner}/{repo}/git/trees/{tree_sha}.
-//   GetGitTree           (no parameters)
-//   GetGitTreeRecursive  (recursive=true)
+use schematic_define::{Endpoint, ParamDef, QueryParamType};
 
-// Accepted: one endpoint; `recursive` is an optional query parameter.
-Endpoint {
-    id: "GetGitTree".to_string(),
-    method: RestMethod::Get,
-    path: "/repos/{owner}/{repo}/git/trees/{tree_sha}".to_string(),
-    params: Some(EndpointParams::default().with_query_param(
-        "recursive",
-        QueryParamType::Boolean,
-        false,
-        Some("Fetch the tree recursively instead of a single level"),
-    )),
-    // ...
-}
+let endpoint = Endpoint::get("GetGitTree", "/repos/{owner}/{repo}/git/trees/{sha}")
+    .describes("Fetch a tree")
+    .returns_empty()
+    .query(ParamDef::new("recursive", QueryParamType::Boolean)
+        .describes("Fetch all levels instead of one"))
+    .build()?;
 ```
 
 When one route answers with different shapes (Bitbucket's `src` route
@@ -358,11 +347,11 @@ base URL ending in `/api` joined with a path starting `/api` can be correct.
 
 A path template such as `/repos/{owner}/{repo}/git/trees/{sha}?recursive=true`
 mixes a query into the path, where it cannot be separated, typed, or masked.
-Nine shipped endpoints still do this (one Gitea, one GitLab, seven OpenAI
-`Beta*` endpoints), so `query-in-path` is a warning reported once per output
-for each of them. Its severity is the constant `QUERY_IN_PATH_SEVERITY`.
-The generated client keeps such a query in the path exactly as written and
-appends declared query parameters after it; see
+All shipped paths use declared query parameters. `query-in-path` is a
+blocking error in every output, and endpoint/API builders reject it too.
+Diagnostics identify the API, endpoint, and offending path. An OpenAPI import
+normalizes supported query-bearing source paths before building endpoints;
+malformed or conflicting expressions fail import. See
 [request-side inputs](./request-side.md#path-templates-that-already-contain-a-query).
 
 ## Calling validation from code

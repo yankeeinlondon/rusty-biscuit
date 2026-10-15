@@ -6,9 +6,8 @@ kind: canonical-documentation
 
 Use `schematic_define::DefinitionContext` to collect the types for one generated
 module. Registration returns a `TypeDesc` with separate component and Rust names.
-OpenAI imports use a single typed module-group assembly for the API and
-ordered registry. Other shipped API factories retain their existing literal
-definitions and registry lookups during migration.
+Every shipped REST provider and imported module uses one typed module-group
+assembly for its APIs and ordered registry.
 
 ```rust
 use schematic_define::{definition_type, DefinitionContext};
@@ -124,4 +123,12 @@ covers the matrix and repeated read/write/read transfer round trips. Existing
 shipped definition snapshots and artifact drift tests continue to exercise the
 unchanged catalog through normal generation.
 
-[Definition builders](definition-builders.md) retain descriptor evidence in typed schemas and validate it against the destination module context at API build. Legacy schemas omit that evidence until migrated.
+[Definition builders](definition-builders.md) retain descriptor evidence in typed schemas and validate it against the destination module context at API build. REST JSON schemas without that evidence fail API build; WebSocket schemas retain their separate compatibility representation.
+
+A nominal generic model needs a concrete Rust path for each instantiation it
+registers. For example, Bitbucket registers `PaginatedResponse<Repository>` with
+both the wrapper and `Repository` qualified through their public module. Its
+registration implementations live beside `PaginatedResponse`; a context can
+register one directly without first assembling the provider. Writing the
+literal path `PaginatedResponse<T>` inside a generic implementation would leave
+an unbound `T` in generated client code.
