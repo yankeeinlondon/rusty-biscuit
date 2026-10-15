@@ -1,7 +1,8 @@
 //! Phase 7 — atomic task execution and lifecycle semantics.
 //!
 //! Every test drives the public seam ([`TaskExecution::run`]) over a task node
-//! produced by the *real* preflight walk against files on disk, because the
+//! produced by preflight over current grammar, with legacy stacks restored
+//! as explicit internal execution models (see `preflight::runtime_fixture`), because the
 //! contract under test starts at the node: approved shell bytes, the authoring
 //! directory a reference resolved from, and the composition mode of the
 //! referenced document are all decided before execution and must survive it
@@ -29,7 +30,7 @@ use super::*;
 use crate::composition::error::CompositionError;
 use crate::composition::lifecycle::executor::{ShellRunError, ShellRunner};
 use crate::composition::lifecycle::{LifecycleEmitter, LifecycleSignal};
-use crate::composition::sequence::preflight::build_preflight_graph_with_context;
+use crate::composition::sequence::preflight::runtime_fixture::RuntimeFixture;
 use crate::composition::sequence::{build_step_overlay, resolve_sequence_plan};
 use crate::events::GlobalSettings;
 use crate::messaging::RuntimeMessagingSettings;
@@ -343,7 +344,9 @@ impl Fixture {
         // walks the *process* CWD's repository topology before either of them
         // runs, which under nextest is the monorepo checkout.
         let resolved = crate::composition::resolve_fixture_source(source)?;
-        let plan = resolve_sequence_plan(&resolved, &crate::test_support::context_for(&resolved.resolved_path))?.expect("fixture declares a sequence");
+        let runtime_fixture = RuntimeFixture::new(&resolved, dir.path());
+        let fixture_source = &runtime_fixture.source;
+        let plan = resolve_sequence_plan(fixture_source, &crate::test_support::context_for(&resolved.resolved_path))?.expect("fixture declares a sequence");
         // Demand-driven: no fixture references `ctx.*`, so the preflight walk is
         // handed a date/time-only context instead of probing git, the repo, the
         // OS, and the hardware once per test.
@@ -351,7 +354,19 @@ impl Fixture {
         if let Some(environment) = environment {
             *context.env_mut() = environment.vars().clone();
         }
-        let graph = build_preflight_graph_with_context(&plan, &resolved, context.clone(), &crate::test_support::context_for(&resolved.resolved_path))?;
+        let graph = runtime_fixture.build(&plan, context.clone(), &crate::test_support::context_for(&resolved.resolved_path))?;
+
+        let mut approved = darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals::new();
+        for candidate in &graph.template_candidates {
+            if candidate.requirement == darkmatter::markdown::compose::shell_expansion::template::ModeRequirement::AnyMode {
+                for command in candidate.resolved.as_ref().expect("byte-eligible fixture site") {
+                    approved.insert_exact(command.clone());
+                }
+            } else {
+                approved.insert_template(candidate.shape().expect("fixture template"));
+            }
+        }
+        graph.record_shell_authorization(approved, Some(dir.path().to_path_buf()));
 
         let overlay = build_step_overlay(&plan, 0).as_set_overrides(None);
         let mut frontmatter: Map<String, Value> = resolved
@@ -438,6 +453,7 @@ impl Fixture {
     fn execute_step(&self, index: usize, wiring: &Wiring<'_>) -> TaskOutcome {
         let live = std::sync::Mutex::new(self.frontmatter.clone());
         let stack = StackExecutionContext {
+            seq: None,
             signal: LifecycleSignal::Start,
             scope: None,
             frontmatter: &self.frontmatter,
@@ -582,6 +598,19 @@ impl LifecycleEmitter for Recorder {
 impl ShellRunner for Recorder {
     fn run(&self, command: &str) -> Result<i32, ShellRunError> {
         self.push(format!("stack-shell:{command}"));
+        Ok(*self.stack_shell_code.lock().unwrap())
+    }
+
+    fn run_structured(
+        &self,
+        chain: &darkmatter::markdown::compose::shell_expansion::template::FilledChain,
+    ) -> Result<i32, ShellRunError> {
+        let argv: Vec<String> = chain
+            .segments
+            .iter()
+            .map(|segment| format!("{} {:?}", segment.program, segment.args))
+            .collect();
+        self.push(format!("stack-structured:{}", argv.join(" ; ")));
         Ok(*self.stack_shell_code.lock().unwrap())
     }
 }
@@ -754,6 +783,19 @@ impl FakeTaskShell {
 }
 
 impl TaskShellRunner for FakeTaskShell {
+    fn run_structured(
+        &self,
+        chain: &darkmatter::markdown::compose::shell_expansion::template::FilledChain,
+        timeout: Duration,
+        interrupt: Option<&AtomicBool>,
+        live: Option<&Arc<TaskLiveOutput>>,
+    ) -> Result<ShellCommandOutput, TaskShellError> {
+        // The fake records a display label; production never renders argv as shell text.
+        assert_eq!(chain.segments.len(), 1);
+        let segment = &chain.segments[0];
+        self.run(&std::iter::once(segment.program.as_str()).chain(segment.args.iter().map(String::as_str)).collect::<Vec<_>>().join(" "), timeout, interrupt, live)
+    }
+
     fn run(
         &self,
         command: &str,
@@ -1144,15 +1186,17 @@ mod shell_tasks {
         );
     }
 
-    /// Approved == executed: preflight resolved `{{ state.name }}` once, and the
+    /// Approved == executed: preflight resolved `{{ seq.name }}` once, and the
     /// executor runs those bytes without re-resolving anything.
     #[test]
     fn the_preflight_approved_bytes_are_executed_verbatim() {
         let dir = TempDir::new().unwrap();
         let source = one_step_source(
             dir.path(),
-            json!({ "name": "alpha", "shell": "echo {{ state.name }}" }),
+            json!({ "name": "alpha", "shell": "echo {{ label }}" }),
         );
+        let text = fs::read_to_string(&source).unwrap();
+        fs::write(&source, text.replacen("---\n", "---\nlabel: alpha\n", 1)).unwrap();
         let fixture = Fixture::build(dir, &source).unwrap();
         assert!(
             matches!(&fixture.task().action, PreflightAction::Shell { commands }
@@ -2573,7 +2617,7 @@ mod side_effect_tasks {
         let dir = TempDir::new().unwrap();
         let source = one_step_source(
             dir.path(),
-            json!({ "name": "alpha", "side_effect": { "set": {"outputs": "hijacked"} } }),
+            json!({ "name": "alpha", "side_effect": { "set": {"seq": "hijacked"} } }),
         );
         let fixture = Fixture::build(dir, &source).unwrap();
         let recorder = Recorder::default();
@@ -3354,8 +3398,8 @@ mod prompt_tasks {
     #[test]
     fn params_are_evaluated_just_in_time_against_the_effective_state() {
         let (dir, source) = prompt_fixture(json!({
-            "topic": "{{ state.name }}",
-            "position": "{{ state.index }}",
+            "topic": "{{ seq.name }}",
+            "position": "{{ seq.index }}",
             "literal": "unchanged",
         }));
         let fixture = Fixture::build(dir, &source).unwrap();
@@ -3417,11 +3461,11 @@ mod prompt_tasks {
             "accumulated runtime mutations outrank user setters",
         );
         assert_eq!(
-            overrides["state"]["name"],
+            request.set_overrides.sequence_value().unwrap()["name"],
             json!("alpha"),
             "the reserved overlay outranks everything",
         );
-        assert_eq!(overrides["outputs"], json!([]));
+        assert_eq!(request.set_overrides.sequence_value().unwrap()["outputs"], json!([]));
         use darkmatter::markdown::compose::OverrideOrigin;
         assert_eq!(
             request.set_overrides.origin_of("only_param"),
@@ -3430,12 +3474,12 @@ mod prompt_tasks {
         );
         assert_eq!(request.set_overrides.origin_of("shared"), OverrideOrigin::Authored);
         assert_eq!(request.set_overrides.origin_of("mutated"), OverrideOrigin::Data);
-        assert_eq!(request.set_overrides.origin_of("state"), OverrideOrigin::Data);
+        assert!(!overrides.contains_key("seq"));
     }
 
     #[test]
     fn a_param_targeting_a_reserved_key_is_rejected_before_the_provider_runs() {
-        let (dir, source) = prompt_fixture(json!({ "state": "hijacked" }));
+        let (dir, source) = prompt_fixture(json!({ "seq": "hijacked" }));
         let fixture = Fixture::build(dir, &source).unwrap();
         let recorder = Recorder::default();
         let shell = FakeTaskShell::default();
@@ -3783,8 +3827,8 @@ mod outcome_contract {
         assert_eq!(results[0].3, vec![Duration::from_secs(45); 2]);
     }
 
-    /// The external reference is exclusive *and* immutable: the referencing site
-    /// contributes the reference and nothing else.
+    /// A referencing leg supplies its own name, but cannot patch the external
+    /// task's executable options.
     #[test]
     fn a_referencing_site_override_on_an_external_task_is_rejected() {
         let dir = TempDir::new().unwrap();
@@ -3799,7 +3843,7 @@ mod outcome_contract {
             &json!({
                 "kind": "group",
                 "name": "bundle",
-                "tasks": [{ "task": "task.yaml", "name": "patched-name" }],
+                "tasks": [{ "task": "task.yaml", "name": "patched-name", "timeout": "10s" }],
             }),
         );
         let source = one_step_source(dir.path(), json!({ "name": "alpha", "group": "group.yaml" }));
@@ -4192,7 +4236,7 @@ mod serial_groups {
                         {
                             "name": "reader",
                             "prompt": "target.md",
-                            "params": { "seen": "{{ marker }}", "prior": "{{ last(outputs) }}" },
+                            "params": { "seen": "{{ marker }}", "prior": "{{ last(seq.outputs) }}" },
                         },
                     ],
                 },
@@ -4257,7 +4301,8 @@ mod serial_groups {
         // Whole-value typing survives the scope: `attempt` stays a number.
         assert_eq!(request.params["attempt"], json!(2));
         assert_eq!(recorder.events(), vec!["info:starting release".to_string()]);
-        assert_eq!(request.set_overrides.values()["group"]["label"], json!("release"));
+        assert_eq!(request.lifecycle_group.as_ref().unwrap()["label"], json!("release"));
+        assert!(!request.set_overrides.values().contains_key("group"));
     }
 
     /// The scope ends with the group: a later sequence step referencing
@@ -4453,7 +4498,7 @@ mod serial_groups {
             &json!({
                 "kind": "group",
                 "name": "bundle",
-                "tasks": [{ "task": "task.yaml" }],
+                "tasks": [{ "task": "task.yaml", "name": "external" }],
             }),
         );
         let source = one_step_source(
@@ -5627,7 +5672,8 @@ mod byte_parity {
             );
         }
 
-        // Inside a group too: a member's command cannot read its group.
+        // Inside a group, `group` is a late value: the member's command is
+        // approved as a template and reads its group when it runs.
         let dir = TempDir::new().unwrap();
         let source = write_source(
             dir.path(),
@@ -5642,10 +5688,13 @@ mod byte_parity {
             )],
             "Document body.\n",
         );
-        assert!(matches!(
-            Fixture::build(dir, &source),
-            Err(CompositionError::SequenceShellLateBinding { ref root, .. }) if root == "group"
-        ));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let PreflightAction::Group(group) = &fixture.task().action else {
+            panic!("expected a group task");
+        };
+        let member = &group.tasks[0].shell_sites[0];
+        assert_eq!(member.mode, crate::composition::sequence::preflight::SiteMode::Template);
+        assert!(member.reads_late_value());
 
         let dir = TempDir::new().unwrap();
         let source = write_source(
@@ -5825,4 +5874,184 @@ mod document_environment {
         assert!(outcome.succeeded(), "{}", failure_message(&outcome));
         assert_eq!(shell.commands(), vec!["echo run=one".to_string()]);
     }
+}
+
+// -- the step barrier: late values -------------------------------------------
+
+mod late_values {
+    use super::*;
+    use crate::composition::sequence::preflight::resolve_task_late_values;
+    use darkmatter::markdown::compose::expression::ExpressionError;
+
+    /// A two-step sequence whose second step runs `setup-command` and then a
+    /// shell command reading `late`.
+    fn fixture(late: &str, outputs: Value) -> Fixture {
+        let dir = TempDir::new().unwrap();
+        let source = write_source(
+            dir.path(),
+            "seq.md",
+            &[(
+                "sequence",
+                json!([
+                    { "name": "earlier", "shell": "earlier-command" },
+                    {
+                        "name": "reader",
+                        "setup": [{ "shell": "setup-command" }],
+                        "shell": format!("primary {{{{ {late} }}}}"),
+                    },
+                ]),
+            )],
+            "Document body.\n",
+        );
+        let mut fixture = Fixture::build(dir, &source).unwrap();
+        // The state the second step reads: the first step's output committed.
+        let mut lookup: HashMap<String, Value> =
+            fixture.frontmatter.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        lookup.insert("seq".to_string(), json!({"outputs": outputs}));
+        fixture.state = EffectiveStateBuilder::new()
+            .with_frontmatter(lookup)
+            .with_context(fixture.state.context().clone())
+            .with_allow_ctx_override(true)
+            .build()
+            .unwrap();
+        fixture
+    }
+
+    fn runtime_with(entry: &str) -> Arc<RuntimeState> {
+        let runtime = Arc::new(RuntimeState::new());
+        runtime.append_output_entry(Value::String(entry.to_string()));
+        runtime
+    }
+
+    /// A late value that is `null` when the step is reached fails the step
+    /// before any of its commands runs — not even the setup command before
+    /// it — and the earlier step's output stands.
+    #[test]
+    fn a_missing_late_value_fails_the_step_before_any_of_its_commands_runs() {
+        let fixture = fixture("seq.outputs[3]", json!(["earlier"]));
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::with_stdout(&["never"]);
+        let runtime = runtime_with("earlier");
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+
+        let outcome = fixture.execute_step(1, &wiring);
+
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        let error = outcome.error.as_ref().unwrap();
+        assert_eq!(error.info.variant, "SequenceShellLateValue", "{error:?}");
+        assert!(error.message().contains("seq.outputs[3]") && error.message().contains("missing"), "{}", error.message());
+        assert!(recorder.events().is_empty(), "the setup command ran: {:?}", recorder.events());
+        assert!(shell.commands().is_empty(), "the primary command ran: {:?}", shell.commands());
+        assert_eq!(runtime.snapshot().outputs, vec![json!("earlier")], "earlier effects stand");
+    }
+
+    /// A late value that cannot be one argument fails the same way, and the
+    /// failure never shows the value.
+    #[test]
+    fn an_invalid_late_value_fails_the_step_without_showing_it() {
+        let fixture = fixture("last(seq.outputs)", json!([["hidden-value"]]));
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::with_stdout(&["never"]);
+
+        let outcome = fixture.execute_step(1, &Wiring::new(&recorder, &shell));
+
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        let error = outcome.error.as_ref().unwrap();
+        assert_eq!(error.info.variant, "SequenceShellLateValue");
+        assert!(!format!("{error:?}").contains("hidden-value"), "{error:?}");
+        assert!(recorder.events().is_empty() && shell.commands().is_empty());
+    }
+
+    /// A present late value passes the barrier, which keeps it for template
+    /// dispatch by site and hole.
+    #[test]
+    fn a_present_late_value_is_kept_for_its_site() {
+        let fixture = fixture("last(seq.outputs)", json!(["earlier", "dist"]));
+        let task = fixture.task_at(1);
+        let evaluate = |expression: &str| -> Result<Value, ExpressionError> {
+            assert_eq!(expression, "last(seq.outputs)", "only late placeholders are read");
+            Ok(json!("dist"))
+        };
+        let values = resolve_task_late_values(task, &evaluate).unwrap();
+        assert_eq!(values.site("primary[0]").and_then(|site| site.get(0)), Some("dist"));
+        assert!(values.site("setup[0]").is_none(), "a site with no placeholder has no late values");
+    }
+
+    /// A late command runs its filled argv and commits its output.
+    #[test]
+    fn a_late_command_that_passes_the_barrier_runs_its_filled_arguments() {
+        let fixture = fixture("last(seq.outputs)", json!(["earlier", "dist"]));
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::with_stdout(&["never"]);
+
+        let runtime = runtime_with("dist");
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+        let outcome = fixture.execute_step(1, &wiring);
+
+        assert_eq!(outcome.status, TaskStatus::Succeeded, "{outcome:?}");
+        assert_eq!(shell.commands(), vec!["primary dist"]);
+        assert_eq!(outcome.stdout, "never");
+        assert_eq!(recorder.events(), vec!["stack-shell:setup-command"]);
+    }
+    #[test]
+    fn discovery_without_shape_authorization_cannot_run_a_template() {
+        let fixture = fixture("seq.outputs[3]", json!(["dist"]));
+        fixture.graph.record_shell_authorization(Default::default(), None);
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let outcome = fixture.execute_step(1, &Wiring::new(&recorder, &shell));
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        assert!(failure_message(&outcome).contains("not approved"), "{outcome:?}");
+        assert!(recorder.events().is_empty() && shell.commands().is_empty());
+    }
+
+    #[test]
+    fn an_ordinary_hole_reads_setup_mutations_at_command_entry() {
+        let dir = TempDir::new().unwrap();
+        let source = write_source(dir.path(), "seq.md", &[
+            ("x", json!("original")),
+            ("sequence", json!([
+                { "name": "earlier", "shell": "earlier" },
+                { "name": "later", "setup": [{ "set": { "x": "changed value" } }], "shell": "primary {{ x }}" }
+            ])),
+        ], "Body.\n");
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::with_stdout(&["result"]);
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+        let outcome = fixture.execute_step(1, &wiring);
+        assert!(outcome.succeeded(), "{outcome:?}");
+        assert_eq!(shell.commands(), ["primary changed value"]);
+        assert_eq!(runtime.snapshot().mutations.get("x"), Some(&json!("changed value")));
+        assert_eq!(runtime.snapshot().outputs, [json!("result")]);
+    }
+
+    #[test]
+    fn a_blacklisted_later_segment_prevents_the_entire_chain() {
+        let dir = TempDir::new().unwrap();
+        let source = write_source(dir.path(), "seq.md", &[
+            ("action", json!("status")),
+            ("sequence", json!([
+                { "name": "earlier", "shell": "earlier" },
+                { "name": "later", "shell": "primary safe && git {{ action }}" }
+            ])),
+        ], "Body.\n");
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let runtime = Arc::new(RuntimeState::new());
+        runtime.set(&fixture.engine, "action", json!("reset"), &fixture.frontmatter).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+        let outcome = fixture.execute_step(1, &wiring);
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        assert!(failure_message(&outcome).to_ascii_lowercase().contains("blacklist"), "{outcome:?}");
+        assert!(shell.commands().is_empty());
+        assert!(runtime.snapshot().outputs.is_empty());
+    }
+
 }

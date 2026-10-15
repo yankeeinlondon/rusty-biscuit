@@ -328,6 +328,7 @@ fn finalize_requires_recorded_terminal_not_just_stack_run() {
     // touch the guard's terminal flag, so Finalize is still skipped.
     let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
     let stack_ctx = crate::composition::lifecycle_executor::StackExecutionContext {
+        seq: None,
         signal: LifecycleSignal::Failure,
         scope: None,
         frontmatter: &serde_json::Map::new(),
@@ -438,6 +439,7 @@ fn run_event_stack_emits_the_stack_in_order() {
     assert!(guard.record_event_emission(LifecycleSignal::Start));
 
     let stack_ctx = crate::composition::lifecycle_executor::StackExecutionContext {
+        seq: None,
         signal: LifecycleSignal::Start,
         scope: None,
         frontmatter: &serde_json::Map::new(),
@@ -507,6 +509,7 @@ fn execute_event_still_runs_full_event() {
     );
 
     let stack_ctx = crate::composition::lifecycle_executor::StackExecutionContext {
+        seq: None,
         signal: LifecycleSignal::Start,
         scope: None,
         frontmatter: &serde_json::Map::new(),
@@ -607,6 +610,7 @@ fn run_event_stack_marks_only_terminal_events_as_terminal_lifecycle_work() {
         .auto_rehash(false)
         .build();
     let stack_ctx = crate::composition::lifecycle_executor::StackExecutionContext {
+        seq: None,
         signal: LifecycleSignal::Start,
         scope: None,
         frontmatter: &serde_json::Map::new(),

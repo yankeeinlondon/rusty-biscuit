@@ -635,6 +635,14 @@ checks, and DMLS's `nested_span.rs` mirrors its path spelling.
   ends the whole event. Audio is published in list position (no
   `audio_phases`). `LifecycleRunGuard::emit_signal` (the drop safety net) emits
   only root, unguarded, literal communication.
+- **Shell modes.** A `shell` command or `set` `$( … )` with a placeholder
+  carries a `shell_template::LifecycleShellTemplate` (stamped by
+  `preflight::resolve_lifecycle_shell_commands`); the lifecycle audit settles
+  it to resolved bytes or template, or leaves it refusing. Template mode fills
+  from the live state, checks the filled chain, and dispatches through
+  `ShellRunner::run_structured` (`structured_shell.rs`); a host that approves a
+  stack elsewhere (sequence `setup:`/`teardown:`) builds one with
+  `LifecycleShellTemplate::approved`.
 - **`with` overlays.** `proxy` and `retry` share `WithOverlay` and
   `executor.rs::resolve_with_overlay`; errors are the `LifecycleWith*` family
   (`LifecycleWithUnsupported` elsewhere). A retry overlay travels as
@@ -730,12 +738,28 @@ owns orchestration. The split follows the two execution phases:
 - `sequence/preflight/` — the recursive task-graph loader. Walks inline tasks,
   `kind: task` / `kind: group` / `kind: group-catalog` files, and every `prompt:`
   document, keeping a canonical-path ancestry stack so a cycle reports its whole
-  chain. Resolves shell bytes under an early-binding-only lookup and the
-  launch environment so approved == executed. `preflight/reapproval.rs`
-  (`PreflightApproval`, `compose_shell_text`) re-resolves each interpolating
-  task command under the task's own document environment before any stage
-  runs and refuses changed text (`SequenceShellApprovalChanged`); interim until
-  shell template approval lands.
+  chain. Every task carries a static `TaskPosition` (`First` only for the
+  first step's task and every leg of a first-step group; `TaskPosition::child`
+  is the recursive rule a nested sequence would use) and one
+  `PreparedShellSite` per command (`shell:`, stack `shell`, stack whole-value
+  `set` `$( … )`) recording its authored text, typed `CommandTemplate` (owner
+  = the sequence source's schema), `SiteMode` (`ResolvedBytes` / `Template`),
+  position, and property. `prepare_site` resolves a first-task command with
+  no late value under an early-binding-only lookup (caller setters included)
+  and approves its bytes (`graph.shell_commands`); every other command with a
+  placeholder becomes a `TemplateRequired` `ShellCandidate`
+  (`graph.template_candidates`). Late roots are `SEQUENCE_LATE_ROOTS`
+  (`outputs`, `loop`, `group` inside a group), followed through derived step
+  values; `err`/`timing`/`current` stay `SequenceShellLateBinding`.
+  `PromptReference` carries each `prompt:` reference's position, evaluated
+  approval-time `params`, and late `params` into the document's discovery
+  (`deferred_shell_roots()`, `with_placeholders_template_required` for a later
+  task). `resolve_task_late_values` is the step barrier
+  (`TaskExecution::run_stages` calls it before any stage).
+  `preflight/reapproval.rs` (`PreflightApproval`, `compose_approval_value`, the
+  one `SubtreeCompose` site) re-resolves each resolved-bytes command under the
+  task's own document environment before any stage runs and refuses changed
+  text (`SequenceShellApprovalChanged`).
 - `sequence/task/` — `TaskExecution::run` → `TaskOutcome`. `run()` never returns
   `Err`: continuation is the scheduler's `fail_fast` decision, not an error
   escaping one task. `group.rs` adds serial and (via `std::thread::scope` plus a
@@ -747,9 +771,13 @@ owns orchestration. The split follows the two execution phases:
   it returns `LayeredOverrides`, which also records which keys are data (see
   [Agent text is data](#agent-text-is-data)).
 - `wrap/sequence/{jit,iterate,phase1c,task_run,task_frames}.rs` — just-in-time
-  composition at each step's turn. `phase1c`'s validation compose and execution
-  both route through `jit::compose_step`, so "validated == executed" holds
-  without a second prepare implementation.
+  composition at each step's turn. `phase1c` and execution share
+  `jit::compose_step` options, including deferred roots and static position;
+  validation uses `prepare_sequence_probe` with shell stages disabled.
+  `PromptTaskRunner::validate` passively checks document late holes before
+  setup, retaining `DocumentShellValues` on the request consumed at execution.
+  Each request owns a fresh snapshot, including transcluded owner sites;
+  runtime document preparation proves membership without granting new approvals.
 
 Two seams are worth knowing before editing:
 

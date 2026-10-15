@@ -128,6 +128,11 @@ Required-feature targets keep DuckDB, L2/L3 integration binaries, and live
 provider targets out of that compile graph. CI enables daemon and terminal
 features; explicit tier recipes enable the corresponding local targets.
 
+Run `just test`, `just lint`, and `just check-tier-coverage claudine`
+sequentially. The tier audit uses `nextest list` with default features and can
+overwrite the fixture-enabled `claudine` binary just as lint-transport can.
+Concurrent listing can remove diagnostic snapshot seams while CLI tests run.
+
 **The L1 spawn contract.** An L1 test obtains a `claudine` command from
 `CliProcessFixture` in `claudine/cli/tests/common/mod.rs` — `command()` for the
 hermetic default, `command_builder()` when it needs a named escape. The default
@@ -202,6 +207,88 @@ The **local control plane** is platform-native and per stable OS user: a Unix-do
 - For when/why a feature changed → [timeline.md](timeline.md)
 - For a specific subsystem → the deep topic docs under [Reference Documents](#reference-documents)
 
+## Container grammar boundary
+
+Sequence tasks accept an exclusive `sequence:` list or file reference (source
+suffix grammar applies). Inline list tasks alone accept container lifecycle
+keys; nested execution remains explicitly unsupported until the container
+runner lands. Groups reject `execution:` (concurrency is implicit), require
+unique nonempty leg names, reject reserved variables `legs`, `succeeded`,
+`failed`, `cancelled`, and retain boolean `fail_fast` only on group objects.
+Task `setup:`/`teardown:` and sequence-document `fail_fast:` are removed
+grammar. The CLI rejects `--fail-fast` before source loading, keeps explicit
+provider `--` tails opaque, and no longer injects `CLAUDINE_FAIL_FAST`.
+`cancelled` is a parsed lifecycle event with a cleanup-only action set;
+actual cancellation dispatch is planned. Internal legacy task-stage tests
+construct preflight models directly; they do not authorize old YAML syntax.
+The canonical shipped trigger schema lives in `claudine/schemas/`, not
+Darkmatter's docs tree. See [Sequences](topics/flow-control/sequences.md).
+
+## Lexical sequence bindings
+
+`lifecycle/bindings/containers.rs` owns fixture-testable `SequenceBinding`,
+`GroupBinding`, and named leg outcomes. `seq`, `group`, and `loop` shadow
+complete roots. `seq` replaces generated frontmatter overlays; authored
+`fm.seq`/`fm.group`/`fm.loop` remain ordinary data. `LayeredOverrides` carries
+its `sequence_value` separately, and `PrepareOptions`/`CallerInputLayers`
+retain `sequence_binding` across rereads and proxy adoption. Never flatten
+that channel back into setters or live frontmatter. `RuntimeSnapshot.seq`
+contains the active position; `sequence_value()` adds current committed
+outputs. The loop's condition and lifecycle gate read that same cell.
+
+`bindings/rename.rs` rejects parsed legacy root reads (including bracket
+access and both condition branches), preserving authored/supplied properties
+by presence, including null. Composition host globals retain a typed renamed
+root fallback for reads introduced by transclusion; Darkmatter's explicit
+`with_document_fallbacks` lets the reading child declare its own property.
+`seq` string presentation uses the existing name-coercion keys for `seq`,
+`seq.previous`, and `seq.next`; typed expression evaluation retains objects.
+Sequence task templates defer `seq`/`group`/`loop`, including the first task.
+Nested container execution remains planned; the future runner must use these
+values for own events and scope restoration rather than merge root fields.
+
+## Structured shell authorization
+
+Document, lifecycle and sequence shells share Darkmatter's typed template
+filler. An exact approval fixes resolved bytes; a template approval permits
+only the authored shape. Never authorize newly filled bytes to bridge modes.
+Sequence graph discovery alone grants no execution: `resolve_graph_shell_approvals`
+records the audited `ShellPreApprovals` on `PreflightGraph`, including referenced
+prompt lifecycle stacks through passive frontmatter-only preparation; task dispatch
+checks membership before filling. Later tasks retain authored text, never
+interim interpolated shell strings. Byte-eligible shell candidates retain their
+`authored_command` even when template grammar fails: authored program holes
+withdraw prefix approval, and `prompt_resolved_site` rejects unoffered grants.
+Lifecycle resolution preserves that authored text across repeated resolution.
+`task/templates.rs` installs approved
+lifecycle stack sites and fills primary commands against current runtime
+mutations. A prompt task's passive barrier and JIT composition share the
+same document epoch (`PromptTaskRequest::document_epoch`), so context capture
+and epoch accounting stay coherent. Referenced prompt lifecycle `shell` and whole-value `set` sites retain
+`PrepareOptions::deferred_shell_roots` and lexical `lifecycle_group`; the passive
+`validate_document_shell_late_values` probe returns their condition-blind lifecycle
+for approval before setup. `DocumentShellValues` keys freeze their late holes
+for JIT preparation as well as document directives. Deferred holes use the step-entry snapshot
+before setup; ordinary holes read at command entry. `TaskShellRunner::run_structured` refuses by
+default; `SystemTaskShell` shares the existing owned-tree process epilogue
+with exact execution. Whole-chain policy and direct-target validation precede
+the first spawn. Shared redirection targets identify original destinations:
+`2>&1 > /dev/null` retains stderr on original stdout; never collapse it to
+stderr's own capture channel. Native `native_task_` and `native_lifecycle_`
+CLI regressions prove routing and downstream output on every OS. See [Pre-flight Checks](topics/pre-flight-checks.md).
+
+Audit limits: the current late root is `outputs`, not `seq.outputs`. Both group
+schedulers validate all members before member setup, retaining `LateValues`,
+prompt `DocumentShellValues`, epoch/context and lexical group scope through
+dispatch; ordinary values remain current per command. Nested sequences and
+group terminal events have no runtime surface. First-task primary `shell:` and task stacks
+with only known values support either exact or shape approval. Graph candidates
+retain both modes; task entry settles shape membership before byte stamping
+and environment reapproval. Do not infer full container coverage from later-task tests.
+The shell runtime rejection chain omits rejected values; earlier document
+schema validation can disclose them. Approval is separate from result caching:
+current membership, validators, blacklists, and direct targets still apply.
+
 ## Initialization shell boundary
 
 Loop initialization uses the full bootstrap frontmatter separately from the
@@ -221,7 +308,8 @@ cannot execute shells either, including catch evaluation-error routes, and
 `no_error` cannot suppress the prohibition. The shared runtime permits lifecycle
 shells only from `start`, after preflight, and proxy adoption resets that boundary.
 Keep parser rejection and the runtime backstop together (`DisabledShellRunner`
-refuses `run` and `run_values` alike). See the binding ruling
+refuses `run`, `run_values`, and `run_structured` alike, and its
+`ensure_permitted` answers before a template site reads any placeholder). See the binding ruling
 in `claudine/fixes/2026-09-15-initialize-after-proxy/spec.md` (R2).
 
 ## Library Module Map

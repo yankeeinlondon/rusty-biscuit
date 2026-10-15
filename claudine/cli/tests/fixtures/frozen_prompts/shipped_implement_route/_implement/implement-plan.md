@@ -135,7 +135,7 @@ You will log your implementation progress to: {{log}}
     - set `started_phase` to "{{phase}}"
 ::end-block
 
-::block when="is_last"
+::block when="fm.is_last"
 Now we need to update the specification file's frontmatter ({{spec}}):
 
 - set `implemented` to `true`

@@ -211,7 +211,7 @@ fn lifecycle_config_is_empty() {
 }
 
 #[test]
-fn all_seven_signals_have_canonical_property_names() {
+fn all_eight_signals_have_canonical_property_names() {
     assert_eq!(LifecycleSignal::Initialize.property_name(), "initialize");
     assert_eq!(LifecycleSignal::Start.property_name(), "start");
     assert_eq!(LifecycleSignal::Success.property_name(), "success");
@@ -235,6 +235,7 @@ fn signal_all_iterates_in_canonical_order() {
             "failure",
             "finalize",
             "loop",
+            "cancelled",
         ]
     );
 }
@@ -333,7 +334,7 @@ fn empty_stack_is_the_empty_slice() {
 }
 
 #[test]
-fn empty_frontmatter_yields_empty_seven_event_config() {
+fn empty_frontmatter_yields_empty_eight_event_config() {
     let fm = json!({});
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
     assert!(config.is_empty());

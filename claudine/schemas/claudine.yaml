@@ -34,6 +34,11 @@ match:
         - failure: boolean(required)
         - failure: object(required)
         - failure: "unknown[](required)"
+        - cancelled: string(required)
+        - cancelled: number(required)
+        - cancelled: boolean(required)
+        - cancelled: object(required)
+        - cancelled: "unknown[](required)"
         - finalize: string(required)
         - finalize: number(required)
         - finalize: boolean(required)
@@ -75,9 +80,8 @@ $schema:
           value: "unknown -> stored hash payload"
           ignored: "string[] -> extra frontmatter keys ignored during hash computation"
     last_updated: "date -> managed content-change date in YYYY-MM-DD form; stamped by Claudine's completion"
-    fail_fast: "boolean -> stop a sequence at the first failed step"
     sequence:
-        - "unknown[] -> the sequence's tasks"
+        - "step[]@./lifecycle.yaml -> the sequence's tasks; deeper container grammar is parser-validated"
         - "string -> a file reference to the sequence's tasks"
     loop: "loop@./lifecycle.yaml -> run the prompt repeatedly"
     argv: "string[] -> arguments passed through to the agent"
@@ -88,6 +92,7 @@ $schema:
     blocked: "stack@./lifecycle.yaml -> actions run when the agent is blocked"
     success: "stack@./lifecycle.yaml -> actions run after a successful run"
     failure: "stack@./lifecycle.yaml -> actions run after a failed run"
+    cancelled: "cancelled-stack@./lifecycle.yaml -> opt into cancellation; actions run when cancelled"
     finalize: "stack@./lifecycle.yaml -> actions run last, whatever the outcome"
     timeout: "string(not-empty) -> the run's overall timeout, such as 30m"
     step_timeout: "string(not-empty) -> the timeout for one sequence step"
@@ -101,11 +106,6 @@ $schema:
     yolo: "boolean -> skip permission prompts; set by flag, not read from a document"
     verbosity: "string(suggest(silent, quiet, verbose)) -> prompt-reporting verbosity of a system prompt: silent, quiet, or verbose in any letter case"
     mode: "enum(append, replace) -> whether a system prompt appends to or replaces the provider's own"
-    state: "unknown -> a sequence step's state; injected by Claudine into sequence steps"
-    previous: "unknown -> the previous sequence step; injected by Claudine into sequence steps"
-    next: "unknown -> the next sequence step; injected by Claudine into sequence steps"
-    outputs: "unknown -> earlier sequence steps' outputs; injected by Claudine into sequence steps"
-    sequence_id: "unknown -> the running sequence's identifier; injected by Claudine into sequence steps"
     name: name@./linking.yaml
     allowed-tools: allowed-tools@./linking.yaml
     tools: tools@./linking.yaml

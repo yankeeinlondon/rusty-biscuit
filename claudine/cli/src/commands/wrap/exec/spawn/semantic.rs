@@ -244,7 +244,6 @@ pub(crate) fn run_child_stream_semantic(
                 setup::isolate_into_process_group(&mut command);
                 let mut child = command.spawn()?;
                 *child_spawned = true;
-                crate::budget::record_child(child.id());
                 Span::current().record("child_pid", tracing::field::display(child.id()));
                 let stdout = child
                     .stdout

@@ -53,6 +53,38 @@ pub(crate) fn parse_directives_in(
     ctx: SourceContext,
     line_offset: usize,
 ) -> Result<Vec<ShellDirective>, ShellExpansionError> {
+    scan_directive_lines(content, data, ctx, line_offset)
+        .into_iter()
+        .map(|line| line.parsed)
+        .collect()
+}
+
+/// One `::shell` directive line, found by its authored line start, prefix,
+/// and keyword, with its command parsed from the line's current text.
+#[derive(Debug)]
+pub(crate) struct DirectiveLine {
+    /// The whole line, terminator included.
+    pub span: std::ops::Range<usize>,
+    /// The `::shell` keyword. Always authored, so it projects back to the
+    /// authored body.
+    pub keyword: std::ops::Range<usize>,
+    pub indent: String,
+    /// The line's current text parsed as a resolved-byte directive, or why it
+    /// could not be. A placeholder value that holds quotes, operators, or
+    /// command syntax fails here; a template reading of the authored line may
+    /// still run it.
+    pub parsed: Result<ShellDirective, ShellExpansionError>,
+}
+
+/// [`parse_directives_in`], keeping each line's parse failure with the line
+/// instead of failing the whole body, so a caller can still run a directive
+/// whose authored text is a valid template.
+pub(crate) fn scan_directive_lines(
+    content: &str,
+    data: Option<&DataRanges>,
+    ctx: SourceContext,
+    line_offset: usize,
+) -> Vec<DirectiveLine> {
     let structural = structural_view(content, data);
     let code_regions = find_code_regions(&structural);
     let mut directives = Vec::new();
@@ -81,86 +113,37 @@ pub(crate) fn parse_directives_in(
                 && authored_directive(data, line_start, keyword_end)
             {
                 let indent = line[..prefix_len].to_string();
-
-                // Parse the command
-                let tokens = tokenize(command_text, &ctx).map_err(|e| {
-                    ShellExpansionError::ParseDirective {
-                        ctx: Box::new(ctx.clone()),
+                let parsed = parse_directive_command(
+                    command_text,
+                    &structural,
+                    data,
+                    keyword_end,
+                    file_line,
+                    &ctx,
+                )
+                .map(|(pipeline, error_handling, timeout_override, no_cache)| {
+                    let raw_command = pipeline.display_string();
+                    let executable = pipeline.actions[0].command.executable.clone();
+                    let args = pipeline.actions[0].command.args.clone();
+                    ShellDirective {
+                        raw_command,
+                        executable,
+                        args,
+                        span: line_start..line_with_newline_end,
+                        indent: indent.clone(),
                         origin: ShellCommandOrigin::Body { line: file_line },
-                        message: match e {
-                            ShellExpansionError::ParseDirective { message, .. } => message,
-                            _ => e.to_string(),
-                        },
+                        error_handling,
+                        timeout_override,
+                        no_cache,
+                        pipeline: Some(pipeline),
+                        ctx: ctx.clone(),
                     }
-                })?;
-
-                if tokens.is_empty() {
-                    return Err(ShellExpansionError::ParseDirective {
-                        ctx: Box::new(ctx.clone()),
-                        origin: ShellCommandOrigin::Body { line: file_line },
-                        message: "Empty command".to_string(),
-                    });
-                }
-
-                // Separate error handling options, timeout, and the cache opt-out
-                // from shell tokens
-                let (error_handling, shell_tokens, timeout_override, no_cache) =
-                    extract_options_from_tokens(&tokens, file_line, &ctx)?;
-
-                if shell_tokens.is_empty() {
-                    return Err(ShellExpansionError::ParseDirective {
-                        ctx: Box::new(ctx.clone()),
-                        origin: ShellCommandOrigin::Body { line: file_line },
-                        message: "No command after error handling options".to_string(),
-                    });
-                }
-
-                // Parse the pipeline from the shell tokens
-                let pipeline = parse_pipeline(&shell_tokens, &ctx).map_err(|e| {
-                    ShellExpansionError::ParseDirective {
-                        ctx: Box::new(ctx.clone()),
-                        origin: ShellCommandOrigin::Body { line: file_line },
-                        message: match e {
-                            ShellExpansionError::ParseDirective { message, .. } => message,
-                            _ => e.to_string(),
-                        },
-                    }
-                })?;
-
-                if let Some(data) = data {
-                    let command_start = keyword_end + 1;
-                    let command_range = command_start..command_start + command_text.len();
-                    if data.intersects(&command_range) {
-                        let masked = &structural[command_range];
-                        if let Some(change) = data_changed_shape(&pipeline, masked, true, &ctx) {
-                            return Err(ShellExpansionError::ParseDirective {
-                                ctx: Box::new(ctx.clone()),
-                                origin: ShellCommandOrigin::Body { line: file_line },
-                                message: format!(
-                                    "inserted data {change}; interpolation may supply a \
-                                     command's arguments, never its executable or structure"
-                                ),
-                            });
-                        }
-                    }
-                }
-
-                let raw_command = pipeline.display_string();
-                let executable = pipeline.actions[0].command.executable.clone();
-                let args = pipeline.actions[0].command.args.clone();
-
-                directives.push(ShellDirective {
-                    raw_command,
-                    executable,
-                    args,
+                });
+                directives.push(DirectiveLine {
                     span: line_start..line_with_newline_end,
+                    keyword: line_start + prefix_len..keyword_end,
                     indent,
-                    origin: ShellCommandOrigin::Body { line: file_line },
-                    error_handling,
-                    timeout_override,
-                    no_cache,
-                    pipeline: Some(pipeline),
-                    ctx: ctx.clone(),
+                    parsed,
                 });
             }
         }
@@ -168,7 +151,92 @@ pub(crate) fn parse_directives_in(
         byte_offset = line_with_newline_end;
     }
 
-    Ok(directives)
+    directives
+}
+
+/// The parsed parts of one directive's command text: its pipeline, error
+/// handling, timeout override, and cache opt-out.
+type ParsedDirectiveCommand = (
+    super::types::ShellPipeline,
+    ErrorHandling,
+    Option<std::time::Duration>,
+    bool,
+);
+
+/// Parses the command text of a `::shell` line whose keyword ends at
+/// `keyword_end`, failing when data inserted into it changed its shape.
+fn parse_directive_command(
+    command_text: &str,
+    structural: &str,
+    data: Option<&DataRanges>,
+    keyword_end: usize,
+    file_line: usize,
+    ctx: &SourceContext,
+) -> Result<ParsedDirectiveCommand, ShellExpansionError> {
+    // Parse the command
+    let tokens = tokenize(command_text, ctx).map_err(|e| {
+        ShellExpansionError::ParseDirective {
+            ctx: Box::new(ctx.clone()),
+            origin: ShellCommandOrigin::Body { line: file_line },
+            message: match e {
+                ShellExpansionError::ParseDirective { message, .. } => message,
+                _ => e.to_string(),
+            },
+        }
+    })?;
+
+    if tokens.is_empty() {
+        return Err(ShellExpansionError::ParseDirective {
+            ctx: Box::new(ctx.clone()),
+            origin: ShellCommandOrigin::Body { line: file_line },
+            message: "Empty command".to_string(),
+        });
+    }
+
+    // Separate error handling options, timeout, and the cache opt-out
+    // from shell tokens
+    let (error_handling, shell_tokens, timeout_override, no_cache) =
+        extract_options_from_tokens(&tokens, file_line, ctx)?;
+
+    if shell_tokens.is_empty() {
+        return Err(ShellExpansionError::ParseDirective {
+            ctx: Box::new(ctx.clone()),
+            origin: ShellCommandOrigin::Body { line: file_line },
+            message: "No command after error handling options".to_string(),
+        });
+    }
+
+    // Parse the pipeline from the shell tokens
+    let pipeline = parse_pipeline(&shell_tokens, ctx).map_err(|e| {
+        ShellExpansionError::ParseDirective {
+            ctx: Box::new(ctx.clone()),
+            origin: ShellCommandOrigin::Body { line: file_line },
+            message: match e {
+                ShellExpansionError::ParseDirective { message, .. } => message,
+                _ => e.to_string(),
+            },
+        }
+    })?;
+
+    if let Some(data) = data {
+        let command_start = keyword_end + 1;
+        let command_range = command_start..command_start + command_text.len();
+        if data.intersects(&command_range) {
+            let masked = &structural[command_range];
+            if let Some(change) = data_changed_shape(&pipeline, masked, true, ctx) {
+                return Err(ShellExpansionError::ParseDirective {
+                    ctx: Box::new(ctx.clone()),
+                    origin: ShellCommandOrigin::Body { line: file_line },
+                    message: format!(
+                        "inserted data {change}; interpolation may supply a \
+                         command's arguments, never its executable or structure"
+                    ),
+                });
+            }
+        }
+    }
+
+    Ok((pipeline, error_handling, timeout_override, no_cache))
 }
 
 /// The authored command text of every `::shell` directive in `content`, with
@@ -200,6 +268,21 @@ pub(crate) fn authored_directive_commands(content: &str, line_offset: usize) -> 
     commands
 }
 
+/// The authored command text of the `::shell` directive whose line holds
+/// byte `offset` of `content`, with its 1-based file line.
+///
+/// Applies the same prefix rule as [`authored_directive_commands`]; the
+/// caller has already established that the line is a directive outside code.
+pub(crate) fn authored_directive_at(content: &str, offset: usize, line_offset: usize) -> Option<(String, usize)> {
+    let start = content.get(..offset)?.rfind('\n').map_or(0, |index| index + 1);
+    let end = content[offset..].find('\n').map_or(content.len(), |index| offset + index);
+    let line = &content[start..end];
+    let line = line.strip_suffix('\r').unwrap_or(line);
+    let command = line[directive_prefix_len(line)..].trim_end().strip_prefix("::shell ")?;
+    let file_line = content[..start].matches('\n').count() + 1 + line_offset;
+    Some((command.to_string(), file_line))
+}
+
 /// Parses an authored `::shell` command as a template and removes the
 /// directive's own options (`--when-error`, `--no-cache`, `::timeout:<N>`, …),
 /// which are not command arguments, exactly as [`parse_directives_in`]
@@ -207,9 +290,23 @@ pub(crate) fn authored_directive_commands(content: &str, line_offset: usize) -> 
 pub(crate) fn authored_template(
     command_text: &str,
 ) -> Result<super::template::CommandTemplate, super::template::TemplateGrammarError> {
+    authored_template_with_options(command_text).map(|(template, _)| template)
+}
+
+/// [`authored_template`], also returning the removed option words in order.
+/// An option word or option argument that holds a placeholder is `None`: it
+/// has no authored value.
+fn authored_template_with_options(
+    command_text: &str,
+) -> Result<(super::template::CommandTemplate, Vec<Option<String>>), super::template::TemplateGrammarError> {
     use super::template::{ArgPart, TemplateArg, TemplateGrammarError};
 
+    let literal_of = |arg: &TemplateArg| match arg.parts.as_slice() {
+        [ArgPart::Literal(text)] => Some(text.clone()),
+        _ => None,
+    };
     let mut template = super::template::parse_authored(command_text)?;
+    let mut options = Vec::new();
     for segment in &mut template.segments {
         let mut words: Vec<TemplateArg> = std::iter::once(TemplateArg::normalized(vec![ArgPart::Literal(
             std::mem::take(&mut segment.program),
@@ -219,21 +316,22 @@ pub(crate) fn authored_template(
         let mut kept = Vec::with_capacity(words.len());
         let mut index = 0;
         while index < words.len() {
-            let literal = match words[index].parts.as_slice() {
-                [ArgPart::Literal(text)] => Some(text.as_str()),
-                _ => None,
+            let literal = literal_of(&words[index]);
+            let consumed = match literal.as_deref() {
+                Some(option) if ERROR_HANDLING_OPTIONS.contains(&option) => 1 + option_arg_count(option),
+                Some("--no-cache") => 1,
+                Some(word) if word.starts_with("::timeout:") => 1,
+                _ => 0,
             };
-            match literal {
-                Some(option) if ERROR_HANDLING_OPTIONS.contains(&option) => {
-                    index += 1 + option_arg_count(option);
-                }
-                Some("--no-cache") => index += 1,
-                Some(word) if word.starts_with("::timeout:") => index += 1,
-                _ => {
-                    kept.push(std::mem::replace(&mut words[index], TemplateArg { parts: Vec::new() }));
-                    index += 1;
-                }
+            if consumed == 0 {
+                kept.push(std::mem::replace(&mut words[index], TemplateArg { parts: Vec::new() }));
+                index += 1;
+                continue;
             }
+            for word in words.iter().skip(index).take(consumed) {
+                options.push(literal_of(word));
+            }
+            index += consumed;
         }
         let mut kept = kept.into_iter();
         let program = kept.next().ok_or(TemplateGrammarError::Empty)?;
@@ -244,7 +342,43 @@ pub(crate) fn authored_template(
         };
         segment.args = kept.collect();
     }
-    Ok(template)
+    Ok((template, options))
+}
+
+/// A `::shell` directive's own options, read from its authored text: error
+/// handling, the timeout override, and the cache opt-out.
+pub(crate) struct AuthoredOptions {
+    pub error_handling: ErrorHandling,
+    pub timeout_override: Option<std::time::Duration>,
+    pub no_cache: bool,
+}
+
+/// The options of the authored `::shell` command `command_text`, for a
+/// directive whose current text no longer parses because a placeholder value
+/// holds command syntax. `None` when an option or its argument holds a
+/// placeholder, so it has no authored value.
+///
+/// ## Errors
+///
+/// The same option errors [`parse_directives_in`] reports.
+pub(crate) fn authored_directive_options(
+    command_text: &str,
+    file_line: usize,
+    ctx: &SourceContext,
+) -> Result<Option<AuthoredOptions>, ShellExpansionError> {
+    let Ok((_, words)) = authored_template_with_options(command_text) else {
+        return Ok(None);
+    };
+    let Some(words) = words.into_iter().collect::<Option<Vec<String>>>() else {
+        return Ok(None);
+    };
+    let tokens: Vec<ShellToken> = words.into_iter().map(ShellToken::Word).collect();
+    let (error_handling, _, timeout_override, no_cache) = extract_options_from_tokens(&tokens, file_line, ctx)?;
+    Ok(Some(AuthoredOptions {
+        error_handling,
+        timeout_override,
+        no_cache,
+    }))
 }
 
 /// How inserted data changed a command's shape, if it did.

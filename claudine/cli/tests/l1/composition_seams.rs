@@ -55,16 +55,17 @@ use std::path::{Path, PathBuf};
 /// `composition::prepare`.
 const COMPOSE_WITH_ALLOWLIST: &[AllowedSite] = &[
     AllowedSite {
-        site: "composition::prepare::prepare_direct_with_prompt",
+        site: "composition::prepare::prepare_direct_on",
         calls: 1,
         reason: "the canonical direct-document composer (the sanctioned owner); \
-                 `prepare_direct` and the canonical service's every entry \
-                 delegate here",
+                 `prepare_direct`, the canonical service's every entry, and the \
+                 loop seed's read (`prepare_loop_seed`) delegate here",
     },
     AllowedSite {
-        site: "composition::prepare::prepare_inline",
+        site: "composition::prepare::prepare_inline_on",
         calls: 1,
-        reason: "the canonical inline-compose composer (the sanctioned owner)",
+        reason: "the canonical inline-compose composer (the sanctioned owner); \
+                 `prepare_inline` and the loop seed's read delegate here",
     },
     AllowedSite {
         site: "composition::prepare::compose_bootstrap",
@@ -73,6 +74,13 @@ const COMPOSE_WITH_ALLOWLIST: &[AllowedSite] = &[
                  as the two composers above, narrowed to the frontmatter surface; \
                  it produces no prompt, so it is a stage of the sanctioned owner, \
                  not a second composer",
+    },
+    AllowedSite {
+        site: "composition::preflight::resolve_graph_shell_approvals",
+        calls: 1,
+        reason: "passive sequence discovery reuses the referenced document's prepared request, \
+                 narrowed to frontmatter interpolation; it neither executes shells nor \
+                 produces a prompt, and canonical preparation still owns execution",
     },
     AllowedSite {
         site: "system_prompt::prepare::compose_prompt_markdown",
@@ -121,12 +129,13 @@ const SUBTREE_COMPOSE_BASELINE: &[AllowedSite] = &[
                  before any event fires",
     },
     AllowedSite {
-        site: "preflight::reapproval::compose_shell_text",
+        site: "preflight::reapproval::compose_approval_value",
         calls: 1,
-        reason: "Sequence Plus static shell-byte resolution — early-binding \
-                 only, with the resolved bytes stored for approval and execution; \
-                 the same one function re-resolves an approved command under a \
-                 later task's environment to refuse changed text, so it is not a \
+        reason: "Sequence Plus static approval reads — early-binding only: a \
+                 first-task command's resolved bytes, every approval-time \
+                 placeholder's presence check, and a prompt task's approval-time \
+                 params; the same one function re-resolves a resolved command under \
+                 a later task's environment to refuse changed text, so it is not a \
                  second grammar",
     },
     AllowedSite {

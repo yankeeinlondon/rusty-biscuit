@@ -39,6 +39,7 @@ impl Markdown {
         perf: &mut perf::PerfCollector,
         body: &mut BodyProvenance,
         frontmatter_data: &DataPaths,
+        schemas: &super::super::schema_validation::PreparedSchemas,
     ) -> MarkdownResult<()> {
         match operation {
             // FrontmatterInterpolation is handled before EffectiveState build,
@@ -67,15 +68,34 @@ impl Markdown {
                 Ok(())
             }
             ComposeOperation::ShellExpansion => {
-                inline::shell_expansion::run_stage(self, options, runtime, report, perf, body)
+                inline::shell_expansion::run_stage(self, state, schemas, options, runtime, report, perf, body)
             }
             ComposeOperation::ShellBlocks => {
                 let sb_ctx = self.full_source_context_for_errors();
                 let line_offset = self.frontmatter_line_count();
                 body.data.ensure_describes(&self.content)?;
+                let lookup = super::super::context::effective_state::ResolvingLookup::new(
+                    state,
+                    options.expression_resolution_context(&runtime.remote_fetch),
+                );
+                let evaluator = shell_expansion::template::LookupEvaluator::new(&lookup);
+                let templates = body
+                    .authored
+                    .as_ref()
+                    .filter(|authored| authored.text().contains("::shell-block"))
+                    .map(|authored| shell_blocks::BlockTemplates {
+                        authored,
+                        scope: shell_expansion::site::SiteScope::new(
+                            options,
+                            schemas.effective_for(self).and_then(|effective| effective.simplified),
+                        ),
+                        evaluator: &evaluator,
+                        ctx: shell_expansion::site::authored_context(self, Some(authored.text())),
+                    });
                 let (new_content, stage_report, edits) = shell_blocks::run_shell_blocks_stage_in(
                     &self.content,
                     Some(&body.data),
+                    templates.as_ref(),
                     options,
                     &mut runtime.shell,
                     &sb_ctx,

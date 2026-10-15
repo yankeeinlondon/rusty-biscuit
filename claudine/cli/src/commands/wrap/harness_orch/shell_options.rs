@@ -97,15 +97,7 @@ fn build_harness_shell_options_for_policy_root(
     policy_root: Option<PathBuf>,
     shared_cache: Option<claudine::composition::SharedApprovalCache>,
 ) -> claudine::harness::ShellApprovalOptions {
-    let approval_handler: Option<
-        std::sync::Arc<dyn darkmatter::markdown::compose::shell_expansion::ShellApprovalHandler>,
-    > = if darkmatter_cli::approval::can_prompt_interactively() {
-        Some(std::sync::Arc::new(
-            darkmatter_cli::approval::CliShellApprovalHandler,
-        ))
-    } else {
-        None
-    };
+    let approval_handler = prompt_handler(darkmatter_cli::approval::can_prompt_interactively());
     let mut opts = claudine::harness::ShellApprovalOptions {
         policy_root,
         approval_handler,
@@ -115,6 +107,14 @@ fn build_harness_shell_options_for_policy_root(
         opts.approval_cache = cache;
     }
     opts
+}
+
+/// The installed approval prompt: `md`'s own, which shows a template's
+/// placeholders and only the choices a request offers. Without a terminal
+/// there is no prompt, and an unapproved command fails as approval
+/// unavailable.
+fn prompt_handler(can_prompt: bool) -> Option<SharedApprovalHandler> {
+    can_prompt.then(|| Arc::new(darkmatter_cli::approval::CliShellApprovalHandler) as SharedApprovalHandler)
 }
 
 /// Approval handler that auto-approves every command it is asked about.
@@ -328,5 +328,137 @@ mod tests {
         );
         cached.refresh_for_source(&source, None);
         assert_eq!(cached.shell_options.policy_root.as_deref(), Some(nested.as_path()));
+    }
+
+    // ── The installed prompt, answered with scripted input ───────────────
+
+    use darkmatter::markdown::compose::shell_expansion::template::DeferredShellRoots;
+    use darkmatter::markdown::compose::shell_expansion::{
+        ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
+    };
+    use std::sync::Mutex;
+
+    /// The prompt Claudine installs, reading one scripted line per request.
+    struct ScriptedPrompt {
+        answers: Mutex<Vec<&'static str>>,
+        transcript: Mutex<String>,
+    }
+
+    impl ScriptedPrompt {
+        fn new(answers: &[&'static str]) -> Arc<Self> {
+            Arc::new(Self {
+                answers: Mutex::new(answers.iter().rev().copied().collect()),
+                transcript: Mutex::new(String::new()),
+            })
+        }
+
+        fn transcript(&self) -> String {
+            let raw = self.transcript.lock().unwrap();
+            let mut plain = String::with_capacity(raw.len());
+            let mut chars = raw.chars();
+            while let Some(c) = chars.next() {
+                if c == '\x1b' {
+                    chars.by_ref().find(|inner| *inner == 'm');
+                } else {
+                    plain.push(c);
+                }
+            }
+            plain
+        }
+    }
+
+    impl ShellApprovalHandler for ScriptedPrompt {
+        fn approve(&self, request: ShellApprovalRequest) -> Result<ShellApprovalDecision, ShellExpansionError> {
+            let answer = self.answers.lock().unwrap().pop().expect("a scripted answer");
+            let mut output = Vec::new();
+            let decision = darkmatter_cli::approval::approve_with_io(
+                &request,
+                &mut std::io::Cursor::new(format!("{answer}\n")),
+                &mut output,
+            );
+            self.transcript.lock().unwrap().push_str(&String::from_utf8(output).unwrap());
+            decision
+        }
+    }
+
+    fn scripted_options(dir: &Path, prompt: &Arc<ScriptedPrompt>) -> claudine::harness::ShellApprovalOptions {
+        let mut options = build_harness_shell_options_for_policy_root(Some(dir.to_path_buf()), None);
+        options.approval_handler = Some(Arc::clone(prompt) as SharedApprovalHandler);
+        options
+    }
+
+    fn compose_request(dir: &Path, late: bool) -> darkmatter::markdown::compose::ComposeRequest {
+        let mut options = darkmatter::markdown::compose::ComposeOptions::new();
+        if late {
+            options = options.with_deferred_shell_roots(DeferredShellRoots::new(["seq"]));
+        }
+        darkmatter::markdown::compose::ComposeRequest::with_context(options, crate::request::test_context_at(dir))
+            .unwrap()
+    }
+
+    #[test]
+    fn without_a_terminal_no_prompt_is_installed() {
+        assert!(prompt_handler(false).is_none());
+        assert!(prompt_handler(true).is_some());
+    }
+
+    #[test]
+    fn a_single_document_command_is_shown_resolved_and_saved_as_its_shape() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let prompt = ScriptedPrompt::new(&["2"]);
+        let markdown: darkmatter::markdown::Markdown =
+            "---\nout: dist\n---\n::shell just clean --out {{ out }}/build\n".into();
+
+        let result = claudine::composition::preflight::resolve_shell_approvals(
+            Some(&markdown),
+            Some(&compose_request(dir.path(), false)),
+            &scripted_options(dir.path(), &prompt),
+            None,
+            None,
+        )
+        .unwrap();
+
+        let transcript = prompt.transcript();
+        assert!(transcript.contains("Command:  just clean --out {{ out: string }}/build"), "{transcript}");
+        assert!(transcript.contains("Resolved: just clean --out dist/build"), "{transcript}");
+        assert!(transcript.contains("1 │ Allow this exact command"), "{transcript}");
+        assert!(transcript.contains("2 │ Allow this command shape"), "{transcript}");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(".darkmatter-shell-whitelist")).unwrap(),
+            "template just clean --out {{ string }}/build\n"
+        );
+        assert!(!result.approved_commands.contains_exact("just clean --out dist/build"));
+        assert_eq!(result.approved_commands.templates().count(), 1);
+    }
+
+    #[test]
+    fn a_late_command_offers_no_exact_choice_and_refuses_an_unlisted_number() {
+        let dir = tempfile::TempDir::new().unwrap();
+        // Five choices are listed, so "6" is refused before "5" blacklists.
+        let prompt = ScriptedPrompt::new(&["6\n5"]);
+        let markdown: darkmatter::markdown::Markdown =
+            "::shell just clean --out {{ last(seq.outputs) }}/build && git add {{ last(seq.outputs) }}\n".into();
+        let candidates = markdown.compose_preflight(&compose_request(dir.path(), true)).unwrap().candidates;
+
+        let error = claudine::harness::shell::validate_and_approve_template_site(
+            &candidates[0],
+            &scripted_options(dir.path(), &prompt),
+        )
+        .expect_err("blacklisted");
+
+        assert!(matches!(error, claudine::harness::HarnessError::ShellCommandBlacklisted { .. }), "{error:?}");
+        let transcript = prompt.transcript();
+        assert!(
+            transcript.contains("Command:  just clean --out {{ last(seq.outputs): string }}/build && git add"),
+            "{transcript}"
+        );
+        assert!(!transcript.contains("exact command"), "{transcript}");
+        assert!(!transcript.contains("Resolved:"), "{transcript}");
+        assert!(transcript.contains("saves \"prefix just\", \"prefix git\" to the whitelist"), "{transcript}");
+        assert!(transcript.contains("Invalid choice. Please enter 1-5."), "{transcript}");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(".darkmatter-shell-blacklist")).unwrap(),
+            "template just clean --out {{ string }}/build && git add {{ string }}\n"
+        );
     }
 }

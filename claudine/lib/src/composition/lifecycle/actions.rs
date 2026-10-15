@@ -1,8 +1,8 @@
 //! Typed action model for lifecycle stacks.
 //!
-//! A **stack** is any place the lifecycle action grammar is accepted: the six
+//! A **stack** is any place the lifecycle action grammar is accepted: the seven
 //! events (`initialize`, `start`, `blocked`, `success`, `failure`,
-//! `finalize`), the `loop:` block's lifecycle concerns, and a sequence task's
+//! `finalize`, `cancelled`), the `loop:` block's lifecycle concerns, and a sequence task's
 //! `setup:`/`teardown:`. Each parses into an ordered list of
 //! [`LifecycleNode`]s: a leaf [`LifecycleAction`], or a
 //! [`LifecycleConditional`] whose `then`/`else` bodies are themselves ordered
@@ -233,21 +233,13 @@ impl LifecycleControlAction {
     /// Returns `true` when this control action is permitted in the given
     /// event per the spec's "Where valid" matrix.
     ///
-    /// Flow control is **universal**: `Stop`, `Error`, `Retry`, `Resume`,
-    /// `Defer`, and `Proxy` are valid in **every** event. Flow control reacts
-    /// to *state* — an error, a missing file, an `env` value, frontmatter — and
-    /// an error is just one kind of state (e.g. a `success` stack may `resume`
-    /// the agent because an expected artifact was not produced).
-    ///
-    /// `Skip` is the **one** placement-restricted action: a whole-document
-    /// opt-out is only coherent at `initialize`, before anything has run.
-    ///
-    /// Differences that look event-specific are **runtime capability**, not
-    /// placement, and are checked at runtime rather than here: `Resume` needs a
-    /// live provider session (pre-launch it surfaces `ResumeWithoutSession`),
-    /// and `Retry`'s re-entry point (re-run pre-flight vs. re-invoke the
-    /// provider) is derived from whether the provider had launched.
+    /// Cancellation cleanup permits only `Stop`. Other events permit recovery
+    /// directives, with `Skip` restricted to initialization. Provider-session
+    /// requirements and recovery re-entry points are checked at runtime.
     pub fn is_valid_for(&self, event: LifecycleSignal) -> bool {
+        if event == LifecycleSignal::Cancelled {
+            return matches!(self, Self::Stop);
+        }
         match self {
             Self::Skip => matches!(event, LifecycleSignal::Initialize),
             _ => true,
@@ -286,7 +278,9 @@ pub enum WithValue {
 ///
 /// The command bytes are fixed once, at preflight, from early-binding values;
 /// the result is produced each time the action executes. See
-/// [`ResolvedShellValue`] for the two lifetimes.
+/// [`ResolvedShellValue`] for the two lifetimes. A value approved by its shape
+/// ([`Self::template`]) runs its template instead, reading its placeholders
+/// when the action executes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetShellValue {
     /// The value as authored (trimmed), suffixes included.
@@ -294,6 +288,10 @@ pub struct SetShellValue {
     /// The approved command bytes; `None` until preflight resolves them. An
     /// unresolved value never runs.
     pub resolved: Option<ResolvedShellValue>,
+    /// The authored command as a typed template, recorded by preflight when
+    /// it holds a placeholder. Its approval decides whether the value runs
+    /// its bytes or its template.
+    pub template: Option<super::shell_template::LifecycleShellTemplate>,
 }
 
 /// The message of a shell-value parse error, without the directive location
@@ -387,6 +385,7 @@ impl RuntimeSet {
                     WithValue::Shell(Box::new(SetShellValue {
                         authored: text.trim().to_string(),
                         resolved: None,
+                        template: None,
                     })),
                 );
                 continue;
@@ -662,6 +661,8 @@ impl CommunicationChannel {
 /// A shell action.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShellAction {
+    /// Authored bytes retained for approval eligibility after interpolation.
+    pub authored_command: Option<String>,
     /// The shell command expression. The spec example uses string literals,
     /// but the model accepts any expression so interpolation can compose the
     /// command at runtime.
@@ -669,10 +670,14 @@ pub struct ShellAction {
     /// Message to emit when the command exits non-zero.
     pub on_error: Option<Expr>,
     /// `true` once pre-flight (C3) has stamped `command` and `on_error` with
-    /// their resolved bytes. Those bytes are what was approved and are run as
+    /// their resolved bytes. A command approved as those bytes runs them as
     /// they stand: anything the resolution inserted is data and is never
     /// interpolated again at event time.
     pub pre_resolved: bool,
+    /// The authored `command` as a typed template, recorded by pre-flight
+    /// when it holds a placeholder. Its approval decides whether the action
+    /// runs the stamped bytes or the template.
+    pub template: Option<super::shell_template::LifecycleShellTemplate>,
 }
 
 /// A side-effect action — a Darkmatter effect verb invoked by name with

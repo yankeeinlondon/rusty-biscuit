@@ -42,6 +42,7 @@ use super::shell_expansion::types::{
     ShellExpansionError, ShellExpansionRuntime, ShellPipeline, ShellPolicyPaths,
     ShellTimeoutBehavior, frontmatter_key_line,
 };
+use super::shell_expansion::site::{SiteFrame, SiteScope, TemplateSite, prepare_site};
 use super::shell_expansion::{
     PreparedShellDirective, execute_prepared_directive, execute_prepared_outcome,
     prepare_directive,
@@ -59,7 +60,7 @@ mod assignment;
 mod suffix;
 
 pub use assignment::{
-    ResolvedShellValue, check_frontmatter_shell_value, execute_resolved_shell_values,
+    ResolvedShellValue, check_frontmatter_shell_value, execute_resolved_shell_values, execute_shell_values_with,
 };
 pub use suffix::{
     FRONTMATTER_SHELL_SUFFIXES, FrontmatterShellSuffix, ShellResultKind, ShellSuffixDescriptor,
@@ -275,6 +276,9 @@ fn shell_token_spans(s: &str) -> Vec<SourceSpan> {
 /// - [`FrontmatterShellAst::Ternary`] — a conditional `COND ? THEN : ELSE`
 ///   whose branches each evaluate to either an empty literal or a pipeline.
 ///
+/// The frontmatter scan adds [`FrontmatterShellAst::Unparsed`] for a value
+/// that can run only as its authored template.
+///
 /// The condition is captured as the original, pre-interpolation text so that
 /// it can be evaluated by the template expression engine at execution time;
 /// it never reaches the shell. The branch AST exists so that validation and
@@ -292,6 +296,12 @@ pub(crate) enum FrontmatterShellAst {
         then_branch: Branch,
         else_branch: Branch,
     },
+    /// A value whose interpolated text no longer parses as a command because
+    /// a placeholder's value holds quotes, operators, or command syntax, but
+    /// whose authored text is a template with a placeholder. It has no
+    /// resolved bytes and can run only in template mode; `reason` is the
+    /// parse failure, reported when template mode is not available.
+    Unparsed { reason: String },
 }
 
 /// One side of a ternary in a frontmatter shell expression.
@@ -450,7 +460,7 @@ fn parse_shell_suffixes(
 /// parsed as a template, or `None` when `value` is not such a value.
 ///
 /// A conditional (`$( cond ? a : b )`) is never a template.
-pub(crate) fn authored_shell_template(
+pub fn authored_shell_template(
     value: &str,
     key: &str,
     ctx: &SourceContext,
@@ -1252,7 +1262,21 @@ pub(crate) fn scan_frontmatter(
         if let Value::String(s) = value {
             let original = provenance.authored_source(key);
 
-            if let Some(mut directive) = parse_shell_value(s, key, original, ctx)? {
+            let parsed = match parse_shell_value(s, key, original, ctx) {
+                Ok(parsed) => parsed,
+                Err(error) => {
+                    let reason = match &error {
+                        ShellExpansionError::ParseDirective { message, .. } => message.clone(),
+                        other => other.to_string(),
+                    };
+                    Some(
+                        original
+                            .and_then(|authored| unparsed_template(authored, key, reason, ctx))
+                            .ok_or(error)?,
+                    )
+                }
+            };
+            if let Some(mut directive) = parsed {
                 directive.line = frontmatter_key_line(ctx, key);
                 directives.push(directive);
             }
@@ -1260,6 +1284,42 @@ pub(crate) fn scan_frontmatter(
     }
 
     Ok(directives)
+}
+
+/// The directive for an authored `$( … )` value whose interpolated text no
+/// longer parses, when its authored text is a template with a placeholder
+/// and valid suffixes; `None` otherwise, so the parse error stands.
+fn unparsed_template(
+    authored: &str,
+    key: &str,
+    reason: String,
+    ctx: &SourceContext,
+) -> Option<FrontmatterShellDirective> {
+    let (inner, template) = authored_shell_template(authored, key, ctx)?;
+    template.ok()?.placeholders().next()?;
+    let rest = authored.trim().strip_prefix("$(")?;
+    let close = find_unquoted_closing_paren(rest, key, ctx).ok()?;
+    let suffixes = parse_shell_suffixes(&rest[close + 1..], key, ctx).ok()?;
+    Some(FrontmatterShellDirective {
+        key: key.to_string(),
+        raw_command: inner,
+        executable: String::new(),
+        args: Vec::new(),
+        timeout_override: suffixes.timeout_override,
+        no_cache: suffixes.no_cache,
+        result: suffixes.result,
+        pipeline: None,
+        ast: FrontmatterShellAst::Unparsed { reason },
+        line: None,
+    })
+}
+
+/// What frontmatter shell expansion needs to run a `$( … )` value as a
+/// template: the document's schema projection, which types its placeholders,
+/// and the authored document, for diagnostics that must not show a value.
+pub(crate) struct FrontmatterTemplates {
+    pub schema: Option<crate::markdown::schemas::SimplifiedSchema>,
+    pub ctx: SourceContext,
 }
 
 /// Executes all frontmatter shell expansion directives and rewrites
@@ -1280,6 +1340,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     runtime: &mut PipelineRuntime,
     provenance: &mut FrontmatterProvenance,
     ctx: &SourceContext,
+    templates: Option<&FrontmatterTemplates>,
 ) -> MarkdownResult<FrontmatterShellExpansionReport> {
     let candidates = scan_frontmatter(frontmatter, provenance, ctx, &options.exclude_keys)?;
 
@@ -1315,8 +1376,35 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     let mut pending: Vec<(usize, String, Pending)> = Vec::with_capacity(candidates.len());
     let mut missing_roots = Vec::new();
 
+    // Placeholders of a `$( … )` value are read from the frontmatter as it
+    // stands now, after the first interpolation pass.
+    let hole_state = templates.map(|_| {
+        let map: HashMap<String, Value> = frontmatter
+            .as_map()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        FrontmatterSeedState::new(map, options.context().clone())
+            .with_current_authority(resolution_context.current.clone())
+            .with_resolution_context(Some(resolution_context.clone()))
+    });
+    let hole_evaluator = hole_state.as_ref().map(crate::markdown::compose::shell_expansion::template::LookupEvaluator::new);
+    let scope = templates.map(|templates| SiteScope::new(options, templates.schema.clone()));
+
     for (index, candidate) in candidates.iter().enumerate() {
+        let site = match (templates, &hole_evaluator, &scope) {
+            (Some(templates), Some(evaluator), Some(scope)) => {
+                template_site(candidate, provenance, templates, scope, evaluator, ctx)?
+            }
+            _ => None,
+        };
         let pending_item = match &candidate.ast {
+            FrontmatterShellAst::Pipeline(pipeline) if site.is_some() => {
+                let directive = branch_directive(pipeline.clone(), candidate.raw_command.clone(), candidate, ctx);
+                let prepared =
+                    prepare_site(Ok(directive), site.as_ref(), options, &policy_paths, &mut runtime.shell)?;
+                Pending::Execute(Box::new(prepared))
+            }
             FrontmatterShellAst::Pipeline(pipeline) => {
                 let prepared = prepare_branch_pipeline(
                     pipeline.clone(),
@@ -1327,6 +1415,18 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                     &mut runtime.shell,
                     ctx,
                 )?;
+                Pending::Execute(Box::new(prepared))
+            }
+            FrontmatterShellAst::Unparsed { reason } => {
+                let unread = ShellExpansionError::ParseDirective {
+                    ctx: Box::new(ctx.clone()),
+                    origin: ShellCommandOrigin::Frontmatter {
+                        key: candidate.key.clone(),
+                        line: candidate.line,
+                    },
+                    message: reason.clone(),
+                };
+                let prepared = prepare_site(Err(unread), site.as_ref(), options, &policy_paths, &mut runtime.shell)?;
                 Pending::Execute(Box::new(prepared))
             }
             FrontmatterShellAst::Ternary {
@@ -1580,6 +1680,8 @@ pub(crate) fn directive_reachable_pipelines(
 ) -> Result<Vec<ShellPipeline>, ShellExpansionError> {
     match &directive.ast {
         FrontmatterShellAst::Pipeline(pipeline) => Ok(vec![pipeline.clone()]),
+        // No resolved bytes: it can be approved only by its template.
+        FrontmatterShellAst::Unparsed { .. } => Ok(Vec::new()),
         FrontmatterShellAst::Ternary {
             then_branch,
             else_branch,
@@ -1721,10 +1823,54 @@ fn prepare_branch_pipeline(
     runtime: &mut ShellExpansionRuntime,
     ctx: &SourceContext,
 ) -> Result<PreparedShellDirective, ShellExpansionError> {
+    let directive = branch_directive(pipeline, raw_command, candidate, ctx);
+    prepare_directive(&directive, options, policy_paths, runtime)
+}
+
+/// The template site of a non-conditional `$( … )` value whose authored
+/// command holds a placeholder, or `None`.
+fn template_site<'e>(
+    candidate: &FrontmatterShellDirective,
+    provenance: &FrontmatterProvenance,
+    templates: &FrontmatterTemplates,
+    scope: &SiteScope<'_>,
+    evaluator: &'e dyn crate::markdown::compose::shell_expansion::template::HoleEvaluator,
+    ctx: &SourceContext,
+) -> Result<Option<TemplateSite<'e>>, ShellExpansionError> {
+    let Some((authored, template)) = provenance
+        .authored_source(&candidate.key)
+        .and_then(|value| authored_shell_template(value, &candidate.key, ctx))
+    else {
+        return Ok(None);
+    };
+    if super::expression::ExpressionFinder::scan_plain(&authored).expressions.is_empty() {
+        return Ok(None);
+    }
+    let frame = SiteFrame {
+        span: 0..0,
+        indent: String::new(),
+        error_handling: ErrorHandling::default(),
+        timeout_override: candidate.timeout_override,
+        no_cache: candidate.no_cache,
+    };
+    let origin = ShellCommandOrigin::Frontmatter {
+        key: candidate.key.clone(),
+        line: candidate.line,
+    };
+    scope.site(&authored, template, origin, templates.ctx.clone(), evaluator, frame)
+}
+
+/// The directive one frontmatter pipeline runs as.
+fn branch_directive(
+    pipeline: ShellPipeline,
+    raw_command: String,
+    candidate: &FrontmatterShellDirective,
+    ctx: &SourceContext,
+) -> ShellDirective {
     let executable = pipeline.actions[0].command.executable.clone();
     let args = pipeline.actions[0].command.args.clone();
 
-    let directive = ShellDirective {
+    ShellDirective {
         raw_command,
         executable,
         args,
@@ -1739,9 +1885,7 @@ fn prepare_branch_pipeline(
         no_cache: candidate.no_cache,
         pipeline: Some(pipeline),
         ctx: ctx.clone(),
-    };
-
-    prepare_directive(&directive, options, policy_paths, runtime)
+    }
 }
 
 /// A ternary branch resolved for execution: either a value produced without a

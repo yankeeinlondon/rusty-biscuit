@@ -493,13 +493,13 @@ fn windows_wait_loop(
     //   when it closes, and an exited process has none, so losing that race is
     //   not a launch failure. A provider that fails fast (a rejected flag, an
     //   auth refusal) exits in milliseconds and hits this on every run —
-    //   `sequence --budget-ledger` failed outright on Windows until 2026-09-21
-    //   for exactly that reason. The child is asked, since the code alone
-    //   cannot tell this from the next case.
+    //   `sequence` failed outright on Windows until 2026-09-21 for exactly
+    //   that reason. The child is asked, since the code alone cannot tell
+    //   this from the next case.
     // - This wrapper itself runs inside a Job that forbids nesting. Failing
     //   the launch would mean no provider could run at all: an SSH session on
     //   Windows puts everything it starts in such a Job, which made every
-    //   `sequence_budget` launch fail with "Access is denied. (0x80070005)"
+    //   sequence launch fail with "Access is denied. (0x80070005)"
     //   (measured on `build-win-native`, 2026-09-22). The run continues with
     //   descendant cleanup degraded to the child process itself.
     //

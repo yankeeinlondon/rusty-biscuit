@@ -130,8 +130,8 @@ pub use preflight::{
 pub use prepare::{
     BootstrapPreparation, BootstrapRequest, DocumentEntryReason, DocumentPreparation,
     LoopOwnership, PreparationStages, PrepareOptions, PromptSource, SchemaStage, SourceBasis,
-    approve_document_shell, bind_agent_workspace, preflight_bootstrap_shell, preflight_document_shell,
-    prepare_bootstrap, prepare_direct, prepare_document, prepare_inline,
+    approve_document_shell, validate_document_shell_late_values, bind_agent_workspace, preflight_bootstrap_shell, preflight_document_shell,
+    prepare_bootstrap, prepare_direct, prepare_document, prepare_inline, prepare_loop_seed, prepare_sequence_probe,
 };
 #[cfg(test)]
 pub(crate) use resolve::resolve_fixture_source;
@@ -166,9 +166,10 @@ pub use select::{
 };
 pub use sequence::preflight::{
     DiscoveredCommand, GroupExecution, PreflightAction, PreflightGraph, PreflightGroup,
-    PreflightStep, PreflightTask, PromptDocument, build_preflight_graph,
-    build_preflight_graph_with_context,
-    build_preflight_graph_with_invocation, reject_non_sequence_kind,
+    PreflightStep, PreflightTask, PreparedShellSite, PromptDocument, PromptReference,
+    ShellSiteKind, SiteMode, TaskPosition, build_preflight_graph,
+    build_preflight_graph_with_context, build_preflight_graph_with_invocation,
+    reject_non_sequence_kind, resolve_task_late_values, sequence_deferred_roots,
 };
 pub use sequence::task::{
     DEFAULT_COMMAND_TIMEOUT, PromptRunOutcome, PromptTaskRequest, PromptTaskRunner, RunawayTrip,

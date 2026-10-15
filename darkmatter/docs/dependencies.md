@@ -22,6 +22,11 @@ same scheme validation and deny-all-by-default host policy.
   shared terminal harness remains available to L1 because `render_invariants`
   uses its pure layout-invariant helpers without opening a terminal.
 - The CLI's separate `terminal-tests` feature enables its terminal harness.
+- The CLI's `test-fixtures` feature enables `test-toolkit` as an optional
+  dependency for one target, the `darkmatter-argv-recorder` fixture binary
+  (`test_toolkit::argv_recorder`), which the shell template tests run as a
+  native program. `just test` and CI enable it; `md`'s install never builds
+  it. It adds no crate: `test-toolkit` is already a dev dependency.
 
 The corresponding integration targets declare `required-features`, so an L1
 filter does not first compile binaries and native/browser dependencies that it

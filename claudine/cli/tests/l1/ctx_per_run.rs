@@ -401,10 +401,9 @@ fn a_resumed_attempt_observes_the_previous_attempts_staging() {
     );
 }
 
-/// Each task of a serial group is a run: a member observes what the member
-/// before it staged.
+/// Each sequence task is a run and observes earlier tasks' staging.
 #[test]
-fn a_serial_group_member_observes_an_earlier_members_staging() {
+fn a_sequence_task_observes_an_earlier_tasks_staging() {
     let fixture = repo("ctx-per-run-serial-group");
     doc(
         &fixture,
@@ -414,7 +413,7 @@ fn a_serial_group_member_observes_an_earlier_members_staging() {
     let file = doc(
         &fixture,
         "seq.md",
-        "---\nsequence:\n  - name: bundle\n    group:\n      name: bundle\n      execution: serial\n      tasks:\n        - name: before\n          prompt: ./read.md\n        - name: stage\n          shell: \"git add a.txt\"\n        - name: after\n          prompt: ./read.md\n---\n",
+        "---\nsequence:\n  - name: before\n    prompt: ./read.md\n  - name: stage\n    shell: \"git add a.txt\"\n  - name: after\n    prompt: ./read.md\n---\n",
     );
 
     let run = run(&fixture, &["sequence", "--claude", &file]);
@@ -448,7 +447,7 @@ fn parallel_siblings_share_one_capture_until_one_reenters() {
     let file = doc(
         &fixture,
         "seq.md",
-        "---\nsequence:\n  - name: bundle\n    group:\n      name: bundle\n      execution: parallel\n      max_parallel: 1\n      tasks:\n        - name: stage\n          shell: \"git add a.txt\"\n        - name: read\n          prompt: ./read.md\n---\n",
+        "---\nsequence:\n  - name: bundle\n    group:\n      name: bundle\n      max_parallel: 1\n      tasks:\n        - name: stage\n          shell: \"git add a.txt\"\n        - name: read\n          prompt: ./read.md\n---\n",
     );
 
     let run = run(&fixture, &["sequence", "--claude", &file]);

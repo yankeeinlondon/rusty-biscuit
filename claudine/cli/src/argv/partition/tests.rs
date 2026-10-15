@@ -384,8 +384,8 @@ fn owned_surface_is_derived_from_clap_and_non_empty() {
     for flag in ["--yolo", "-y", "--silent", "--dry-run", "--sandbox"] {
         assert!(owned.is_bool_flag(flag), "{flag} must be a boolean owned flag");
     }
-    // The `sequence`-only flag is in the union.
-    assert!(owned.is_value_flag("--fail-fast"));
+    // Removed policy switches are not part of the owned surface.
+    assert!(!owned.is_value_flag("--fail-fast"));
 }
 
 // Shared with the completion matrix, which reads the rest of it.
@@ -451,4 +451,20 @@ fn a_non_utf8_token_before_the_file_is_left_for_clap() {
     let (claudine, after) = partition_composition_tail(argv).expect("not an argument after the file");
     assert_eq!(claudine[2], invalid_token());
     assert!(after.arguments().is_empty());
+}
+
+#[test]
+fn removed_sequence_policy_is_typed_before_any_source_read() {
+    for tokens in [
+        vec!["claudine", "sequence", "--fail-fast", "true", "missing.md"],
+        vec!["claudine", "sequence", "missing.md", "--fail-fast", "false"],
+        vec!["claudine", "sequence", "missing.md", "--fail-fast=invalid"],
+        vec!["claudine", "sequence", "--fail-fast"],
+    ] {
+        assert_eq!(partition_composition_tail(argv(&tokens)).unwrap_err(), PartitionError::RemovedSequenceFailFast);
+    }
+    let (_, _, opaque) = partition(&["claudine", "sequence", "file.md", "--", "--fail-fast", "true"]);
+    assert_eq!(opaque, Some(strs(&["--fail-fast", "true"])));
+    let (claudine, _, _) = partition(&["claudine", "sequence", "--model", "--fail-fast", "file.md"]);
+    assert_eq!(claudine, strs(&["claudine", "sequence", "--model", "--fail-fast", "file.md"]));
 }

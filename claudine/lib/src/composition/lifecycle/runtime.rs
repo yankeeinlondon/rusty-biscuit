@@ -211,7 +211,7 @@ impl LifecycleCatchProtocol {
 
         let needs_finalize = matches!(
             origin,
-            LifecycleSignal::Success | LifecycleSignal::Blocked | LifecycleSignal::Failure
+            LifecycleSignal::Success | LifecycleSignal::Blocked | LifecycleSignal::Failure | LifecycleSignal::Cancelled
         ) || (origin == LifecycleSignal::Loop && evaluation.is_some());
         (needs_finalize && !state.finalize_emitted).then(|| LifecycleCatchStep {
             signal: LifecycleSignal::Finalize,
@@ -431,7 +431,7 @@ fn terminal_or_finalize(
             }
         }
         LifecycleSignal::Loop => LifecycleTransitionDecision::Continue,
-        LifecycleSignal::Success | LifecycleSignal::Blocked | LifecycleSignal::Failure
+        LifecycleSignal::Success | LifecycleSignal::Blocked | LifecycleSignal::Failure | LifecycleSignal::Cancelled
             if !input.finalize_emitted =>
         {
             LifecycleTransitionDecision::Finalize { error }
@@ -439,6 +439,7 @@ fn terminal_or_finalize(
         LifecycleSignal::Success
         | LifecycleSignal::Blocked
         | LifecycleSignal::Failure
+        | LifecycleSignal::Cancelled
         | LifecycleSignal::Finalize => {
             let terminal = input.terminal_slot.unwrap_or(input.event);
             let error = error.or_else(|| {

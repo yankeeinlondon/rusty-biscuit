@@ -8,7 +8,9 @@
 //! type. A shape is what a `template <shape>` policy rule stores, what the
 //! whitelist and blacklist match, and what a template approval authorizes.
 //! A [`FilledChain`] is a command after every hole has been replaced by one
-//! argument; the runtime blacklist checks it before the first segment starts.
+//! argument ([`fill_template`]); the runtime blacklist checks it before the
+//! first segment starts, and [`resolve_direct_target`] finds each program
+//! without a shell.
 //!
 //! Design: `claudine/docs/topics/pre-flight-checks.md` and
 //! `darkmatter/docs/inline/preflight-checks.md`.
@@ -16,8 +18,10 @@
 mod approval;
 mod canonical;
 pub(crate) mod candidate;
+mod fill;
 mod grammar;
 pub mod matching;
+mod target;
 mod typing;
 
 #[cfg(test)]
@@ -25,9 +29,14 @@ mod tests;
 
 pub use approval::{ApprovalKey, OfferedChoices, ShellPreApprovals, TemplateApprovalView};
 pub use canonical::TemplateRuleError;
-pub use candidate::{CommandSite, DeferredShellRoots, ModeRequirement, ShellCandidate};
+pub use candidate::{CommandSite, DeferredShellRoots, ModeRequirement, ShellCandidate, derived_deferred_keys};
+pub use fill::{
+    DocumentShellValues, HoleError, HoleEvaluator, LateValueError, LateValues, LookupEvaluator, RejectReason, SiteValues,
+    fill_template, resolve_late_values,
+};
 pub use grammar::parse_authored;
 pub use matching::rule_covers;
+pub use target::{TemplateTargetError, resolve_direct_target};
 pub use typing::{ApprovalType, HoleType, HoleValidator, StringLikeType, TypeProvenance, project_hole};
 
 use super::tokenize::{ShellToken, apply_redirection};

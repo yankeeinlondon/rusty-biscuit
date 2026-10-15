@@ -511,6 +511,8 @@ pub struct CallerInputLayers {
     /// Top-level keys of [`set_overrides`](Self::set_overrides) that are data
     /// (see [`PrepareOptions::data_override_keys`][super::PrepareOptions]).
     pub data_override_keys: std::collections::BTreeSet<String>,
+    /// Complete lexical sequence root, carried outside frontmatter.
+    pub sequence_binding: Option<serde_json::Value>,
     /// Immutable raw caller overrides paired with their launch-time origins.
     pub caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
     /// Launch-area directory that anchors caller-supplied file references.
@@ -548,6 +550,7 @@ impl CallerInputLayers {
         Self {
             set_overrides: None,
             data_override_keys: Default::default(),
+            sequence_binding: None,
             caller_input_records: Default::default(),
             file_ref_fallback_dir: None,
             file_resolution_context,
@@ -595,6 +598,7 @@ impl CallerInputLayers {
         Self {
             set_overrides: options.set_overrides.clone(),
             data_override_keys: options.data_override_keys.clone(),
+            sequence_binding: options.sequence_binding.clone(),
             caller_input_records: options.caller_input_records.clone(),
             file_ref_fallback_dir: options.file_ref_fallback_dir.clone(),
             file_resolution_context: options.file_resolution_context.clone(),
@@ -607,10 +611,12 @@ impl CallerInputLayers {
     /// The overrides with the origin of each key.
     pub fn layered_overrides(&self) -> super::LayeredOverrides {
         super::LayeredOverrides::from_parts(self.set_overrides.as_ref(), &self.data_override_keys)
+            .with_sequence_value(self.sequence_binding.clone())
     }
 
     /// Replace the overrides and their origins together.
     pub fn set_layered_overrides(&mut self, overrides: super::LayeredOverrides) {
+        self.sequence_binding = overrides.sequence_value().cloned();
         self.data_override_keys = overrides.data_keys().clone();
         self.set_overrides = Some(overrides.to_value());
     }
@@ -620,6 +626,7 @@ impl CallerInputLayers {
     pub fn apply_to(&self, mut options: super::PrepareOptions) -> super::PrepareOptions {
         options.set_overrides = self.set_overrides.clone();
         options.data_override_keys = self.data_override_keys.clone();
+        options.sequence_binding = self.sequence_binding.clone();
         options.caller_input_records = self.caller_input_records.clone();
         options.file_ref_fallback_dir = self.file_ref_fallback_dir.clone();
         options.file_resolution_context = self.file_resolution_context.clone();

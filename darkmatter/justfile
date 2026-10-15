@@ -76,9 +76,9 @@ test *args="":
     if [[ "${NEXTEST_PROFILE:-}" == "ci" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]]; then
         # Darkmatter's CI L1 contract retains the explicitly marked slow tests
         # and keeps per-package invocations for distinct JUnit reports.
-        BISCUIT_L1_INCLUDE_SLOW=1 just _test_all "{{ LIBRARY }} --features effects-instrumentation; {{ CLI }}; {{ DMLS }} --features effects-instrumentation; {{ DMLS_ZED_CLI }}" {{ args }} || exit_code=$?
+        BISCUIT_L1_INCLUDE_SLOW=1 just _test_all "{{ LIBRARY }} --features effects-instrumentation; {{ CLI }} --features test-fixtures; {{ DMLS }} --features effects-instrumentation; {{ DMLS_ZED_CLI }}" {{ args }} || exit_code=$?
     else
-        just _test_local_all "{{ LIBRARY }} --features effects-instrumentation; {{ CLI }}; {{ DMLS }} --features effects-instrumentation; {{ DMLS_ZED_CLI }}" {{ args }} || exit_code=$?
+        just _test_local_all "{{ LIBRARY }} --features effects-instrumentation; {{ CLI }} --features test-fixtures; {{ DMLS }} --features effects-instrumentation; {{ DMLS_ZED_CLI }}" {{ args }} || exit_code=$?
     fi
     if (( exit_code == 130 )); then
         exit 130

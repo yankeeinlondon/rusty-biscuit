@@ -32,3 +32,18 @@ The lifecycle parser in `claudine/lib/src/composition/lifecycle/` remains the
 authority on what can run. Tests in `claudine/lib/tests/l1/claudine_schemas.rs`
 keep the action types aligned with its verb inventory and with Darkmatter's
 side-effect and expression-function catalogs.
+
+The frontmatter catalog includes `cancelled` on documents and containers. Its
+stack accepts communication, expressions, shells, and `stop`; the lifecycle
+parser rejects other flow directives. An empty `cancelled: []` opts a
+primitive into cancellation. Container execution is implemented separately
+from this grammar and schema surface.
+
+`lifecycle.yaml` also exports `step`, `task`, and `group` for editor completion
+and authored parameter schemas, for example
+`$schema: { nested: task@./lifecycle.yaml }`.
+A task can contain an inline `sequence:` list or a referenced sequence;
+a group owns `tasks:`, `variables:`, and `fail_fast:`. Deeper nested lists
+remain parser-validated, as do executable exclusivity, unique leg names,
+container-event placement, and removed-key diagnostics. The document catalog
+does not declare `fail_fast` or the former injected sequence overlays.

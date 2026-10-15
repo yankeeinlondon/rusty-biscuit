@@ -218,19 +218,19 @@ fn every_accepted_playa_dry_run_spelling_prepares_nothing() {
 }
 
 /// Writes three prompt documents, each with a never-firing early phrase, and
-/// a sequence over them whose step one has a never-firing `setup:` phrase.
+/// a sequence over them, with one extra never-firing phrase on the first prompt.
 fn write_three_prompt_sequence(fixture: &CliProcessFixture) -> PathBuf {
     for (name, title) in [("a.md", "Alpha"), ("b.md", "Beta"), ("c.md", "Gamma")] {
         write_document(
             fixture,
             name,
-            &format!("---\ntitle: {title}\nfailure:\n    - say: \"{{{{ title }}}} failed\"\n---\nWork on {title}.\n"),
+            &format!("---\ntitle: {title}\nfailure:\n{}    - say: \"{{{{ title }}}} failed\"\n---\nWork on {title}.\n", if name == "a.md" { "    - say: setting up\n" } else { "" }),
         );
     }
     write_document(
         fixture,
         "seq.md",
-        "---\nsequence:\n    - name: one\n      prompt: a.md\n      setup:\n          - when: \"false\"\n            then:\n                - say: setting up\n    - name: two\n      prompt: b.md\n    - name: three\n      prompt: c.md\n---\nSequence.\n",
+        "---\nsequence:\n    - name: one\n      prompt: a.md\n    - name: two\n      prompt: b.md\n    - name: three\n      prompt: c.md\n---\nSequence.\n",
     )
 }
 
@@ -284,7 +284,7 @@ fn a_three_prompt_sequence_submits_every_document_before_step_one() {
 }
 
 /// A preparation that never finishes delays none of a sequence's steps: the
-/// first phrase queued (step one's `setup:`) starts and blocks the worker,
+/// first phrase queued (the first prompt) starts and blocks the worker,
 /// and all three steps still launch. This does not show when the later
 /// prompts were submitted; the test above does.
 #[test]
@@ -421,87 +421,29 @@ Work on {{ title }}.
     );
 }
 
-/// Under `{ "tts": { "provider": "kokoro", "voice": "af_heart" } }`, a mixed
-/// sequence prepares each phrase with what its path plays with: the
-/// `setup:`/`teardown:` of a top-level task, a serial member and a parallel
-/// member with the task stacks' playback configuration (automatic provider, no
-/// requested voice), and every prompt document lifecycle with the user's.
+/// Prompt lifecycle pre-warm retains the configured provider and voice for
+/// both top-level prompt steps and group members.
 #[test]
-fn a_mixed_sequence_prepares_task_stacks_and_prompts_with_their_playback_configuration() {
+fn a_mixed_sequence_prepares_prompts_with_their_playback_configuration() {
     let fixture = CliProcessFixture::named("prewarm-mixed-config");
-    common::write(
-        &fixture.home().join(".claudine/config.json"),
-        r#"{ "tts": { "provider": "kokoro", "voice": "af_heart" } }"#,
-    );
+    common::write(&fixture.home().join(".claudine/config.json"),
+        r#"{ "tts": { "provider": "kokoro", "voice": "af_heart" } }"#);
     let launches = common::launch_recorder::install(&fixture, "goose", "exit 0");
     for name in ["a.md", "m.md", "p.md"] {
-        write_document(
-            &fixture,
-            name,
-            &format!("---\nfailure:\n    - say: \"{name} failed\"\n---\nWork on {name}.\n"),
-        );
+        write_document(&fixture, name,
+            &format!("---\nfailure:\n    - say: \"{name} failed\"\n---\nWork.\n"));
     }
-    let stacks = |label: &str, indent: &str| {
-        format!(
-            "{indent}setup:\n{indent}    - when: \"false\"\n{indent}      then:\n{indent}          - say: {label} setup\n\
-             {indent}teardown:\n{indent}    - when: \"false\"\n{indent}      then:\n{indent}          - say: {label} teardown\n"
-        )
-    };
-    let sequence = write_document(
-        &fixture,
-        "seq.md",
-        &format!(
-            "---\nsequence:\n    - name: top\n      prompt: a.md\n{top}\
-             \x20   - name: serial\n      group:\n          execution: serial\n          tasks:\n              - name: member\n                prompt: m.md\n{member}\
-             \x20   - name: parallel\n      group:\n          execution: parallel\n          tasks:\n              - name: leg\n                prompt: p.md\n{leg}\
-             ---\nSequence.\n",
-            top = stacks("top", "      "),
-            member = stacks("serial member", "                "),
-            leg = stacks("parallel member", "                "),
-        ),
-    );
-
+    let sequence = write_document(&fixture, "seq.md",
+        "---\nsequence:\n    - name: top\n      prompt: a.md\n    - name: group\n      group:\n          max_parallel: 1\n          tasks:\n              - name: first\n                prompt: m.md\n              - name: second\n                prompt: p.md\n---\nSequence.\n");
     let output = observed(&fixture, "record")
-        .args(["sequence", "--goose", sequence.to_str().unwrap()])
-        .output()
-        .unwrap();
+        .args(["sequence", "--goose", sequence.to_str().unwrap()]).output().unwrap();
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-
     assert!(output.status.success(), "{stderr}");
     assert_eq!(common::launch_recorder::launches(&launches).len(), 3, "{stderr}");
-    let task_config = serde_json::to_string(&biscuit_speaks::TtsConfig::new()).unwrap();
-    let mut prepared = recorded_with_config(&record_path(&fixture));
-    prepared.sort();
-    let user_configs: Vec<&String> = prepared
-        .iter()
-        .filter(|(text, _)| text.ends_with(".md failed"))
-        .map(|(_, config)| config)
-        .collect();
-    assert_eq!(user_configs.len(), 3, "{prepared:?}");
-    assert!(
-        user_configs.iter().all(|config| *config == user_configs[0]
-            && config.contains("af_heart")
-            && config.to_lowercase().contains("kokoro")),
-        "prompt lifecycles use the user's provider and voice: {user_configs:?}"
-    );
-    let task_phrases: Vec<(String, String)> = prepared
-        .iter()
-        .filter(|(text, _)| !text.ends_with(".md failed"))
-        .cloned()
-        .collect();
-    let mut expected: Vec<(String, String)> = [
-        "top setup",
-        "top teardown",
-        "serial member setup",
-        "serial member teardown",
-        "parallel member setup",
-        "parallel member teardown",
-    ]
-    .iter()
-    .map(|text| ((*text).to_owned(), task_config.clone()))
-    .collect();
-    expected.sort();
-    assert_eq!(task_phrases, expected, "task stacks use the task playback configuration\n{stderr}");
+    let prepared = recorded_with_config(&record_path(&fixture));
+    assert_eq!(prepared.len(), 3, "{prepared:?}");
+    assert!(prepared.iter().all(|(_, config)| config == &prepared[0].1
+        && config.contains("af_heart") && config.to_lowercase().contains("kokoro")), "{prepared:?}");
     assert!(!fixture.audio_spool().exists(), "nothing was spoken");
 }
 
@@ -530,9 +472,9 @@ fn deferred_sequence(site: &str, stack: Option<&str>) -> String {
         "top" => ("    - name: first\n      prompt: doc.md\n", "      "),
         "serial" | "parallel" => (
             if site == "serial" {
-                "    - name: group\n      group:\n          execution: serial\n          tasks:\n              - name: member\n                prompt: doc.md\n"
+                "    - name: group\n      group:\n          max_parallel: 1\n          tasks:\n              - name: member\n                prompt: doc.md\n"
             } else {
-                "    - name: group\n      group:\n          execution: parallel\n          tasks:\n              - name: member\n                prompt: doc.md\n"
+                "    - name: group\n      group:\n          max_parallel: 1\n          tasks:\n              - name: member\n                prompt: doc.md\n"
             },
             "                ",
         ),
@@ -569,49 +511,34 @@ fn run_deferred(name: &str, site: &str, stack: Option<&str>) -> (Vec<(String, St
     (prepared, vec![before, after])
 }
 
-/// Assert `prepared` holds exactly the document control and each resolved
-/// task phrase once, every task phrase with the task playback configuration.
-fn assert_deferred_task_phrases(prepared: &[(String, String)], dates: &[String]) {
-    let task_config = serde_json::to_string(&biscuit_speaks::TtsConfig::new()).unwrap();
-    let date = dates
-        .iter()
-        .find(|date| prepared.iter().any(|(text, _)| *text == format!("task ctx {date}")))
-        .unwrap_or_else(|| panic!("`task ctx` resolved to the captured date {dates:?}: {prepared:?}"));
-    let texts: Vec<&str> = prepared.iter().map(|(text, _)| text.as_str()).collect();
-    let mut expected = vec![
-        format!("doc ctx {date}"),
-        "doc env Ada".to_owned(),
-        "literal control".to_owned(),
-        format!("task ctx {date}"),
-        "task derived Widget ready".to_owned(),
-        "task env Ada".to_owned(),
-    ];
-    expected.sort();
-    assert_eq!(texts, expected, "each phrase is prepared exactly once");
-    for (text, config) in prepared.iter().filter(|(text, _)| !text.starts_with("doc ")) {
-        assert_eq!(config, &task_config, "{text}: the task playback configuration");
-    }
-}
-
-/// One test per task site: a `setup:` or `teardown:` phrase preflight skipped
-/// is prepared, resolved, once the site establishes the task's context.
+/// Retired task stacks fail before speech preparation or provider launch.
 macro_rules! deferred_task_stack_tests {
     ($($test:ident: $site:literal, $property:literal;)*) => {$(
         #[test]
         fn $test() {
-            let (prepared, dates) = run_deferred(stringify!($test), $site, Some($property));
-            assert_deferred_task_phrases(&prepared, &dates);
+            let fixture = CliProcessFixture::named(stringify!($test));
+            let launches = common::launch_recorder::install(&fixture, "goose", "exit 0");
+            write_document(&fixture, "doc.md", DEFERRED_DOCUMENT);
+            let sequence = write_document(&fixture, "seq.md", &deferred_sequence($site, Some($property)));
+            let output = observed(&fixture, "record")
+                .args(["sequence", "--goose", sequence.to_str().unwrap()]).output().unwrap();
+            let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+            assert!(!output.status.success(), "{stderr}");
+            assert!(stderr.contains($property) && stderr.contains("removed"), "{stderr}");
+            assert!(common::launch_recorder::launches(&launches).is_empty(), "{stderr}");
+            assert!(!record_path(&fixture).exists(), "nothing was prepared: {stderr}");
+            assert!(!fixture.audio_spool().exists(), "nothing was spoken");
         }
     )*};
 }
 
 deferred_task_stack_tests! {
-    deferred_phrases_of_a_top_level_task_setup_are_prepared: "top", "setup";
-    deferred_phrases_of_a_top_level_task_teardown_are_prepared: "top", "teardown";
-    deferred_phrases_of_a_serial_member_setup_are_prepared: "serial", "setup";
-    deferred_phrases_of_a_serial_member_teardown_are_prepared: "serial", "teardown";
-    deferred_phrases_of_a_parallel_member_setup_are_prepared: "parallel", "setup";
-    deferred_phrases_of_a_parallel_member_teardown_are_prepared: "parallel", "teardown";
+    removed_top_level_task_setup_is_rejected_before_preparation: "top", "setup";
+    removed_top_level_task_teardown_is_rejected_before_preparation: "top", "teardown";
+    removed_serial_member_setup_is_rejected_before_preparation: "serial", "setup";
+    removed_serial_member_teardown_is_rejected_before_preparation: "serial", "teardown";
+    removed_parallel_member_setup_is_rejected_before_preparation: "parallel", "setup";
+    removed_parallel_member_teardown_is_rejected_before_preparation: "parallel", "teardown";
 }
 
 /// The control: a prompt task's own document prepares its `env` and `ctx`
@@ -639,7 +566,7 @@ fn a_group_container_with_setup_is_rejected_before_any_preparation() {
         &fixture,
         "seq.md",
         &format!(
-            "---\nsequence:\n    - name: group\n{}      group:\n          execution: serial\n          tasks:\n              - name: member\n                prompt: doc.md\n---\nSequence.\n",
+            "---\nsequence:\n    - name: group\n{}      group:\n          max_parallel: 1\n          tasks:\n              - name: member\n                prompt: doc.md\n---\nSequence.\n",
             deferred_stack("setup", "      "),
         ),
     );
@@ -651,7 +578,7 @@ fn a_group_container_with_setup_is_rejected_before_any_preparation() {
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
 
     assert!(!output.status.success(), "{stderr}");
-    assert!(stderr.contains("which is not valid for a `group`"), "{stderr}");
+    assert!(stderr.contains("setup") && stderr.contains("removed"), "{stderr}");
     assert!(common::launch_recorder::launches(&launches).is_empty(), "{stderr}");
     assert!(!record_path(&fixture).exists(), "nothing was prepared\n{stderr}");
 }

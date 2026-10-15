@@ -627,7 +627,7 @@ fn a_sequence_reserved_overlay_shadows_a_same_named_caller_file_input() {
     );
     write(
         &fixture.cwd().join("target.md"),
-        "---\n$schema:\n  state:\n    - file(required)\n    - object(required)\nreserved_name: \"{{ state.name }}\"\nstart:\n    - {append_line: ['events.log', 'winner={{ reserved_name }}']}\n---\nTarget.\n",
+        "---\n$schema:\n  state:\n    - file(required)\n    - object(required)\nreserved_name: \"{{ seq.name }}\"\nstart:\n    - {append_line: ['events.log', 'winner={{ reserved_name }}']}\n---\nTarget.\n",
     );
 
     let assertion = fixture

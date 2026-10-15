@@ -501,12 +501,12 @@ fn collect_recursive(
     child_state_data.remove("$schema");
 
     // ── Body `::shell` directives ──────────────────────────────────
-    let directives = crate::markdown::compose::shell_expansion::parser::parse_directives_in(
+    let directive_lines = crate::markdown::compose::shell_expansion::parser::scan_directive_lines(
         prepared.content(),
         Some(&body_data),
         prepared_ctx.clone(),
         line_offset,
-    )?;
+    );
 
     // ── Authored command sites ─────────────────────────────────────
     // Each `::shell` and `::shell-block` command is also read as authored,
@@ -528,15 +528,34 @@ fn collect_recursive(
         markdown.frontmatter_line_count(),
     );
     let mut body_sites = Vec::with_capacity(authored_directives.len());
+    let mut body_awaiting = Vec::with_capacity(authored_directives.len());
     for (authored, line) in &authored_directives {
         let template = crate::markdown::compose::shell_expansion::parser::authored_template(authored);
         body_sites.push(site_ctx.build(&scope, authored, template, ShellCommandOrigin::Body { line: *line })?);
+        body_awaiting.push(site_ctx.awaits_execution(authored));
     }
-    let body_linked = body_sites.len() == directives.len();
+    let body_linked = body_sites.len() == directive_lines.len();
 
-    for (index, directive) in directives.iter().enumerate() {
-        let line = directive.origin.line_number();
+    for (index, directive_line) in directive_lines.into_iter().enumerate() {
+        // Its value does not exist yet, so neither do its bytes; the
+        // preparation that binds the value audits the command.
+        if body_linked && body_awaiting[index] {
+            continue;
+        }
         let site = body_linked.then(|| &mut body_sites[index]);
+        // A value holding quotes, operators, or command syntax makes the
+        // interpolated text unreadable as a command. Its site can still run
+        // as a template, but never as those bytes.
+        let (directive, site) = match (directive_line.parsed, site) {
+            (Ok(directive), site) => (directive, site),
+            (Err(_), Some(site)) if site.shape().is_some() => {
+                site.requirement = ModeRequirement::TemplateRequired;
+                continue;
+            }
+            (Err(error), _) => return Err(error.into()),
+        };
+        let directive = &directive;
+        let line = directive.origin.line_number();
         let template_required = site
             .as_ref()
             .is_some_and(|site| site.requirement == ModeRequirement::TemplateRequired);
@@ -572,7 +591,13 @@ fn collect_recursive(
             }
         }
     }
-    candidates.extend(body_sites);
+    candidates.extend(
+        body_sites
+            .into_iter()
+            .zip(body_awaiting)
+            .filter(|(_, awaiting)| !(body_linked && *awaiting))
+            .map(|(site, _)| site),
+    );
 
     // ── Body `::shell-block` commands ──────────────────────────────
     // A malformed block (e.g. an unterminated `::block`) is surfaced richly by
@@ -584,7 +609,9 @@ fn collect_recursive(
     let pairs = block_pairs::scan_block_pairs_in(prepared.content(), Some(&body_data))
         .unwrap_or_default();
     let authored_offset = markdown.frontmatter_line_count();
-    let mut block_sites = Vec::new();
+    // The authored commands of each block, in document order, beside the
+    // site discovery built for each.
+    let mut authored_blocks: Vec<Vec<(ShellCandidate, String, usize, bool)>> = Vec::new();
     for pair in block_pairs::scan_block_pairs_in(markdown.content(), None).unwrap_or_default() {
         if !matches!(pair.kind, block_pairs::BlockOpenKind::Shell) {
             continue;
@@ -592,10 +619,11 @@ fn collect_recursive(
         let body_text = &markdown.content()[pair.body_span.clone()];
         let (commands, _dangling) =
             super::super::shell_blocks::body::group_logical_commands(body_text, pair.start_line + 1);
+        let mut block = Vec::with_capacity(commands.len());
         for command in commands {
             let template =
                 crate::markdown::compose::shell_expansion::template::parse_authored(&command.raw_command);
-            block_sites.push(site_ctx.build(
+            let site = site_ctx.build(
                 &scope,
                 &command.raw_command,
                 template,
@@ -603,74 +631,128 @@ fn collect_recursive(
                     start_line: pair.start_line + authored_offset,
                     command_line: command.start_line + authored_offset,
                 },
-            )?);
-        }
-    }
-    let mut block_resolved: Vec<(ShellCommandOrigin, Vec<String>)> = Vec::new();
-    for pair in pairs {
-        if !matches!(pair.kind, block_pairs::BlockOpenKind::Shell) {
-            continue;
-        }
-        let body_text = &prepared.content()[pair.body_span.clone()];
-        let commands = split_logical_commands(body_text, pair.start_line + 1)
-            .map_err(|e| crate::markdown::types::MarkdownError::Transform(e.to_string()))?;
-        if body_data.intersects(&pair.body_span) {
-            super::super::shell_blocks::reject_data_shaped_commands(
-                &commands,
-                &body_data.masked(prepared.content())[pair.body_span.clone()],
-                pair.start_line + 1,
-                body_text,
-                line_offset,
-                Some(source_file.clone()),
             )?;
+            let awaiting = site_ctx.awaits_execution(&command.raw_command);
+            block.push((site, command.raw_command, command.start_line, awaiting));
         }
-        for command in commands {
-            let origin = ShellCommandOrigin::ShellBlock {
-                start_line: pair.start_line + line_offset,
-                command_line: command.start_line + line_offset,
-            };
-            let template_required = block_sites
-                .get(block_resolved.len())
-                .is_some_and(|site| site.requirement == ModeRequirement::TemplateRequired);
-            let mut site_keys = Vec::new();
-            for action in &command.pipeline.actions {
-                let exe_raw = action.command.executable.clone();
-                let args_raw = action.command.args.clone();
-                let raw_command = render_action(&exe_raw, &args_raw);
-                let (executable, args) = resolve_executable(
+        authored_blocks.push(block);
+    }
+    let resolved_pairs: Vec<_> = pairs
+        .into_iter()
+        .filter(|pair| matches!(pair.kind, block_pairs::BlockOpenKind::Shell))
+        .collect();
+    let blocks_linked = authored_blocks.len() == resolved_pairs.len();
+    let mut add_entries = |pipeline: &crate::markdown::compose::shell_expansion::types::ShellPipeline,
+                           origin: &ShellCommandOrigin,
+                           template_required: bool|
+     -> Vec<String> {
+        let mut site_keys = Vec::new();
+        for action in &pipeline.actions {
+            let exe_raw = action.command.executable.clone();
+            let args_raw = action.command.args.clone();
+            let raw_command = render_action(&exe_raw, &args_raw);
+            let (executable, args) = resolve_executable(
                 &options.alias_resolutions,
                 login_shell(options.context().env()),
                 &exe_raw,
                 &args_raw,
             );
-                let normalized = normalize_command(&executable, &args);
-                site_keys.push(normalized.clone());
-                if template_required || !seen.insert(normalized.clone()) {
-                    continue;
+            let normalized = normalize_command(&executable, &args);
+            site_keys.push(normalized.clone());
+            if template_required || !seen.insert(normalized.clone()) {
+                continue;
+            }
+            let entry = ShellCommandEntry {
+                raw_command,
+                executable,
+                args,
+                normalized,
+                source_file: source_file.clone(),
+                origin: origin.clone(),
+            };
+            local_entries.push(entry.clone());
+            entries.push(entry);
+        }
+        site_keys
+    };
+    for (index, pair) in resolved_pairs.into_iter().enumerate() {
+        let body_text = &prepared.content()[pair.body_span.clone()];
+        let resolved = split_logical_commands(body_text, pair.start_line + 1)
+            .map_err(|e| crate::markdown::types::MarkdownError::Transform(e.to_string()))
+            .and_then(|commands| {
+                if body_data.intersects(&pair.body_span) {
+                    super::super::shell_blocks::reject_data_shaped_commands(
+                        &commands,
+                        &body_data.masked(prepared.content())[pair.body_span.clone()],
+                        pair.start_line + 1,
+                        body_text,
+                        line_offset,
+                        Some(source_file.clone()),
+                    )?;
                 }
-                let entry = ShellCommandEntry {
-                    raw_command,
-                    executable,
-                    args,
-                    normalized,
-                    source_file: source_file.clone(),
-                    origin: origin.clone(),
-                };
-                local_entries.push(entry.clone());
-                entries.push(entry);
+                Ok(commands)
+            });
+        let sites = blocks_linked.then(|| &mut authored_blocks[index]);
+        let commands = match (resolved, sites) {
+            (Ok(commands), sites) => (commands, sites),
+            // A value holding command syntax makes the block's interpolated
+            // text unreadable. Its template sites can still run as templates,
+            // and a command without a placeholder is its own authored bytes.
+            (Err(_), Some(sites))
+                if sites.iter().all(|(site, raw, _, _)| {
+                    site.shape().is_some()
+                        || ExpressionFinder::scan_plain(raw).expressions.is_empty()
+                }) =>
+            {
+                for (site, raw, start_line, _) in sites.iter_mut() {
+                    if site.shape().is_some() {
+                        site.requirement = ModeRequirement::TemplateRequired;
+                        continue;
+                    }
+                    let origin = site.site.origin.clone();
+                    let mut keys = Vec::new();
+                    for command in split_logical_commands(raw, *start_line)
+                        .map_err(|e| crate::markdown::types::MarkdownError::Transform(e.to_string()))?
+                    {
+                        keys.extend(add_entries(&command.pipeline, &origin, false));
+                    }
+                    site.resolved = Some(keys);
+                }
+                continue;
             }
-            block_resolved.push((origin, site_keys));
+            (Err(error), _) => return Err(error),
+        };
+        let (commands, mut sites) = commands;
+        let linked = sites.as_ref().is_some_and(|sites| sites.len() == commands.len());
+        for (position, command) in commands.into_iter().enumerate() {
+            let origin = ShellCommandOrigin::ShellBlock {
+                start_line: pair.start_line + line_offset,
+                command_line: command.start_line + line_offset,
+            };
+            let awaiting = linked && sites.as_ref().is_some_and(|sites| sites[position].3);
+            let site = sites
+                .as_mut()
+                .filter(|_| linked)
+                .map(|sites| &mut sites[position].0);
+            let template_required = site
+                .as_ref()
+                .is_some_and(|site| site.requirement == ModeRequirement::TemplateRequired);
+            let keys = add_entries(&command.pipeline, &origin, template_required || awaiting);
+            if let Some(site) = site {
+                site.site.origin = origin;
+                if site.requirement == ModeRequirement::AnyMode {
+                    site.resolved = Some(keys);
+                }
+            }
         }
     }
-    if block_resolved.len() == block_sites.len() {
-        for (site, (origin, keys)) in block_sites.iter_mut().zip(block_resolved) {
-            site.site.origin = origin;
-            if site.requirement == ModeRequirement::AnyMode {
-                site.resolved = Some(keys);
-            }
-        }
-    }
-    candidates.extend(block_sites);
+    candidates.extend(
+        authored_blocks
+            .into_iter()
+            .flatten()
+            .filter(|(_, _, _, awaiting)| !(blocks_linked && *awaiting))
+            .map(|(site, _, _, _)| site),
+    );
 
     // ── Recurse into referenced children (condition-blind) ─────────
     let transclusion_opts = options.transclusion_options();
@@ -1085,6 +1167,15 @@ fn scan_one_frontmatter(
             }
             None => None,
         };
+        // A value whose interpolated text does not parse has no resolved
+        // bytes: it can run only as its template.
+        if matches!(
+            candidate.ast,
+            crate::markdown::compose::frontmatter_shell_expansion::FrontmatterShellAst::Unparsed { .. }
+        ) && let Some(site) = &mut site
+        {
+            site.requirement = ModeRequirement::TemplateRequired;
+        }
         let template_required = site
             .as_ref()
             .is_some_and(|site| site.requirement == ModeRequirement::TemplateRequired);
@@ -1172,6 +1263,9 @@ fn scan_one_frontmatter(
 /// against, and the owner schema they are typed by. The schema is assembled
 /// only when a site has a placeholder.
 struct DiscoverySiteContext {
+    /// The host globals whose values exist only once execution supplies them
+    /// (Claudine's `loop` before the first iteration).
+    pending: Vec<String>,
     state: crate::markdown::compose::EffectiveState,
     resolution: crate::markdown::compose::expression::ResolutionContext,
     markdown: Markdown,
@@ -1186,7 +1280,22 @@ impl DiscoverySiteContext {
         state: &crate::markdown::compose::EffectiveState,
         remote_fetch: &remote_fetch::RemoteFetchRuntime,
     ) -> Self {
+        let pending = discovery
+            .host_globals
+            .as_ref()
+            .map(|globals| {
+                globals
+                    .view()
+                    .globals()
+                    .filter(|global| {
+                        *global.availability() == crate::markdown::compose::expression::Availability::ExecutionDependent
+                    })
+                    .map(|global| global.root().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
         Self {
+            pending,
             state: state.clone(),
             resolution: discovery.expression_resolution_context(remote_fetch),
             markdown: prepared.clone(),
@@ -1204,6 +1313,19 @@ impl DiscoverySiteContext {
         let state = crate::markdown::compose::pipeline::document_state_builder(frontmatter, options).build()?;
         let remote_fetch = options.remote_fetch_runtime();
         Ok(Self::new(frontmatter, options, &state, &remote_fetch))
+    }
+
+    /// Whether `authored` reads a host global whose value does not exist
+    /// until execution supplies it. Such a body command has no bytes yet, so
+    /// this discovery leaves it to the preparation that binds the value.
+    fn awaits_execution(&self, authored: &str) -> bool {
+        let pending: Vec<&str> = self.pending.iter().map(String::as_str).collect();
+        !pending.is_empty()
+            && ExpressionFinder::scan_plain(authored).expressions.iter().any(|location| {
+                parse(&location.expression).is_ok_and(|expr| {
+                    crate::markdown::compose::shell_expansion::template::candidate::reads_global_root(&expr, &pending)
+                })
+            })
     }
 
     fn schema(&self) -> Option<&crate::markdown::schemas::SimplifiedSchema> {
@@ -1248,10 +1370,31 @@ impl DiscoverySiteContext {
             &self.state,
             self.resolution.clone(),
         );
-        let evaluate = |expr: &Expr| crate::markdown::compose::expression::evaluate(expr, &lookup).ok();
-        typed
-            .build(authored, template, origin, &evaluate)
-            .map_err(|error| crate::markdown::types::MarkdownError::ShellExpansion(Box::new(error)))
+        // A host global whose value exists only once execution supplies it is
+        // unknown here, not missing; the preparation that binds it checks its
+        // presence.
+        let pending: Vec<&str> = self.pending.iter().map(String::as_str).collect();
+        let evaluate = |expr: &Expr| {
+            if crate::markdown::compose::shell_expansion::template::candidate::reads_global_root(expr, &pending) {
+                return None;
+            }
+            crate::markdown::compose::expression::evaluate(expr, &lookup).ok()
+        };
+        let candidate = typed
+            .build(authored, template, origin.clone(), &evaluate)
+            .map_err(|error| crate::markdown::types::MarkdownError::ShellExpansion(Box::new(error)))?;
+        if self.options.validate_deferred_shell_values && let Ok(template) = &candidate.template {
+            use crate::markdown::compose::shell_expansion::template::{LookupEvaluator, resolve_late_values};
+            let late = resolve_late_values([(authored, template)], &LookupEvaluator::new(&lookup)).map_err(|error| {
+                crate::markdown::types::MarkdownError::ShellExpansion(Box::new(
+                    error.error.into_shell_error(scope.ctx, authored, &origin),
+                ))
+            })?;
+            if let (Some(snapshot), Some(values)) = (&self.options.document_shell_values, late.site(authored)) {
+                snapshot.insert(&candidate, values.clone());
+            }
+        }
+        Ok(candidate)
     }
 }
 

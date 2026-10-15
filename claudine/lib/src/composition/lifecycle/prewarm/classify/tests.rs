@@ -301,7 +301,7 @@ const DECIDED_ROOTS: &[(&str, bool)] = &[
     ("err", false),
     ("timing", false),
     ("group", false),
-    ("outputs", false),
+    ("seq", false),
 ];
 
 #[test]

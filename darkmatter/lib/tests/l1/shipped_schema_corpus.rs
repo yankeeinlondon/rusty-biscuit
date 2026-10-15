@@ -1157,13 +1157,11 @@ fn migrated_shipped_definitions_declare_their_presence() {
         parse_property_definition(key, yaml_key(schema, key).unwrap_or_else(|| panic!("no `{key}`")))
             .unwrap_or_else(|error| panic!("`{key}`: {error}"))
     };
-    for key in ["state", "previous", "next", "outputs", "sequence_id"] {
-        let definition = property(key);
-        assert!(
-            definition.admits_null() && !definition.is_required(),
-            "`{key}` is a null-admitting `unknown`: {definition:?}"
-        );
+    for key in ["state", "previous", "next", "outputs", "sequence_id", "fail_fast"] {
+        assert!(yaml_key(schema, key).is_none(), "`{key}` is not an authored catalog property");
     }
+    let cancelled = property("cancelled");
+    assert!(!cancelled.is_required() && !cancelled.admits_null(), "{cancelled:?}");
 
     assert_eq!(effect_counters(), counters, "parsing a definition ran an effect");
     assert!(

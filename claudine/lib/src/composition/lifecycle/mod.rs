@@ -1,8 +1,8 @@
 //! Lifecycle stacks for composition frontmatter.
 //!
-//! This module provides support for the seven composition lifecycle events
+//! This module provides support for the eight composition lifecycle events
 //! (`initialize`, `start`, `success`, `blocked`, `failure`, `finalize`,
-//! `loop`). Each event is a stack: an ordered action list, or one dictionary
+//! `loop`, `cancelled`). Each event is a stack: an ordered action list, or one dictionary
 //! of verbs that expands into that list in canonical order (see
 //! [`actions::LifecycleNode`]). The `loop:` block additionally carries
 //! iteration controls parsed by [`super::looping::resolve_loop_config`]; its
@@ -43,6 +43,8 @@ pub mod control;
 pub mod executor;
 pub mod runtime;
 mod parse;
+pub mod shell_template;
+mod structured_shell;
 pub mod prewarm;
 mod source_map;
 mod validate;
@@ -195,7 +197,7 @@ pub(crate) fn parse_single_action_with_order(
     )
 }
 
-/// The seven top-level frontmatter keys that hold lifecycle event subtrees.
+/// The eight top-level frontmatter keys that hold lifecycle event subtrees.
 ///
 /// Claudine defers these from Darkmatter's compose-time value-resolution
 /// passes (via `ComposeOptions::with_exclude_keys`) so their authored
@@ -216,13 +218,14 @@ pub const LIFECYCLE_EVENT_KEYS: &[&str] = &[
     "failure",
     "finalize",
     "loop",
+    "cancelled",
 ];
 
 
 /// Complete lifecycle configuration for a composition.
 ///
 /// Parsed from frontmatter properties `initialize`, `start`, `success`,
-/// `blocked`, `failure`, `finalize`, and the lifecycle concerns of `loop:`.
+/// `blocked`, `failure`, `cancelled`, `finalize`, and the lifecycle concerns of `loop:`.
 ///
 /// ## Examples
 ///
@@ -237,11 +240,16 @@ pub const LIFECYCLE_EVENT_KEYS: &[&str] = &[
 pub struct LifecycleConfig {
     /// Typed, validated stacks keyed by event.
     pub stacks: LifecycleStacks,
+    /// Whether `cancelled` was authored, including an empty stack. Sibling
+    /// cancellation opts in by presence, independently of cleanup actions.
+    pub cancelled_declared: bool,
 }
 
 /// Per-event typed stacks.
 ///
-/// An omitted or `null` event, `[]`, and `{}` are all the empty stack.
+/// An omitted event, `[]`, and `{}` contain no actions. The configuration
+/// separately retains cancellation opt-in presence. `cancelled: null` is
+/// invalid; other events retain their null-as-empty behavior.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LifecycleStacks {
     #[allow(missing_docs)]
@@ -256,15 +264,17 @@ pub struct LifecycleStacks {
     pub failure: Vec<LifecycleNode>,
     #[allow(missing_docs)]
     pub finalize: Vec<LifecycleNode>,
+    #[allow(missing_docs)]
+    pub cancelled: Vec<LifecycleNode>,
     /// The `loop:` block's lifecycle concerns: its loose verb keys or `gate:`.
     pub loop_gate: Vec<LifecycleNode>,
 }
 
 /// Lifecycle event signal types.
 ///
-/// The seven composition lifecycle signals, in deterministic iteration
+/// The eight composition lifecycle signals, in deterministic iteration
 /// order: `Initialize`, `Start`, `Success`, `Blocked`, `Failure`,
-/// `Finalize`, `Loop`. This order is used by validators that walk every
+/// `Finalize`, `Loop`, `Cancelled`. This order is used by validators that walk every
 /// event surface (nested-span scan, `err` availability check) and is exposed
 /// via [`Self::all`].
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -286,12 +296,15 @@ pub enum LifecycleSignal {
     Failure,
 
     /// Once per iteration, immediately after the terminal `success`/
-    /// `failure` (or `blocked`) completes.
+    /// `failure`, `blocked`, or `cancelled` completes.
     Finalize,
 
     /// Post-`finalize` "iterate again?" gate; evaluates the document's
     /// `loop` while/until condition.
     Loop,
+
+    /// Execution was interrupted or a running leg opted into sibling cancellation.
+    Cancelled,
 }
 
 impl LifecycleSignal {
@@ -300,7 +313,7 @@ impl LifecycleSignal {
     /// Used by validators that walk every event surface. New variants
     /// should be appended to the end so existing diagnostic order is
     /// preserved.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Initialize,
         Self::Start,
         Self::Success,
@@ -308,6 +321,7 @@ impl LifecycleSignal {
         Self::Failure,
         Self::Finalize,
         Self::Loop,
+        Self::Cancelled,
     ];
 }
 
@@ -463,8 +477,8 @@ impl LifecycleEmitter for DefaultLifecycleEmitter {
 /// terminal signal (`blocked` or `failure`) is emitted when a run exits
 /// after `start` without an explicit terminal signal.
 ///
-/// The guard now tracks the full seven-event lifecycle:
-/// `initialize` → `start` → (`success`|`blocked`|`failure`) → `finalize`.
+/// The guard tracks terminal exclusivity and cleanup:
+/// `initialize` → `start` → (`success`|`blocked`|`failure`|`cancelled`) → `finalize`.
 /// Each non-terminal signal is idempotent; terminal signals are exclusive
 /// (only one may fire per iteration); `finalize` may fire once after the
 /// terminal signal.
@@ -607,7 +621,8 @@ impl<'a> LifecycleRunGuard<'a> {
             }
             LifecycleSignal::Success
             | LifecycleSignal::Blocked
-            | LifecycleSignal::Failure => {
+            | LifecycleSignal::Failure
+            | LifecycleSignal::Cancelled => {
                 if self.terminal_emitted {
                     return false;
                 }
@@ -668,6 +683,7 @@ impl<'a> LifecycleRunGuard<'a> {
             LifecycleSignal::Success
                 | LifecycleSignal::Blocked
                 | LifecycleSignal::Failure
+                | LifecycleSignal::Cancelled
                 | LifecycleSignal::Finalize
         )
         .then(crate::interrupt::TerminalLifecycleScope::enter);
@@ -987,6 +1003,7 @@ impl LifecycleConfig {
             LifecycleSignal::Failure => &self.stacks.failure,
             LifecycleSignal::Finalize => &self.stacks.finalize,
             LifecycleSignal::Loop => &self.stacks.loop_gate,
+            LifecycleSignal::Cancelled => &self.stacks.cancelled,
         }
     }
 
@@ -1004,10 +1021,11 @@ impl LifecycleConfig {
             LifecycleSignal::Failure => &mut self.stacks.failure,
             LifecycleSignal::Finalize => &mut self.stacks.finalize,
             LifecycleSignal::Loop => &mut self.stacks.loop_gate,
+            LifecycleSignal::Cancelled => &mut self.stacks.cancelled,
         }
     }
 
-    /// Returns `true` if every event's stack is empty.
+    /// Returns `true` when there are no actions or explicit cancellation opt-in.
     ///
     /// ## Examples
     ///
@@ -1017,7 +1035,7 @@ impl LifecycleConfig {
     /// assert!(config.is_empty());
     /// ```
     pub fn is_empty(&self) -> bool {
-        LifecycleSignal::ALL
+        !self.cancelled_declared && LifecycleSignal::ALL
             .iter()
             .all(|signal| self.stack(*signal).is_empty())
     }

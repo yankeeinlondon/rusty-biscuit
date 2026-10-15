@@ -234,3 +234,54 @@ fn session_reservations_are_keyed_by_mode_and_policy_root() {
     let elsewhere = ApprovalKey::template(Some(Path::new("/policy/b")), shape);
     assert_eq!(runtime.reserve_allow_once(&elsewhere, false), ReserveOutcome::Reserved);
 }
+
+#[test]
+fn shell_template_program_choices_keep_authored_program_evidence() {
+    for (authored, prefix) in [
+        ("{{ tool }} probe", false),
+        ("> /dev/null {{ tool }} probe", false),
+        ("2> /dev/null {{ tool }} probe", false),
+        (">&2 {{ tool }} probe", false),
+        ("2>&1 {{ tool }} probe", false),
+        ("> /dev/null tool {{ word }}", true),
+        ("2> /dev/null tool {{ word }}", true),
+        (">&2 tool {{ word }}", true),
+        ("2>&1 tool {{ word }}", true),
+        ("git --version\n{{ tool }} probe", false),
+        ("git --version\r\n{{ tool }} probe", false),
+        ("git --version\n> /dev/null {{ tool }} probe", false),
+        ("git --version\r\n2> /dev/null {{ tool }} probe", false),
+        ("git --version\n>&2 {{ tool }} probe", false),
+        ("git --version\r\n2>&1 {{ tool }} probe", false),
+        ("git --version\nother {{ word }}", true),
+        ("git --version\r\nother {{ word }}", true),
+        ("git --version\n> /dev/null other {{ word }}", true),
+        ("git --version\r\n2> /dev/null other {{ word }}", true),
+        ("git --version\n>&2 other {{ word }}", true),
+        ("git --version\r\n2>&1 other {{ word }}", true),
+        ("tool \"quoted\n{{ word }}\"", true),
+        ("tool \"quoted\r\n{{ word }}\"", true),
+        ("git --version && {{ tool }} probe", false),
+        ("git --version || pre{{ tool }} probe", false),
+        ("'{{ tool }}' probe", false),
+        ("\"pre{{ tool }}\" probe", false),
+        ("tool `literal` && {{ tool }} probe", false),
+        ("tool {{ word || 'a && b' }}", true),
+        ("tool {{ word }} && other {{ word }}", true),
+        ("tool `literal` {{ word }}", true),
+        ("tool {{ word }} ; other literal", true),
+        ("tool {{ word }} ; {{ tool }} probe", false),
+    ] {
+        let candidate = ShellCandidate {
+            authored_command: authored.to_string(),
+            site: CommandSite { source_file: "doc.md".into(), origin: crate::markdown::compose::ShellCommandOrigin::Body { line: 1 }, owner: None },
+            template: parse_authored(authored),
+            resolved: Some(vec!["resolved probe".to_string()]),
+            requirement: ModeRequirement::AnyMode,
+        };
+        let offered = candidate.offered();
+        assert!(offered.exact, "{authored}");
+        assert_eq!(offered.prefix, prefix, "{authored}");
+        assert_eq!(offered.shape, candidate.template.is_ok(), "{authored}");
+    }
+}

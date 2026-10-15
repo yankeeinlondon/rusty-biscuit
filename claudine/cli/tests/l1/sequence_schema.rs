@@ -113,7 +113,7 @@ sequence:
   - one
   - two
 ---
-Working on {{topic}} ({{state}}).
+Working on {{topic}} ({{seq}}).
 "#,
     )
     .unwrap();
@@ -221,7 +221,7 @@ Step about {{config}}.
 /// Verifies that a step-level `step_timeout` (declared in a sequence step's
 /// raw state object) overrides the document-level `step_timeout`. The step
 /// overlay passes the step's raw state unchanged under the `state` key, so
-/// per-step `step_timeout` is surfaced via `{{ state.step_timeout || ... }}`
+/// per-step `step_timeout` is surfaced via `{{ seq.step_timeout || ... }}`
 /// interpolation in the document frontmatter.
 ///
 /// Test shape:
@@ -249,13 +249,13 @@ fn sequence_per_step_step_timeout_override() {
     fs::write(
         &md_file,
         r#"---
-step_timeout: '{{ state.step_timeout || "30s" }}'
+step_timeout: '{{ seq.step_timeout || "30s" }}'
 sequence:
   - name: fast
   - name: slow
     step_timeout: 0.5s
 ---
-Run step {{ state.name }}
+Run step {{ seq.name }}
 "#,
     )
     .unwrap();
@@ -365,7 +365,7 @@ sequence:
   - alpha
 tier: $(echo huge)
 ---
-Step {{state}} with tier {{tier}}.
+Step {{seq}} with tier {{tier}}.
 "#,
     )
     .unwrap();
@@ -424,9 +424,9 @@ sequence:
     doc: {}
   - name: malformed
     doc: {}
-loaded_title: "{{{{ frontmatter(state.doc, 'title') }}}}"
+loaded_title: "{{{{ frontmatter(seq.doc, 'title') }}}}"
 ---
-Step {{{{ state.name }}}}: {{{{ loaded_title }}}}
+Step {{{{ seq.name }}}}: {{{{ loaded_title }}}}
 "#,
             valid_doc.display(),
             malformed_doc.display()
@@ -527,7 +527,7 @@ sequence:
 initialize:
   - proxy: "./review.md"
 ---
-Step {{ state }}.
+Step {{ seq }}.
 "#,
     )
     .unwrap();

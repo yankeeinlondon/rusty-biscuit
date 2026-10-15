@@ -38,7 +38,7 @@ fn run(fixture: &CliProcessFixture, args: &[&str]) -> (String, String) {
 // `outputs` in a standalone compose
 // ============================================================================
 
-/// A standalone `compose` document reads `{{ last(outputs) }}` in its body and
+/// A standalone `compose` document reads `{{ last(seq.outputs) }}` in its body and
 /// gets an empty accumulator rather than an undefined-root failure or a raw
 /// span leaking into the delivered prompt.
 #[test]
@@ -46,7 +46,7 @@ fn standalone_compose_body_sees_an_initialized_empty_accumulator() {
     let fixture = CliProcessFixture::named("composition-outputs");
     fake_goose(&fixture, "provider said hello", 0);
     let md = fixture.cwd().join("doc.md");
-    fs::write(&md, "---\ntitle: t\n---\nPrevious was [{{ last(outputs) }}].\n").unwrap();
+    fs::write(&md, "---\ntitle: t\n---\nPrevious was [{{ last(seq.outputs) }}].\n").unwrap();
 
     let (_, stderr) = run(
         &fixture,
@@ -64,7 +64,7 @@ fn standalone_compose_body_sees_an_initialized_empty_accumulator() {
 }
 
 /// The `success` hook sees the accumulator with exactly one element — this
-/// run's output — so `{{ last(outputs) }}` means the same thing standalone as
+/// run's output — so `{{ last(seq.outputs) }}` means the same thing standalone as
 /// it does mid-sequence.
 #[test]
 fn success_sees_this_runs_output_appended() {
@@ -73,7 +73,7 @@ fn success_sees_this_runs_output_appended() {
     let md = fixture.cwd().join("doc.md");
     fs::write(
         &md,
-        "---\ntitle: t\nsuccess:\n  info: 'count={{ length(outputs) }} last={{ last(outputs) }}'\n---\nBody.\n",
+        "---\ntitle: t\nsuccess:\n  info: 'count={{ length(seq.outputs) }} last={{ last(seq.outputs) }}'\n---\nBody.\n",
     )
     .unwrap();
 
@@ -97,7 +97,7 @@ fn finalize_after_success_sees_the_accumulated_entry() {
     let md = fixture.cwd().join("doc.md");
     fs::write(
         &md,
-        "---\ntitle: t\nfinalize:\n  info: 'final={{ last(outputs) }}'\n---\nBody.\n",
+        "---\ntitle: t\nfinalize:\n  info: 'final={{ last(seq.outputs) }}'\n---\nBody.\n",
     )
     .unwrap();
 
@@ -121,7 +121,7 @@ fn start_sees_only_prior_entries() {
     let md = fixture.cwd().join("doc.md");
     fs::write(
         &md,
-        "---\ntitle: t\nstart:\n  info: 'at-start={{ length(outputs) }}'\n---\nBody.\n",
+        "---\ntitle: t\nstart:\n  info: 'at-start={{ length(seq.outputs) }}'\n---\nBody.\n",
     )
     .unwrap();
 
@@ -145,7 +145,7 @@ fn a_failed_run_commits_no_entry() {
     let md = fixture.cwd().join("doc.md");
     fs::write(
         &md,
-        "---\ntitle: t\nfailure:\n  info: 'at-failure={{ length(outputs) }}'\nfinalize:\n  info: 'at-finalize={{ length(outputs) }}'\n---\nBody.\n",
+        "---\ntitle: t\nfailure:\n  info: 'at-failure={{ length(seq.outputs) }}'\nfinalize:\n  info: 'at-finalize={{ length(seq.outputs) }}'\n---\nBody.\n",
     )
     .unwrap();
 
@@ -183,7 +183,7 @@ fn the_captured_entry_is_undecorated_and_preserves_interior_whitespace() {
     let md = fixture.cwd().join("doc.md");
     fs::write(
         &md,
-        "---\ntitle: t\nsuccess:\n  info: 'captured=[{{ last(outputs) }}]'\n---\nBody.\n",
+        "---\ntitle: t\nsuccess:\n  info: 'captured=[{{ last(seq.outputs) }}]'\n---\nBody.\n",
     )
     .unwrap();
 
@@ -214,7 +214,7 @@ fn provider_stderr_is_excluded_from_the_captured_entry() {
     let md = fixture.cwd().join("doc.md");
     fs::write(
         &md,
-        "---\ntitle: t\nsuccess:\n  info: 'captured=[{{ last(outputs) }}]'\n---\nBody.\n",
+        "---\ntitle: t\nsuccess:\n  info: 'captured=[{{ last(seq.outputs) }}]'\n---\nBody.\n",
     )
     .unwrap();
 
@@ -236,7 +236,7 @@ fn inline_compose_success_sees_this_runs_output() {
     let md = fixture.cwd().join("doc.md");
     fs::write(
         &md,
-        "---\ntitle: t\nprompt: Write something.\nsuccess:\n  info: 'inline-last={{ last(outputs) }}'\n---\nold body\n",
+        "---\ntitle: t\nseq: {name: authored}\nprompt: Write something.\nsuccess:\n  info: 'inline-last={{ last(seq.outputs) }}'\n---\nold body\n",
     )
     .unwrap();
     // Inline mode's output is the agent's summary, and the agent is the writer.
@@ -254,6 +254,17 @@ fn inline_compose_success_sees_this_runs_output() {
         stderr.contains("inline-last=generated body"),
         "inline-compose must commit its output too; stderr:\n{stderr}"
     );
+    for _ in 0..2 {
+        let text = fs::read_to_string(&md).unwrap();
+        let document: darkmatter::markdown::Markdown = text.into();
+        let fm = document.frontmatter().as_map();
+        assert_eq!(fm.get("seq"), Some(&serde_json::json!({"name":"authored"})));
+        for key in ["state", "previous", "next", "outputs", "sequence_id", "step", "total_steps", "is_first", "is_last", "group", "loop"] {
+            assert!(!fm.contains_key(key), "runtime root {key} was persisted");
+        }
+        fs::write(&md, document.as_string()).unwrap();
+    }
+
 }
 
 // ============================================================================
@@ -305,7 +316,7 @@ fn set_targeting_a_reserved_key_fails_the_run_before_launch() {
     let md = fixture.cwd().join("doc.md");
     fs::write(
         &md,
-        "---\ntitle: t\nstart:\n    - {set: {outputs: hijacked}}\n---\nBody.\n",
+        "---\ntitle: t\nstart:\n    - {set: {seq: hijacked}}\n---\nBody.\n",
     )
     .unwrap();
 
@@ -375,7 +386,7 @@ exit 0
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nsequence:\n  - alpha\n  - beta\nfinalize:\n  info: 'acc n={{ length(outputs) }} last={{ last(outputs) }}'\n---\nRun {{state}}.\n",
+        "---\nsequence:\n  - alpha\n  - beta\nfinalize:\n  info: 'acc n={{ length(seq.outputs) }} last={{ last(seq.outputs) }}'\n---\nRun {{seq}}.\n",
     )
     .unwrap();
 
@@ -417,19 +428,18 @@ exit 0
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nsequence:\n  - alpha\n  - beta\nfinalize:\n  info: 'acc n={{ length(outputs) }} last={{ last(outputs) }}'\n---\nRun {{state}}.\n",
+        "---\nsequence:\n  - alpha\n  - beta\nfinalize:\n  info: 'acc n={{ length(seq.outputs) }} last={{ last(seq.outputs) }}'\n---\nRun {{seq}}.\n",
     )
     .unwrap();
 
     let (_, stderr) = run(
         &fixture,
-        &["sequence", "--goose", "--fail-fast", "false", md.to_str().unwrap()],
+        &["sequence", "--goose", md.to_str().unwrap()],
     );
 
     assert!(
-        stderr.contains("acc n=1 last=output-2"),
-        "only the succeeding step commits an entry, so the accumulator holds \
-         exactly one — the second step's; stderr:\n{stderr}"
+        stderr.contains("acc n=0 last="),
+        "the failed step commits no entry and later steps do not run; stderr:\n{stderr}"
     );
     assert!(
         !stderr.contains("last=output-1"),
@@ -463,7 +473,7 @@ exit 0
     let md = fixture.cwd().join("doc.md");
     fs::write(
         &md,
-        "---\ntitle: t\nloop:\n  until: 'length(outputs) >= 2'\n  max: 3\nstart:\n  - info: 'iter n={{ length(outputs) }} carried={{ carried }} prev={{ loop.last_output }}'\n  - {set: {carried: 'from-iteration-1'}}\ncarried: none\n---\nBody.\n",
+        "---\ntitle: t\nloop:\n  until: 'length(seq.outputs) >= 2'\n  max: 3\nstart:\n  - info: 'iter n={{ length(seq.outputs) }} carried={{ carried }} prev={{ loop.last_output }}'\n  - {set: {carried: 'from-iteration-1'}}\ncarried: none\n---\nBody.\n",
     )
     .unwrap();
 

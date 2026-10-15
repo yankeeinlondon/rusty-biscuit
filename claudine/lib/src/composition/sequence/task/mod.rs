@@ -32,6 +32,7 @@
 
 mod group;
 mod shell;
+mod templates;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -194,6 +195,16 @@ impl TaskOutcome {
 /// to compose and launch.
 #[derive(Debug, Clone)]
 pub struct PromptTaskRequest {
+    /// Established lexical group variables; absent outside groups.
+    pub lifecycle_group: Option<Map<String, Value>>,
+    /// The context captured by the document barrier, reused without a second capture.
+    pub prepared_context: std::sync::Arc<std::sync::Mutex<Option<darkmatter::markdown::compose::ComposeContext>>>,
+    /// The prompt document's captured epoch, shared by its entry barrier and execution.
+    pub document_epoch: std::sync::Arc<std::sync::Mutex<Option<crate::invocation_context::DocumentEpoch>>>,
+    /// Fresh per-execution snapshot filled before task setup.
+    pub document_shell_values: darkmatter::markdown::compose::shell_expansion::template::DocumentShellValues,
+    /// Static position and late roots retained from graph discovery.
+    pub deferred_shell_roots: darkmatter::markdown::compose::shell_expansion::template::DeferredShellRoots,
     /// The canonical document path resolved at preflight.
     pub path: std::path::PathBuf,
     /// The reference as authored, for diagnostics.
@@ -269,6 +280,10 @@ pub struct PromptRunOutcome {
 ///
 /// The wrapper implements this; the library never owns provider launch.
 pub trait PromptTaskRunner: Sync {
+    /// Check the document's late shell inputs before this task's setup runs.
+    fn validate(&self, _request: &PromptTaskRequest) -> Result<(), CompositionError> {
+        Ok(())
+    }
     /// Run one prompt task.
     ///
     /// ## Errors
@@ -280,12 +295,19 @@ pub trait PromptTaskRunner: Sync {
 
     /// Open the composition run one serial group member executes as.
     ///
-    /// A serial member is a run of its own, so it observes what the members
-    /// before it changed, and a document of its own, which captures its own
-    /// environment. `None` keeps the group's snapshot for the member's fields,
+    /// A serial member is a run and document of its own. Late shell readers
+    /// open at the group barrier; other members open at dispatch, observing
+    /// what earlier members changed. `None` keeps the group's snapshot for the member's fields,
     /// which is all a runner without launch evidence can offer.
     fn open_member_run(&self, _task: &PreflightTask) -> Option<TaskRun> {
         None
+    }
+
+    /// Refresh Git/run observations for a serial member without late shell inputs,
+    /// so ordinary reads see earlier members' changes. Retain the document and its
+    /// environment; a new document capture would change the member's input snapshot.
+    fn refresh_member_run(&self, _task: &PreflightTask, run: &TaskRun) -> TaskRun {
+        run.clone()
     }
 
     /// Open one parallel group leg: a document of its own, capturing its own
@@ -399,6 +421,12 @@ pub struct TaskExecution<'a> {
     pub document: Option<&'a crate::invocation_context::InvocationContext>,
 }
 
+struct ValidatedTask {
+    late: darkmatter::markdown::compose::shell_expansion::template::LateValues,
+    prompt: Option<PromptTaskRequest>,
+    group: Option<group::ValidatedGroup>,
+}
+
 impl TaskExecution<'_> {
     /// Run the task through setup, its primary action, and teardown.
     ///
@@ -406,6 +434,10 @@ impl TaskExecution<'_> {
     /// outcome, because a scheduler must decide continuation from `fail_fast`
     /// rather than from an error propagating out of one task.
     pub fn run(&self) -> TaskOutcome {
+        self.run_validated(None)
+    }
+
+    fn run_validated(&self, validated: Option<&ValidatedTask>) -> TaskOutcome {
         let started = Instant::now();
         let mutations_before = self.mutation_snapshot();
 
@@ -416,7 +448,7 @@ impl TaskExecution<'_> {
             secondary_errors,
             group_tasks,
             group_output,
-        } = self.run_stages();
+        } = self.run_stages(validated);
 
         // A serial group's members each committed their own entry as they ran, so
         // the group must not add a wrapper entry on top of them. A *parallel*
@@ -453,11 +485,17 @@ impl TaskExecution<'_> {
     }
 
     /// The stage machine, without output commit or timing bookkeeping.
-    fn run_stages(&self) -> StageOutcome {
+    fn run_stages(&self, validated: Option<&ValidatedTask>) -> StageOutcome {
+        let mut task = self.task.clone();
+        self.graph.settle_task_shell_modes(&mut task);
+        TaskExecution { task: &task, ..*self }.run_settled_stages(validated)
+    }
+
+    fn run_settled_stages(&self, validated: Option<&ValidatedTask>) -> StageOutcome {
         // Parsing precedes setup deliberately: a stack that will not parse is an
         // authoring error, and running teardown for a task that never started is
         // worse than not running it.
-        let stacks = match self.parse_stacks() {
+        let mut stacks = match self.parse_stacks() {
             Ok(stacks) => stacks,
             Err(error) => {
                 return StageOutcome::terminal(
@@ -471,6 +509,42 @@ impl TaskExecution<'_> {
         };
         if let Some(refusal) = self.verify_preflight_approvals() {
             return StageOutcome::terminal(TaskStatus::Failed, Some(refusal));
+        }
+        if let Err(error) = self.verify_template_authorizations() {
+            return StageOutcome::terminal(TaskStatus::Failed, Some(TaskDiagnostic::from_composition(TaskStage::Setup, &error)));
+        }
+        // The step barrier: every late value the task's commands read is read
+        // and checked now, before any of them runs, so a missing one fails the
+        // task with nothing run and earlier steps' effects intact. Template
+        // dispatch fills each late placeholder from these values; every other
+        // placeholder is read when its own command runs.
+        let owned;
+        let validated = match validated {
+            Some(validated) => validated,
+            None => {
+                owned = match self.validate_task() {
+                    Ok(validated) => validated,
+                    Err(error) => return StageOutcome::terminal(TaskStatus::Failed, Some(TaskDiagnostic::from_composition(TaskStage::Setup, &error))),
+                };
+                &owned
+            }
+        };
+        let current_prompt;
+        let prompt_request = if validated.prompt.is_none()
+            && let PreflightAction::Prompt { path, reference } = &self.task.action
+        {
+            current_prompt = match self.prompt_request(path, reference).and_then(|request| {
+                self.prompt.validate(&request)?;
+                Ok(request)
+            }) {
+                Ok(request) => request,
+                Err(error) => return StageOutcome::terminal(TaskStatus::Failed, Some(TaskDiagnostic::from_composition(TaskStage::Setup, &error))),
+            };
+            Some(&current_prompt)
+        } else { validated.prompt.as_ref() };
+        let late_values = &validated.late;
+        if let Err(error) = self.install_template_sites(&mut stacks, late_values) {
+            return StageOutcome::terminal(TaskStatus::Failed, Some(TaskDiagnostic::from_composition(TaskStage::Setup, &error)));
         }
 
         if self.interrupted() {
@@ -495,7 +569,7 @@ impl TaskExecution<'_> {
             if self.interrupted() {
                 status = TaskStatus::Interrupted;
             } else {
-                let primary = self.run_primary();
+                let primary = self.run_primary(late_values, prompt_request, validated.group.as_ref());
                 stdout = primary.stdout;
                 group_tasks = primary.group_tasks;
                 group_output = primary.group_output;
@@ -581,7 +655,9 @@ impl TaskExecution<'_> {
             }
             None => stack,
         };
-        let outcome = context.in_scope(scope).execute_action_stack(items);
+        let seq = self.sequence_binding();
+        let context = StackExecutionContext { seq: Some(&seq), ..context.in_scope(scope) };
+        let outcome = context.execute_action_stack(items);
         outcome
             .evaluation_error
             .or(outcome.action_error)
@@ -628,31 +704,62 @@ impl TaskExecution<'_> {
     }
 
     /// Run the task's executable field.
-    fn run_primary(&self) -> PrimaryOutcome {
+    fn run_primary(&self, late: &darkmatter::markdown::compose::shell_expansion::template::LateValues, prompt_request: Option<&PromptTaskRequest>, group: Option<&group::ValidatedGroup>) -> PrimaryOutcome {
         match &self.task.action {
-            PreflightAction::Prompt { path, reference } => self.run_prompt(path, reference),
-            PreflightAction::Shell { commands } => self.run_shell(commands),
+            PreflightAction::Prompt { .. } => {
+                let mut request = prompt_request.expect("prompt requests pass the step barrier").clone();
+                let deferred = self.graph.prompt_references.iter().find(|reference| reference.path == request.path && reference.position == self.task.position)
+                    .map(|reference| reference.deferred_params.as_slice()).unwrap_or_default();
+                for (key, value) in &self.task.params {
+                    if !deferred.contains(key) {
+                        match self.resolve_value(value, &format!("params.{key}")) {
+                            Ok(value) => { request.params.insert(key.clone(), value); }
+                            Err(error) => return PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &error)),
+                        }
+                    }
+                }
+                request.set_overrides = self.layered_overrides(&request.params);
+                request.runtime = self.runtime.cloned();
+                request.frame_writer = self.live.map(|live| live.rendered_writer());
+                self.run_prompt_request(&request)
+            },
+            PreflightAction::Shell { commands } => self.run_shell(commands, late),
             PreflightAction::SideEffect {
                 action,
                 authored_set_order,
             } => self.run_side_effect(action, authored_set_order.as_deref()),
-            PreflightAction::Group(group) => self.run_group(group),
+            PreflightAction::Group(definition) => self.run_group(definition, group.expect("groups pass the step barrier")),
         }
     }
 
-    /// Compose and launch a `prompt:` document through the injected runner.
-    fn run_prompt(&self, path: &std::path::Path, reference: &str) -> PrimaryOutcome {
-        let params = match self.evaluate_params() {
-            Ok(params) => params,
-            Err(error) => {
-                return PrimaryOutcome::failed(TaskDiagnostic::from_composition(
-                    TaskStage::Primary,
-                    &error,
-                ));
-            }
-        };
+    fn validate_task(&self) -> Result<ValidatedTask, CompositionError> {
+        let mut task = self.task.clone();
+        self.graph.settle_task_shell_modes(&mut task);
+        let execution = TaskExecution { task: &task, ..*self };
+        execution.verify_template_authorizations()?;
+        let late = execution.late_values()?;
+        let prompt = if let PreflightAction::Prompt { path, reference } = &task.action {
+            let request = execution.prompt_request(path, reference)?;
+            execution.prompt.validate(&request)?;
+            Some(request)
+        } else { None };
+        let group = if let PreflightAction::Group(group) = &task.action {
+            Some(execution.validate_group(group)?)
+        } else { None };
+        Ok(ValidatedTask { late, prompt, group })
+    }
 
-        let request = PromptTaskRequest {
+    fn prompt_request(&self, path: &std::path::Path, reference: &str) -> Result<PromptTaskRequest, CompositionError> {
+        let params = self.evaluate_params()?;
+        Ok(PromptTaskRequest {
+            lifecycle_group: self.stack.group.cloned(),
+            prepared_context: Default::default(),
+            document_epoch: Default::default(),
+            document_shell_values: Default::default(),
+            deferred_shell_roots: self.graph.prompt_references.iter()
+                .find(|candidate| candidate.path == path && candidate.position == self.task.position)
+                .map(|candidate| candidate.deferred_shell_roots())
+                .unwrap_or_else(super::preflight::sequence_deferred_roots),
             path: path.to_path_buf(),
             reference: reference.to_string(),
             // The referenced document's own frontmatter decides the mode: a
@@ -674,9 +781,11 @@ impl TaskExecution<'_> {
             frame_writer: self.live.map(|live| live.rendered_writer()),
             run_evidence: self.run_evidence.cloned(),
             document: self.document.cloned(),
-        };
+        })
+    }
 
-        match self.prompt.run(&request) {
+    fn run_prompt_request(&self, request: &PromptTaskRequest) -> PrimaryOutcome {
+        match self.prompt.run(request) {
             Ok(run) if run.interrupted => {
                 PrimaryOutcome::interrupted(trim_transport_newline(&run.stdout).to_string())
             }
@@ -687,7 +796,7 @@ impl TaskExecution<'_> {
                 TaskStage::Primary,
                 &CompositionError::SequenceTaskPromptFailed {
                     task: self.label(),
-                    path: path.to_path_buf(),
+                    path: request.path.clone(),
                     code: run.exit_code,
                 },
             )),
@@ -698,18 +807,20 @@ impl TaskExecution<'_> {
         }
     }
 
-    /// Run every approved command in declaration order.
+    /// Run every command in declaration order.
     ///
-    /// The commands are preflight's resolved bytes and are passed through
-    /// untouched — approved *is* executed. Each command's stdout contributes one
+    /// Exact commands retain their preflight bytes. Template commands prove
+    /// shape membership, then fill against current state and barrier values.
+    /// Each command's stdout contributes one
     /// line-terminated block to the task's output, so a two-command task reads
     /// as its two results in declaration order.
     ///
     /// Display and capture diverge here: the runner streams *both* pipes
     /// through the task's live stream as they are read, while only stdout is
     /// collected into the payload below. A command's stderr is therefore
-    /// attributed on screen and absent from `outputs`.
-    fn run_shell(&self, commands: &[String]) -> PrimaryOutcome {
+    /// attributed on screen and absent from `outputs`, unless an authored
+    /// redirection routes it to the original stdout destination.
+    fn run_shell(&self, commands: &[String], late: &darkmatter::markdown::compose::shell_expansion::template::LateValues) -> PrimaryOutcome {
         let timeout = match self.command_timeout() {
             Ok(timeout) => timeout,
             Err(error) => {
@@ -726,12 +837,40 @@ impl TaskExecution<'_> {
             .and_then(|document| self.shell.for_child_environment(document.env_baseline()));
         let shell = document_shell.as_deref().unwrap_or(self.shell);
         let mut collected: Vec<String> = Vec::with_capacity(commands.len());
-        for command in commands {
+        for (index, command) in commands.iter().enumerate() {
             if self.interrupted() {
                 return PrimaryOutcome::interrupted(collected.join("\n"));
             }
-            let output = match shell.run(command, timeout, self.interrupt, self.live) {
+            let chain = match self.prepare_primary_template(index, late) {
+                Ok(chain) => chain,
+                Err(error) => return PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &error)),
+            };
+            let run = match chain {
+                Some(chain) => shell.run_structured(&chain, timeout, self.interrupt, self.live),
+                None => shell.run(command, timeout, self.interrupt, self.live),
+            };
+            let output = match run {
                 Ok(output) => output,
+                Err(TaskShellError::Target { reason, .. }) => {
+                    let site = self.task.shell_sites.iter().find(|site| site.id == format!("primary[{index}]")).expect("structured dispatch has an authored site");
+                    let error = darkmatter::markdown::compose::ShellExpansionError::TemplateTarget {
+                        ctx: Box::new(biscuit_terminal::errors::SourceContext::new(site.source_file.clone(), site.source_file.clone(), site.authored.clone())),
+                        command: site.authored.clone(), reason,
+                        origin: darkmatter::markdown::compose::ShellCommandOrigin::Frontmatter { key: site.property.clone(), line: None },
+                    };
+                    return PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &CompositionError::SequenceShellResolution {
+                        command: site.authored.clone(), task: self.label(), message: error.to_string(),
+                        source: Some(Box::new(MarkdownError::ShellExpansion(Box::new(error)))),
+                    }));
+                }
+                Err(error @ TaskShellError::UnsupportedStructured) => {
+                    return PrimaryOutcome::failed(TaskDiagnostic::from_composition(
+                        TaskStage::Primary,
+                        &CompositionError::SequenceShellResolution {
+                            command: command.clone(), task: self.label(), message: error.to_string(), source: None,
+                        },
+                    ));
+                }
                 Err(TaskShellError::Isolation(source)) => {
                     return PrimaryOutcome::failed(TaskDiagnostic::from_composition(
                         TaskStage::Primary,
@@ -929,13 +1068,12 @@ impl TaskExecution<'_> {
     }
 
     /// Refuse the task, before any stage runs, when its document's captured
-    /// environment changes the text of a command sequence preflight approved.
+    /// environment changes the text of a command sequence preflight resolved.
     ///
-    /// Interim contract until shell template approval lands: preflight
-    /// approves exact text resolved under the launch environment, and a task
-    /// captures its own environment later, so an approval can only vouch for
-    /// identical text. Prompt documents are not checked here; they approve
-    /// their own exact text when they compose.
+    /// Resolved-byte sites use the launch environment, and a task captures its
+    /// own environment later, so resolved text can only vouch for identical
+    /// text. Template-mode sites use their runtime fill instead. Prompt
+    /// documents check membership in their upfront approvals when composing.
     fn verify_preflight_approvals(&self) -> Option<TaskDiagnostic> {
         let document = self.document?;
         let environment = document.document_environment();
@@ -951,12 +1089,65 @@ impl TaskExecution<'_> {
         None
     }
 
-    /// Replace each `shell` command and `on_error` in a parsed stack with the
-    /// bytes sequence approval fixed for that site, and mark the action
-    /// resolved, so execution runs exactly the approved bytes and never
-    /// evaluates the authored text again.
+    /// Read and validate every late value this task's command sites read
+    /// ([`super::preflight::resolve_task_late_values`]), against the task's
+    /// state as it stands now: `outputs` and the step's values from
+    /// [`Self::state`], `group` from the enclosing group, `loop` from the
+    /// enclosing loop (none today).
     ///
-    /// A command with interpolation that approval did not record fails closed.
+    /// [`Self::state`]: TaskExecution::state
+    fn sequence_binding(&self) -> Value {
+        let mut snapshot = self.runtime.map_or_else(Default::default, |runtime| runtime.snapshot());
+        if snapshot.seq.is_none() {
+            snapshot.seq = self.overlay.and_then(|overlay| overlay.get("seq")).cloned();
+        }
+        // In-process callers may supply an already frozen sequence value.
+        if self.runtime.is_none() {
+            return snapshot.seq.unwrap_or_else(||
+                crate::composition::lifecycle::bindings::SequenceBinding::standalone(Vec::new()).to_value());
+        }
+        snapshot.sequence_value()
+    }
+
+    fn late_values(
+        &self,
+    ) -> Result<darkmatter::markdown::compose::shell_expansion::template::LateValues, CompositionError>
+    {
+        use darkmatter::markdown::compose::expression::EvaluationSession;
+        use darkmatter::markdown::compose::shell_expansion::template::LookupEvaluator;
+        if self.task.late_sites().next().is_none() {
+            return Ok(Default::default());
+        }
+        let resolution = super::super::document_expression_resolution_context(
+            &self.task.origin_path,
+            self.stack.prepared_context,
+            self.stack.file_resolution_context,
+            self.stack.ctx_base_dir,
+        )?;
+        let seq = self.sequence_binding();
+        let (view, globals) = runtime_bindings(
+            LifecycleScope::TaskSetup,
+            LifecycleValues {
+                err: None,
+                timing: self.stack.timing,
+                group: self.stack.group,
+                seq: Some(&seq),
+            },
+        );
+        let session = EvaluationSession::associate(view, self.state, globals)
+            .expect("the task scope's view and its runtime entries agree")
+            .with_resolution_context(resolution);
+        super::preflight::resolve_task_late_values(self.task, &LookupEvaluator::new(&session))
+    }
+
+    /// Replace each `shell` command and `on_error` in a parsed stack with the
+    /// bytes sequence preflight resolved for that site, and each `set`
+    /// `$( … )` value with the value it fixed, marking each resolved, so
+    /// execution runs exactly those bytes and never evaluates the authored
+    /// text again.
+    ///
+    /// A command with interpolation that preflight did not record fails closed,
+    /// unless its template is installed after the late-value barrier.
     fn apply_approved_commands(
         &self,
         stage: TaskStage,
@@ -977,6 +1168,20 @@ impl TaskExecution<'_> {
         stage: TaskStage,
         action: &mut LifecycleAction,
     ) -> Result<(), CompositionError> {
+        if let LifecycleActionKind::RuntimeSet(set) = &mut action.kind {
+            for (key, shell) in set.shell_values_mut() {
+                let fixed = self.task.approved_set_values.iter().find(|approved| {
+                    approved.site.stage() == stage
+                        && approved.key == *key
+                        && approved.site.authored() == shell.authored
+                });
+                // An unfixed value refuses to run at its turn.
+                if let Some(fixed) = fixed {
+                    shell.resolved = Some(fixed.value.clone());
+                }
+            }
+            return Ok(());
+        }
         let LifecycleActionKind::Shell(shell) = &mut action.kind else {
             return Ok(());
         };
@@ -994,7 +1199,18 @@ impl TaskExecution<'_> {
                     && action_value_to_expr(&Value::String(approved.site().authored().to_string()))
                         .is_ok_and(|authored| authored == *expr)
             });
+            let template_site = || {
+                self.task.shell_sites.iter().any(|site| {
+                    site.stage == stage
+                        && site.mode == super::preflight::SiteMode::Template
+                        && action_value_to_expr(&Value::String(site.authored.clone()))
+                            .is_ok_and(|authored| authored == *expr)
+                })
+            };
             let Some(approved) = approved else {
+                if template_site() {
+                    continue;
+                }
                 return Err(CompositionError::SequenceShellResolution {
                     command: expr.to_string(),
                     task: self.label(),
@@ -1013,7 +1229,7 @@ impl TaskExecution<'_> {
 
     /// Evaluate `params` just in time against the caller's effective state.
     ///
-    /// Whole-value typing survives: `topic: "{{ state.index }}"` binds the
+    /// Whole-value typing survives: `topic: "{{ seq.index }}"` binds the
     /// number, not its rendering.
     fn evaluate_params(&self) -> Result<Map<String, Value>, CompositionError> {
         let mut evaluated = Map::new();
@@ -1080,12 +1296,14 @@ impl TaskExecution<'_> {
             self.stack.file_resolution_context,
             self.stack.ctx_base_dir,
         )?;
+        let seq = self.sequence_binding();
         let (view, globals) = runtime_bindings(
             LifecycleScope::TaskSetup,
             LifecycleValues {
                 err: None,
                 timing: self.stack.timing,
                 group: self.stack.group,
+                seq: Some(&seq),
             },
         );
         SubtreeCompose::new(value, self.state)

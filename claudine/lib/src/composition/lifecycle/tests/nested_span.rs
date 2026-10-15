@@ -332,7 +332,7 @@ fn single_pass_inventory_matches_the_authored_claudine_schema() {
         .iter()
         .filter(|(_, value)| {
             value.as_str().is_some_and(|ty| {
-                ["stack@", "initialize-stack@", "loop@"].iter().any(|prefix| ty.starts_with(prefix))
+                ["stack@", "initialize-stack@", "cancelled-stack@", "loop@"].iter().any(|prefix| ty.starts_with(prefix))
             })
         })
         .map(|(key, _)| key.as_str())

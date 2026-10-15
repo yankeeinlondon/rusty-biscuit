@@ -75,7 +75,7 @@ fn a_later_step_composes_against_the_edit_an_earlier_step_made() {
         &format!(
             r#"if [ ! -f "$HOME/done" ]; then
   : > "$HOME/done"
-  printf -- '---\nmarker: rewritten\nsequence:\n  - alpha\n  - beta\nstart:\n  info: "marker is {{{{ fm.marker }}}}"\n---\nBody {{{{state}}}}.\n' > "{md}"
+  printf -- '---\nmarker: rewritten\nsequence:\n  - alpha\n  - beta\nstart:\n  info: "marker is {{{{ fm.marker }}}}"\n---\nBody {{{{seq}}}}.\n' > "{md}"
 fi
 printf 'ok\n'
 exit 0"#,
@@ -84,7 +84,7 @@ exit 0"#,
     );
     fs::write(
         &md,
-        "---\nmarker: original\nsequence:\n  - alpha\n  - beta\nstart:\n  info: 'marker is {{ fm.marker }}'\n---\nBody {{state}}.\n",
+        "---\nmarker: original\nsequence:\n  - alpha\n  - beta\nstart:\n  info: 'marker is {{ fm.marker }}'\n---\nBody {{seq}}.\n",
     )
     .unwrap();
 
@@ -117,14 +117,14 @@ fn a_mid_run_edit_to_the_sequence_list_does_not_change_the_plan() {
         &fixture,
         r#"if [ ! -f "$HOME/done" ]; then
   : > "$HOME/done"
-  printf -- '---\nsequence:\n  - alpha\n  - beta\n  - gamma\n---\nBody {{state}}.\n' > "$HOME/seq.md"
+  printf -- '---\nsequence:\n  - alpha\n  - beta\n  - gamma\n---\nBody {{seq}}.\n' > "$HOME/seq.md"
 fi
 printf 'ok\n'
 exit 0"#,
     );
     fs::write(
         &md,
-        "---\nsequence:\n  - alpha\n  - beta\n---\nBody {{state}}.\n",
+        "---\nsequence:\n  - alpha\n  - beta\n---\nBody {{seq}}.\n",
     )
     .unwrap();
 
@@ -201,7 +201,7 @@ fn a_set_from_an_earlier_step_is_composed_into_a_later_step() {
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nphase: initial\nsequence:\n  - alpha\n  - beta\nsuccess:\n  - {set: {phase: advanced}}\nstart:\n  info: 'phase={{ fm.phase }}'\n---\nBody for {{state}} in {{ fm.phase }}.\n",
+        "---\nphase: initial\nsequence:\n  - alpha\n  - beta\nsuccess:\n  - {set: {phase: advanced}}\nstart:\n  info: 'phase={{ fm.phase }}'\n---\nBody for {{seq}} in {{ fm.phase }}.\n",
     )
     .unwrap();
 
@@ -230,7 +230,7 @@ fn a_set_from_an_earlier_step_is_composed_into_a_later_step() {
 /// The reserved overlay outranks every lower layer: a `set` targeting a
 /// reserved key is refused, and `state` keeps naming the step.
 ///
-/// The assertion reads `state.name` rather than `{{state}}`: string-context
+/// The assertion reads `state.name` rather than `{{seq}}`: string-context
 /// name coercion is a compose-time option, and a lifecycle `info:` resolves
 /// after composition, where the typed object is what is in scope.
 #[test]
@@ -240,7 +240,7 @@ fn the_reserved_overlay_outranks_a_runtime_mutation() {
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nsequence:\n  - alpha\n  - beta\nsuccess:\n  - {set: {state: hijacked}}\nstart:\n  info: 'state={{ state.name }}'\n---\nBody {{state}}.\n",
+        "---\nsequence:\n  - alpha\n  - beta\nsuccess:\n  - {set: {state: hijacked}}\nstart:\n  info: 'state={{ seq.name }}'\n---\nBody {{seq}}.\n",
     )
     .unwrap();
 
@@ -259,7 +259,7 @@ fn the_reserved_overlay_outranks_a_runtime_mutation() {
     );
 }
 
-/// A later step composes `{{ last(outputs) }}` against the entry the previous
+/// A later step composes `{{ last(seq.outputs) }}` against the entry the previous
 /// step committed — the accumulator is a live runtime layer, not a preflight
 /// snapshot.
 #[test]
@@ -269,7 +269,7 @@ fn a_later_step_composes_the_previous_steps_output() {
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nsequence:\n  - alpha\n  - beta\nstart:\n  info: 'prior=[{{ last(outputs) }}]'\n---\nBody {{state}}.\n",
+        "---\nsequence:\n  - alpha\n  - beta\nstart:\n  info: 'prior=[{{ last(seq.outputs) }}]'\n---\nBody {{seq}}.\n",
     )
     .unwrap();
 
@@ -293,10 +293,9 @@ fn a_later_step_composes_the_previous_steps_output() {
 // Failure policy
 // ============================================================================
 
-/// A mid-run composition failure is a failure of *that step*: under
-/// `fail_fast: false` the remaining steps still run.
+/// The removed continuation flag is rejected before any provider starts.
 #[test]
-fn a_step_failure_lets_later_steps_run_when_fail_fast_is_false() {
+fn removed_continuation_flag_never_starts_the_first_step() {
     let fixture = CliProcessFixture::named("sequence-jit");
     // Fail the first launch, succeed afterwards.
     fake_goose(
@@ -312,7 +311,7 @@ exit 0"#,
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nsequence:\n  - alpha\n  - beta\n---\nBody {{state}}.\n",
+        "---\nsequence:\n  - alpha\n  - beta\n---\nBody {{seq}}.\n",
     )
     .unwrap();
 
@@ -327,11 +326,9 @@ exit 0"#,
         ],
     );
 
-    assert_ne!(code, 0, "a failed step must fail the run; stderr:\n{stderr}");
-    assert!(
-        stderr.contains("1/2") && stderr.contains("2/2"),
-        "both steps must be attempted; stderr:\n{stderr}"
-    );
+    assert_ne!(code, 0, "{stderr}");
+    assert!(stderr.contains("removed") && stderr.contains("--fail-fast"), "{stderr}");
+    assert!(!fixture.home().join("first").exists());
 }
 
 /// The same fixture under `fail_fast: true` stops at the first failure and
@@ -348,7 +345,7 @@ exit 3"#,
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nsequence:\n  - alpha\n  - beta\n---\nBody {{state}}.\n",
+        "---\nsequence:\n  - alpha\n  - beta\n---\nBody {{seq}}.\n",
     )
     .unwrap();
 
@@ -357,8 +354,6 @@ exit 3"#,
         &[
             "sequence",
             "--goose",
-            "--fail-fast",
-            "true",
             md.to_str().unwrap(),
         ],
     );
@@ -395,7 +390,7 @@ exit 0"#,
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nsequence:\n  - name: work\n    shell: \"echo from-shell\"\n  - name: report\nstart:\n  info: 'prior=[{{ last(outputs) }}]'\n---\nBody {{state}}.\n",
+        "---\nsequence:\n  - name: work\n    shell: \"echo from-shell\"\n  - name: report\nstart:\n  info: 'prior=[{{ last(seq.outputs) }}]'\n---\nBody {{seq}}.\n",
     )
     .unwrap();
     fs::write(
@@ -431,7 +426,7 @@ fn a_failing_shell_task_fails_its_step() {
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nsequence:\n  - name: work\n    shell: \"false\"\n---\nBody {{state}}.\n",
+        "---\nsequence:\n  - name: work\n    shell: \"false\"\n---\nBody {{seq}}.\n",
     )
     .unwrap();
     fs::write(
@@ -467,7 +462,7 @@ fn dry_run_composes_every_step_and_launches_nothing() {
 exit 0"#,
     );
     let md = fixture.cwd().join("seq.md");
-    let original = "---\nprompt: 'Do {{state}}'\nsequence:\n  - alpha\n  - beta\n---\nBody.\n";
+    let original = "---\nprompt: 'Do {{seq}}'\nsequence:\n  - alpha\n  - beta\n---\nBody.\n";
     fs::write(&md, original).unwrap();
 
     let (_, stderr, code) = run(
@@ -500,7 +495,7 @@ fn dry_run_composes_every_step_against_the_initial_state() {
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nsequence:\n  - alpha\n  - beta\n---\nPrior was [{{ last(outputs) }}].\n",
+        "---\nsequence:\n  - alpha\n  - beta\n---\nPrior was [{{ last(seq.outputs) }}].\n",
     )
     .unwrap();
 
@@ -541,7 +536,7 @@ exit 0"#,
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nsequence:\n  - alpha\n  - beta\n---\nBody {{state}}.\n",
+        "---\nsequence:\n  - alpha\n  - beta\n---\nBody {{seq}}.\n",
     )
     .unwrap();
 

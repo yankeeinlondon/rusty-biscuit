@@ -266,6 +266,7 @@ pub(crate) fn route_staged_initialize(
         Instant::now(),
     );
     let init_ctx = StackExecutionContext {
+        seq: None,
         signal: LifecycleSignal::Initialize,
         scope: None,
         frontmatter,

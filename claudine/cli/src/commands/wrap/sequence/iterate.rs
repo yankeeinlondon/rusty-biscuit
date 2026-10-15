@@ -160,7 +160,6 @@ pub(super) fn run_sequence_steps(
 
     let mut interrupt_observed = false;
     for step_index in 0..total_steps {
-        crate::budget::enter_stage(&run.plan.steps[step_index].name);
         if run.interrupted.load(Ordering::SeqCst) {
             interrupt_observed = true;
             if let Some(acc) = perf_accumulator.as_mut() {
@@ -169,6 +168,9 @@ pub(super) fn run_sequence_steps(
             break;
         }
         let step = &run.plan.steps[step_index];
+        runtime_state.set_sequence_binding(claudine::composition::lifecycle::bindings::SequenceBinding::step(
+            &claudine::composition::sequence::build_step_overlay(run.plan, step_index), Vec::new(),
+        ).to_value());
 
         // Dry-run: separate each document's rendered metadata block with a
         // full-width horizontal rule on stderr. The per-document render happens
@@ -235,11 +237,7 @@ pub(super) fn run_sequence_steps(
                 tasks,
             } => (
                 false,
-                Some(if crate::budget::stopped_by_exhaustion() {
-                    "stopped: execution budget exhausted".to_string()
-                } else {
-                    "interrupted by SIGINT".to_string()
-                }),
+                Some("interrupted by SIGINT".to_string()),
                 None,
                 None,
                 agent_perf,
@@ -386,7 +384,12 @@ fn run_one_step(
     // One composition run per step: the step's composition of this document,
     // its task, and the task's prompt document observe one view of Git state.
     let step_run = claudine::invocation_context::RunEvidence::default();
+    let deferred = super::jit::sequence_shell_roots(step_index);
     let step_compose = StepComposeContext {
+        lifecycle_group: None,
+        prepared_context: None,
+        document_epoch: None,
+        deferred_shell_roots: deferred,
         run_evidence: Some(&step_run),
         invocation: &step_prep_context.invocation,
         file_resolution_context: step_prep_context.source_context.file_resolution_context(),
@@ -447,6 +450,7 @@ fn run_one_step(
     );
     // The step's own scope, kept by any document a handoff adopts within it.
     let step_scope = StepScope {
+        lifecycle_group: None,
         caller_overrides: set_overrides,
         runtime_state: Arc::clone(runtime_state),
         suppress_output_commit: false,

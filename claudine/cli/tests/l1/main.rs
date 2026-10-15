@@ -122,6 +122,10 @@ mod lifecycle_message_drain;
 #[cfg(windows)]
 mod lifecycle_message_drain_console_windows;
 mod lifecycle_message_drain_interrupt;
+// Installs the `claudine-argv-recorder` and `claudine-fake-goose` fixture
+// binaries, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod lifecycle_shell_templates;
 #[cfg(unix)]
 mod loop_cli;
 // Installs the `claudine-fake-goose` fixture binary on Windows, which only
@@ -136,6 +140,7 @@ mod preflight_execution_parity;
 #[cfg(unix)]
 mod lifecycle_mixed_span_validation;
 mod lifecycle_set_shell_values;
+mod shell_approval_prompt;
 mod shell_missing_values;
 mod literal_glob_hint;
 #[cfg(unix)]
@@ -153,10 +158,6 @@ mod provider_tail_notice;
 mod provider_tail_ownership;
 mod run_harness_loop_call_sites;
 mod setter_after_switch;
-// Spawns the `claudine-fake-goose` fixture binary, which only
-// `test-fixtures` builds.
-#[cfg(feature = "test-fixtures")]
-mod sequence_budget;
 mod sequence_cli;
 #[cfg(windows)]
 mod sequence_ctrl_c_windows;
@@ -182,6 +183,10 @@ mod sequence_perf;
 mod sequence_prompt_property;
 #[cfg(unix)]
 mod sequence_schema;
+// Installs the `claudine-argv-recorder` and `claudine-fake-goose` fixture
+// binaries, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod sequence_shell_templates;
 mod sequence_sources_cli;
 mod shipped_prompts;
 mod skills_integration;

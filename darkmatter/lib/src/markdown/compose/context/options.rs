@@ -549,6 +549,10 @@ pub struct ComposeOptions {
     /// one is not evaluated by discovery and its command can be approved only
     /// as a template. Default: empty.
     pub(crate) deferred_shell_roots: crate::markdown::compose::shell_expansion::template::DeferredShellRoots,
+    /// Passive step-entry discovery validates deferred holes against current values.
+    pub(crate) validate_deferred_shell_values: bool,
+    /// Per-task deferred values checked at the host barrier.
+    pub(crate) document_shell_values: Option<crate::markdown::compose::shell_expansion::template::DocumentShellValues>,
 
     // ── Named-object string coercion (Sequence Plus) ───────────────
     /// Frontmatter keys whose OBJECT values render their `name` string field
@@ -958,6 +962,8 @@ impl ComposeOptions {
             exclude_keys: std::collections::HashSet::new(),
             host_globals: None,
             deferred_shell_roots: Default::default(),
+            validate_deferred_shell_values: false,
+            document_shell_values: None,
             name_coercion_keys: Vec::new(),
             file_ref_fallback_dir: None,
         }
@@ -1475,6 +1481,20 @@ impl ComposeOptions {
         roots: crate::markdown::compose::shell_expansion::template::DeferredShellRoots,
     ) -> Self {
         self.deferred_shell_roots = roots;
+        self
+    }
+
+    /// Carry one task's late-value snapshot from passive discovery into execution.
+    #[must_use]
+    pub fn with_document_shell_values(mut self, values: crate::markdown::compose::shell_expansion::template::DocumentShellValues) -> Self {
+        self.document_shell_values = Some(values);
+        self
+    }
+
+    /// Validate late holes during passive discovery, before a host runs task setup.
+    #[must_use]
+    pub fn with_deferred_shell_value_validation(mut self, enabled: bool) -> Self {
+        self.validate_deferred_shell_values = enabled;
         self
     }
 
@@ -2761,6 +2781,8 @@ impl ComposeOptions {
             exclude_keys,
             host_globals,
             deferred_shell_roots,
+            validate_deferred_shell_values,
+            document_shell_values,
             name_coercion_keys,
             portable_env,
             absolute_fallback_warning,
@@ -3155,6 +3177,16 @@ impl ComposeOptions {
                 enc.str(root);
             }
         }
+        if deferred_shell_roots.placeholders_template_required() {
+            enc.field("placeholders_template_required");
+        }
+        if let Some(values) = document_shell_values {
+            enc.field("document_shell_values");
+            enc.str(&values.identity());
+        }
+        if *validate_deferred_shell_values {
+            enc.field("validate_deferred_shell_values");
+        }
         // Ordered vector: preserve the caller's coercion precedence.
         enc.field("name_coercion_keys");
         enc.count(name_coercion_keys.len());
@@ -3313,6 +3345,16 @@ impl ComposeOptions {
             for root in roots {
                 cenc.str(root);
             }
+        }
+        if deferred_shell_roots.placeholders_template_required() {
+            cenc.field("placeholders_template_required");
+        }
+        if let Some(values) = document_shell_values {
+            cenc.field("document_shell_values");
+            cenc.str(&values.identity());
+        }
+        if *validate_deferred_shell_values {
+            cenc.field("validate_deferred_shell_values");
         }
         cenc.field("name_coercion_keys");
         cenc.count(name_coercion_keys.len());

@@ -298,7 +298,8 @@ where
                     prompt_path,
                 )
                     .with_file_ref_fallback_dir(lifecycle_ctx.launch_area)
-                    .with_prepared_context(run_context.as_ref().or(lifecycle_ctx.context));
+                    .with_prepared_context(run_context.as_ref().or(lifecycle_ctx.context))
+                    .with_runtime_state(runtime_state);
             !evaluate_condition(&config.condition, &pre_mutation_lookup)?
         };
         let ambient = LoopAmbient::new(
@@ -454,6 +455,7 @@ where
             loop_start,
             file_resolution_context,
             current_authority.clone(),
+            runtime_state,
         )? {
             LoopGateOutcome::Exit => {
                 return Ok(LoopExecutionResult::success(
@@ -486,6 +488,7 @@ where
                 iteration + 1,
                 &last_output,
                 last_exit_code,
+                runtime_state,
                 LoopFileResolution {
                     source_path: prompt_path,
                     fallback_dir: lifecycle_ctx.launch_area,
@@ -594,11 +597,12 @@ fn run_loop_gate(
     loop_start: std::time::Instant,
     file_resolution_context: &biscuit_file::FileResolutionContext,
     current: Option<darkmatter::markdown::compose::CurrentAuthority>,
+    runtime_state: Option<&crate::composition::RuntimeState>,
 ) -> Result<LoopGateOutcome, CompositionError> {
     let timing = capture_loop_lifecycle_timing(loop_start);
     // The gate's stack reads the `loop` global from the same ambient the
     // condition reads below: the iteration that just finished.
-    let loop_ctx = build_loop_stack_context(
+    let mut loop_ctx = build_loop_stack_context(
         LifecycleSignal::Loop,
         frontmatter,
         lifecycle_ctx,
@@ -611,6 +615,7 @@ fn run_loop_gate(
         current,
         Some(ambient),
     );
+    loop_ctx.runtime_state = runtime_state;
     let loop_outcome = guard.execute_event(LifecycleSignal::Loop, &loop_ctx);
 
     // A late-binding evaluation error in the gate stack (a crashed `when:`
@@ -707,7 +712,8 @@ fn run_loop_gate(
 
     let lookup = LoopExpressionLookup::new(frontmatter, ambient, file_resolution_context, prompt_path)
         .with_file_ref_fallback_dir(lifecycle_ctx.launch_area)
-        .with_prepared_context(lifecycle_ctx.context);
+        .with_prepared_context(lifecycle_ctx.context)
+        .with_runtime_state(runtime_state);
     if !evaluate_condition(&config.condition, &lookup)? {
         return Ok(LoopGateOutcome::Exit);
     }
@@ -751,6 +757,7 @@ fn build_loop_stack_context<'a>(
     loop_values: Option<&'a LoopAmbient>,
 ) -> StackExecutionContext<'a> {
     StackExecutionContext {
+        seq: None,
         signal,
         scope: None,
         frontmatter,
@@ -909,13 +916,15 @@ fn should_continue_after_cap(
     next_iteration: usize,
     last_output: &str,
     last_exit_code: i32,
+    runtime_state: Option<&crate::composition::RuntimeState>,
     resolution: LoopFileResolution<'_>,
 ) -> Result<bool, CompositionError> {
     let ambient = LoopAmbient::new(next_iteration, false, true, last_output, last_exit_code);
     let lookup =
         LoopExpressionLookup::new(frontmatter, &ambient, resolution.context, resolution.source_path)
             .with_file_ref_fallback_dir(resolution.fallback_dir)
-        .with_prepared_context(resolution.prepared_context);
+        .with_prepared_context(resolution.prepared_context)
+        .with_runtime_state(runtime_state);
     evaluate_condition(&config.condition, &lookup)
 }
 

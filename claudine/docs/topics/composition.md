@@ -1401,9 +1401,9 @@ flowchart TD
 ### Approval under a later document's map
 
 Sequence preflight approves every `shell:`, `setup:`, and `teardown:` command
-before any step runs, so it resolves them under the launch map. When a later
-task captures its own map, it resolves each approved command again under that
-map, before any of its stages runs:
+before any step runs, so it resolves those whose values exist then under the
+launch map. When a later task captures its own map, it resolves each such
+command again under that map, before any of its stages runs:
 
 - identical text runs as approved;
 - changed text is refused with `CompositionError::SequenceShellApprovalChanged`,
@@ -1415,10 +1415,15 @@ preflight (launch map TARGET=staging):  shell: deploy {{ env.TARGET }}  approved
 step 2 (its map TARGET=prod):           resolves to "deploy prod"  refused: changed TARGET
 ```
 
-A preflight approval covers only the exact text it approved. **Planned:**
-approval of the command template, so that a later task's changed text can run
-without a refusal. Prompt and step documents are unaffected: they already
-approve the exact text they are about to run when they run it.
+Resolved text covers only itself. A later task's command with a placeholder
+is approved by its typed shape rather than its text (see
+[Sequences — Phase 1](flow-control/sequences.md#phase-1--static-preflight));
+it runs as a template filled from the task's current state. Prompt and step
+documents preserve the same static position and late inputs: a later document
+uses its preflight shape approval, with ordinary values read at command entry.
+Before task setup, a passive walk checks every deferred document hole,
+including transcluded documents, and retains those values for that execution.
+Sequence validation discovers document shells without executing them.
 
 ### Model selection under a later document's map
 

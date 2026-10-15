@@ -8,8 +8,8 @@
 //!
 //! The sequence-wide validation pass ([`super::phase1c`]) calls the same
 //! function against the initial source and an empty runtime cell. Sharing one
-//! path is what makes "validated == executed" true: there is no second prepare
-//! implementation that could drift.
+//! option builder preserves the approval context; validation probes disable
+//! shell stages and execution proves membership in their approval set.
 //!
 //! What is *not* re-derived at a step boundary: the step list itself. Dynamic
 //! sources snapshot once during static preflight (spec → *Phase 1 — Static
@@ -32,6 +32,11 @@ use crate::commands::schema_interactive::emit_dropped_optional_warnings;
 /// The per-invocation inputs every step composition shares.
 #[derive(Clone)]
 pub(super) struct StepComposeContext<'a> {
+    pub(super) lifecycle_group: Option<serde_json::Map<String, Value>>,
+    /// The barrier's launch context; reusing its epoch must not recapture it.
+    pub(super) prepared_context: Option<darkmatter::markdown::compose::ComposeContext>,
+    /// A prompt task reuses the epoch its passive entry barrier captured.
+    pub(super) document_epoch: Option<claudine::invocation_context::DocumentEpoch>,
     /// Repo root of the sequence source, for shell policy resolution.
     pub(super) source_repo_root: Option<&'a Path>,
     /// Working directory `::shell` expansions run in.
@@ -57,6 +62,11 @@ pub(super) struct StepComposeContext<'a> {
     /// composed for the step, its task, and the task's prompt document are
     /// one run. `None` opens a new run per preparation.
     pub(super) run_evidence: Option<&'a claudine::invocation_context::RunEvidence>,
+    /// Validation probes discover commands without executing them.
+    pub(super) validation_probe: bool,
+    pub(super) document_shell_values: Option<darkmatter::markdown::compose::shell_expansion::template::DocumentShellValues>,
+    /// Approval-time position and inputs preserved at each execution.
+    pub(super) deferred_shell_roots: darkmatter::markdown::compose::shell_expansion::template::DeferredShellRoots,
 }
 
 impl<'ctx> StepComposeContext<'ctx> {
@@ -109,8 +119,7 @@ pub(super) fn step_set_overrides(
     )
 }
 
-/// This step's reserved overlay alone — `state`, `previous`, `next`,
-/// `sequence_id` — with no lower layer folded in.
+/// This step's lexical `seq` payload, without any frontmatter layers.
 ///
 /// A task executor needs it unmixed: it folds its own layers (`params` <
 /// user setters < mutations < overlay), and handing it the already-folded object
@@ -142,14 +151,12 @@ pub(super) fn step_env_overrides(
 /// The part of [`step_env_overrides`] that belongs to the step rather than to
 /// the document it runs, so a proxy target inside the step keeps it while
 /// installing its own `AGENT`/`MODEL`/`YOLO`.
-pub(super) fn step_owned_env(effective_fail_fast: bool) -> BTreeMap<String, String> {
-    BTreeMap::from([(
-        "CLAUDINE_FAIL_FAST".to_string(),
-        effective_fail_fast.to_string(),
-    )])
+pub(super) fn step_owned_env(_effective_fail_fast: bool) -> BTreeMap<String, String> {
+    BTreeMap::new()
 }
 
-/// Validate, approve, and compose one step against `source`.
+/// Validate and compose one step against `source`, approving only during the
+/// sequence-wide passive validation probe.
 ///
 /// ## Errors
 ///
@@ -191,7 +198,8 @@ pub(super) fn compose_step(
     let step_source = pre.source;
     // Pre-validation may drop invalid optional keys; the rest keep their origin.
     let step_overrides =
-        LayeredOverrides::from_parts(pre.set_overrides.as_ref(), set_overrides.data_keys());
+        LayeredOverrides::from_parts(pre.set_overrides.as_ref(), set_overrides.data_keys())
+            .with_sequence_value(set_overrides.sequence_value().cloned());
 
     let approval_options = super::super::apply_composition_shell_overrides(
         super::super::build_harness_shell_options_for_source_with_cache(
@@ -203,29 +211,36 @@ pub(super) fn compose_step(
         ctx.shared.yolo,
     );
 
-    // Discovery and preparation share one option set, so the template audit
-    // approves exactly the bytes the step's compose executes.
+    // Execution receives only the preflight approvals. Re-auditing the live
+    // document here would grant new bytes or shapes after the sequence starts.
     let mut prepare_options =
         step_prepare_options(&step_source, ctx, step_overrides, env_overrides, allow_empty_body);
     let mut approved = approved;
-    let template_preflight =
-        composition::approve_document_shell(&step_source, &prepare_options, &approval_options)?;
-    approved.extend(template_preflight.approved_commands.clone());
+    if ctx.validation_probe {
+        let template_preflight =
+            composition::approve_document_shell(&step_source, &prepare_options, &approval_options)?;
+        approved.extend(template_preflight.approved_commands);
+    }
     prepare_options.pre_approved_commands = Some(approved.clone());
 
     // Inline steps prepare via `prepare_inline_with_schema` so the composed
     // `prompt` frontmatter becomes the agent prompt and the prepared closure is
     // `Inline`, which drives body write-back after the provider run.
-    let prepared = if ctx.inline_mode {
+    let prepared = if ctx.validation_probe {
+        composition::prepare_sequence_probe(&step_source, prepare_options, if ctx.inline_mode {
+            composition::CompositionMode::InlineFrontmatterPrompt
+        } else {
+            composition::CompositionMode::ChainedDocument
+        })?
+    } else if ctx.inline_mode {
         composition::prepare_inline_with_schema(&step_source, prepare_options)?
     } else {
         composition::prepare_direct_with_schema(&step_source, prepare_options)?
     };
     emit_dropped_optional_warnings(&prepared.dropped_optionals);
 
-    // Audit the resolved lifecycle commands too. At validation time this is
-    // what front-loads approval for the whole run; at execution time the cache
-    // already holds them, so nothing prompts.
+    // Lifecycle preparation has its own mode settlement; share the invocation
+    // cache while keeping document approvals fixed by the validation probe.
     let lifecycle_preflight = composition::resolve_shell_approvals(
         None,
         None,
@@ -241,12 +256,13 @@ pub(super) fn compose_step(
 /// The options one step both discovers its template shell commands with and
 /// prepares with.
 ///
-/// Each call opens the step's own document epoch: one launch-anchored
-/// snapshot, constructed through the invocation owner and never from the step
+/// A prompt task reuses the epoch its entry barrier opened; other calls open
+/// the step's own epoch. Its launch-anchored snapshot comes through the
+/// invocation owner and never from the step
 /// document's location, so moving the document cannot change launch-facing
 /// `ctx.*`, while its `SourceContext` (`ctx.file_resolution_context`) drives
 /// file resolution. The epoch joins `ctx.run_evidence` when the step supplies
-/// one, so every document of one step observes one view of Git state. `{{state}}`/`{{previous}}`/`{{next}}` render their `name`
+/// one, so every document of one step observes one view of Git state. `{{seq}}`/`{{seq.previous}}`/`{{seq.next}}` render their `name`
 /// in string context; whole-value and dotted access keep the typed object.
 pub(super) fn step_prepare_options(
     source: &ResolvedCompositionSource,
@@ -255,18 +271,22 @@ pub(super) fn step_prepare_options(
     env_overrides: &BTreeMap<String, String>,
     allow_empty_body: bool,
 ) -> PrepareOptions {
-    let document_epoch = match ctx.run_evidence {
+    let document_epoch = ctx.document_epoch.clone().unwrap_or_else(|| match ctx.run_evidence {
         Some(run) => ctx.invocation.begin_document_epoch_in(run),
         None => ctx.invocation.begin_document_epoch(),
-    };
+    });
     let requirements =
         darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
-    let mut prepared_context = document_epoch.capture_launch_context(&requirements);
+    let mut prepared_context = ctx.prepared_context.clone()
+        .unwrap_or_else(|| document_epoch.capture_launch_context(&requirements));
     for (key, value) in env_overrides {
         prepared_context.env_mut().insert(key.clone(), value.clone());
     }
     PrepareOptions {
+        lifecycle_group: ctx.lifecycle_group.clone(),
         pre_approved_commands: None,
+        deferred_shell_roots: ctx.deferred_shell_roots.clone(),
+        document_shell_values: ctx.document_shell_values.clone(),
         env_overrides: env_overrides.clone(),
         perf_enabled: ctx.shared.perf,
         source_repo_root: ctx.source_repo_root.map(Path::to_path_buf),
@@ -289,3 +309,9 @@ pub(super) fn step_prepare_options(
 
 #[cfg(test)]
 mod tests;
+
+/// Static position is preserved even when preceding steps are skipped.
+pub(super) fn sequence_shell_roots(step_index: usize) -> darkmatter::markdown::compose::shell_expansion::template::DeferredShellRoots {
+    let roots = darkmatter::markdown::compose::shell_expansion::template::DeferredShellRoots::new(["seq", "loop", "group"]);
+    if step_index == 0 { roots } else { roots.with_placeholders_template_required() }
+}

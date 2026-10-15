@@ -253,6 +253,7 @@ pub(super) fn build_lifecycle_stack_context_for_materialized<'a>(
         .unwrap_or_else(|| EMPTY_FRONTMATTER.get_or_init(serde_json::Map::new));
     let base_dir = source_path.parent().or(repo_root);
     StackExecutionContext {
+        seq: None,
         signal,
         scope: None,
         frontmatter: fm_map,
@@ -301,19 +302,11 @@ pub(super) fn build_lifecycle_stack_context_for_materialized<'a>(
 /// and `finalize` see the entry this run produced, while `initialize`/`start`
 /// (and `failure`, which never reaches here) see only prior entries.
 ///
-/// The entry is published to the per-attempt live cell as well, so an
-/// event-time `{{ last(outputs) }}` resolves against the same array a later
-/// composition will be handed.
+/// Event-time `seq.outputs` and later composition both read this runtime
+/// cell; no generated output property is published into frontmatter.
 pub(super) fn commit_run_output(materialized: &MaterializedHarnessPrompt, stdout: &str) {
     materialized.runtime_state.append_output(stdout);
-    materialized
-        .live_frontmatter
-        .lock()
-        .expect("live frontmatter mutex poisoned")
-        .insert(
-        claudine::composition::OUTPUTS_KEY.to_string(),
-        materialized.runtime_state.outputs_value(),
-    );
+
 }
 
 /// Capture the lifecycle stack-only `timing` global for an event.

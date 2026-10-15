@@ -25,9 +25,16 @@ use std::path::PathBuf;
 /// it, and the command can be approved only as a template. Declaring a root
 /// here does not make it readable; lexical availability stays with the
 /// host's binding view.
+///
+/// A host that places commands where their values may change before they run
+/// (a sequence task after the first) also sets
+/// [`with_placeholders_template_required`](Self::with_placeholders_template_required):
+/// every command with a placeholder is then [`ModeRequirement::TemplateRequired`],
+/// even when all its values are known at approval.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct DeferredShellRoots {
     roots: BTreeSet<String>,
+    placeholders_template_required: bool,
 }
 
 impl DeferredShellRoots {
@@ -38,19 +45,55 @@ impl DeferredShellRoots {
     {
         Self {
             roots: roots.into_iter().map(Into::into).collect(),
+            placeholders_template_required: false,
         }
+    }
+
+    /// The same roots, with every command that has a placeholder required to
+    /// run as a template. Approval-time placeholders are still evaluated and
+    /// checked for presence; only the resolved-byte mode is withdrawn.
+    #[must_use]
+    pub fn with_placeholders_template_required(mut self) -> Self {
+        self.placeholders_template_required = true;
+        self
+    }
+
+    /// Whether every command with a placeholder must run as a template.
+    pub fn placeholders_template_required(&self) -> bool {
+        self.placeholders_template_required
     }
 
     pub fn contains(&self, root: &str) -> bool {
         self.roots.contains(root)
     }
 
+    /// Whether no root is declared late. Says nothing about
+    /// [`placeholders_template_required`](Self::placeholders_template_required).
     pub fn is_empty(&self) -> bool {
         self.roots.is_empty()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &str> {
         self.roots.iter().map(String::as_str)
+    }
+
+    /// The late roots `expression` reads: a declared root, or a key of
+    /// `derived` (see [`derived_deferred_keys`]). `None` when it reads none,
+    /// or does not parse. Static: nothing is evaluated.
+    pub fn late_roots_of(&self, expression: &str, derived: &HashSet<String>) -> Option<Vec<String>> {
+        if self.is_empty() && derived.is_empty() {
+            return None;
+        }
+        let expr = parse(expression).ok()?;
+        let mut roots = Vec::new();
+        read_roots(&expr, &mut roots);
+        let mut late: Vec<String> = roots
+            .into_iter()
+            .filter(|read| read.is_late(self, derived))
+            .map(|read| read.root)
+            .collect();
+        late.dedup();
+        (!late.is_empty()).then_some(late)
     }
 }
 
@@ -79,6 +122,8 @@ pub enum ModeRequirement {
 /// One discovered shell command site.
 #[derive(Debug, Clone)]
 pub struct ShellCandidate {
+    /// The authored command, retained even when template grammar rejects it.
+    pub authored_command: String,
     pub site: CommandSite,
     /// The authored command parsed as a template, typed against the owner's
     /// schema, with each hole's timing. An error keeps the site eligible for
@@ -92,7 +137,8 @@ pub struct ShellCandidate {
 }
 
 impl ShellCandidate {
-    /// The command as authored.
+    /// The valid template's authored command; byte-only sites retain their
+    /// original text in [`authored_command`](Self::authored_command).
     pub fn authored(&self) -> Option<&str> {
         self.template.as_ref().ok().map(|template| template.authored.as_str())
     }
@@ -117,8 +163,69 @@ impl ShellCandidate {
         OfferedChoices {
             exact: resolved,
             shape: self.shape().is_some(),
-            prefix: resolved || self.template.is_ok(),
+            prefix: (resolved || self.template.is_ok()) && self.program_words_fixed(),
         }
+    }
+
+    /// Whether every authored program word is literal, including when another
+    /// part of the command is outside template grammar.
+    pub fn program_words_fixed(&self) -> bool {
+        match &self.template {
+            Err(TemplateGrammarError::ProgramWordHole) => return false,
+            // Native-shell adapters preserve line boundaries, while the template
+            // grammar folds them into whitespace between arguments.
+            Ok(_) if !self.authored_command.contains(['\n', '\r']) => return true,
+            _ => {}
+        }
+        let holes = ExpressionFinder::scan_plain(&self.authored_command).expressions;
+        let mut holes = holes.iter().peekable();
+        let mut chars = self.authored_command.char_indices().peekable();
+        let mut quote = None;
+        let mut program = true;
+        let mut word = false;
+        while let Some((offset, ch)) = chars.next() {
+            if let Some(hole) = holes.peek()
+                && hole.start == offset
+            {
+                if program {
+                    return false;
+                }
+                while chars.peek().is_some_and(|(offset, _)| *offset < hole.end) {
+                    chars.next();
+                }
+                holes.next();
+                word = true;
+                continue;
+            }
+            if ch == '\\' && quote != Some('\'') {
+                chars.next();
+                word = true;
+            } else if Some(ch) == quote {
+                quote = None;
+            } else if quote.is_some() {
+                word = true;
+            } else if matches!(ch, '\'' | '"') {
+                quote = Some(ch);
+                word = true;
+            } else if matches!(ch, '\n' | '\r') {
+                let line = self.authored_command[offset + ch.len_utf8()..]
+                    .split(['\n', '\r']).next().unwrap_or("");
+                if matches!(super::parse_authored(line), Err(TemplateGrammarError::ProgramWordHole)) {
+                    return false;
+                }
+                program = true;
+                word = false;
+            } else if ch.is_whitespace() {
+                if word { program = false; }
+                word = false;
+            } else if matches!(ch, '&' | '|' | ';') {
+                program = true;
+                word = false;
+            } else {
+                word = true;
+            }
+        }
+        true
     }
 
     /// Whether `approvals` authorize this site: its resolved bytes when it may
@@ -165,18 +272,7 @@ impl CandidateScope<'_> {
     /// The late roots `expression` reads, or `None` when it reads none (or
     /// does not parse; the compose pass reports that).
     fn deferred_roots(&self, expression: &str) -> Option<Vec<String>> {
-        if self.deferred.is_empty() && self.derived.is_empty() {
-            return None;
-        }
-        let expr = parse(expression).ok()?;
-        let mut roots = Vec::new();
-        read_roots(&expr, &mut roots);
-        let mut late: Vec<String> = roots
-            .into_iter()
-            .filter(|root| self.deferred.contains(root) || self.derived.contains(root))
-            .collect();
-        late.dedup();
-        (!late.is_empty()).then_some(late)
+        self.deferred.late_roots_of(expression, self.derived)
     }
 
     /// Builds the candidate for one authored command.
@@ -189,9 +285,9 @@ impl CandidateScope<'_> {
     ///
     /// - [`ShellExpansionError::MissingValue`] for an approval-time
     ///   placeholder whose value is `null`.
-    /// - [`ShellExpansionError::TemplateGrammar`] when a late placeholder
-    ///   requires template mode and the authored command is not a valid
-    ///   template.
+    /// - [`ShellExpansionError::TemplateGrammar`] when a late placeholder, or
+    ///   [`DeferredShellRoots::placeholders_template_required`], requires
+    ///   template mode and the authored command is not a valid template.
     pub(crate) fn build(
         &self,
         authored: &str,
@@ -256,7 +352,8 @@ impl CandidateScope<'_> {
             }
         }
 
-        let requirement = if any_late {
+        let placed_late = self.deferred.placeholders_template_required() && !holes.is_empty();
+        let requirement = if any_late || placed_late {
             ModeRequirement::TemplateRequired
         } else {
             ModeRequirement::AnyMode
@@ -273,6 +370,7 @@ impl CandidateScope<'_> {
         }
 
         Ok(ShellCandidate {
+            authored_command: authored.to_string(),
             site: CommandSite {
                 source_file: self.source_file.clone(),
                 origin,
@@ -289,7 +387,7 @@ impl CandidateScope<'_> {
 /// through another such key (including `inherited` keys of a parent).
 ///
 /// Static: values are scanned for expressions and never evaluated.
-pub(crate) fn derived_deferred_keys<'a>(
+pub fn derived_deferred_keys<'a>(
     frontmatter: impl Iterator<Item = (&'a String, &'a Value)>,
     deferred: &DeferredShellRoots,
     inherited: &HashSet<String>,
@@ -298,7 +396,7 @@ pub(crate) fn derived_deferred_keys<'a>(
     if deferred.is_empty() && derived.is_empty() {
         return derived;
     }
-    let reads: Vec<(&String, Vec<String>)> = frontmatter
+    let reads: Vec<(&String, Vec<RootRead>)> = frontmatter
         .map(|(key, value)| {
             let mut roots = Vec::new();
             value_roots(value, &mut roots);
@@ -311,7 +409,7 @@ pub(crate) fn derived_deferred_keys<'a>(
             if derived.contains(*key) {
                 continue;
             }
-            if roots.iter().any(|root| deferred.contains(root) || derived.contains(root)) {
+            if roots.iter().any(|read| read.is_late(deferred, &derived)) {
                 derived.insert((*key).clone());
                 grew = true;
             }
@@ -322,7 +420,32 @@ pub(crate) fn derived_deferred_keys<'a>(
     }
 }
 
-fn value_roots(value: &Value, roots: &mut Vec<String>) {
+/// Whether `expr` reads any of `roots` as a global, not through `fm.`.
+pub(crate) fn reads_global_root(expr: &Expr, roots: &[&str]) -> bool {
+    let mut reads = Vec::new();
+    read_roots(expr, &mut reads);
+    reads
+        .iter()
+        .any(|read| !read.frontmatter && roots.contains(&read.root.as_str()))
+}
+
+/// The first path segment of one variable an expression reads.
+struct RootRead {
+    root: String,
+    /// Read through `fm.` (or `fm['…']`): a frontmatter key, never a host
+    /// global of the same name.
+    frontmatter: bool,
+}
+
+impl RootRead {
+    /// A host-declared late root read as a global, or a frontmatter key
+    /// derived from one read either way.
+    fn is_late(&self, deferred: &DeferredShellRoots, derived: &HashSet<String>) -> bool {
+        (!self.frontmatter && deferred.contains(&self.root)) || derived.contains(&self.root)
+    }
+}
+
+fn value_roots(value: &Value, roots: &mut Vec<RootRead>) {
     match value {
         Value::String(text) => {
             for location in ExpressionFinder::find_all_plain(text) {
@@ -339,13 +462,16 @@ fn value_roots(value: &Value, roots: &mut Vec<String>) {
 
 /// The first path segment of every variable `expr` reads, with an `fm.`
 /// prefix removed so `fm.out` and `out` name the same key.
-fn read_roots(expr: &Expr, roots: &mut Vec<String>) {
+fn read_roots(expr: &Expr, roots: &mut Vec<RootRead>) {
     match expr {
         Expr::Variable(path) => {
             let effective = fm_namespace::strip_fm_prefix(path);
             let root = effective.split('.').next().unwrap_or(effective);
             if !root.is_empty() {
-                roots.push(root.to_string());
+                roots.push(RootRead {
+                    root: root.to_string(),
+                    frontmatter: effective.len() != path.len(),
+                });
             }
         }
         Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
@@ -372,7 +498,10 @@ fn read_roots(expr: &Expr, roots: &mut Vec<String>) {
         }
         Expr::Index { base, index } => {
             if let Some(key) = fm_namespace::literal_index_key(base, index) {
-                roots.push(key.to_string());
+                roots.push(RootRead {
+                    root: key.to_string(),
+                    frontmatter: true,
+                });
                 return;
             }
             read_roots(base, roots);

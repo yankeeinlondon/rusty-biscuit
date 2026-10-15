@@ -98,6 +98,7 @@ impl LoopAmbient {
 #[derive(Debug, Clone, Copy)]
 pub struct LoopExpressionLookup<'a> {
     frontmatter: &'a Map<String, Value>,
+    runtime_state: Option<&'a crate::composition::RuntimeState>,
     ambient: &'a LoopAmbient,
     file_ref_fallback_dir: Option<&'a Path>,
     file_resolution_context: &'a biscuit_file::FileResolutionContext,
@@ -116,12 +117,19 @@ impl<'a> LoopExpressionLookup<'a> {
     ) -> Self {
         Self {
             frontmatter,
+            runtime_state: None,
             ambient,
             file_ref_fallback_dir: None,
             file_resolution_context,
             source_path,
             prepared_context: None,
         }
+    }
+
+    /// Read the invocation's sequence root and committed outputs in conditions.
+    pub fn with_runtime_state(mut self, runtime: Option<&'a crate::composition::RuntimeState>) -> Self {
+        self.runtime_state = runtime;
+        self
     }
 
     /// Retain the captured launch area as `file_ref_fallback_dir` diagnostic
@@ -151,6 +159,16 @@ impl EvaluationLookup for LoopExpressionLookup<'_> {
     fn get(&self, path: &str) -> Option<Value> {
         if fm_namespace_path(path).is_some() {
             return resolve_fm_namespace_in_object(path, self.frontmatter);
+        }
+
+        if path == "seq" || path.starts_with("seq.") {
+            let value = self.runtime_state.map_or_else(||
+                super::super::lifecycle::bindings::SequenceBinding::standalone(Vec::new()).to_value(),
+                crate::composition::RuntimeState::sequence_value);
+            if path == "seq" { return Some(value); }
+            let mut result = &value;
+            for member in path[4..].split('.') { result = result.get(member)?; }
+            return Some(result.clone());
         }
 
         // A reserved namespace is never a document property, so a miss inside

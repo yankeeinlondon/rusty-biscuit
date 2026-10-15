@@ -37,6 +37,23 @@ fn graph_for(path: &str) -> (ResolvedCompositionSource, PreflightGraph) {
     (source, graph)
 }
 
+// Retained task-stage runtime coverage uses explicit internal models after
+// the public parser has validated the current authoring grammar.
+fn legacy_graph_for(path: &str) -> (ResolvedCompositionSource, PreflightGraph) {
+    use crate::composition::sequence::preflight::runtime_fixture::RuntimeFixture;
+
+    let source = crate::composition::resolve_fixture_source(path).expect("fixture resolves");
+    let directory = source.resolved_path.parent().unwrap();
+    let fixture = RuntimeFixture::new(&source, directory);
+    let resolution = crate::test_support::context_for(&source.resolved_path);
+    let plan = resolve_sequence_plan(&fixture.source, &resolution)
+        .expect("current grammar resolves")
+        .expect("fixture declares a sequence");
+    let context = ComposeContext::capture_for_content(directory, "");
+    let graph = fixture.build(&plan, context, &resolution).expect("internal preflight model builds");
+    (source, graph)
+}
+
 fn submit(handle: &PrewarmHandle, source: &ResolvedCompositionSource, graph: &PreflightGraph) -> usize {
     submit_sequence_preflight(
         handle,
@@ -100,7 +117,7 @@ async fn every_early_phrase_of_three_prompts_is_queued_before_any_step_runs() {
         }),
         "The sequence body.\n",
     );
-    let (source, graph) = graph_for(&sequence);
+    let (source, graph) = legacy_graph_for(&sequence);
     let fake = FakePreparer::blocking();
     let worker = PrewarmWorker::deferred_with(false, Arc::new(fake.clone()));
 
@@ -148,7 +165,7 @@ async fn task_inputs_unresolved_values_and_captures_are_left_late() {
                 { "say": "probe {{ probe }}" },
                 { "say": "home {{ env.HOME }}" },
                 { "say": "area {{ ctx.area }}" },
-                { "say": "step {{ state }}" },
+                { "say": "step {{ seq }}" },
             ],
         }),
         "Shared work.\n",
@@ -242,7 +259,7 @@ async fn task_stacks_use_task_playback_and_prompt_lifecycles_use_the_user_config
         }),
         "Body.\n",
     );
-    let (source, graph) = graph_for(&sequence);
+    let (source, graph) = legacy_graph_for(&sequence);
     let user = GlobalSettings {
         tts: Some(TtsSettings {
             provider: Some("kokoro".into()),
@@ -322,7 +339,7 @@ async fn task_stacks_resolve_with_the_tasks_captured_inputs() {
             { "say": format!("{label} env {{{{ env.PREWARM_NAME }}}}") },
             { "say": format!("{label} ctx {{{{ ctx.today }}}}") },
             { "say": format!("{label} derived {{{{ derived }}}}") },
-            { "say": format!("{label} state {{{{ state }}}}") },
+            { "say": format!("{label} state {{{{ seq }}}}") },
             { "say": format!("{label} topic {{{{ topic }}}}") },
         ] }])
     };
@@ -340,7 +357,7 @@ async fn task_stacks_resolve_with_the_tasks_captured_inputs() {
         }),
         "Body.\n",
     );
-    let (source, graph) = graph_for(&sequence);
+    let (source, graph) = legacy_graph_for(&sequence);
     let task = graph.steps[0].task.as_ref().expect("the step declares a task");
     let fake = FakePreparer::recording();
     let worker = PrewarmWorker::deferred_with(false, Arc::new(fake.clone()));

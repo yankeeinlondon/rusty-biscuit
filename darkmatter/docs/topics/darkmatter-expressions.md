@@ -1343,6 +1343,14 @@ a declared global even when a deferred key (`with_exclude_keys`) shares its
 name; an explicit `fm.<name>` read of that key is still rejected. A read of a
 global declared unavailable fails the composition, in a transcluded document
 too, and `MarkdownError::unavailable_binding` finds it in the cause chain.
+A host can opt selected roots into `with_document_fallbacks(["previous"])`.
+For those roots, a present property in the reading document wins, including
+an explicit null; the registered global is used only when that property is
+absent. This supports typed migration errors for retired names while keeping
+ordinary authored properties. The default remains complete-root shadowing.
+Configured name coercion applies in string presentation to host globals too;
+whole-value expression results retain their original types.
+
 Without host globals nothing changes: every non-reserved root is a document
 property.
 

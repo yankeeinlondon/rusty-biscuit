@@ -370,6 +370,135 @@ fn without_declared_late_roots_the_same_read_is_an_approval_time_value() {
     );
 }
 
+/// A host global whose value exists only once execution supplies it (a loop
+/// before its first iteration) is unknown at discovery, not missing: a body
+/// command reading it contributes no bytes and no site, and is left to the
+/// preparation that binds the value. A frontmatter command still sees it.
+#[test]
+fn a_body_command_reading_an_execution_dependent_global_is_left_to_its_preparation() {
+    use darkmatter::markdown::compose::expression::{
+        Availability, BindingView, HostGlobals, RuntimeBinding, ScopeId,
+    };
+    let dir = TempDir::new().unwrap();
+    let path = write(
+        dir.path(),
+        "doc.md",
+        "::shell tool run-{{ loop.count }}\n\n::shell-block\ntool block-{{ loop.count }}\n::end-block\n\n::shell tool fixed\n",
+    );
+    let pending = || {
+        let view = BindingView::builder(ScopeId::new("host.pending"))
+            .declare("loop", "The iteration's values.", Availability::ExecutionDependent)
+            .build()
+            .unwrap();
+        HostGlobals::associate(Arc::new(view), [("loop".to_string(), RuntimeBinding::eager(serde_json::Value::Null))])
+            .unwrap()
+    };
+
+    let report = preflight(dir.path(), &path, |options| options.with_host_globals(pending())).expect("no missing value");
+
+    let normalized: Vec<&str> = report.entries.iter().map(|entry| entry.normalized.as_str()).collect();
+    assert_eq!(normalized, ["tool fixed"]);
+    assert!(
+        report.candidates.iter().all(|candidate| candidate.authored() != Some("tool run-{{ loop.count }}")),
+        "{:?}",
+        report.candidates
+    );
+}
+
+/// A host that places commands where their values may change before they run
+/// (a sequence's later task) requires every command with a placeholder to be
+/// a template, though its values are known: approval-time values are still
+/// checked for presence, and no resolved bytes are offered.
+#[test]
+fn a_host_placing_commands_late_requires_every_placeholder_site_to_be_a_template() {
+    let dir = TempDir::new().unwrap();
+    let late = || DeferredShellRoots::new(["outputs"]).with_placeholders_template_required();
+    let path = write(
+        dir.path(),
+        "doc.md",
+        "---
+out: dist
+---
+::shell just build --out {{ out }}
+::shell just clean
+",
+    );
+    let report = preflight(dir.path(), &path, |options| options.with_deferred_shell_roots(late())).unwrap();
+    let placed = &report.candidates[0];
+    assert_eq!(placed.requirement, ModeRequirement::TemplateRequired);
+    assert!(placed.resolved.is_none() && !placed.offered().exact);
+    let timing = &placed.template.as_ref().unwrap().placeholders().next().unwrap().timing;
+    assert_eq!(timing, &HoleTiming::ApprovalTime);
+    assert_eq!(report.candidates[1].requirement, ModeRequirement::AnyMode);
+    let normalized: Vec<&str> = report.entries.iter().map(|entry| entry.normalized.as_str()).collect();
+    assert_eq!(normalized, ["just clean"], "a placed site contributes no bytes");
+
+    let missing = write(dir.path(), "missing.md", "::shell just build --out {{ absent }}
+");
+    let error = preflight(dir.path(), &missing, |options| options.with_deferred_shell_roots(late()))
+        .expect_err("absent is missing");
+    assert_eq!(missing_value(&error).map(|(_, expression, _)| expression), Some("absent"));
+
+    let grammar = write(dir.path(), "grammar.md", "---
+out: dist
+---
+::shell cat {{ out }} a&b
+");
+    let error = preflight(dir.path(), &grammar, |options| options.with_deferred_shell_roots(late()))
+        .expect_err("template grammar");
+    assert!(
+        matches!(&error, MarkdownError::ShellExpansion(inner)
+            if matches!(inner.as_ref(), ShellExpansionError::TemplateGrammar { .. })),
+        "{error:?}"
+    );
+}
+
+/// A frontmatter `$( … )` whose placeholder reads a late root the host does
+/// not bind during discovery is a template site with no resolved bytes, not a
+/// dynamic command shape.
+#[test]
+fn a_frontmatter_command_with_a_late_placeholder_is_a_template() {
+    let dir = TempDir::new().unwrap();
+    let path = write(
+        dir.path(),
+        "doc.md",
+        "---
+listing: \"$(just test {{ last(outputs) }})\"
+---
+Body.
+",
+    );
+    let report = preflight(dir.path(), &path, |options| {
+        options.with_deferred_shell_roots(DeferredShellRoots::new(["outputs"]))
+    })
+    .unwrap();
+    let [site] = report.candidates.as_slice() else {
+        panic!("one site: {:?}", report.candidates);
+    };
+    assert_eq!(site.requirement, ModeRequirement::TemplateRequired);
+    assert_eq!(site.authored(), Some("just test {{ last(outputs) }}"));
+    assert!(report.entries.is_empty(), "{:?}", report.entries);
+}
+
+/// A late root names a host global. `fm.<root>` reads the document's own
+/// property of that name, which is an approval-time value.
+#[test]
+fn an_fm_read_of_a_late_root_name_is_a_document_value() {
+    let dir = TempDir::new().unwrap();
+    let path = write(dir.path(), "doc.md", "---
+group: g
+---
+::shell echo {{ fm.group }}
+");
+    let report = preflight(dir.path(), &path, |options| {
+        options.with_deferred_shell_roots(DeferredShellRoots::new(["group"]))
+    })
+    .unwrap();
+    assert_eq!(report.candidates[0].requirement, ModeRequirement::AnyMode);
+    let normalized: Vec<&str> = report.entries.iter().map(|entry| entry.normalized.as_str()).collect();
+    assert_eq!(normalized, ["echo g"]);
+}
+
 // ── Structured pre-approvals and the execution gate ───────────────────────
 
 fn execute(
@@ -438,11 +567,10 @@ fn the_gate_accepts_a_shape_approval_and_never_adds_its_bytes() {
     let mut approvals = ShellPreApprovals::new();
     approvals.insert_template(report.candidates[0].shape().unwrap());
 
-    // The gate admits the site by its shape. Execution then needs template
-    // mode, which resolved-byte execution never fakes by adding the bytes it
-    // resolved: the command is refused, not run.
-    let error = execute(dir.path(), &path, approvals.clone(), &[]).expect_err("template mode not run as bytes");
-    assert!(not_pre_approved(&error), "{error:?}");
+    // The gate admits the site by its shape, and execution runs it in
+    // template mode; the bytes it resolved never join the approvals.
+    let output = execute(dir.path(), &path, approvals.clone(), &[]).unwrap();
+    assert!(output.contains("git version"), "{output}");
     assert!(!approvals.contains_exact("git --version hello"));
 
     // A changed declared type is a different shape and is not a member.

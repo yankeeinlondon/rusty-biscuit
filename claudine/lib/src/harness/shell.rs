@@ -391,6 +391,163 @@ pub fn template_rule_covers(
     Ok(Some(shape))
 }
 
+/// How the user approved a resolved-byte site at its prompt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolvedSiteApproval {
+    /// Exact, prefix, or once: the site runs as its resolved bytes, which
+    /// the session cache (or the saved rule) now approves.
+    Bytes,
+    /// The command shape: the site runs as a template.
+    Shape(TemplateShape),
+}
+
+/// Asks the handler about a resolved-byte site that has a placeholder,
+/// offering every choice the site is eligible for: its exact bytes, its
+/// shape, and its programs with any arguments.
+///
+/// An authored program placeholder withdraws prefix approval even when the
+/// site has no valid template shape. Nothing is asked, and `None` returned,
+/// when the site has neither a shape nor a program placeholder, when a
+/// whitelist rule or a session decision already covers every one of its
+/// commands, when a command's bytes are blacklisted, or when there is no
+/// handler or policy root. The caller then approves the bytes as resolved
+/// bytes, which reports those outcomes.
+///
+/// ## Errors
+///
+/// `ShellCommandBlacklisted` when the shape matches a blacklist or the user
+/// blacklists the command, `ShellCommandDenied` on a denial or a choice the
+/// request did not offer, and `ShellPolicyWriteFailed` when a persistent
+/// decision cannot be written (nothing is cached then).
+pub fn prompt_resolved_site(
+    candidate: &ShellCandidate,
+    options: &ShellApprovalOptions,
+) -> Result<Option<ResolvedSiteApproval>, HarnessError> {
+    let Some(keys) = &candidate.resolved else {
+        return Ok(None);
+    };
+    let shape = candidate.shape();
+    if shape.is_none() && candidate.program_words_fixed() {
+        return Ok(None);
+    }
+    let offered = candidate.offered();
+    if !offered.exact {
+        return Ok(None);
+    }
+    let commands = match keys.iter().map(|key| tokenize_words_strict(key))
+        .collect::<Result<Vec<Vec<String>>, _>>() {
+        Ok(commands) => commands,
+        // Native-shell adapters retain authored shell text as one approval key.
+        // Strict tokenization must not erase the site's program restrictions.
+        Err(_) if shape.is_none() || !offered.prefix => keys.iter().map(|key| vec![key.clone()]).collect(),
+        Err(_) => return Ok(None),
+    };
+    let command = candidate.display_command();
+    let _span = info_span!("harness_shell_prompt_site", command = %command).entered();
+    let policy = SessionPolicy::load(options, &command)?;
+    let exact_key = |key: &String| ApprovalKey::exact(options.policy_root.as_deref(), key.clone());
+    let mut undecided = false;
+    for (key, parts) in keys.iter().zip(&commands) {
+        let Some((executable, args)) = parts.split_first() else {
+            return Ok(None);
+        };
+        if check_builtin_blacklist(executable, args).is_some()
+            || check_user_blacklist(&policy.blacklist, executable, args, key)
+        {
+            return Ok(None);
+        }
+        undecided |= !check_whitelist(&policy.whitelist, executable, key)
+            && cached_decision(&options.approval_cache, &exact_key(key)).is_none();
+    }
+    if !undecided {
+        return Ok(None);
+    }
+    let template_key = shape.as_ref().map(|shape| ApprovalKey::template(options.policy_root.as_deref(), shape.clone()));
+    if let Some(shape) = &shape {
+        if let Some(reason) = check_template_blacklist(shape, &policy.blacklist) {
+            return Err(HarnessError::ShellCommandBlacklisted { command, reason });
+        }
+        if let Some(decision) = cached_decision(&options.approval_cache, template_key.as_ref().expect("shape key")) {
+            return decision_result(decision, &command).map(|()| Some(ResolvedSiteApproval::Shape(shape.clone())));
+        }
+    }
+    let (Some(handler), Some(policy_paths)) = (&options.approval_handler, &policy.paths) else {
+        return Ok(None);
+    };
+
+    let mut distinct = std::collections::HashSet::new();
+    let executables: Vec<&str> = commands
+        .iter()
+        .filter_map(|parts| parts.first().map(String::as_str))
+        .filter(|executable| distinct.insert(*executable))
+        .collect();
+    let first = &commands[0];
+    let request = darkmatter::markdown::compose::shell_expansion::ShellApprovalRequest {
+        source: ComposeSource::File(candidate.site.source_file.clone()),
+        origin: candidate.site.origin.clone(),
+        raw_command: command.clone(),
+        executable: first[0].clone(),
+        args: first[1..].to_vec(),
+        normalized_exact: keys.join(" && "),
+        whitelist_path: policy_paths.whitelist.clone(),
+        blacklist_path: policy_paths.blacklist.clone(),
+        alias_name: None,
+        chain_executables: if executables.len() > 1 {
+            executables.iter().map(|executable| executable.to_string()).collect()
+        } else {
+            Vec::new()
+        },
+        offered,
+        template: candidate.approval_view(),
+    };
+    let Ok(decision) = handler.approve(request) else {
+        return Err(HarnessError::ShellCommandDenied { command });
+    };
+    let cache_bytes = |decision: CachedApprovalDecision| {
+        for key in keys {
+            cache_approval_decision(&options.approval_cache, exact_key(key), decision);
+        }
+    };
+    match decision {
+        ShellApprovalDecision::AllowExactPersist => {
+            for key in keys {
+                persist(store::append_whitelist_exact(policy_paths, key), policy_paths)?;
+            }
+            cache_bytes(CachedApprovalDecision::Allowed);
+            Ok(Some(ResolvedSiteApproval::Bytes))
+        }
+        ShellApprovalDecision::AllowTemplatePersist if offered.shape => {
+            let shape = shape.expect("offered shape");
+            persist(store::append_whitelist_template(policy_paths, &shape), policy_paths)?;
+            cache_approval_decision(&options.approval_cache, template_key.expect("shape key"), CachedApprovalDecision::Allowed);
+            Ok(Some(ResolvedSiteApproval::Shape(shape)))
+        }
+        ShellApprovalDecision::AllowCommandPersist if offered.prefix => {
+            for executable in &executables {
+                persist(store::append_whitelist_prefix(policy_paths, executable), policy_paths)?;
+            }
+            cache_bytes(CachedApprovalDecision::Allowed);
+            Ok(Some(ResolvedSiteApproval::Bytes))
+        }
+        ShellApprovalDecision::AllowOnce => {
+            cache_bytes(CachedApprovalDecision::Allowed);
+            Ok(Some(ResolvedSiteApproval::Bytes))
+        }
+        ShellApprovalDecision::BlacklistPersist => {
+            for key in keys {
+                persist(store::append_blacklist_exact(policy_paths, key), policy_paths)?;
+            }
+            cache_bytes(CachedApprovalDecision::Blacklisted);
+            fresh_decision_result(CachedApprovalDecision::Blacklisted, &command).map(|()| None)
+        }
+        // Deny, or a choice the request did not offer.
+        _ => {
+            cache_bytes(CachedApprovalDecision::Denied);
+            Err(HarnessError::ShellCommandDenied { command })
+        }
+    }
+}
+
 /// Checks resolved bytes against the built-in and user blacklists only, for
 /// a command whose site is approved by its shape.
 ///
@@ -413,6 +570,18 @@ pub fn check_command_blacklists(parts: &[String], options: &ShellApprovalOptions
         });
     }
     Ok(())
+}
+
+/// The user blacklist under `policy_root`, which a template-mode command's
+/// filled arguments are checked against before it starts. Empty without a
+/// policy root, or when the file cannot be read; the built-in blacklist still
+/// applies.
+pub fn user_blacklist(policy_root: Option<&Path>) -> ShellRuleSet {
+    let options = ShellApprovalOptions {
+        policy_root: policy_root.map(Path::to_path_buf),
+        ..ShellApprovalOptions::default()
+    };
+    SessionPolicy::load(&options, "").map(|policy| policy.blacklist).unwrap_or_default()
 }
 
 /// The user policy one approval reads: the rule files under the policy root,

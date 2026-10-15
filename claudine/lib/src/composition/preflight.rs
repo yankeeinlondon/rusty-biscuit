@@ -22,7 +22,8 @@ use crate::composition::lifecycle::bindings::{
     unavailable_root,
 };
 use crate::composition::lifecycle_actions::{LifecycleActionKind, for_each_action_mut};
-use crate::harness::shell::{ShellApprovalOptions, tokenize_words_strict};
+use crate::composition::lifecycle::shell_template::{LifecycleShellTemplate, reads_as_command, typed_template};
+use crate::harness::shell::{ResolvedSiteApproval, ShellApprovalOptions, tokenize_words_strict};
 use darkmatter::markdown::compose::shell_expansion::template::{
     ModeRequirement, ShellCandidate, ShellPreApprovals,
 };
@@ -49,7 +50,9 @@ pub struct PreFlightResult {
 ///
 /// 1. Template `::shell` directives (via Darkmatter's document graph walker)
 /// 2. Lifecycle stack shell commands (from every reachable `shell` action
-///    across the six shell-capable lifecycle events)
+///    across the six shell-capable lifecycle events). A lifecycle command with
+///    a placeholder is a site like a document command, and the approval records
+///    on it whether it runs its resolved bytes or its template.
 ///
 /// ## Errors
 ///
@@ -109,7 +112,7 @@ pub fn resolve_shell_approvals(
 
     // -- Source 2: Lifecycle stack shell commands ------------------------------
     // Condition-blind, matching the template posture: every reachable
-    // `shell` action (and its `on_error`) is gathered regardless of the
+    // `shell` action is gathered regardless of the
     // `when:` guard, because the guard may evaluate differently under
     // document states the audit cannot predict.
     if let Some(lifecycle_config) = lifecycle {
@@ -119,20 +122,37 @@ pub fn resolve_shell_approvals(
         for (command, _property_path) in collect_lifecycle_shell_commands(lifecycle_config) {
             all_commands.push((command, source_file.clone(), 0));
         }
+        candidates.extend(lifecycle_shell_candidates(lifecycle_config, &LifecycleSignal::ALL, &source_file));
     }
 
-    approve_commands(all_commands, &candidates, approval_options)
+    let result = approve_commands(all_commands, &candidates, approval_options)?;
+    if let Some(lifecycle_config) = lifecycle {
+        settle_lifecycle_shell_modes(
+            lifecycle_config,
+            &LifecycleSignal::ALL,
+            &result.approved_commands,
+            approval_options.policy_root.as_deref(),
+        );
+    }
+    Ok(result)
 }
 
 /// Approve every shell command a sequence's preflight graph can reach.
 ///
-/// Two sources feed the gate, and both are condition-blind:
+/// Three sources feed the gate, and all are condition-blind:
 ///
-/// 1. the graph's own already-resolved bytes — task `shell:` commands and
-///    `setup:`/`teardown:` shell actions, which preflight resolved once so that
-///    what is approved is exactly what runs;
-/// 2. every referenced prompt document's template `::shell` directives, so a
-///    document composed at its turn can never stop mid-sequence for approval.
+/// 1. the graph's resolved-byte commands — the first task's `shell:`
+///    commands and `setup:`/`teardown:` shell sites whose values all exist
+///    now, which preflight resolved once; their valid templates also permit
+///    choosing shape approval instead;
+/// 2. the graph's typed candidates — first-task sites eligible for either
+///    mode, and every later task command with a placeholder or late read
+///    approved only by its typed shape;
+/// 3. every referenced prompt document's shell directives, frontmatter shell
+///    values, and lifecycle stacks, discovered once per reference with that reference's late roots and
+///    parameters, so a document composed at its turn can never stop
+///    mid-sequence for approval. A later task's document has every command
+///    with a placeholder approved as a template.
 ///
 /// ## Errors
 ///
@@ -141,17 +161,23 @@ pub fn resolve_shell_approvals(
 pub fn resolve_graph_shell_approvals(
     graph: &crate::composition::sequence::preflight::PreflightGraph,
     approval_options: &ShellApprovalOptions,
-    prompt_compose_request: &dyn Fn(&Path) -> Result<ComposeRequest, CompositionError>,
+    prompt_compose_request: &dyn Fn(
+        &crate::composition::sequence::preflight::PromptReference,
+    ) -> Result<ComposeRequest, CompositionError>,
 ) -> Result<PreFlightResult, CompositionError> {
+    graph.record_shell_authorization(ShellPreApprovals::new(), None);
     let mut all_commands: Vec<(String, std::path::PathBuf, usize)> = Vec::new();
-    let mut candidates: Vec<ShellCandidate> = Vec::new();
+    let mut candidates: Vec<ShellCandidate> = graph.template_candidates.clone();
 
     for command in &graph.shell_commands {
         all_commands.push((command.command.clone(), command.source_file.clone(), 0));
     }
 
-    for document in &graph.prompt_documents {
-        let options = prompt_compose_request(&document.path)?;
+    for reference in &graph.prompt_references {
+        let Some(document) = graph.prompt_document(&reference.path) else {
+            continue;
+        };
+        let options = prompt_compose_request(reference)?;
         let preflight = document
             .markdown
             .compose_preflight(&options)
@@ -164,9 +190,36 @@ pub fn resolve_graph_shell_approvals(
             ));
         }
         candidates.extend(preflight.candidates);
+        // Resolve only frontmatter data; discovery never executes document shells.
+        let roots = lifecycle_document_roots(&document.markdown, &reference.deferred_shell_roots());
+        let excluded: Vec<String> = super::lifecycle::LIFECYCLE_EVENT_KEYS.iter().map(|key| (*key).to_string())
+            .chain(roots.iter().map(str::to_string)).collect();
+        let passive = options.clone().map_options(|options| options.only(
+            &[darkmatter::markdown::compose::ComposeOperation::FrontmatterInterpolation])
+            .with_exclude_keys(excluded));
+        let composed = document.markdown.compose_with(&passive)
+            .map_err(|error| discovery_failed(&document.path, error))?.0;
+        let effective = super::prepare::frontmatter_to_value(composed.frontmatter());
+        let mut lifecycle = super::lifecycle::parse_lifecycle_config_with_orders(&effective, &document.path, Some(composed.frontmatter()))?;
+        let mut lifecycle_options = super::PrepareOptions::new(options.resolution_context().clone());
+        lifecycle_options.deferred_shell_roots = roots;
+        let source = super::ResolvedCompositionSource { original_ref: document.path.display().to_string(),
+            resolved_path: document.path.clone(), original_text: document.markdown.as_string(), markdown: document.markdown.clone() };
+        let schema = super::schema::load_authored_schema(&source, None, options.resolution_context(), &Default::default())?
+            .and_then(|schema| schema.simplified);
+        let enclosing = if effective.get("loop").is_some_and(serde_json::Value::is_object) { EnclosingLoop::Pending } else { EnclosingLoop::Outside };
+        resolve_lifecycle_shell_commands_in_sequence(
+            &mut lifecycle, &effective, options.context(), &document.path,
+            options.resolution_context(), None, enclosing, schema.as_ref(), Some(&lifecycle_options),
+        )?;
+        all_commands.extend(collect_lifecycle_shell_commands(&lifecycle).into_iter()
+            .map(|(command, _)| (command, document.path.clone(), 0)));
+        candidates.extend(lifecycle_shell_candidates(&lifecycle, &LifecycleSignal::ALL, &document.path));
     }
 
-    approve_commands(all_commands, &candidates, approval_options)
+    let result = approve_commands(all_commands, &candidates, approval_options)?;
+    graph.record_shell_authorization(result.approved_commands.clone(), approval_options.policy_root.clone());
+    Ok(result)
 }
 
 /// Approve every document command site, then the remaining resolved bytes.
@@ -174,7 +227,9 @@ pub fn resolve_graph_shell_approvals(
 /// A site that may run only as a template is approved by its shape. A
 /// resolved-byte site whose bytes no `exact` rule covers, but whose shape a
 /// `template` rule covers, is approved by its shape too: an exact rule wins,
-/// then a template rule, then a prefix rule. The bytes of a site approved by
+/// then a template rule, then a prefix rule. A resolved-byte site with a
+/// placeholder that no rule covers is asked about as a site, so its prompt
+/// offers the shape beside the exact bytes. The bytes of a site approved by
 /// its shape are still checked against the blacklists; they join the exact
 /// set only when another site needs them as bytes.
 fn approve_commands(
@@ -185,6 +240,7 @@ fn approve_commands(
     let mut templates = ShellPreApprovals::new();
     let mut by_shape: HashSet<String> = HashSet::new();
     let mut by_bytes: HashSet<String> = HashSet::new();
+    let mut prompted_bytes: HashSet<String> = HashSet::new();
     for candidate in candidates {
         let line = candidate.site.origin.line_number();
         let source_file = &candidate.site.source_file;
@@ -198,7 +254,21 @@ fn approve_commands(
         let Some(keys) = &candidate.resolved else {
             continue;
         };
-        match crate::harness::shell::template_rule_covers(candidate, approval_options).map_err(audit)? {
+        let shape = match crate::harness::shell::template_rule_covers(candidate, approval_options).map_err(audit)? {
+            Some(shape) => Some(shape),
+            None => {
+                let prompted =
+                    crate::harness::shell::prompt_resolved_site(candidate, approval_options).map_err(audit)?;
+                if prompted.is_some() {
+                    prompted_bytes.extend(keys.iter().cloned());
+                }
+                match prompted {
+                    Some(ResolvedSiteApproval::Shape(shape)) => Some(shape),
+                    Some(ResolvedSiteApproval::Bytes) | None => None,
+                }
+            }
+        };
+        match shape {
             Some(shape) => {
                 templates.insert_template(shape);
                 by_shape.extend(keys.iter().cloned());
@@ -208,6 +278,10 @@ fn approve_commands(
     }
     let shape_only: HashSet<String> = by_shape.difference(&by_bytes).cloned().collect();
     let mut result = approve_discovered_commands_with(all_commands, &shape_only, approval_options)?;
+    // A site answered at its own prompt leaves its bytes looking whitelisted
+    // to the byte pass, which runs after the answer was recorded.
+    result.user_approved += prompted_bytes.len();
+    result.already_whitelisted = result.already_whitelisted.saturating_sub(prompted_bytes.len());
     result.total_discovered += candidates
         .iter()
         .filter(|candidate| candidate.requirement == ModeRequirement::TemplateRequired)
@@ -239,20 +313,101 @@ pub fn resolve_lifecycle_shell_approvals(
         .into_iter()
         .map(|(command, _property)| (command, lifecycle_source_path.to_path_buf(), 0))
         .collect();
-    approve_discovered_commands(commands, approval_options)
+    let candidates = lifecycle_shell_candidates(lifecycle, signals, lifecycle_source_path);
+    let result = approve_commands(commands, &candidates, approval_options)?;
+    settle_lifecycle_shell_modes(
+        lifecycle,
+        signals,
+        &result.approved_commands,
+        approval_options.policy_root.as_deref(),
+    );
+    Ok(result)
+}
+
+/// Every lifecycle shell site reachable from `signals` that holds a
+/// placeholder, as an approval candidate: its resolved bytes (when they still
+/// read as a command) and its typed shape.
+fn lifecycle_shell_candidates(
+    lifecycle: &LifecycleConfig,
+    signals: &[LifecycleSignal],
+    source_file: &Path,
+) -> Vec<ShellCandidate> {
+    let mut candidates = Vec::new();
+    for_each_lifecycle_shell_site(lifecycle, signals, &mut |site, property| {
+        candidates.push(site.candidate(source_file, &property));
+    });
+    for signal in signals {
+        crate::composition::lifecycle_actions::for_each_action(lifecycle.stack(*signal), &mut |action| {
+            let LifecycleActionKind::Shell(shell) = &action.kind else { return; };
+            let (None, Some(authored), Expr::StringLiteral(bytes)) =
+                (&shell.template, &shell.authored_command, &shell.command) else { return; };
+            if !authored.contains("{{") { return; }
+            let parts = tokenize_words_strict(bytes).unwrap_or_else(|_| vec![bytes.clone()]);
+            let Some((program, args)) = parts.split_first() else { return; };
+            candidates.push(ShellCandidate {
+                authored_command: authored.clone(),
+                site: darkmatter::markdown::compose::shell_expansion::template::CommandSite {
+                    source_file: source_file.to_path_buf(),
+                    origin: darkmatter::markdown::compose::ShellCommandOrigin::Frontmatter {
+                        key: action.path.field("command").to_string(), line: None,
+                    },
+                    owner: None,
+                },
+                template: darkmatter::markdown::compose::shell_expansion::template::parse_authored(authored),
+                resolved: Some(vec![darkmatter::markdown::compose::shell_expansion::normalize_command(program, args)]),
+                requirement: ModeRequirement::AnyMode,
+            });
+        });
+    }
+    candidates
+}
+
+/// Record on each lifecycle shell site the mode `approved` grants it: an
+/// exact member runs its bytes, a shape member its template, and a site that
+/// is neither runs in no mode.
+pub(crate) fn settle_lifecycle_shell_modes(
+    lifecycle: &LifecycleConfig,
+    signals: &[LifecycleSignal],
+    approved: &ShellPreApprovals,
+    policy_root: Option<&Path>,
+) {
+    for_each_lifecycle_shell_site(lifecycle, signals, &mut |site, _property| {
+        site.settle(approved, policy_root);
+    });
+}
+
+/// Visit every `shell` command and `set` value with a typed template,
+/// condition-blind, with its authored property.
+fn for_each_lifecycle_shell_site(
+    lifecycle: &LifecycleConfig,
+    signals: &[LifecycleSignal],
+    visit: &mut impl FnMut(&LifecycleShellTemplate, String),
+) {
+    for signal in LifecycleSignal::ALL.into_iter().filter(|signal| signals.contains(signal)) {
+        crate::composition::lifecycle_actions::for_each_action(lifecycle.stack(signal), &mut |action| {
+            match &action.kind {
+                LifecycleActionKind::Shell(shell) => {
+                    if let Some(site) = &shell.template {
+                        visit(site, action.path.field("command").to_string());
+                    }
+                }
+                LifecycleActionKind::RuntimeSet(set) => {
+                    for (key, value) in set.shell_values() {
+                        if let Some(site) = &value.template {
+                            visit(site, action.path.map_key(key.as_str()).to_string());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        });
+    }
 }
 
 /// Deduplicate `all_commands` and run each survivor through shell policy.
-pub(super) fn approve_discovered_commands(
-    all_commands: Vec<(String, std::path::PathBuf, usize)>,
-    approval_options: &ShellApprovalOptions,
-) -> Result<PreFlightResult, CompositionError> {
-    approve_discovered_commands_with(all_commands, &HashSet::new(), approval_options)
-}
-
-/// [`approve_discovered_commands`], where the bytes in `shape_only` belong
-/// only to sites already approved by their shape: they are checked against
-/// the blacklists and neither prompted for nor added to the exact set.
+/// The bytes in `shape_only` belong only to sites already approved by their
+/// shape: they are checked against the blacklists and neither prompted for
+/// nor added to the exact set.
 fn approve_discovered_commands_with(
     all_commands: Vec<(String, std::path::PathBuf, usize)>,
     shape_only: &HashSet<String>,
@@ -414,9 +569,13 @@ fn audit_failure(
 ///
 /// Each resolved action is marked [`ShellAction::pre_resolved`], so the
 /// executor runs the stamped bytes as they stand instead of interpolating the
-/// data they now contain a second time.
+/// data they now contain a second time. A command with a placeholder also
+/// keeps its authored text as a template typed against `owner_schema`
+/// ([`ShellAction::template`]); the lifecycle audit then settles which of the
+/// two runs (see [`LifecycleShellTemplate`]).
 ///
 /// [`ShellAction::pre_resolved`]: super::lifecycle::ShellAction::pre_resolved
+/// [`ShellAction::template`]: super::lifecycle::ShellAction::template
 ///
 /// Short-form `shell` actions (`shell: "..."`) and long-form `shell` actions
 /// (`shell: { command: ... }`) with any `on_error:` text are covered,
@@ -434,6 +593,7 @@ fn audit_failure(
 /// authored property path (e.g. `failure[0].else[1].shell.command`) and the
 /// raw command string. Commands in both branches of every conditional are
 /// resolved: approval never depends on which branch runs.
+#[allow(clippy::too_many_arguments)]
 pub fn resolve_lifecycle_shell_commands(
     lifecycle: &mut LifecycleConfig,
     effective_frontmatter: &serde_json::Value,
@@ -442,6 +602,23 @@ pub fn resolve_lifecycle_shell_commands(
     file_resolution_context: &biscuit_file::FileResolutionContext,
     file_ref_fallback_dir: Option<&Path>,
     enclosing_loop: EnclosingLoop<'_>,
+    owner_schema: Option<&darkmatter::markdown::schemas::SimplifiedSchema>,
+) -> Result<(), CompositionError> {
+    resolve_lifecycle_shell_commands_in_sequence(lifecycle, effective_frontmatter, context, source_path,
+        file_resolution_context, file_ref_fallback_dir, enclosing_loop, owner_schema, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn resolve_lifecycle_shell_commands_in_sequence(
+    lifecycle: &mut LifecycleConfig,
+    effective_frontmatter: &serde_json::Value,
+    context: &ComposeContext,
+    source_path: &Path,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
+    file_ref_fallback_dir: Option<&Path>,
+    enclosing_loop: EnclosingLoop<'_>,
+    owner_schema: Option<&darkmatter::markdown::schemas::SimplifiedSchema>,
+    options: Option<&super::PrepareOptions>,
 ) -> Result<(), CompositionError> {
     let frontmatter: HashMap<String, serde_json::Value> = effective_frontmatter
         .as_object()
@@ -473,6 +650,13 @@ pub fn resolve_lifecycle_shell_commands(
             let prefix = action.path.to_string();
             result = match &mut action.kind {
                 LifecycleActionKind::RuntimeSet(set) => set.shell_values_mut().try_for_each(|(key, shell)| {
+                    if let Some(site) = sequence_lifecycle_template(&shell.authored, Some(key), &format!("{prefix}.{key}"),
+                        source_path, owner_schema, options, &state, &resolution_ctx, enclosing_loop)? {
+                        shell.resolved = darkmatter::markdown::compose::ResolvedShellValue::template_only(
+                            key, &shell.authored, "sequence template", context);
+                        shell.template = Some(site);
+                        return Ok(());
+                    }
                     resolve_set_shell_value(
                         key,
                         shell,
@@ -483,9 +667,26 @@ pub fn resolve_lifecycle_shell_commands(
                         &format!("{prefix}.{key}"),
                         source_path,
                         enclosing_loop,
+                        owner_schema,
                     )
                 }),
-                LifecycleActionKind::Shell(shell) => {
+                LifecycleActionKind::Shell(shell) => (|| {
+                    if shell.authored_command.is_none()
+                        && let Expr::StringLiteral(raw) = &shell.command
+                    {
+                        shell.authored_command = Some(raw.clone());
+                    }
+                    if let Expr::StringLiteral(raw) = &shell.command
+                        && let Some(site) = sequence_lifecycle_template(raw, None, &format!("{prefix}.command"),
+                            source_path, owner_schema, options, &state, &resolution_ctx, enclosing_loop)? {
+                        shell.template = Some(site);
+                        shell.pre_resolved = false;
+                        return Ok(());
+                    }
+                    let authored = match &shell.command {
+                        Expr::StringLiteral(raw) => typed_template(raw, owner_schema),
+                        _ => None,
+                    };
                     let resolved = resolve_shell_command_expr(
                         &mut shell.command,
                         &state,
@@ -507,9 +708,18 @@ pub fn resolve_lifecycle_shell_commands(
                     });
                     if resolved.is_ok() {
                         shell.pre_resolved = true;
+                        // The bytes run only when approval proves them; a
+                        // shape approval runs the authored template instead.
+                        shell.template = authored.map(|template| {
+                            let bytes = match &shell.command {
+                                Expr::StringLiteral(bytes) if reads_as_command(bytes) => Some(vec![bytes.clone()]),
+                                _ => None,
+                            };
+                            LifecycleShellTemplate::new(template, bytes)
+                        });
                     }
                     resolved
-                }
+                })(),
                 _ => Ok(()),
             };
         });
@@ -524,6 +734,11 @@ pub fn resolve_lifecycle_shell_commands(
 /// `shell` action's command, with late-binding roots refused, and Darkmatter
 /// then fixes every pipeline the value can run. Those bytes are what approval
 /// sees and what the action runs; nothing re-interpolates them later.
+///
+/// A value whose command holds a placeholder also keeps its authored command
+/// as a typed template, so approval by shape can run it as one. When the
+/// resolved text no longer reads as a command (a value inserted command
+/// syntax), it has no bytes and may run only as that template.
 #[allow(clippy::too_many_arguments)]
 fn resolve_set_shell_value(
     key: &str,
@@ -535,6 +750,7 @@ fn resolve_set_shell_value(
     property: &str,
     source_path: &Path,
     enclosing_loop: EnclosingLoop<'_>,
+    owner_schema: Option<&darkmatter::markdown::schemas::SimplifiedSchema>,
 ) -> Result<(), CompositionError> {
     let mut resolved = Expr::StringLiteral(shell.authored.clone());
     resolve_shell_command_expr(
@@ -548,22 +764,54 @@ fn resolve_set_shell_value(
     let Expr::StringLiteral(resolved) = resolved else {
         unreachable!("a string literal stays a string literal");
     };
-    let value = darkmatter::markdown::compose::ResolvedShellValue::resolve(
+    let template = darkmatter::markdown::compose::authored_shell_template(
+        &shell.authored,
+        key,
+        &biscuit_terminal::errors::SourceContext::new(
+            source_path.to_path_buf(),
+            source_path.to_path_buf(),
+            shell.authored.clone(),
+        ),
+    )
+    .and_then(|(inner, _)| typed_template(&inner, owner_schema));
+    let resolution_failure = |error: darkmatter::markdown::compose::ShellExpansionError| {
+        CompositionError::LifecycleShellResolution {
+            source_path: source_path.to_path_buf(),
+            property: property.to_string(),
+            raw: shell.authored.clone(),
+            message: crate::composition::lifecycle::actions::shell_value_error_message(&error),
+            source: Some(Box::new(darkmatter::markdown::MarkdownError::ShellExpansion(Box::new(error)))),
+        }
+    };
+    let (value, site) = match darkmatter::markdown::compose::ResolvedShellValue::resolve(
         key,
         &shell.authored,
         &resolved,
         frontmatter.clone(),
         context,
         resolution_ctx.clone(),
-    )
-    .map_err(|error| CompositionError::LifecycleShellResolution {
-        source_path: source_path.to_path_buf(),
-        property: property.to_string(),
-        raw: shell.authored.clone(),
-        message: crate::composition::lifecycle::actions::shell_value_error_message(&error),
-        source: Some(Box::new(darkmatter::markdown::MarkdownError::ShellExpansion(Box::new(error)))),
-    })?;
+    ) {
+        Ok(value) => {
+            let site = template.map(|template| LifecycleShellTemplate::new(template, Some(value.commands())));
+            (value, site)
+        }
+        Err(error) => {
+            let template_only = template.as_ref().and_then(|_| {
+                darkmatter::markdown::compose::ResolvedShellValue::template_only(
+                    key,
+                    &shell.authored,
+                    &crate::composition::lifecycle::actions::shell_value_error_message(&error),
+                    context,
+                )
+            });
+            match (template_only, template) {
+                (Some(value), Some(template)) => (value, Some(LifecycleShellTemplate::new(template, None))),
+                _ => return Err(resolution_failure(error)),
+            }
+        }
+    };
     shell.resolved = Some(value);
+    shell.template = site;
     Ok(())
 }
 
@@ -650,9 +898,18 @@ fn resolve_shell_command_expr(
     let serde_json::Value::Array(mut composed) = composed else {
         unreachable!("an array subtree composes to an array");
     };
+    // Before a loop's first iteration `loop` has no value yet: it is unknown
+    // here, not missing, and each iteration's preparation checks it.
+    let pending_loop = matches!(enclosing_loop, EnclosingLoop::Pending)
+        .then(|| darkmatter::markdown::compose::shell_expansion::template::DeferredShellRoots::new(["loop"]));
     if let Some(expression) = placeholders
         .iter()
         .zip(composed.iter().skip(1))
+        .filter(|(expression, _)| {
+            pending_loop
+                .as_ref()
+                .is_none_or(|roots| roots.late_roots_of(expression, &Default::default()).is_none())
+        })
         .find_map(|(expression, read)| read.is_null().then_some(expression))
     {
         let error = darkmatter::markdown::compose::ShellExpansionError::MissingValue {
@@ -721,3 +978,111 @@ pub(crate) fn approval_failure(
 
 #[cfg(test)]
 mod tests;
+
+/// Sequence lifecycle sites retain authored expressions and the step barrier's values.
+#[allow(clippy::too_many_arguments)]
+fn sequence_lifecycle_template(
+    raw: &str, set_key: Option<&str>, property: &str, source: &Path,
+    schema: Option<&darkmatter::markdown::schemas::SimplifiedSchema>,
+    options: Option<&super::PrepareOptions>, state: &darkmatter::markdown::compose::EffectiveState,
+    resolution: &ResolutionContext, enclosing_loop: EnclosingLoop<'_>,
+) -> Result<Option<LifecycleShellTemplate>, CompositionError> {
+    use darkmatter::markdown::compose::shell_expansion::template::{ArgPart, HoleTiming, LookupEvaluator, resolve_late_values, fill_template};
+    let Some(options) = options.filter(|options| !options.deferred_shell_roots.is_empty()) else { return Ok(None) };
+    let context = biscuit_terminal::errors::SourceContext::new(source.to_path_buf(), source.to_path_buf(), raw.to_string());
+    let inner = match set_key {
+        Some(key) => darkmatter::markdown::compose::authored_shell_template(raw, key, &context).map(|(inner, _)| inner),
+        None => Some(raw.to_string()),
+    };
+    let Some(inner) = inner else { return Ok(None) };
+    if !inner.contains("{{") { return Ok(None) }
+    if let Ok(diagnostics) = approval_diagnostics(&inner, LifecycleScope::LifecycleShellApproval)
+        && let Some(diagnostic) = diagnostics.into_iter().find(|diagnostic| {
+            unavailable_root(&diagnostic.error).is_none_or(|root| !options.deferred_shell_roots.contains(root))
+        }) {
+        return Err(CompositionError::LifecycleShellResolution { source_path: source.to_path_buf(), property: property.to_string(),
+            raw: raw.to_string(), message: diagnostic.error.to_string(), source: Some(Box::new(approval_failure(raw, diagnostic.error))) });
+    }
+    let derived = darkmatter::markdown::compose::shell_expansion::template::derived_deferred_keys(
+        state.data().iter(), &options.deferred_shell_roots, &Default::default());
+    // Resolved-byte eligibility must not depend on the narrower template grammar.
+    let reads_late = darkmatter::markdown::compose::expression::ExpressionFinder::scan_plain(&inner)
+        .expressions.iter().any(|location| options.deferred_shell_roots
+            .late_roots_of(&location.expression, &derived).is_some());
+    if !options.deferred_shell_roots.placeholders_template_required() && !reads_late {
+        return Ok(None);
+    }
+    let Some(mut template) = typed_template(&inner, schema) else {
+        return Err(CompositionError::LifecycleShellResolution { source_path: source.to_path_buf(), property: property.to_string(),
+            raw: raw.to_string(), message: "invalid shell template grammar".to_string(), source: None });
+    };
+    for segment in &mut template.segments {
+        for arg in &mut segment.args {
+            for part in &mut arg.parts {
+                if let ArgPart::Hole(hole) = part
+                    && let Some(roots) = options.deferred_shell_roots.late_roots_of(&hole.expression, &derived) {
+                    hole.timing = HoleTiming::Deferred { roots };
+                }
+            }
+        }
+    }
+    let mut site = LifecycleShellTemplate::new(template, None);
+    let candidate = site.candidate(source, property);
+    if let Some(approved) = &options.pre_approved_commands
+        && !candidate.authorized_by(approved) {
+        return Err(CompositionError::LifecycleShellResolution { source_path: source.to_path_buf(), property: property.to_string(),
+            raw: raw.to_string(), message: "the authored template was not approved at sequence preflight".to_string(), source: None });
+    }
+    let origin = candidate.site.origin.clone();
+    let fail = |error: darkmatter::markdown::compose::shell_expansion::template::HoleError| {
+        let message = error.to_string();
+        CompositionError::LifecycleShellResolution { source_path: source.to_path_buf(), property: property.to_string(),
+            raw: raw.to_string(), message,
+            source: Some(Box::new(darkmatter::markdown::MarkdownError::ShellExpansion(Box::new(error.into_shell_error(&context, raw, &origin))))) }
+    };
+    let (view, globals) = runtime_bindings_enclosed(LifecycleScope::TaskSetup, LifecycleValues {
+        group: options.lifecycle_group.as_ref(), seq: options.sequence_binding.as_ref(), ..Default::default()
+    }, enclosing_loop);
+    let session = darkmatter::markdown::compose::expression::EvaluationSession::associate(view, state, globals)
+        .expect("task bindings agree").with_resolution_context(resolution.clone());
+    let evaluator = LookupEvaluator::new(&session);
+    let mut known = site.template().clone();
+    for segment in &mut known.segments {
+        for arg in &mut segment.args {
+            for part in &mut arg.parts {
+                if let ArgPart::Hole(hole) = part {
+                    hole.timing = match hole.timing {
+                        HoleTiming::Deferred { .. } => HoleTiming::ApprovalTime,
+                        HoleTiming::ApprovalTime => HoleTiming::Deferred { roots: Vec::new() },
+                    };
+                }
+            }
+        }
+    }
+    resolve_late_values([(property, &known)], &evaluator).map_err(|error| fail(error.error))?;
+    let saved = options.document_shell_values.as_ref().and_then(|values| values.get(&candidate));
+    let values = if options.validate_deferred_shell_values {
+        let late = resolve_late_values([(property, site.template())], &evaluator).map_err(|error| fail(error.error))?;
+        let values = late.site(property).cloned().unwrap_or_default();
+        if let Some(snapshot) = &options.document_shell_values { snapshot.insert(&candidate, values.clone()); }
+        Some(values)
+    } else { saved };
+    // Validate known values without evaluating deferred holes during discovery.
+    if options.validate_deferred_shell_values {
+        fill_template(site.template(), &evaluator, values.as_ref()).map_err(fail)?;
+    }
+    if let Some(values) = values { site = site.with_late_values(values); }
+    Ok(Some(site))
+}
+
+/// Keep derived inputs late after frontmatter interpolation replaces their expressions.
+pub(crate) fn lifecycle_document_roots(
+    markdown: &Markdown,
+    roots: &darkmatter::markdown::compose::shell_expansion::template::DeferredShellRoots,
+) -> darkmatter::markdown::compose::shell_expansion::template::DeferredShellRoots {
+    use darkmatter::markdown::compose::shell_expansion::template::{DeferredShellRoots, derived_deferred_keys};
+    let authored = super::prepare::frontmatter_to_value(markdown.frontmatter());
+    let derived = authored.as_object().map(|map| derived_deferred_keys(map.iter(), roots, &Default::default())).unwrap_or_default();
+    let extended = DeferredShellRoots::new(roots.iter().map(str::to_string).chain(derived));
+    if roots.placeholders_template_required() { extended.with_placeholders_template_required() } else { extended }
+}

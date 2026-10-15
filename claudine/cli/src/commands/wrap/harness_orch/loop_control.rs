@@ -1968,36 +1968,6 @@ fn execute_attempt_phase(
         None
     };
 
-    // A budgeted run debits the invocation before spawn and bounds the
-    // attempt by the remaining shared allowance. Capped after the session key
-    // above, so a resume is not refused over the shrinking deadline.
-    let mut launch = launch;
-    match crate::budget::admit_launch(attempt) {
-        Ok(Some(remaining)) => {
-            let timeout = &mut launch.timeout_config.timeout;
-            *timeout = Some(timeout.map_or(remaining, |configured| configured.min(remaining)));
-        }
-        Ok(None) => {}
-        Err(refusal) => {
-            let e = color_eyre::Report::from(refusal);
-            let err_info = LifecycleErrorInfo::from_error_or_action("budget_admission", e.as_ref());
-            rollback_inline_document(inline.as_mut(), term);
-            return Err(match emit_failure_finalize_with_err(
-                lifecycle_guard,
-                &materialized,
-                &prompt_state.source_path,
-                repo_root,
-                term,
-                effect_engine,
-                &err_info,
-                loop_start,
-            ) {
-                Some(ce) => ce.into(),
-                None => e,
-            });
-        }
-    }
-
     let mut child_spawned = false;
     let attempt_result = execute_harness_attempt(
         attempt,
@@ -2026,7 +1996,6 @@ fn execute_attempt_phase(
         // Cloned per attempt: a retry starts with an empty partial-line buffer.
         state.run.task_frame_writer.clone(),
     );
-    crate::budget::settle_launch();
 
     // Mark launched as soon as spawn succeeded — before propagating
     // any post-spawn error — so the guard correctly classifies
@@ -2315,7 +2284,7 @@ fn classify_attempt_phase(
     // The provider produced its summary, so it joins `outputs` now — before any
     // terminal lifecycle handling, so `success`, `failure`, and `finalize` alike
     // observe it and a later iteration, step, or standalone
-    // `{{ last(outputs) }}` reads it back. It is the agent's report on the work;
+    // `{{ last(seq.outputs) }}` reads it back. It is the agent's report on the work;
     // the document never receives it (spec §D3).
     //
     // A task-driven run withholds the commit: its executor publishes the entry

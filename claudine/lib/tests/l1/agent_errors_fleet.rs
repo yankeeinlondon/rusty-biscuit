@@ -239,6 +239,13 @@ impl ShellRunner for PersistentFindingsGate {
         })?;
         Ok(0)
     }
+
+    fn run_structured(
+        &self,
+        _chain: &darkmatter::markdown::compose::shell_expansion::template::FilledChain,
+    ) -> Result<i32, ShellRunError> {
+        unreachable!("the fleet gate's commands hold no placeholder")
+    }
 }
 
 #[test]
@@ -297,6 +304,7 @@ fn exhausted_remediation_fails_finalize_and_preserves_findings() {
     let source_path = dir.path().join("_fleet.md");
     let file_resolution_context = biscuit_file::FileResolutionContext::new(dir.path());
     let context = |signal| StackExecutionContext {
+        seq: None,
         signal,
         scope: None,
         frontmatter,

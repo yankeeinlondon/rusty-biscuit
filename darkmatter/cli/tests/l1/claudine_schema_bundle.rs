@@ -98,11 +98,15 @@ fn claudine_bundle_loads_and_both_triggers_are_discovered() {
     let documents = repository(
         &process,
         &bundle,
-        &[("controls-beside-ticket", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/controls-beside-ticket.md"))],
+        &[
+            ("controls-beside-ticket", include_str!("../../../../claudine/lib/tests/fixtures/claudine-schemas/controls-beside-ticket.md")),
+            ("cancelled-container", "---\ncancelled: [{stderr: cancelled}]\nsequence: [{name: child, sequence: []}]\n---\n"),
+        ],
     );
     let (code, records) = validate(&process, &documents);
     assert_eq!(code, Some(0), "{records:?}");
     assert_record(&records, "controls-beside-ticket", true, &[]);
+    assert_record(&records, "cancelled-container", true, &[]);
 
     let output = process
         .command()

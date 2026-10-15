@@ -224,7 +224,7 @@ mod entry {
                 { "say": "dotted {{ fm.topic }}" },
                 { "say": "bracket {{ fm['topic'] }}" },
                 { "say": "computed {{ fm[key_name] }}" },
-                { "say": "output {{ outputs.summary }}" },
+                { "say": "output {{ seq.outputs.summary }}" },
                 { "say": "iteration {{ loop.count }}" },
                 { "say": "error {{ err.msg }}" },
             ],
@@ -237,8 +237,8 @@ mod entry {
         // The control: through a handle the sequence did not scope, the same
         // reads are early, so the scoping is what made them late.
         let unscoped = worker.handle();
-        assert_eq!(prepare(&unscoped, &document), 5);
-        fake.wait_for_calls(6).await;
+        assert_eq!(prepare(&unscoped, &document), 4);
+        fake.wait_for_calls(5).await;
         assert_eq!(
             fake.texts(),
             texts(&[
@@ -247,8 +247,6 @@ mod entry {
                 "dotted per step",
                 "bracket per step",
                 "computed Report",
-                // Outside a sequence `outputs` is an ordinary, absent property.
-                "output ",
             ])
         );
     }

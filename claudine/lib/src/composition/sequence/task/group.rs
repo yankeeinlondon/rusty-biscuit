@@ -14,8 +14,8 @@
 //! ## `execution: serial` (the default)
 //!
 //! Member tasks run one at a time against the *same* runtime cell as the rest of
-//! the sequence, so task 2 sees task 1's `set` writes and reads task 1's entry
-//! through `{{ last(outputs) }}` — exactly as if the two had been sequence steps.
+//! the sequence, so task 2 sees task 1's ordinary `set` writes. Shell template
+//! late inputs are frozen for all members at group entry, before member setup.
 //! Each member commits its own entry, so a serial group grows `outputs` entry by
 //! entry rather than adding a wrapper entry. The first failure stops the group
 //! and the remaining tasks do not run.
@@ -53,7 +53,7 @@ use serde_json::{Map, Value};
 use super::super::super::error::CompositionError;
 use super::super::super::lifecycle::context::LifecycleErrorInfo;
 use super::super::super::lifecycle::executor::StackExecutionContext;
-use super::super::super::runtime_state::{OUTPUTS_KEY, RuntimeSnapshot, RuntimeState};
+use super::super::super::runtime_state::{RuntimeSnapshot, RuntimeState};
 use super::super::preflight::{GroupExecution, PreflightGroup, PreflightTask};
 use super::{
     PrimaryOutcome, TaskDiagnostic, TaskExecution, TaskOutcome, TaskRun, TaskStage, TaskStatus,
@@ -78,10 +78,6 @@ struct MemberRun {
     duration: Duration,
 }
 
-/// The `group` global's name at the frontmatter root and in the lifecycle
-/// injected-globals layer.
-pub(super) const GROUP_SCOPE_KEY: &str = "group";
-
 /// One member task's contribution to the owning step's summary.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupTaskResult {
@@ -91,6 +87,13 @@ pub struct GroupTaskResult {
     pub status: TaskStatus,
     /// Wall-clock time across the task's three stages.
     pub duration: Duration,
+}
+
+pub(super) struct ValidatedGroup {
+    variables: Map<String, Value>,
+    members: Vec<super::ValidatedTask>,
+    runs: Vec<Option<TaskRun>>,
+    group_run: Option<TaskRun>,
 }
 
 impl TaskExecution<'_> {
@@ -111,26 +114,57 @@ impl TaskExecution<'_> {
         })
     }
 
-    /// Schedule a group's tasks and report the group as one primary outcome.
-    pub(super) fn run_group(&self, group: &PreflightGroup) -> PrimaryOutcome {
-        let variables = match self.resolve_group_variables(group) {
-            Ok(variables) => variables,
-            Err(error) => {
-                return PrimaryOutcome::failed(TaskDiagnostic::from_composition(
-                    TaskStage::Primary,
-                    &error,
-                ));
+    /// Freeze every member's late shell inputs before the group begins effects.
+    pub(super) fn validate_group(&self, group: &PreflightGroup) -> Result<ValidatedGroup, CompositionError> {
+        let variables = self.resolve_group_variables(group)?;
+        let overlay = self.member_overlay();
+        let stack = self.stack.with_group(&variables);
+        let state = self.member_state()?;
+        let group_run = if group.execution == GroupExecution::Parallel {
+            self.prompt.open_group_run(group)
+        } else { None };
+        let mut members = Vec::with_capacity(group.tasks.len());
+        let mut runs = Vec::with_capacity(group.tasks.len());
+        for task in &group.tasks {
+            let run = match group.execution {
+                GroupExecution::Serial if task.late_sites().next().is_none()
+                    && !matches!(task.action, super::PreflightAction::Prompt { .. }) => None,
+                GroupExecution::Serial => self.prompt.open_member_run(task),
+                GroupExecution::Parallel => self.prompt.open_leg_run(task, group_run.as_ref()),
+            };
+            let member_stack = StackExecutionContext {
+                source_path: &task.diagnostic.source_path,
+                prepared_context: run.as_ref().map(|opened| &opened.context)
+                    .or(group_run.as_ref().map(|opened| &opened.context))
+                    .or(stack.prepared_context),
+                ..stack.with_signal(stack.signal)
+            };
+            let member = TaskExecution {
+                task, state: &state, stack: &member_stack, overlay: Some(&overlay),
+                run_evidence: run.as_ref().map(|opened| &opened.run)
+                    .or(group_run.as_ref().map(|opened| &opened.run)).or(self.run_evidence),
+                document: run.as_ref().and_then(|opened| opened.document.as_ref()).or(self.document),
+                ..*self
+            };
+            let mut validated = member.validate_task()?;
+            let has_late_document = validated.prompt.as_ref()
+                .is_some_and(|request| !request.document_shell_values.is_empty());
+            if !has_late_document {
+                validated.prompt = None;
             }
-        };
+            members.push(validated);
+            runs.push(run);
+        }
+        Ok(ValidatedGroup { variables, members, runs, group_run })
+    }
 
-        let scope_overlay = self.overlay_with_group(&variables);
-        let scope_stack = self.stack.with_group(&variables);
-
+    pub(super) fn run_group(&self, group: &PreflightGroup, validated: &ValidatedGroup) -> PrimaryOutcome {
+        let variables = &validated.variables;
+        let scope_overlay = self.member_overlay();
+        let scope_stack = self.stack.with_group(variables);
         match group.execution {
-            GroupExecution::Serial => self.run_serial(group, &variables, &scope_overlay, &scope_stack),
-            GroupExecution::Parallel => {
-                self.run_parallel(group, &variables, &scope_overlay, &scope_stack)
-            }
+            GroupExecution::Serial => self.run_serial(group, &scope_overlay, &scope_stack, validated),
+            GroupExecution::Parallel => self.run_parallel(group, &scope_overlay, &scope_stack, validated),
         }
     }
 
@@ -138,9 +172,9 @@ impl TaskExecution<'_> {
     fn run_serial(
         &self,
         group: &PreflightGroup,
-        variables: &Map<String, Value>,
         scope_overlay: &Value,
         scope_stack: &StackExecutionContext<'_>,
+        validated: &ValidatedGroup,
     ) -> PrimaryOutcome {
         let mut results = Vec::with_capacity(group.tasks.len());
         let mut collected: Vec<String> = Vec::with_capacity(group.tasks.len());
@@ -148,7 +182,7 @@ impl TaskExecution<'_> {
         let mut secondary: Vec<TaskDiagnostic> = Vec::new();
         let mut interrupted = false;
 
-        for task in &group.tasks {
+        for (index, task) in group.tasks.iter().enumerate() {
             let started = Instant::now();
             // Serial work shares the parallel geometry with nothing drawn in the
             // gutter, so switching between the two modes does not shift the
@@ -159,17 +193,28 @@ impl TaskExecution<'_> {
             }
             // Rebuilt per task, not once per group: a serial member reads the
             // `set` writes and the `outputs` entry its predecessor produced.
-            let member_state = match self.member_state(variables) {
+            let member_state = match self.member_state() {
                 Ok(state) => state,
                 Err(error) => {
                     failure = Some(TaskDiagnostic::from_composition(TaskStage::Primary, &error));
                     break;
                 }
             };
-            // Each serial member is a composition run and a document of its
-            // own, so its fields and its document see what earlier members
-            // changed, under the environment it captures here.
-            let member_run = self.prompt.open_member_run(task);
+            // Keep the context and document epoch used at the group barrier;
+            // ordinary runtime values still come from the live member state.
+            let current_run;
+            let member_run = match validated.runs[index].as_ref() {
+                Some(run) if validated.members[index].late.is_empty()
+                    && validated.members[index].prompt.is_none() => {
+                    current_run = Some(self.prompt.refresh_member_run(task, run));
+                    current_run.as_ref()
+                }
+                Some(run) => Some(run),
+                None => {
+                    current_run = self.prompt.open_member_run(task);
+                    current_run.as_ref()
+                }
+            };
             let member_stack = StackExecutionContext {
                 source_path: &task.diagnostic.source_path,
                 prepared_context: member_run
@@ -191,7 +236,7 @@ impl TaskExecution<'_> {
                     .or(self.document),
                 ..*self
             };
-            let outcome = member.run();
+            let outcome = member.run_validated(Some(&validated.members[index]));
             let duration = started.elapsed();
             if let Some(stream) = &stream {
                 stream.close(outcome.status.into(), duration);
@@ -238,16 +283,16 @@ impl TaskExecution<'_> {
     fn run_parallel(
         &self,
         group: &PreflightGroup,
-        variables: &Map<String, Value>,
         scope_overlay: &Value,
         scope_stack: &StackExecutionContext<'_>,
+        validated: &ValidatedGroup,
     ) -> PrimaryOutcome {
         // Taken once. A sibling's `set` or `outputs` entry is invisible until the
         // merge below, and no live file is re-read between siblings.
         let base = self
             .runtime
             .map_or_else(RuntimeSnapshot::default, |runtime| runtime.snapshot());
-        let member_state = match self.member_state_from(variables, &base) {
+        let member_state = match self.member_state_from(&base) {
             Ok(state) => state,
             Err(error) => {
                 return PrimaryOutcome::failed(TaskDiagnostic::from_composition(
@@ -280,7 +325,7 @@ impl TaskExecution<'_> {
         // a single shared cursor, so a freed slot always takes the next task.
         // One run for the whole group, captured before any sibling starts;
         // a sibling that re-enters later opens its own.
-        let group_run = self.prompt.open_group_run(group);
+        let group_run = validated.group_run.as_ref();
         let group_context = group_run
             .as_ref()
             .map(|opened| &opened.context)
@@ -293,11 +338,7 @@ impl TaskExecution<'_> {
         // in declaration order and before any leg starts, so which leg holds
         // which capture does not depend on scheduling. The legs share the
         // group's run, not one another's document.
-        let leg_runs: Vec<Option<TaskRun>> = group
-            .tasks
-            .iter()
-            .map(|task| self.prompt.open_leg_run(task, group_run.as_ref()))
-            .collect();
+        let leg_runs = &validated.runs;
 
         let workers = group
             .max_parallel
@@ -354,7 +395,7 @@ impl TaskExecution<'_> {
                         // A sibling's failure never cancels in-flight work:
                         // discarding a half-finished agent run costs more than
                         // letting it land in its slot.
-                        let outcome = member.run();
+                        let outcome = member.run_validated(Some(&validated.members[index]));
                         let duration = started.elapsed();
                         if let Some(stream) = &stream {
                             stream.close(outcome.status.into(), duration);
@@ -511,12 +552,11 @@ impl TaskExecution<'_> {
     /// stands, the reserved overlay, and the group scope.
     fn member_state(
         &self,
-        variables: &Map<String, Value>,
     ) -> Result<EffectiveState, CompositionError> {
         let snapshot = self
             .runtime
             .map_or_else(RuntimeSnapshot::default, |runtime| runtime.snapshot());
-        self.member_state_from(variables, &snapshot)
+        self.member_state_from(&snapshot)
     }
 
     /// [`Self::member_state`] against a caller-supplied snapshot.
@@ -526,7 +566,6 @@ impl TaskExecution<'_> {
     /// the result with every sibling.
     fn member_state_from(
         &self,
-        variables: &Map<String, Value>,
         snapshot: &RuntimeSnapshot,
     ) -> Result<EffectiveState, CompositionError> {
         let mut data = self.state.data().clone();
@@ -534,17 +573,12 @@ impl TaskExecution<'_> {
             for (key, value) in &snapshot.mutations {
                 data.insert(key.clone(), value.clone());
             }
-            data.insert(OUTPUTS_KEY.to_string(), snapshot.outputs_value());
         }
         if let Some(Value::Object(overlay)) = self.overlay {
             for (key, value) in overlay {
-                data.insert(key.clone(), value.clone());
+                if key != "seq" { data.insert(key.clone(), value.clone()); }
             }
         }
-        data.insert(
-            GROUP_SCOPE_KEY.to_string(),
-            Value::Object(variables.clone()),
-        );
         EffectiveStateBuilder::new()
             .with_frontmatter(data)
             .with_context(self.state.context().clone())
@@ -553,19 +587,9 @@ impl TaskExecution<'_> {
             .map_err(|source| CompositionError::PreFlightStateBuildFailed { source })
     }
 
-    /// The reserved overlay a member task composes a prompt document under.
-    ///
-    /// `group` rides the overlay because that is the layer rebuilt per task —
-    /// which is precisely what makes the scope end with the group.
-    fn overlay_with_group(&self, variables: &Map<String, Value>) -> Value {
-        let mut overlay = match self.overlay {
-            Some(Value::Object(map)) => map.clone(),
-            _ => Map::new(),
-        };
-        overlay.insert(
-            GROUP_SCOPE_KEY.to_string(),
-            Value::Object(variables.clone()),
-        );
-        Value::Object(overlay)
+    /// Group variables travel through the lexical stack and prompt request,
+    /// never the frontmatter overlay.
+    fn member_overlay(&self) -> Value {
+        self.overlay.cloned().unwrap_or_else(|| Value::Object(Map::new()))
     }
 }

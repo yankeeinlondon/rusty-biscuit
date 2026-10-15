@@ -321,11 +321,11 @@ fn compose_does_not_scrub_a_malformed_optional_control() {
 #[test]
 fn inline_compose_does_not_scrub_a_malformed_optional_control() {
     let (fixture, marker) = marker_fixture("launch-trigger-schemas-no-scrub-inline");
-    let doc = write_doc(&fixture, "prompt.md", "---\nprompt: hi\nfail_fast: [1]\n---\nBody\n");
+    let doc = write_doc(&fixture, "prompt.md", "---\nprompt: hi\ntimeout: [1]\n---\nBody\n");
 
     let result = run(&fixture, "inline-compose", &doc, &[]);
 
-    assert_schema_rejection(&result, &["/fail_fast"], "inline-compose");
+    assert_schema_rejection(&result, &["/timeout"], "inline-compose");
     assert!(!marker.exists(), "{}", result.stderr);
 }
 

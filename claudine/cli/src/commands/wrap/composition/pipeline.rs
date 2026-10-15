@@ -1760,6 +1760,7 @@ fn provider_run_handoff(
         std::time::Instant::now(),
     );
     let init_ctx = StackExecutionContext {
+        seq: None,
         signal: LifecycleSignal::Initialize,
         scope: None,
         frontmatter: fm_map.unwrap_or(&empty_frontmatter),

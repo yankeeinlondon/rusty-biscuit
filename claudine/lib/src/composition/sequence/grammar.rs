@@ -385,3 +385,55 @@ impl SpanScanner {
         !self.in_quotes() && self.interpolation == 0 && self.parens == 0
     }
 }
+
+/// Container event keys carried by inline sequences and group definitions.
+pub const CONTAINER_EVENT_KEYS: &[&str] = &["initialize", "start", "success", "failure", "blocked", "cancelled", "finalize"];
+
+/// Validate task grammar before preparation can execute any work.
+pub fn validate_task_grammar(map: &serde_json::Map<String, Value>, origin: &std::path::Path) -> Result<(), CompositionError> {
+    for key in ["setup", "teardown", "execution", "fail_fast"] {
+        if let Some(value) = map.get(key) {
+            return Err(removed_task_key(key, value, origin));
+        }
+    }
+    let inline = matches!(map.get("sequence"), Some(Value::Array(_)));
+    for key in CONTAINER_EVENT_KEYS {
+        if let Some(value) = map.get(*key) {
+            if !inline {
+                return Err(CompositionError::RemovedGrammar {
+                    source_path: origin.to_path_buf(), path: (*key).into(), removed: (*key).into(),
+                    replacement: "container events belong on an inline `sequence:` list or inside a `group:` object; put referenced sequence events in its target document".into(),
+                });
+            }
+            let mut root = serde_json::Map::new();
+            root.insert((*key).into(), value.clone());
+            super::super::lifecycle::parse_lifecycle_config(&Value::Object(root), origin)?;
+        }
+    }
+    if let Some(value) = map.get("sequence") {
+        match value {
+            Value::Array(items) => {
+                super::normalize::normalize_plan(items, super::model::SequenceSource::Inline, origin, true)?;
+            }
+            Value::String(_) => {
+                if !matches!(classify_source(value)?, SequenceSourceSpec::Reference(_)) {
+                    return Err(CompositionError::SequenceInvalid("task `sequence` must be a list or file reference; dynamic sources belong on the sequence document".into()));
+                }
+            }
+            other => return Err(CompositionError::SequenceInvalid(format!("task `sequence` must be a list or file reference, got {}", json_type_name(other)))),
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn removed_task_key(key: &str, value: &Value, origin: &std::path::Path) -> CompositionError {
+    let replacement = match key {
+        "setup" => "use a preceding `side_effect:` task for an action or `shell:` task for a command",
+        "teardown" => "use a group's `finalize:`; wrap a single task in a group of one",
+        "execution" if value.as_str() == Some("serial") => "use `sequence: [{name: first, shell: command}]` for ordered work; nest that sequence as a group leg when needed",
+        "execution" => "groups run concurrently; omit `execution:` (including `execution: parallel`)",
+        "fail_fast" => "`fail_fast` belongs on a `group:` object only; use a group of one with `fail_fast: false` to continue after failure",
+        _ => unreachable!(),
+    };
+    CompositionError::RemovedGrammar { source_path: origin.to_path_buf(), path: key.into(), removed: key.into(), replacement: replacement.into() }
+}

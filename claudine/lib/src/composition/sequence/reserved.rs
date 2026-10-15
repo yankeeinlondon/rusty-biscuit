@@ -12,31 +12,30 @@
 
 use super::model::ExecutableField;
 
-/// The five mutually-exclusive executable fields. Exactly one may appear on a
+/// The six mutually-exclusive executable fields. Exactly one may appear on a
 /// task; a step may carry zero (it runs the document body) or one.
-pub const EXECUTABLE_KEYS: &[&str] = &["prompt", "shell", "side_effect", "group", "task"];
+pub const EXECUTABLE_KEYS: &[&str] = &["prompt", "shell", "side_effect", "group", "task", "sequence"];
 
 /// Optional task fields that live alongside an executable and are consumed as
 /// task configuration, never as authored state.
 pub const TASK_OPTION_KEYS: &[&str] =
-    &["name", "setup", "teardown", "params", "timeout", "operation", "flow"];
+    &["name", "params", "timeout", "operation", "flow", "initialize", "start", "success", "failure", "blocked", "cancelled", "finalize"];
 
 /// Fields generated onto every `step_state`. Authors may declare them in a
 /// `$schema` with `generated`, but may never provide or override a value.
 pub const GENERATED_STATE_KEYS: &[&str] =
-    &["id", "sequence_id", "is_first", "is_last", "index", "count"];
+    &["id", "sequence_id", "is_first", "is_last", "index", "count", "run_id", "previous", "next", "outputs"];
 
-/// Reserved keys at the frontmatter root (the per-step overlay). Never authored
-/// as state, never a `--set`/`params`/`set`-side-effect target.
-pub const ROOT_OVERLAY_KEYS: &[&str] = &["state", "previous", "next", "outputs", "sequence_id"];
+/// Read-only lexical roots; explicit `fm.*` remains authored frontmatter.
+pub const ROOT_OVERLAY_KEYS: &[&str] = &["seq", "group", "loop"];
 
 /// The overlay keys whose object values render their `name` field in inline
-/// string context (`{{state}}` → the state's name), while whole-value spans and
+/// string context (`{{seq}}` → the state's name), while whole-value spans and
 /// dotted paths keep the typed object. Passed to Darkmatter compose as the
 /// name-coercion key set (spec → *Referencing Sequence States*).
-pub const NAME_COERCION_KEYS: &[&str] = &["state", "previous", "next"];
+pub const NAME_COERCION_KEYS: &[&str] = &["seq", "seq.previous", "seq.next"];
 
-/// Whether `key` is one of the five executable fields.
+/// Whether `key` is one of the six executable fields.
 pub fn is_executable_key(key: &str) -> bool {
     EXECUTABLE_KEYS.contains(&key)
 }
@@ -58,24 +57,16 @@ pub fn is_reserved_state_key(key: &str) -> bool {
 /// declaring an option outside this set is a typed authoring error rather than
 /// a silently-ignored field (spec → *Task Resolution and Lifecycle Semantics*).
 ///
-/// `name`, `setup`, and `teardown` apply to every task variant; the table below
-/// lists only the variant-specific additions.
-///
-/// - `prompt`: `params`, `operation`, `flow` — it composes another document.
-/// - `shell`: `timeout` — a per-command duration.
-/// - `side_effect`: no additions.
-/// - `group`: no additions (a group configures itself in its own object).
-/// - `task`: **nothing at all** — an external `task:` reference expands the
-///   referenced file exclusively and immutably, so even a referencing-site
-///   `name:` would be a patch the expansion silently discards. A sequence step
-///   is unaffected: its `name` is the step's state name, extracted before task
-///   options are read.
+/// Lifecycle events apply only to inline sequence containers. External task
+/// references may carry a leg name; their target still supplies the executable
+/// and its options.
 pub fn allowed_task_options(field: ExecutableField) -> &'static [&'static str] {
     match field {
-        ExecutableField::Prompt => &["name", "setup", "teardown", "params", "operation", "flow"],
-        ExecutableField::Shell => &["name", "setup", "teardown", "timeout"],
-        ExecutableField::SideEffect => &["name", "setup", "teardown"],
+        ExecutableField::Prompt => &["name", "params", "operation", "flow"],
+        ExecutableField::Shell => &["name", "timeout"],
+        ExecutableField::SideEffect => &["name"],
         ExecutableField::Group => &["name"],
-        ExecutableField::Task => &[],
+        ExecutableField::Task => &["name"],
+        ExecutableField::Sequence => &["name", "initialize", "start", "success", "failure", "blocked", "cancelled", "finalize"],
     }
 }

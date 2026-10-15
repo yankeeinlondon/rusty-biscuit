@@ -472,8 +472,9 @@ impl MarkdownError {
     }
 
     /// The shell authorization or input failure in this error's cause chain,
-    /// if any: a missing value, or a command that must run as a template and
-    /// is not a valid one.
+    /// if any: a missing value, a command that must run as a template and is
+    /// not a valid one, a template value its type refuses, or a template
+    /// program that cannot run without an interpreter.
     ///
     /// These are not command failures, so no tolerance a stage offers for
     /// ordinary failures (`when_error`, a transclusion notice, a nested
@@ -486,7 +487,10 @@ impl MarkdownError {
                 .downcast_ref::<ShellExpansionError>()
                 .or_else(|| error.downcast_ref::<Box<ShellExpansionError>>().map(AsRef::as_ref));
             if let Some(
-                shell @ (ShellExpansionError::MissingValue { .. } | ShellExpansionError::TemplateGrammar { .. }),
+                shell @ (ShellExpansionError::MissingValue { .. }
+                | ShellExpansionError::TemplateGrammar { .. }
+                | ShellExpansionError::TemplateValueRejected { .. }
+                | ShellExpansionError::TemplateTarget { .. }),
             ) = shell
             {
                 return Some(shell);

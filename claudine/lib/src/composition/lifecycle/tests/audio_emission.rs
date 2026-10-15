@@ -193,6 +193,7 @@ fn execute_with(
         .build();
     let fm = serde_json::Map::new();
     let context = executor::StackExecutionContext {
+        seq: None,
         signal,
         scope: None,
         frontmatter: &fm,

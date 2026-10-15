@@ -19,13 +19,13 @@ use super::resolve::is_auto_selectable_state;
 ///
 /// Reads only the normalized step's outer executable: `prompt`, `task`,
 /// `group`, and a body step (no executable) are eligible; `shell` and
-/// `side_effect` are not. Never composes files or runs commands.
+/// `side_effect` and nested `sequence` are not. Never composes files or runs commands.
 pub(super) fn is_review_eligible(step: &SequenceStep) -> bool {
     match step.executable.as_ref().map(|executable| executable.field) {
         None | Some(ExecutableField::Prompt | ExecutableField::Task | ExecutableField::Group) => {
             true
         }
-        Some(ExecutableField::Shell | ExecutableField::SideEffect) => false,
+        Some(ExecutableField::Shell | ExecutableField::SideEffect | ExecutableField::Sequence) => false,
     }
 }
 

@@ -111,7 +111,7 @@ impl ActiveDocumentOutcome {
 ///
 /// A handoff changes the step's document, never the step (R8). The target reads
 /// the step's caller layers (the user's setters, a task's evaluated `params`,
-/// the reserved `state`/`previous`/`next` overlay, earlier steps' runtime
+/// the lexical `seq` binding, earlier steps' runtime
 /// values) at the precedence the source read them, sees the step's environment
 /// and `operation`, writes `set` and `outputs` into the step's runtime cell, and
 /// a `prompt:` task's target still withholds its output for the task executor
@@ -123,11 +123,12 @@ pub(crate) struct StepScope {
     /// The step's caller layers, origin kept: only the user's setters are
     /// authored, every run-produced value is data.
     pub(crate) caller_overrides: claudine::composition::LayeredOverrides,
+    pub(crate) lifecycle_group: Option<serde_json::Map<String, serde_json::Value>>,
     pub(crate) runtime_state: Arc<claudine::composition::RuntimeState>,
     pub(crate) suppress_output_commit: bool,
     pub(crate) task_frame_writer: Option<claudine::render::TaskFrameWriter>,
     /// Environment the step sets for whatever document it runs
-    /// (`CLAUDINE_FAIL_FAST`, a task's `OPERATION`). Never the source's
+    /// (a task's `OPERATION`). Never the source's
     /// `AGENT`/`MODEL`/`YOLO`: the target installs its own over this.
     pub(crate) env_overrides: BTreeMap<String, String>,
     /// A task's own `operation`, which outranks the command's `--operation`.
@@ -733,7 +734,7 @@ pub(crate) fn prepare_and_run_active_document(
             &claudine::composition::LayeredOverrides::from_parts(
                 set_overrides.as_ref(),
                 &caller_data_keys(step_scope),
-            ),
+            ).with_sequence_value(step_scope.and_then(|scope| scope.caller_overrides.sequence_value().cloned())),
             &caller_input_records,
             &approval_options,
             &mut prep_substages,
@@ -1528,11 +1529,16 @@ fn execute_loop_or_single(
         DocumentBoot::Eager(_, options) | DocumentBoot::Staged(options) => options.clone(),
     };
     let loop_prepare_options = PrepareOptions {
+        sequence_binding: step_scope.and_then(|scope| scope.caller_overrides.sequence_value().cloned()),
+        lifecycle_group: step_scope.and_then(|scope| scope.lifecycle_group.clone()),
         invocation_context: Some(prep_context.invocation.clone()),
         document_epoch: Some(document_epoch.clone()),
         set_overrides: set_overrides.clone(),
         caller_input_records: caller_input_records.clone(),
         pre_approved_commands: eager_approved.clone(),
+        deferred_shell_roots: Default::default(),
+        validate_deferred_shell_values: false,
+        document_shell_values: None,
         env_overrides: env_overrides.clone(),
         perf_enabled: shared.perf,
         source_repo_root: prep_context.source_repo_root.clone(),
@@ -1540,8 +1546,6 @@ fn execute_loop_or_single(
         prepared_context: Some(prepared_context.clone()),
         file_ref_fallback_dir: Some(prep_context.launch_workspace.launch_cwd.clone()),
         file_resolution_context: file_resolution_context.clone(),
-        // Name coercion is a sequence-only concern; standalone compose/loop
-        // prep injects no `state` object, so there is nothing to coerce.
         name_coercion_keys: Vec::new(),
         allow_empty_body: false,
         // R4 applies to a looping document exactly as it does to a single one.

@@ -300,7 +300,7 @@ fn is_plain_string(def: &PropertyDef) -> bool {
 }
 
 /// The declaration's type text without its description.
-fn declaration_text(def: &PropertyDef) -> String {
+pub(super) fn declaration_text(def: &PropertyDef) -> String {
     let text = |atom: &PropertyAtom| {
         let mut atom = atom.clone();
         atom.description = None;

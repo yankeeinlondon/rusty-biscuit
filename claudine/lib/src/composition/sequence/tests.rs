@@ -77,7 +77,7 @@ fn inline_scalar_list_normalizes_correctly() {
     let source = make_source(
         &dir,
         &[("sequence", json!(["one", "two", "three"]))],
-        "Prompt: {{state}}",
+        "Prompt: {{seq}}",
     );
     let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
     assert!(matches!(plan.source, SequenceSource::Inline));
@@ -142,11 +142,11 @@ fn inline_object_step_name_wrong_type_fails() {
 // -- resolve_sequence_plan: empty list ------------------------------------
 
 #[test]
-fn empty_list_fails() {
+fn empty_list_returns_empty_plan() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("sequence", json!([]))], "Prompt");
-    let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
-    assert!(matches!(err, CompositionError::SequenceEmpty), "got: {err}");
+    let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
+    assert!(plan.steps.is_empty());
 }
 
 // -- resolve_sequence_plan: invalid type -----------------------------------
@@ -165,7 +165,7 @@ fn invalid_sequence_type_fails() {
 // -- resolve_sequence_plan: fail_fast frontmatter -------------------------
 
 #[test]
-fn fail_fast_false_from_frontmatter() {
+fn fail_fast_false_from_frontmatter_is_removed() {
     let dir = TempDir::new().unwrap();
     let source = make_source(
         &dir,
@@ -175,8 +175,8 @@ fn fail_fast_false_from_frontmatter() {
         ],
         "Prompt",
     );
-    let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
-    assert!(!plan.document_fail_fast);
+    let error = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
+    assert!(matches!(error, CompositionError::RemovedGrammar {..}));
 }
 
 // -- resolve_sequence_plan: external YAML (sequence: form) ----------------
@@ -194,7 +194,7 @@ fn external_sequence_form_loads() {
     let source = make_source(
         &dir,
         &[("sequence", json!("steps.yaml"))],
-        "Prompt: {{state.name}}",
+        "Prompt: {{seq.name}}",
     );
     let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
     assert!(matches!(plan.source, SequenceSource::External { .. }));
@@ -225,7 +225,7 @@ sequence:
     let source = make_source(
         &dir,
         &[("sequence", json!("agents.yaml"))],
-        "Research {{state.name}}",
+        "Research {{seq.name}}",
     );
     let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
     assert_eq!(plan.steps.len(), 2);
@@ -291,7 +291,7 @@ fn external_template_reserved_key_collision_fails() {
         &yaml_path,
         r#"kind: sequence
 template:
-  state: "{{name}}"
+  seq: "{{name}}"
 sequence:
   - name: One
 "#,
@@ -301,7 +301,7 @@ sequence:
     let source = make_source(&dir, &[("sequence", json!("bad.yaml"))], "Prompt");
     let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
     assert!(
-        matches!(err, CompositionError::SequenceReservedTemplateKey(ref k) if k == "state"),
+        matches!(err, CompositionError::SequenceReservedTemplateKey(ref k) if k == "seq"),
         "got: {err}"
     );
 }
@@ -360,7 +360,7 @@ fn fail_fast_wrong_type_fails() {
     );
     let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
     assert!(
-        matches!(err, CompositionError::SequenceInvalid(ref msg) if msg.contains("fail_fast")),
+        matches!(err, CompositionError::RemovedGrammar { ref removed, .. } if removed == "fail_fast"),
         "got: {err}"
     );
 }
@@ -1051,22 +1051,13 @@ fn overlay_as_set_overrides_emits_new_root_keys_and_reserves_them() {
     let overrides = build_step_overlay(&plan, 0).as_set_overrides(Some(user_set));
     let map = overrides.as_object().unwrap();
 
-    // Always-present root keys.
-    assert!(map["state"].is_object());
-    assert_eq!(map["state"]["name"], json!("a"));
-    assert_eq!(map["state"]["index"], json!(1));
-    assert!(map["sequence_id"].is_string());
-    // `outputs` is NOT an overlay key: the runtime layer below owns the
-    // accumulator, and an overlay copy would reset it at every step boundary.
-    assert!(!map.contains_key("outputs"), "overlay must not emit `outputs`");
-    // First step: previous is null, next is the second state object.
-    assert!(map["previous"].is_null());
-    assert_eq!(map["next"]["name"], json!("b"));
-
-    // Reserved overlay keys always win over user setters.
-    assert_eq!(map["state"]["name"], json!("a"));
-    assert_ne!(map["sequence_id"], json!("nope"));
-    // Non-reserved user keys survive.
+    assert_eq!(map["seq"]["name"], json!("a"));
+    assert_eq!(map["seq"]["index"], json!(1));
+    assert!(map["seq"]["run_id"].is_string());
+    assert!(map["seq"]["previous"].is_null());
+    assert_eq!(map["seq"]["next"]["name"], json!("b"));
+    assert_eq!(map["state"], json!("should-lose"), "authored legacy names are data");
+    assert_eq!(map["sequence_id"], json!("nope"));
     assert_eq!(map["color"], json!("red"));
 }
 
@@ -1254,22 +1245,13 @@ mod clean_break {
         let overrides = build_step_overlay(&plan, 0).as_set_overrides(None);
         let map = overrides.as_object().expect("overlay is a JSON object");
 
-        for key in ["state", "previous", "next", "sequence_id"] {
-            assert!(map.contains_key(key), "overlay must emit `{key}`");
+        assert_eq!(map.len(), 1);
+        let seq = map["seq"].as_object().unwrap();
+        for inner in ["index", "count", "is_first", "is_last", "id", "run_id", "previous", "next", "outputs"] {
+            assert!(seq.contains_key(inner), "seq must carry `{inner}`");
         }
-        assert!(
-            !map.contains_key("outputs"),
-            "`outputs` belongs to the runtime layer, not the overlay: {map:?}"
-        );
-        assert_eq!(
-            map.len(),
-            4,
-            "overlay emits exactly four reserved root keys: {map:?}"
-        );
-        // The generated position fields live inside each state, not at the root.
-        let state = map["state"].as_object().unwrap();
-        for inner in ["index", "count", "is_first", "is_last", "id", "sequence_id"] {
-            assert!(state.contains_key(inner), "state must carry `{inner}`");
+        for retired in ["state", "previous", "next", "sequence_id", "outputs"] {
+            assert!(!map.contains_key(retired), "retired root {retired}");
         }
     }
 
@@ -2021,16 +2003,10 @@ mod dynamic_sources {
 
     // -- empty static vs empty dynamic ------------------------------------
 
-    /// The ratified split: a static empty list is an authoring error, while a
-    /// dynamic source resolving to nothing is a graceful no-op that yields a
-    /// zero-step plan for the caller to report and exit `0` on.
+    /// Both authored and dynamic empty sequences are valid no-ops.
     #[test]
-    fn empty_static_errors_but_empty_dynamic_is_a_no_op() {
-        let static_error = plan_from_frontmatter(&[("sequence", json!([]))]).unwrap_err();
-        assert!(
-            matches!(static_error, CompositionError::SequenceEmpty),
-            "got: {static_error}"
-        );
+    fn empty_static_and_dynamic_are_no_ops() {
+        assert!(plan_from_frontmatter(&[("sequence", json!([]))]).unwrap().steps.is_empty());
 
         for (label, frontmatter) in [
             (
@@ -2070,15 +2046,14 @@ mod dynamic_sources {
         assert!(plan.steps.is_empty());
     }
 
-    /// A *formal* sequence document is authored for sequences, so an empty
-    /// `sequence:` list there is still the typo it looks like.
+    /// Formal sequence documents share the empty-list contract.
     #[test]
-    fn an_empty_formal_sequence_document_is_an_error() {
+    fn an_empty_formal_sequence_document_is_a_no_op() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("s.yaml"), "sequence: []\n").unwrap();
         let source = make_source(&dir, &[("sequence", json!("s.yaml"))], "Prompt");
-        let error = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
-        assert!(matches!(error, CompositionError::SequenceEmpty), "got: {error}");
+        let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
+        assert!(plan.steps.is_empty());
     }
 
     // -- shell sources ----------------------------------------------------
@@ -2285,5 +2260,147 @@ $schema:
 
         assert!(plan.steps[0].executable.is_some());
         assert!(!plan.steps[0].state.extra.contains_key("shell"));
+    }
+}
+
+mod container_grammar {
+    use super::*;
+
+    #[test]
+    fn nested_sequence_and_removed_task_keys() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("sequence.md");
+        for key in ["setup", "teardown", "execution", "fail_fast"] {
+            for value in [Value::Null, json!(false), json!("serial"), json!([])] {
+                let mut item = json!({"name": "work", "shell": "echo untouched"});
+                item[key] = value;
+                let error = normalize::normalize_plan(&[item], SequenceSource::Inline, &path, true).unwrap_err();
+                assert!(matches!(error, CompositionError::RemovedGrammar { .. }), "{key}: {error}");
+            }
+        }
+        let plan = normalize::normalize_plan(&[json!({"name": "nested", "sequence": [], "cancelled": []})], SequenceSource::Inline, &path, true).unwrap();
+        assert_eq!(plan.steps[0].executable.as_ref().unwrap().field.key(), "sequence");
+        assert!(plan.steps[0].state.extra.is_empty());
+    }
+
+    #[test]
+    fn sequence_task_shape_matrix_and_exclusivity() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("sequence.md");
+        for (value, valid) in [(json!([]), true), (json!("@steps.yaml -> items::name(label)"), true), (Value::Null, false), (json!(123), false), (json!([{"name":"ok", "shell":"ok"}, 123]), false), (json!([123]), false)] {
+            let result = normalize::normalize_plan(&[json!({"name":"nested", "sequence":value})], SequenceSource::Inline, &path, true);
+            assert_eq!(result.is_ok(), valid, "{value}: {result:?}");
+        }
+        for executable in ["prompt", "shell", "side_effect", "group", "task"] {
+            let mut item = json!({"name":"nested", "sequence":[]});
+            item[executable] = json!("original input");
+            assert!(matches!(normalize::normalize_plan(&[item], SequenceSource::Inline, &path, true), Err(CompositionError::SequenceExclusiveExecutable {..})));
+        }
+        for key in ["id", "index", "count", "is_first", "is_last", "previous", "next", "outputs", "run_id"] {
+            let mut item = json!({"name":"work", "shell":"echo untouched"});
+            item[key] = json!("authored reserved value");
+            assert!(matches!(normalize::normalize_plan(&[item], SequenceSource::Inline, &path, true), Err(CompositionError::SequenceReservedStateKey {..})), "{key}");
+        }
+        for event in ["initialize", "start", "success", "failure", "blocked", "cancelled", "finalize"] {
+            let mut item = json!({"name":"work", "shell":"echo untouched"});
+            item[event] = json!([]);
+            assert!(matches!(normalize::normalize_plan(&[item], SequenceSource::Inline, &path, true), Err(CompositionError::RemovedGrammar {..})));
+        }
+    }
+}
+
+mod container_yaml_matrix {
+    use super::*;
+
+    #[test]
+    fn shipped_sequence_corpus_uses_normal_resolution_path() {
+        let dir = TempDir::new().unwrap();
+        for (name, text) in [
+            ("local-runners.yaml", include_str!("../../../../docs/local-runners.yaml")),
+            ("providers.yaml", include_str!("../../../../docs/providers.yaml")),
+        ] {
+            let path = dir.path().join(name);
+            fs::write(&path, text).unwrap();
+            let source = make_source(&dir, &[("sequence", json!(name))], "Corpus body");
+            let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&path)).unwrap().unwrap();
+            assert!(!plan.steps.is_empty(), "{name}");
+            assert!(plan.steps.iter().all(|step| !step.name.is_empty()));
+            crate::composition::lifecycle::bindings::reject_removed_sequence_reads(
+                &source.resolved_path,
+                crate::composition::lifecycle::bindings::AuthoredDocument {
+                    frontmatter: &crate::composition::prepare::frontmatter_to_value(source.markdown.frontmatter()),
+                    body: source.markdown.content(), body_line_offset: 0,
+                }, None, None,
+            ).unwrap();
+        }
+    }
+
+    #[test]
+    fn markdown_and_sequence_yaml_fields_matrix() {
+        let dir = TempDir::new().unwrap();
+        let control = "sequence: [{name: nested, sequence: []}]\n";
+        // Each row edits one field of the same valid document. An absent task
+        // executable remains a headed step; absent lifecycle stacks do nothing.
+        let edits = [
+            ("control", "sequence: []", "sequence: []", true),
+            ("sequence absent", ", sequence: []", "", true),
+            ("sequence null", "sequence: []", "sequence: null", false),
+            ("sequence wrong type", "sequence: []", "sequence: 123", false),
+            ("sequence bad element", "sequence: []", "sequence: [{name: good, shell: echo}, 123]", false),
+            ("sequence all bad", "sequence: []", "sequence: [123]", false),
+            ("sequence duplicate", "sequence: []", "sequence: [], sequence: []", false),
+            ("sequence invalid", "sequence: []", "sequence: [", false),
+            ("cancelled empty", "sequence: []", "sequence: [], cancelled: []", true),
+            ("cancelled null", "sequence: []", "sequence: [], cancelled: null", false),
+            ("cancelled wrong type", "sequence: []", "sequence: [], cancelled: 123", false),
+            ("cancelled bad element", "sequence: []", "sequence: [], cancelled: [{warn: good}, 123]", false),
+            ("cancelled all bad", "sequence: []", "sequence: [], cancelled: [123]", false),
+            ("cancelled duplicate", "sequence: []", "sequence: [], cancelled: [], cancelled: []", false),
+            ("cancelled invalid", "sequence: []", "sequence: [], cancelled: [", false),
+            ("name absent", "name: nested, ", "", false),
+            ("name empty", "name: nested", "name: ''", false),
+            ("name null", "name: nested", "name: null", false),
+            ("name wrong type", "name: nested", "name: 123", false),
+            ("name duplicate", "name: nested", "name: nested, name: again", false),
+            ("name invalid", "name: nested", "name: [", false),
+            ("setup null regression", "sequence: []", "sequence: [], setup: null", false),
+        ];
+        for markdown in [true, false] {
+            let path = dir.path().join(if markdown {"sequence.md"} else {"sequence.yaml"});
+            let context = crate::test_support::context_for(&path);
+            let mut cases: Vec<_> = edits.iter().map(|(label, from, to, valid)| {
+                (*label, control.replacen(from, to, 1), *valid)
+            }).collect();
+            cases.extend([
+                ("empty root", "sequence: []\n".into(), true),
+                ("root fail_fast native", "sequence: []\nfail_fast: true\n".into(), false),
+                ("root fail_fast quoted", "sequence: []\nfail_fast: 'true'\n".into(), false),
+                ("root fail_fast null", "sequence: []\nfail_fast: null\n".into(), false),
+                ("root duplicate", "sequence: []\nsequence: []\n".into(), false),
+                ("invalid trailing content", "sequence: []\ninvalid: [\n".into(), false),
+            ]);
+            for (label, yaml, valid) in cases {
+                let text = if markdown {format!("---\n{yaml}---\nBody\n")} else {format!("kind: sequence\n{yaml}")};
+                fs::write(&path, text).unwrap();
+                let loaded = if markdown {
+                    crate::composition::resolve_fixture_source(path.to_str().unwrap())
+                } else {
+                    crate::composition::resolve::load_yaml_document(&path).map(|markdown| ResolvedCompositionSource {
+                        original_ref: path.display().to_string(), resolved_path: path.clone(),
+                        original_text: fs::read_to_string(&path).unwrap(), markdown,
+                    })
+                };
+                let result = loaded.and_then(|source| resolve_sequence_plan(&source, &context));
+                assert_eq!(result.is_ok(), valid, "markdown={markdown}: {label}: {yaml}: {result:?}");
+                if let Ok(Some(plan)) = result {
+                    if label == "empty root" { assert!(plan.steps.is_empty()); }
+                    else {
+                        assert_eq!(plan.steps.len(), 1);
+                        assert_eq!(plan.steps[0].name, "nested");
+                        assert_eq!(plan.steps[0].executable.is_none(), label == "sequence absent");
+                    }
+                }
+            }
+        }
     }
 }

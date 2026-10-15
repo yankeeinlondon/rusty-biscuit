@@ -149,6 +149,7 @@ mod shell_expansion_coordinates;
 mod shell_result_values;
 mod shell_template_policy;
 mod shell_template_discovery;
+mod shell_template_execution;
 mod preflight_child_state_parity;
 mod preflight_repository_sigils;
 mod shell_probe_preflight;

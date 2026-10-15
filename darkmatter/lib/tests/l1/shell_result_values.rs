@@ -666,6 +666,95 @@ mod resolved_values {
         assert!(error.to_string().contains("not pre-approved"), "{error}");
     }
 
+    fn shape_only(repo: &Repo, template: &darkmatter::markdown::compose::shell_expansion::template::CommandTemplate) -> ComposeOptions {
+        let mut approved = darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals::new();
+        approved.insert_template(
+            darkmatter::markdown::compose::shell_expansion::template::TemplateShape::from_template(template),
+        );
+        ComposeOptions::new()
+            .with_source_file(repo.path().join("doc.md"))
+            .with_shell_timeout(std::time::Duration::from_secs(60))
+            .with_pre_approved_commands(approved)
+    }
+
+    /// A value run as its template reads its placeholder when it executes,
+    /// from the state supplied then, and needs its shape approved, never its
+    /// bytes.
+    #[test]
+    fn a_value_run_as_its_template_reads_its_placeholder_when_it_executes() {
+        use darkmatter::markdown::compose::shell_expansion::template::parse_authored;
+        let repo = Repo::new();
+        let template = parse_authored("git rev-parse --verify {{ target }}").unwrap();
+        let value = resolve(
+            &repo,
+            "$(git rev-parse --verify {{ target }})::ok",
+            "$(git rev-parse --verify HEAD)::ok",
+            &[("target", json!("HEAD"))],
+        )
+        .with_template(template.clone());
+        let approved_shape = shape_only(&repo, &template);
+
+        for (target, ok) in [("HEAD", true), ("nope", false)] {
+            let results = execute_resolved_shell_values(
+                &[&value],
+                state(&[("target", json!(target))]),
+                &crate::request_support::request(approved_shape.clone()),
+            )
+            .unwrap();
+            assert_eq!(results[0].1, json!(ok), "target={target}");
+        }
+
+        let bytes_only = options(&repo, &[&value]);
+        let error = execute_resolved_shell_values(
+            &[&value],
+            state(&[("target", json!("HEAD"))]),
+            &crate::request_support::request(bytes_only),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("not pre-approved"), "{error}");
+    }
+
+    /// A template value refuses a missing value before anything starts,
+    /// whatever its result suffix, and fills a barrier's late value without
+    /// reading it again.
+    #[test]
+    fn a_template_value_refuses_a_missing_value_and_fills_late_values() {
+        use darkmatter::markdown::compose::shell_expansion::template::{
+            ArgPart, HoleTiming, parse_authored, resolve_late_values,
+        };
+        let repo = Repo::new();
+        let mut template = parse_authored("git rev-parse --verify {{ target }}").unwrap();
+        let authored = "$(git rev-parse --verify {{ target }})::ok";
+        let value = ResolvedShellValue::template_only("v", authored, "unread", &ComposeContext::capture_for_content(repo.path(), ""))
+            .expect("an authored template")
+            .with_template(template.clone());
+        assert!(value.commands().is_empty(), "a template-only value has no bytes");
+        let options = shape_only(&repo, &template);
+
+        let error = execute_resolved_shell_values(&[&value], HashMap::new(), &crate::request_support::request(options.clone()))
+            .unwrap_err();
+        assert!(
+            matches!(error, darkmatter::markdown::compose::ShellExpansionError::MissingValue { .. }),
+            "{error:?}"
+        );
+
+        if let ArgPart::Hole(hole) = &mut template.segments[0].args[2].parts[0] {
+            hole.timing = HoleTiming::Deferred { roots: vec!["target".to_string()] };
+        }
+        let late = resolve_late_values([("v", &template)], &|_: &str| Ok(json!("HEAD")))
+            .unwrap()
+            .site("v")
+            .cloned()
+            .unwrap();
+        let results = execute_resolved_shell_values(
+            &[&value.clone().with_late_values(late)],
+            HashMap::new(),
+            &crate::request_support::request(options),
+        )
+        .unwrap();
+        assert_eq!(results[0].1, json!(true));
+    }
+
     #[test]
     fn checking_an_authored_value_applies_the_frontmatter_grammar() {
         assert!(check_frontmatter_shell_value("v", "$(git rev-parse {{ ref }})::result").is_ok());

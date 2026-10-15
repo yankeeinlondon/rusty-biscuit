@@ -663,10 +663,10 @@ fn a_sequence_applies_the_verdict_per_step_and_fail_fast_stops_at_step_two() {
         "  - gamma\n",
         "start:\n",
         // `state` is the per-step object, so the branch reads its id.
-        "  - when: \"state.id == 'beta'\"\n",
+        "  - when: \"seq.id == 'beta'\"\n",
         "    then: {set: {marker: '{{ 42 }}'}}\n",
         "---\n",
-        "Step {{ state }}.\n",
+        "Step {{ seq }}.\n",
     );
     let fixture = Fixture::new(source);
     let counter = fixture.path().join("calls.txt");
@@ -882,7 +882,7 @@ fn sequence_step_params_satisfy_the_referenced_documents_completion_schema() {
         "  - name: research\n",
         "    prompt: research.md\n",
         "    params:\n",
-        "      researched_by: \"{{ state.name }}\"\n",
+        "      researched_by: \"{{ seq.name }}\"\n",
         "---\n",
         "plan body\n",
     );

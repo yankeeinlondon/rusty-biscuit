@@ -1164,3 +1164,33 @@ fn linking_types_accept_every_reader_form() {
         assert_eq!(judged.report.valid, valid, "`{frontmatter}`: {:?}", problems(&judged.report));
     }
 }
+
+#[test]
+fn sequence_container_schema_contract() {
+    let files = shipped_bundle!();
+    let repo = SchemaRepo::new(&files);
+    let discovered = repo.discover().expect("shipped schema corpus loads");
+    let trigger = include_str!("../../../schemas/claudine.yaml");
+    let inline = include_str!("../../../schemas/inline-compose.yaml");
+    for (name, yaml, valid) in [
+        ("empty", "cancelled: []", true),
+        ("communication", "cancelled: [{stderr: cancelled}]", true),
+        ("shell", "cancelled: [{shell: 'echo cancelled'}]", true),
+        ("stop", "cancelled: [stop]", true),
+        ("set", "cancelled: [{set: {finished: true}}]", true),
+        ("conditional", "cancelled: [{when: true, then: [{stderr: cancelled}], else: [stop]}]", true),
+        ("retry", "cancelled: [retry]", false),
+        ("bundle-retry", "cancelled: {retry: null}", false),
+        ("number", "cancelled: 7", false),
+        ("task-fields", "cancelled: []\nsequence: [{name: review, prompt: './step.md', operation: review, flow: audit, topic: parsing, params: {x: 1}}]", true),
+        ("nested", "cancelled: []\nsequence: [{name: child, sequence: [], cancelled: []}, {group: {tasks: [{name: leg, shell: 'echo done'}], fail_fast: false, cancelled: []}}]", true),
+    ] {
+        let path = repo.write_document(&format!("container-{name}.md"), &format!("---\n{yaml}\n---\n"));
+        let judged = discovered.judge(&path, trigger, inline).unwrap();
+        assert!(judged.claudine, "{name}: selects shipped trigger");
+        assert_eq!(judged.report.valid, valid, "{name}: {:?}", judged.report);
+        for retired in ["fail_fast", "state", "previous", "next", "outputs", "sequence_id"] {
+            assert!(!judged.properties.contains(retired), "retired catalog property {retired}");
+        }
+    }
+}

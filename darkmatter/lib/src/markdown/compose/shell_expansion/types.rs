@@ -235,13 +235,20 @@ pub enum StdoutTarget {
     Capture,
     /// Discard stdout (`> /dev/null`).
     Null,
-    /// Route stdout to stderr (`>&2`).
+    /// Route stdout to the original stderr destination (`>&2`), even if stderr is later redirected.
     ToStderr,
 }
 
 /// Renders a [`RedirectionConfig`] as the trailing redirection tokens that
 /// would appear after a command (with a leading space when non-empty).
 pub(crate) fn render_redirection(redir: &RedirectionConfig) -> String {
+    // A duplicated destination survives a later null redirect; render that dup first.
+    if redir.stdout == StdoutTarget::Null && redir.stderr == StderrTarget::ToStdout {
+        return " 2>&1 > /dev/null".to_string();
+    }
+    if redir.stdout == StdoutTarget::ToStderr && redir.stderr == StderrTarget::Null {
+        return " >&2 2> /dev/null".to_string();
+    }
     let mut out = String::new();
     match redir.stdout {
         StdoutTarget::Capture => {}
@@ -264,7 +271,7 @@ pub enum StderrTarget {
     Capture,
     /// Discard stderr (`2> /dev/null`).
     Null,
-    /// Merge stderr into stdout (`2>&1`).
+    /// Route stderr to the original stdout destination (`2>&1`), even if stdout is later redirected.
     ToStdout,
 }
 
@@ -662,6 +669,39 @@ pub enum ShellExpansionError {
         origin: ShellCommandOrigin,
     },
 
+    /// A template-mode placeholder's value cannot become one argument of its
+    /// declared type: it is an array or object, holds a NUL byte, or fails
+    /// the declaration or one of its constraints. Nothing ran. The value is
+    /// never shown; `placeholder` is the expression and `declared_type` the
+    /// type it was checked against.
+    #[error(
+        "shell command '{command}' at {origin}: the value of '{placeholder}' {reason} \
+         (declared type: {declared_type}); the command did not run"
+    )]
+    TemplateValueRejected {
+        ctx: Box<SourceContext>,
+        command: String,
+        /// Boxed, with `declared_type`, to keep `ShellExpansionError` under
+        /// the `result_large_err` threshold.
+        placeholder: Box<str>,
+        declared_type: Box<str>,
+        reason: super::template::RejectReason,
+        origin: ShellCommandOrigin,
+    },
+
+    /// A template-mode command's program cannot be run directly: it is not on
+    /// the search path, or it would run through an interpreter that re-parses
+    /// its arguments. Nothing ran, and nothing fell back to a shell.
+    #[error("shell command '{command}' at {origin} cannot run as a template: {reason}")]
+    TemplateTarget {
+        ctx: Box<SourceContext>,
+        command: String,
+        /// Boxed to keep `ShellExpansionError` under the `result_large_err`
+        /// threshold.
+        reason: Box<super::template::TemplateTargetError>,
+        origin: ShellCommandOrigin,
+    },
+
     #[error(
         "dynamic command shape: command '{command}' at {origin} depends on frontmatter key '{key}', which is \
          resolved by frontmatter shell expansion. A condition-blind pre-flight cannot \
@@ -740,6 +780,8 @@ impl ShellExpansionError {
             | Self::NotPreApproved { command, .. }
             | Self::MissingValue { command, .. }
             | Self::TemplateGrammar { command, .. }
+            | Self::TemplateValueRejected { command, .. }
+            | Self::TemplateTarget { command, .. }
             | Self::DynamicCommandShape { command, .. }
             | Self::UnevaluatedDependencyShape { command, .. }
             | Self::Timeout { command, .. }
@@ -766,6 +808,8 @@ impl ShellExpansionError {
             | Self::NotPreApproved { origin, .. }
             | Self::MissingValue { origin, .. }
             | Self::TemplateGrammar { origin, .. }
+            | Self::TemplateValueRejected { origin, .. }
+            | Self::TemplateTarget { origin, .. }
             | Self::DynamicCommandShape { origin, .. }
             | Self::UnevaluatedDependencyShape { origin, .. }
             | Self::Timeout { origin, .. }
@@ -925,6 +969,38 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                     ctx.excerpt_prose(origin.line_number(), 1, "md"),
                 ])
                 .hint("A command that reads a value produced later in the run can be approved only as a template: keep placeholders in arguments and use only <cyan>&&</cyan>, <cyan>||</cyan>, and the curated redirections."),
+
+            ShellExpansionError::TemplateValueRejected {
+                ctx,
+                command,
+                placeholder,
+                declared_type,
+                reason,
+                origin,
+            } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ShellExpansionError", "shell value rejected"))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Reads:</dim> <cyan>{placeholder}</cyan>, whose value {reason}\n<dim>Declared type:</dim> {declared_type}\n<dim>Origin:</dim> {origin}"
+                    )).with_line_breaks(LineBreaks::Hard),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
+                .hint("Each placeholder fills exactly one argument with a string, number, or boolean that its declared type accepts; the command did not run."),
+
+            ShellExpansionError::TemplateTarget {
+                ctx,
+                command,
+                reason,
+                origin,
+            } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ShellExpansionError", "template target refused"))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Reason:</dim> {reason}\n<dim>Origin:</dim> {origin}"
+                    )).with_line_breaks(LineBreaks::Hard),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
+                .hint("A template command runs its program directly with one argument per placeholder: use a native executable on PATH, not a shell builtin, a script without #!, or a .cmd/.bat file."),
 
             ShellExpansionError::DynamicCommandShape {
                 ctx,
@@ -1447,6 +1523,20 @@ impl ShellExpansionRuntime {
         Arc::make_mut(&mut shared.whitelist)
             .entries
             .push(ShellRuleEntry::Prefix(executable));
+    }
+
+    pub(crate) fn persist_whitelist_template(&mut self, shape: super::template::TemplateShape) {
+        let mut shared = self.shared.lock().unwrap();
+        Arc::make_mut(&mut shared.whitelist)
+            .entries
+            .push(ShellRuleEntry::Template(shape));
+    }
+
+    pub(crate) fn persist_blacklist_template(&mut self, shape: super::template::TemplateShape) {
+        let mut shared = self.shared.lock().unwrap();
+        Arc::make_mut(&mut shared.user_blacklist)
+            .entries
+            .push(ShellRuleEntry::Template(shape));
     }
 
     pub(crate) fn persist_blacklist_exact(&mut self, normalized: String) {

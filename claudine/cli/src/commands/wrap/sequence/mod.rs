@@ -54,13 +54,18 @@ pub(super) fn run_was_interrupted(exit_code: i32, interrupted: &AtomicBool) -> b
 
 /// Approve every shell command the preflight graph can reach.
 ///
-/// The graph's own commands arrive already resolved, so what the gate approves
-/// is byte-identical to what execution runs. Referenced prompt documents
-/// contribute their template `::shell` directives through the same pass, which
-/// is what makes "no approval prompts once the sequence starts" honest for work
-/// several hops from the sequence document. Schema verdicts are deferred during
-/// this discovery-only compose because prompt-task `params` bind just in time;
-/// the task's canonical prepare validates the resulting effective values.
+/// The graph's resolved-byte commands arrive already resolved, so what the
+/// gate approves is byte-identical to what runs; every other task command is
+/// approved by its typed shape. Referenced prompt documents contribute their
+/// `::shell` directives through the same pass, once per reference: each
+/// declares the sequence's late roots (and the task's late `params`) to
+/// Darkmatter's discovery, carries the task's approval-time `params` as data,
+/// and, for a later task, requires every command with a placeholder to be a
+/// template. That is what makes "no approval prompts once the sequence starts"
+/// honest for work several hops from the sequence document. Schema verdicts are
+/// deferred during this discovery-only compose because prompt-task `params`
+/// bind just in time; the task's canonical prepare validates the resulting
+/// effective values.
 #[allow(clippy::too_many_arguments, clippy::result_large_err)]
 fn approve_preflight_graph(
     graph: &composition::PreflightGraph,
@@ -72,7 +77,10 @@ fn approve_preflight_graph(
     invocation: &claudine::invocation_context::InvocationContext,
     graph_context: &darkmatter::markdown::compose::ComposeContext,
 ) -> Result<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals> {
-    if graph.shell_commands.is_empty() && graph.prompt_documents.is_empty() {
+    if graph.shell_commands.is_empty()
+        && graph.template_candidates.is_empty()
+        && graph.prompt_documents.is_empty()
+    {
         return Ok(Default::default());
     }
 
@@ -93,10 +101,11 @@ fn approve_preflight_graph(
     // it. Extending through the invocation instead makes each extension a run
     // of its own, which re-observed the working tree once per prompt document.
     let approval_epoch = invocation.begin_document_epoch();
-    let compose_options = |path: &std::path::Path| -> Result<
+    let compose_options = |reference: &composition::PromptReference| -> Result<
         darkmatter::markdown::compose::ComposeRequest,
         claudine::composition::CompositionError,
     > {
+        let path = reference.path.as_path();
         composing.replace(Some(path.to_path_buf()));
         let source_context = invocation
             .derive_source(path)
@@ -120,7 +129,16 @@ fn approve_preflight_graph(
             // directives, and resolving a deferred `success:`/`failure:` read
             // -side file reference here would trip on a file that event has
             // not created yet.
-            .with_exclude_keys(claudine::composition::LIFECYCLE_EVENT_KEYS.iter().copied());
+            .with_exclude_keys(claudine::composition::LIFECYCLE_EVENT_KEYS.iter().copied())
+            .with_deferred_shell_roots(reference.deferred_shell_roots());
+        // The task's approval-time `params` reach its document as data, as
+        // they do at the task's turn.
+        if !reference.params.is_empty() {
+            opts = composition::LayeredOverrides::data(Some(&serde_json::Value::Object(
+                reference.params.clone(),
+            )))
+            .apply_to(opts);
+        }
         if let Some(area) = launch_area {
             opts = opts.with_file_ref_fallback_dir(area.to_path_buf());
         }
@@ -312,9 +330,6 @@ pub(crate) fn execute_sequence(
         }
     };
 
-    // A budgeted run stops through the same flag when its budget runs out.
-    crate::budget::attach_stop_flag(&interrupted);
-
     let shared_approval_cache: composition::SharedApprovalCache =
         Arc::new(Mutex::new(HashMap::new()));
 
@@ -344,8 +359,9 @@ pub(crate) fn execute_sequence(
     // resolved or a provider is launched: every referenced task, group,
     // catalog entry, and prompt document is loaded transitively; blocked
     // constructs are rejected; and every reachable shell command — including
-    // ones behind `when:` guards that read false today — is resolved to bytes
-    // and approved. A failure at this point is abort-all regardless of
+    // ones behind `when:` guards that read false today — is approved: the
+    // first task's as resolved bytes when every value exists now, every other
+    // command with a placeholder by its typed shape. A failure at this point is abort-all regardless of
     // `fail_fast`, and `--dry-run` performs this identical walk.
     // One base launch context for the whole graph, captured before per-task
     // target selection: every launch-facing graph expression (`when:` guards,
@@ -368,6 +384,7 @@ pub(crate) fn execute_sequence(
         graph_context.clone(),
         &prep_context.invocation,
         &prep_context.source_context,
+        user_set_overrides.as_ref(),
     )?;
     // A referenced prompt document composes only at its own turn, so its
     // single-pass lifecycle literals are checked here, before any approval
@@ -646,6 +663,9 @@ pub(crate) fn execute_sequence(
     // No composition is *retained* here — execution re-composes each step at
     // its turn, and this context is what makes the two passes identical.
     let compose_ctx = StepComposeContext {
+        lifecycle_group: None,
+        prepared_context: None,
+        document_epoch: None,
         source_repo_root: source_repo_root.as_deref(),
         child_cwd: &prep_context.launch_workspace.child_cwd,
         launch_area: Some(prep_context.launch_workspace.launch_cwd.as_path()),
@@ -657,6 +677,9 @@ pub(crate) fn execute_sequence(
         invocation: &prep_context.invocation,
         // Each step opens its own run at its turn.
         run_evidence: None,
+        deferred_shell_roots: Default::default(),
+        validation_probe: false,
+        document_shell_values: None,
     };
 
     let Some(validated) = run_phase_1c_with_schema(

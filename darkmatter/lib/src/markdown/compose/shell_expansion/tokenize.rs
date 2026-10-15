@@ -455,26 +455,9 @@ pub fn parse_pipeline(
 pub(crate) fn apply_redirection(redirection: &mut RedirectionConfig, token: &ShellToken) {
     match token {
         ShellToken::RedirectStdoutNull => {
-            // Shell-style dup resolution: if stderr was previously duped
-            // to stdout via `2>&1`, it captured stdout's prior target —
-            // changing stdout now must not retroactively change stderr.
-            if redirection.stderr == StderrTarget::ToStdout {
-                redirection.stderr = match redirection.stdout {
-                    StdoutTarget::Capture => StderrTarget::Capture,
-                    StdoutTarget::Null => StderrTarget::Null,
-                    StdoutTarget::ToStderr => StderrTarget::Capture,
-                };
-            }
             redirection.stdout = StdoutTarget::Null;
         }
         ShellToken::RedirectStderrNull => {
-            if redirection.stdout == StdoutTarget::ToStderr {
-                redirection.stdout = match redirection.stderr {
-                    StderrTarget::Capture => StdoutTarget::Capture,
-                    StderrTarget::Null => StdoutTarget::Null,
-                    StderrTarget::ToStdout => StdoutTarget::Capture,
-                };
-            }
             redirection.stderr = StderrTarget::Null;
         }
         ShellToken::RedirectStderrToStdout => {
@@ -885,16 +868,15 @@ mod tests {
         assert_eq!(redir.stderr, StderrTarget::Null);
     }
 
-    /// `2>&1 > /dev/null`: stderr captures stdout's CURRENT (Capture) target,
-    /// then stdout is nulled — stderr keeps the Capture reference, matching
-    /// real shell semantics.
+    /// `2>&1 > /dev/null`: stderr retains the original stdout destination
+    /// after stdout is nulled.
     #[test]
     fn pipeline_combined_merge_then_stdout_null_keeps_stderr_captured() {
         let tokens = tokenize("cmd 2>&1 > /dev/null").unwrap();
         let pipeline = parse_pipeline(&tokens).unwrap();
         let redir = &pipeline.actions[0].command.redirection;
         assert_eq!(redir.stdout, StdoutTarget::Null);
-        assert_eq!(redir.stderr, StderrTarget::Capture);
+        assert_eq!(redir.stderr, StderrTarget::ToStdout);
     }
 
     /// `> /dev/null 2> /dev/null`: independent nullings of both streams.
@@ -918,14 +900,14 @@ mod tests {
         assert_eq!(redir.stderr, StderrTarget::Null);
     }
 
-    /// `>&2 2> /dev/null`: stdout dups stderr (Capture), then stderr nulled —
-    /// stdout keeps the Capture reference.
+    /// `>&2 2> /dev/null`: stdout retains the original stderr destination
+    /// after stderr is nulled.
     #[test]
     fn pipeline_combined_route_then_stderr_null_keeps_stdout_captured() {
         let tokens = tokenize("cmd >&2 2> /dev/null").unwrap();
         let pipeline = parse_pipeline(&tokens).unwrap();
         let redir = &pipeline.actions[0].command.redirection;
-        assert_eq!(redir.stdout, StdoutTarget::Capture);
+        assert_eq!(redir.stdout, StdoutTarget::ToStderr);
         assert_eq!(redir.stderr, StderrTarget::Null);
     }
 
