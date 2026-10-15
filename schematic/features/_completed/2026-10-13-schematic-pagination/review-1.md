@@ -1,7 +1,10 @@
 ---
 $schema: feature-review.yaml
 ready: false
-findings: []
+findings:
+    - "high: carry out ruling on item 1: reject partitioned first-page sessions (R1-F1)"
+    - "high: carry out ruling on item 2: document and verify paging callbacks (R1-F2)"
+    - "high: carry out ruling on item 3: retain errors and enable manual retry (R1-F3)"
 observations: []
 human_in_the_loop:
     - |-
@@ -70,11 +73,14 @@ blocked: false
 reviewed_by: "codex/gpt-6.1-sol"
 created: "2026-10-14T13:01:14-07:00"
 spec: "2026-10-13-schematic-pagination/spec.md"
-implemented: false
+implemented: true
 description: "A **feature** review of `2026-10-13-schematic-pagination/spec.md`"
 feature: "2026-10-13-schematic-pagination/review-1.md"
+next: "2026-10-13-schematic-pagination/review-2.md"
 next_spec: "schematic/features/2026-10-14-schematic-definition-api/spec.md"
 next_plan: "schematic/features/2026-10-14-schematic-definition-api/plan.md"
+implemented_by: codex/gpt-6.1-sol
+log: schematic/features/2026-10-13-schematic-pagination/log.md
 ---
 
 # Review 1: Schematic pagination

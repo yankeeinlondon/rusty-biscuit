@@ -19,13 +19,14 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-status: human-in-the-loop
+status: implemented
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
-review_iterations: 1
+review_iterations: 2
 clarified: false
 implemented: true
+completed: true
 human_review: false
 parent: ../../reviews/2026-07-31-macro-review/spec.md
 depends_on:

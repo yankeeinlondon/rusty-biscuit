@@ -2746,3 +2746,37 @@ No pre-existing failure was found in the schematic area. The one red result outs
 ### Status
 
 **Implementation complete, ready for review.** Every Phase 8 task is done, and every requirement R1–R36 points to evidence above. The feature stays in its active directory. Nothing was committed or staged.
+
+## Review 1 — session partition support ruling
+
+- Item 1 supersedes the earlier Phase 5 acceptance of independently opened
+  first-page sessions under partitions. Definitions combining partitions with
+  first-page session opening are now rejected by strategy validation with
+  `partitioned-first-page-session`, including defaults, overrides, and alternates.
+- First-page opening without partitions remains supported. Partitioned sessions
+  opened by a separate request retain one shared open, the latest observed handle
+  (including rotating handles), and one close. The accepted response-arrival
+  ordering risk remains; independent-session cleanup requires a future design.
+
+### Response callback contract clarification
+
+- The accepted callback contract is now explicit in the client rustdocs, public hook and pagination guides, and schematic skill: automatic paging runs the global JSON hook before extracting items and continuation values and skips the endpoint's typed mutator. Ordinary sends run both. Generated-client regression coverage exercises page iteration, one-page fetches, collection, and ordinary sends with both callbacks registered.
+
+### Review ruling clarification: retained failures and caller-controlled retry
+
+The Item 3 human ruling supersedes the earlier category-only `AlreadyFailed`
+departure and exclusion of failed-page retry. The public error enum now retains
+the actual error and supporting evidence across repeated iteration calls, with
+no sends until explicit `Pages::retry().await` or `Items::retry().await`.
+Every category remains retryable, including loops, expired deadlines, invalid
+arguments, and session-open errors; retry need not succeed. Each failed attempt
+replaces the retained error with its complete new evidence.
+
+Planning and typed acceptance are checkpointed together so retries preserve the
+failed position, prior delivered items, histories, and partition/direction.
+A deferred continuation failure refreshes its already delivered source page for
+continuation evidence only and never redelivers its items. A recovered ordinary
+page is buffered for the next iteration. ApiError payloads use shared ownership
+without provider Clone; paginated error bodies require Sync. Public behavior is
+recorded in `schematic/docs/pagination.md`; this addendum supersedes historical
+implementation choices rather than rewriting them.
