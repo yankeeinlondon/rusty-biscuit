@@ -41,7 +41,7 @@ previous_review: "{{ iteration > 1 ? replace(spec, basename(spec), 'review-' + (
 spec_name: "{{ parent_dir(spec) }}"
 next_plan: |-
     {{
-        next 
+        next_spec
             ? replace(next_spec, "spec","plan")
             : null
     }}
@@ -410,13 +410,13 @@ This is the first review after the implementation completed:
 
 ::end-block
 
-::block when="iteration == 1 && !is_empty('next')"
+::block when="iteration == 1 && !is_empty(next_spec)"
 
 ### Spec and Plan Refresh
 
 We are in a multi-plan based implementation:
 
-- the next spec is '{{next}}', it has a plan located at '{{next_plan}}'
+- the next spec is '{{next_spec}}', it has a plan located at '{{next_plan}}'
 - both the **spec** and the **plan** were written _before_ the current spec was implemented
 - we must now refresh the next spec and plan based on:
     - what we've learned during the implementation of the current phase

@@ -1,16 +1,16 @@
-//! Just-in-time serial execution (Phase 2) for the sequence orchestrator.
+//! Just-in-time ordered execution for the sequence orchestrator.
 //!
 //! Each step is composed **at its turn**, against the live file on disk and the
 //! runtime layers as they stand at that moment. That ordering is the contract:
 //! step 3 sees step 2's inline-compose write-back, step 2's `set` mutations, and
-//! step 2's committed `outputs` entry, none of which exist when the sequence
+//! step 2's committed `seq.outputs` entry, none of which exist when the sequence
 //! starts. Nothing here re-resolves the *step list* — dynamic sources snapshot
 //! once during static preflight.
 //!
 //! A step either runs the source document's own body (the default) or the one
 //! executable its declaration named, which replaces the body entirely. Both
-//! paths report the same [`SequenceStepResult`], so `fail_fast`, the summary,
-//! and the interrupt story do not branch on task kind.
+//! paths report the same [`SequenceStepResult`] for container failure handling,
+//! summaries, and interruption.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -344,9 +344,8 @@ fn run_one_step(
     // retry/resume, handlers, and `finalize` — reads that one map. The run
     // context below carries the step's view, so nothing downstream reaches
     // back to the launch document's.
-    // Everything this step injects into frontmatter — the per-step overlay
-    // and its caller layers — differs per step, so pre-warm treats it as late
-    // in every document the step prepares.
+    // Caller layers and lexical sequence bindings differ per step, so pre-warm
+    // treats their keys as late in every document the step prepares.
     let step_invocation = run
         .prep_context
         .invocation
@@ -526,9 +525,8 @@ fn run_one_step(
 ///
 /// This is the mid-sequence human-in-the-loop case the spec warns authors to
 /// design away, and it behaves exactly like direct compose: interactive
-/// collection on a TTY, a typed failure otherwise. The failure is a failure of
-/// *this step* — preflight already passed, so `fail_fast` governs what happens
-/// next rather than the abort-all rule.
+/// collection on a TTY, a typed failure otherwise. A failure enters the
+/// enclosing container's failure lifecycle and stops the sequence if unhandled.
 #[allow(clippy::result_large_err)]
 fn compose_with_late_collection(
     run: &SequenceRunContext<'_>,

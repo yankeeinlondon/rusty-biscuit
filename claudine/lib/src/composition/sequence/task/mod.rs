@@ -358,8 +358,8 @@ pub struct TaskExecution<'a> {
     pub state: &'a EffectiveState,
     /// The runtime cell this task accumulates mutations and outputs into.
     ///
-    /// For a sequence step or a serial group member this is the one invocation
-    /// cell; a parallel group member gets a private buffer instead, which is what
+    /// A sequence step uses its invocation cell; a concurrent group leg gets
+    /// a private buffer, which is what
     /// makes sibling mutations invisible to each other until the merge. Shared as
     /// an `Arc` because a `prompt:` task's runner must hand the *same* cell to the
     /// wrapper pipeline, so the document's own lifecycle `set` lands in the

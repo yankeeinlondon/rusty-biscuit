@@ -3495,6 +3495,11 @@ mod prompt_tasks {
             "{}",
             failure_message(&outcome),
         );
+        assert!(
+            failure_message(&outcome).contains("`seq`, `group`, and `loop` are executor-owned views"),
+            "{}",
+            failure_message(&outcome),
+        );
         assert!(prompt.requests.lock().unwrap().is_empty());
     }
 

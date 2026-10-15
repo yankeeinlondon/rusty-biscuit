@@ -2140,8 +2140,8 @@ pub enum CompositionError {
 
     /// A task parameter targets a reserved key.
     #[error(
-        "parameter `{key}` in {task} targets a reserved key; `state`, `previous`, `next`, \
-         `outputs`, and `sequence_id` are executor-owned views"
+        "parameter `{key}` in {task} targets a reserved key; \
+         `seq`, `group`, and `loop` are executor-owned views"
     )]
     SequenceTaskParamReserved {
         /// A label locating the task.

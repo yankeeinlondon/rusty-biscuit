@@ -144,14 +144,19 @@ Rules that shape a design:
 - **A router needs no agent.** A document can do all its routing in `initialize` or `start` and never launch. Give it a short body that tells an agent that reaches it to do nothing and report the fault.
 - **`proxy … with:`** parameterizes the target. Values keep their types, are resolved at the source when the event fires, and are never written to disk. The overlay reaches only the immediate target, so forward what the next hop needs explicitly. It can set any top-level key, including a lifecycle block, which is how a reusable prompt such as `commit.md` can be given a continuation it does not know about.
 - **A proxy chain visits a document once.** Returning to an earlier document is rejected as a cycle, and a chain is limited to 16 hops. A flow that must repeat a stage cannot do it with `proxy`; that is what a sequence is for.
-- **A sequence** is a static list of steps, each composed at its turn: `prompt:`, `shell:`, `side_effect:`, or a group.
+- **A sequence** is an ordered list of steps, each composed at its turn: `prompt:`, `shell:`, `side_effect:`, a nested `sequence:`, or a group.
     - Every command across all steps is approved before step 1 starts.
     - Missing required inputs are collected in one pass up front, so an input that only some paths need must be optional.
     - A step becomes conditional when its prompt calls `skip` from `initialize` after reading the shared report.
     - The same document may appear in more than one step.
     - A step's document may declare `interactive: true` and runs interactively. Only the sequence document itself may not.
     - A step's document may `proxy`; the target runs within the same step, and the step completes once.
-    - `sequence_id` names the run and is the right seed for a per-run file name.
+    - `seq.run_id` names the run and is the right seed for a per-run file name. Use `seq.name`, `seq.index`, `seq.count`, `seq.previous`, `seq.next`, and `seq.outputs` for position and committed results; these bindings are separate from authored frontmatter.
+    - A nested `sequence:` runs its children in order. A group runs named legs concurrently and exposes their outcomes through `group.legs`; a leg may itself be a sequence or group. Groups have no `execution:` selector.
+    - Containers own `initialize`, `start`, `success`, `failure`, `cancelled`, and `finalize` events. Successful containers run `initialize` → `start` → children → `success` → `finalize`; failed children enter the container's `failure` recovery before `finalize`.
+    - Sequences stop on an unhandled child failure. A group alone may declare `fail_fast: false` to retain partial results and continue. Put preparation and cleanup in container events or adjacent tasks; task `setup:` and `teardown:` are removed.
+    - A running group leg opts into sibling-failure cancellation by declaring `cancelled: []` (an empty stack still opts in). Cancellation settles descendants, runs `cancelled` then `finalize`, and never enters failure recovery. Ctrl+C cancels every running leg.
+    - Group isolation covers in-memory state, not files. Failed atomic groups withhold mutations and results; filesystem writes remain real effects. `--dry-run` still runs shell tasks and lifecycle shells.
 - **A loop** (`loop: { while | until, action, max }`) repeats one document. Each iteration is a full composition cycle, and `initialize` fires only on the first. **The condition is checked at the end of an iteration**, against the state that iteration ran with, and the `action` is applied only when the loop continues. A loop therefore always runs at least once, and `while: "n < 2"` counting from `0` runs three times (`n` is `0`, `1`, then `2`). For zero iterations, `skip` from `initialize`. The ambient values are `loop.count`, `loop.is_first`, `loop.is_last`, `loop.last_output`, and `loop.last_exit_code`; the `loop:` configuration itself reads as `fm.loop`. A `proxy` from any event of an iteration ends the loop and hands off.
 - **In this repository every git commit goes through `prompts/commit.md`.** A stage that produces changes stages them and hands off; it never runs `git commit`.
 ::end-block

@@ -1,13 +1,6 @@
-//! Typed domain model for Sequence Plus.
-//!
-//! This module replaces the loosely-shaped "list of raw JSON blobs" with typed
-//! states, sources, and the reserved per-step overlay. It is the vocabulary the
-//! later phases (source resolution, preflight, JIT execution, groups) build on;
-//! phase 3 wires the state/source/overlay portion and defines the remaining
-//! executable/task/output/runtime representations so those phases share one
-//! model rather than re-inventing shapes.
-//!
-//! See `claudine/features/2026-07-11-sequence-plus/spec.md`.
+//! Typed sequence states, sources, executables, and results shared by source
+//! resolution, preflight, and container execution. Per-step `seq` values travel
+//! separately from authored frontmatter.
 
 use std::path::PathBuf;
 

@@ -22,7 +22,7 @@
 //! - [`preflight`] — the recursive task graph: external task/group/catalog/
 //!   prompt loading, cycle detection, and early-binding shell resolution;
 //! - [`source`] — file-reference resolution and referenced-source loading;
-//! - [`task`] — atomic task execution: the setup/primary/teardown contract and
+//! - [`task`] — recursive task execution, container lifecycles, and
 //!   the one [`task::TaskOutcome`] every task variant reports;
 //! - [`reserved`] — the canonical reserved-key catalog shared by every layer.
 //!

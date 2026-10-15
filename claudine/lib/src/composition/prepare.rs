@@ -165,9 +165,9 @@ pub struct PrepareOptions {
     /// retained across harness re-materialization.
     pub file_resolution_context: biscuit_file::FileResolutionContext,
     /// Frontmatter keys whose object values render their `name` field in inline
-    /// string context (`{{state}}` → the name). Sequence preparation sets this
-    /// to the reserved overlay keys (`state`/`previous`/`next`); every other
-    /// caller leaves it empty, so this is a no-op for `compose`/`inline-compose`.
+    /// string context. Preparation also includes the lexical sequence paths
+    /// (`seq`, `seq.previous`, `seq.next`) so these render their names in text
+    /// while whole-value expressions retain native objects.
     pub name_coercion_keys: Vec<String>,
     /// Accept a composition whose body is empty instead of raising
     /// [`CompositionError::ComposedBodyEmpty`].

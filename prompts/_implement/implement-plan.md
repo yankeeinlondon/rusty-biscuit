@@ -11,9 +11,9 @@ $schema:
     pass_icon: string
     commit_message: string -> if you pass in a git commit message then it will be used as the git message instead of using AI to calcuate it
     log: file -> the implementation's log file
-    is_last: boolean -> a boolean flag based on 
     in_loop: boolean -> set by the `review-loop` sequence; when true this step opts out once the spec is marked `implemented`
 yolo: true
+commit_message: ""
 plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
 phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || frontmatter(plan, 'phase') || 1 : null }}"
 area: "{{ ctx.area ? ctx.area : ctx.is_monorepo ? 'monorepo-root' : 'repo-root' }}"
@@ -57,7 +57,7 @@ start:
           - message: |-
                 The previous phase's agent has passed a message to this agent:
 
-                {{frontmatter(log, 'message_to_agent')}}
+                {{file_exists(log) ? frontmatter(log, 'message_to_agent') : null}}
 success: 
     - success: "Completed the implementation of <b>phase <yellow>{{phase}}</yellow></b> of the {{link(plan)}} plan"
     - message: "{{pass_icon}}  phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{parent_dir(plan)}}` successfully completed ({{area}}, {{ctx.agent}}/{{ctx.model}})"
@@ -134,7 +134,7 @@ You will log your implementation progress to: {{log}}
     - set `started_phase` to "{{phase}}"
 ::end-block
 
-::block when="is_last"
+::block when="loop.is_last"
 Now we need to update the specification file's frontmatter ({{spec}}):
 
 - set `implemented` to `true`
@@ -154,7 +154,7 @@ Now we need to update the specification file's frontmatter ({{spec}}):
 
 The agent that implemented the previous phase left this message for you:
 
-{{frontmatter(log, 'message_to_agent')}}
+{{file_exists(log) ? frontmatter(log, 'message_to_agent') : null}}
 ::end-block
 
 ## Test Design Requirements

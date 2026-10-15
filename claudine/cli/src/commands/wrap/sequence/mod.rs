@@ -450,8 +450,8 @@ fn execute_sequence_inner(
     // constructs are rejected; and every reachable shell command — including
     // ones behind `when:` guards that read false today — is approved: the
     // first task's as resolved bytes when every value exists now, every other
-    // command with a placeholder by its typed shape. A failure at this point is abort-all regardless of
-    // `fail_fast`, and `--dry-run` performs this identical walk.
+    // command with a placeholder by its typed shape. A failure blocks the root
+    // container before any child starts; `--dry-run` performs the same walk.
     // One base launch context for the whole graph, captured before per-task
     // target selection: every launch-facing graph expression (`when:` guards,
     // command interpolation, task/group variable defaults) projects the

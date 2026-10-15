@@ -1,9 +1,9 @@
 //! Collect a sequence's candidates from its static preflight graph.
 //!
 //! Before step one launches, every prompt document the graph reached and every
-//! task's `setup:`/`teardown:` is walked from what preflight already parsed:
+//! retained internal task stack is walked from what preflight already parsed:
 //! nothing is composed, no reference is resolved, nothing is fetched, and no
-//! setup runs. What preflight cannot know yet is left late:
+//! action runs. What preflight cannot know yet is left late:
 //!
 //! - every key a sequence injects (the per-step overlay, the caller's
 //!   setters, and a prompt task's `params`, judged per task, so one document
@@ -12,9 +12,9 @@
 //!   resolving it would mean executing it;
 //! - `ctx`/`env`, whose document capture does not exist yet.
 //!
-//! Each document's own preparation submits again later, and each task's
-//! `setup:`/`teardown:` is submitted again by [`submit_task_stacks`] when the
-//! task's context is established, through the same invocation-wide
+//! Each document's own preparation submits again later. [`submit_task_stacks`]
+//! reconsiders internal stacks when the task's context is established, using
+//! the same invocation-wide
 //! de-duplication, finding what preflight had to skip.
 
 use std::collections::BTreeSet;
@@ -35,12 +35,10 @@ use crate::events::GlobalSettings;
 /// Submit every early phrase `graph` statically reaches.
 ///
 /// `settings` are the invocation's bridged user settings: they decide the
-/// pre-warm gates and are what prompt document lifecycles play with. Task
-/// `setup:`/`teardown:` stacks, of top-level tasks and group members alike,
-/// are prepared with [`task_playback_settings`] instead, which is what they
-/// play with. `sequence` is the sequence document; its own lifecycle is walked when a
-/// step runs its body. `caller_keys` are the top-level keys the caller set
-/// for every step. `context` only satisfies the evaluator: no phrase reading
+/// pre-warm gates and are what prompt document lifecycles play with. Retained
+/// internal task stacks use [`task_playback_settings`] for both preparation
+/// and playback. `sequence` supplies their authored frontmatter. `caller_keys`
+/// are the top-level keys the caller set for every step. `context` only satisfies the evaluator: no phrase reading
 /// `ctx` or `env` is resolved here.
 ///
 /// Returns how many new candidates were queued.
@@ -82,11 +80,10 @@ struct Walk<'a> {
     handle: &'a PrewarmHandle,
     /// The user's settings: the gates, and prompt document playback.
     user: &'a GlobalSettings,
-    /// What task `setup:`/`teardown:` stacks play with.
+    /// Playback settings for retained internal task stacks.
     task_playback: GlobalSettings,
     graph: &'a PreflightGraph,
-    /// The sequence document's authored frontmatter, which a task's
-    /// `setup:`/`teardown:` reads.
+    /// The sequence document's authored frontmatter for internal task stacks.
     sequence: Map<String, Value>,
     injected: BTreeSet<String>,
     context: &'a ComposeContext,
@@ -170,7 +167,7 @@ impl Walk<'_> {
     }
 }
 
-/// Submit the early phrases of one task's own `setup:`/`teardown:`, now that
+/// Submit early phrases from internal task stacks, now that
 /// the task's inputs exist.
 ///
 /// Called wherever a task's context is established: a top-level task, a

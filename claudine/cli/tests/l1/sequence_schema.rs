@@ -220,13 +220,13 @@ Step about {{config}}.
 
 /// Verifies that a step-level `step_timeout` (declared in a sequence step's
 /// raw state object) overrides the document-level `step_timeout`. The step
-/// overlay passes the step's raw state unchanged under the `state` key, so
+/// binding exposes authored properties under `seq`, so
 /// per-step `step_timeout` is surfaced via `{{ seq.step_timeout || ... }}`
 /// interpolation in the document frontmatter.
 ///
 /// Test shape:
 /// - Document `step_timeout` falls back to `30s` when the step does not
-///   declare one, but uses `state.step_timeout` when the step does.
+///   declare one, but uses `seq.step_timeout` when the step does.
 /// - Step 1 has no `step_timeout`, so the effective deadline is `30s`. The
 ///   fake provider completes quickly and the step succeeds.
 /// - Step 2 declares `step_timeout: 0.5s` at the step level. The fake
@@ -240,7 +240,7 @@ fn sequence_per_step_step_timeout_override() {
 
     // Document-level step_timeout defaults to 30s; a step may override by
     // setting `step_timeout` at the step level, which the overlay exposes
-    // via `state.step_timeout`. Step 2 sets it to 0.5s: the stall below is
+    // via `seq.step_timeout`. Step 2 sets it to 0.5s: the stall below is
     // unconditional, so the budget only has to outlast the gap between the
     // fixture's two `printf` lines (back-to-back, no sleep) — 0.5s is two
     // orders of magnitude above that even under WSL2 contention, and it

@@ -48,7 +48,7 @@ fn shipped_implement_router_prefers_an_unimplemented_review_over_the_completed_p
     let stderr = run_compose(&fixture, &package, &router, &["spec=fixes/case/spec.md"]);
 
     assert!(
-        stderr.contains("Implement Review Suggestions"),
+        stderr.contains("flow control redirected to implement-suggestions.md"),
         "an existing unimplemented review must outrank the already-executed plan; stderr:\n{stderr}"
     );
     // The stderr panel previews only the first 20 rendered rows, and the

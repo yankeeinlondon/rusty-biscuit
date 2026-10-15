@@ -1026,7 +1026,7 @@ pub struct CompositionExecutionRequest {
 /// Options for sequence execution at the CLI level.
 #[derive(Debug, Clone)]
 pub struct SequenceExecutionOptions {
-    /// CLI `--fail-fast` override. `None` means use the document default.
+    /// Internal execution override; the CLI no longer accepts `--fail-fast`.
     pub fail_fast_override: Option<bool>,
 }
 

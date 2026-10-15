@@ -97,14 +97,10 @@ pub(super) struct StepComposition {
     pub(super) approved: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
 }
 
-/// Fold this step's overrides from the four just-in-time layers.
-///
-/// Lowest precedence first: user setters, accumulated runtime mutations, then
-/// the reserved per-step overlay. The live document's own frontmatter is
-/// Darkmatter's base and sits below all of them. Only the user setters are
-/// authored; the runtime layers and the overlay are data. Passing
-/// `runtime: None` yields the initial view — empty `outputs`, no mutations —
-/// which is what the validation pass and `--dry-run` compose against.
+/// Fold user setters and runtime mutations over the live document's frontmatter.
+/// The step's `seq` binding travels separately from those frontmatter layers.
+/// Passing `runtime: None` yields the initial view with empty `seq.outputs`
+/// and no mutations, used by validation and `--dry-run`.
 pub(super) fn step_set_overrides(
     plan: &SequencePlan,
     step_index: usize,
@@ -163,8 +159,8 @@ pub(super) fn step_owned_env(_effective_fail_fast: bool) -> BTreeMap<String, Str
 /// Every failure is a typed [`CompositionError`]. The caller decides what it
 /// means: the sequence-wide validation pass aggregates
 /// [`CompositionError::MissingProperties`] across steps and aborts on anything
-/// else, while execution treats *any* failure here as a failure of that step,
-/// governed by `fail_fast` (spec → *Mid-run failure policy*).
+/// else. During execution, a step failure enters the enclosing container's
+/// failure lifecycle; an unhandled failure stops the sequence.
 #[allow(clippy::result_large_err)]
 ///
 /// `allow_empty_body` is set by a step that declares an executable: it runs its

@@ -240,3 +240,5 @@ mod wrap_watchdog_startup_stall;
 mod wrap_watchdog_timeout;
 
 mod sequence_containers;
+
+mod research_sequence_artifacts;

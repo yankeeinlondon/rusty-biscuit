@@ -1,4 +1,4 @@
-//! The `agent-errors` fleet prompt (`docs/research/agent-errors/_fleet.md`)
+//! The `agent-errors` fleet prompt (`docs/research/agent-errors/_research.md`)
 //! wires the spec-D10 deterministic recovery policy into its lifecycle: one
 //! shared resume budget repairs missing output, research-document gate errors,
 //! and findings; a separate retry budget handles transient provider failures.
@@ -27,14 +27,14 @@ fn fleet_path() -> PathBuf {
     biscuit_test_harness::manifest_dir!()
         .parent()
         .expect("lib crate lives under the claudine package area")
-        .join("docs/research/agent-errors/_fleet.md")
+        .join("docs/research/agent-errors/_research.md")
 }
 
 /// Reads the fleet prompt's raw frontmatter as a JSON value (interpolation
 /// spans stay literal — the lifecycle parser defers them by design).
 fn fleet_frontmatter() -> serde_json::Value {
     let path = fleet_path();
-    let md = Markdown::try_from(path.as_path()).expect("parse _fleet.md");
+    let md = Markdown::try_from(path.as_path()).expect("parse _research.md");
     serde_json::to_value(md.frontmatter().as_map()).expect("frontmatter to json")
 }
 
@@ -268,10 +268,7 @@ fn exhausted_remediation_fails_finalize_and_preserves_findings() {
         "findings".to_string(),
         json!(findings_path.to_string_lossy().into_owned()),
     );
-    root.insert(
-        "state".to_string(),
-        json!({"name": "Codex", "slug": "codex"}),
-    );
+    let seq = json!({"name": "Codex", "slug": "codex"});
 
     // The fixture begins immediately after the provider claims success. The
     // gate itself and every durable-status branch remain the authored fleet
@@ -301,10 +298,10 @@ fn exhausted_remediation_fails_finalize_and_preserves_findings() {
         user: None,
         repo: None,
     };
-    let source_path = dir.path().join("_fleet.md");
+    let source_path = dir.path().join("_research.md");
     let file_resolution_context = biscuit_file::FileResolutionContext::new(dir.path());
     let context = |signal| StackExecutionContext {
-        seq: None,
+        seq: Some(&seq),
         signal,
         scope: None,
         frontmatter,

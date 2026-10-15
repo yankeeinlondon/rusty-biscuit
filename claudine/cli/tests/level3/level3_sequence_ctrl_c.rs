@@ -1,5 +1,5 @@
 //! Level 3 OS-keyboard-injection test for user Ctrl+C against a **sequence**
-//! whose current step is a blocking `execution: parallel` group.
+//! whose current step is a blocking concurrent group.
 //!
 //! ## Why this exists separately from `level3_wrap_ctrl_c.rs`
 //!
@@ -175,7 +175,6 @@ fn sequence_document() -> String {
          \x20 - name: blocking-group\n\
          \x20   group:\n\
          \x20     name: bundle\n\
-         \x20     execution: parallel\n\
          \x20     tasks:\n\
          {task_entries}\
          \x20 - name: must-not-run\n\
