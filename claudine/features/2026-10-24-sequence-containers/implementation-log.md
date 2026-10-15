@@ -68,16 +68,17 @@ packages:
     - darkmatter
 
 message_to_agent: |-
-    Phase 4 binding roots and the hard rename are implemented. Continue with Phase 5's container runner.
+    Phase 5 implements the root, nested sequence, and concurrent group runners using ContainerRunner and LifecycleRunGuard. Native arrays/dictionaries publish after finalize; group atomic/tolerant state and retry semantics are covered by current-grammar tests. See the Phase 5 section for final gate results and the full inventory.
 
-    - SequenceBinding and GroupBinding in lifecycle/bindings/containers.rs provide complete-root fixture values. Own sequence events use SequenceBinding::container; child positions use ::step; standalone prompts expose only outputs. GroupBinding::event_value exposes results only at terminal events/loop gate; ::leg_value exposes variables only.
-    - Generated frontmatter overlays are removed. LayeredOverrides.sequence_value, PrepareOptions.sequence_binding, and CallerInputLayers.sequence_binding carry seq separately from frontmatter. Preserve that channel across all new runner/retry/proxy paths; never flatten it into setters. RuntimeSnapshot.seq carries a position and sequence_value() supplies committed outputs. StackExecutionContext.seq overrides lexical position; runtime outputs stay live. The loop condition/gate also reads this runtime cell.
-    - Group variables use the lexical stack and PromptTaskRequest.lifecycle_group, never a generated fm.group. StepScope retains the group across proxy adoption. Keep authored fm.seq/fm.group/fm.loop data intact.
-    - seq reads require typed shell templates even in the first task. SEQUENCE_LATE_ROOTS is now seq/loop/group. The prepared lifecycle template path receives the same sequence value.
-    - Parsed rename checks cover source/preparation/lifecycle/external task/group reads and run before CLI dynamic source expansion. Darkmatter HostGlobals::with_document_fallbacks handles transcluded reading-document property presence, including null. Quoted strings, fm.*, and ctx.state are not legacy roots.
-    - Nested sequence execution remains explicitly refused; remove that Phase 3 preflight refusal when the runner lands. Group policy/events/outcome data are retained but dispatch is still Phase 5 work. Preserve cancelled_declared, including an empty cleanup opt-in. Legacy runtime_fixture setup/teardown tests still await runner migration.
-    - Phase 4 migrated current runtime fixtures/tests and current docs. Frozen implement-plan fixtures use fm.is_last for their optional application flag; do not rewrite that flag to seq.is_last. Live internal prompts remain Phase 8 work. Preserve Messenger admission/count hooks from Phase 2 through resume.
-    - Final gates and the complete changed-file inventory are recorded in the Phase 4 log. No formatting, staging, or commits.
+    Phase 6 must wire cancellation into RootRun (CLI sequence/container.rs), run_sequence_attempts (lib sequence/task/sequence.rs), and run_group_container (group.rs). Interrupted child paths currently return Interrupted/130 without cancelled cleanup. Descendants must settle and cleanup must run before each lexical scope is restored; preserve unadmitted cancelled outcomes and cancelled_declared, including empty stacks.
+
+    RuntimeSnapshot.proxy_chain carries proxy ancestry across group worker threads; RuntimeState.enter_container_proxy restores it on scope exit. RuntimeSnapshot.seq remains separate from frontmatter; never flatten it into setters. Sequence scope restoration keeps mutations while restoring the enclosing outputs.
+
+    PreflightGraph captures authored source bytes. Unchanged group sources reuse audited nodes but reevaluate variables; changed nested/group sources are reparsed and checked against the original graph's approvals. Container event shell discovery and full approval-position semantics remain Phase 7 work. Prompt corpus migration remains Phase 8; do not interpret internal legacy setup/teardown test models as valid grammar.
+
+    Root proxy handoffs retain CallerInputRecords so target file schemas validate partial caller paths before initialize. Preserve these records alongside the separate sequence-value channel.
+
+    Ordinary document retry/resume already dispatches before finalize; two event-recorder regressions protect that ordering. The existing pre-start document catch protocol is separate from the new container driver. No formatting, staging, commits, or lifecycle-directory moves were performed.
 source_files_during_phase_3:
     - claudine/cli/src/argv/partition.rs
     - claudine/cli/src/argv/partition/tests.rs
@@ -157,10 +158,149 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/claudine/SKILL.md
-source_files_during_phase_4: []
-docs_updated_during_phase_4: []
+source_files_during_phase_4:
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/preflight.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs
+    - claudine/cli/src/commands/wrap/harness_orch/shell_options.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/tests/common/drain_interrupt.rs
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/frozen_prompts/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/compose_caller_file_provenance.rs
+    - claudine/cli/tests/l1/compose_frontmatter_model.rs
+    - claudine/cli/tests/l1/compose_removed_validation_keys.rs
+    - claudine/cli/tests/l1/composition_outputs.rs
+    - claudine/cli/tests/l1/handoff_owners.rs
+    - claudine/cli/tests/l1/inline_completion_lifecycle.rs
+    - claudine/cli/tests/l1/lifecycle_message_drain.rs
+    - claudine/cli/tests/l1/lifecycle_message_drain_interrupt.rs
+    - claudine/cli/tests/l1/loop_cli.rs
+    - claudine/cli/tests/l1/preflight_execution_parity.rs
+    - claudine/cli/tests/l1/sequence_cli.rs
+    - claudine/cli/tests/l1/sequence_errors_cli.rs
+    - claudine/cli/tests/l1/sequence_groups.rs
+    - claudine/cli/tests/l1/sequence_jit.rs
+    - claudine/cli/tests/l1/sequence_magic_reference.rs
+    - claudine/cli/tests/l1/sequence_overlay_pty.rs
+    - claudine/cli/tests/l1/sequence_perf.rs
+    - claudine/cli/tests/l1/sequence_prompt_property.rs
+    - claudine/cli/tests/l1/sequence_schema.rs
+    - claudine/cli/tests/l1/sequence_shell_templates.rs
+    - claudine/cli/tests/l1/sequence_sources_cli.rs
+    - claudine/cli/tests/l1/wrap_compose_validation.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/bindings/containers.rs
+    - claudine/lib/src/composition/lifecycle/bindings/rename.rs
+    - claudine/lib/src/composition/lifecycle/bindings/rename/tests.rs
+    - claudine/lib/src/composition/lifecycle/bindings/tests.rs
+    - claudine/lib/src/composition/lifecycle/context/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/classify/tests.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/sequence/tests.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/tests.rs
+    - claudine/lib/src/composition/lifecycle/tests/audio_emission.rs
+    - claudine/lib/src/composition/lifecycle/tests/guard_runtime.rs
+    - claudine/lib/src/composition/looping/actions/tests.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/expression.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/preflight/tests.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/tests.rs
+    - claudine/lib/src/composition/reserved.rs
+    - claudine/lib/src/composition/runtime_state.rs
+    - claudine/lib/src/composition/runtime_state/tests.rs
+    - claudine/lib/src/composition/sequence/mod.rs
+    - claudine/lib/src/composition/sequence/model.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/reserved.rs
+    - claudine/lib/src/composition/sequence/task/group.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/templates.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/composition/sequence/tests.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/tests/l1/agent_errors_fleet.rs
+    - darkmatter/lib/src/markdown/compose/context/effective_state.rs
+    - darkmatter/lib/src/markdown/compose/expression/binding.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+docs_updated_during_phase_4:
+    - claudine/README.md
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/features/2026-10-24-sequence-containers/implementation-log.md
+    - claudine/features/2026-10-24-sequence-containers/plan.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
 docs_created_during_phase_4: []
-skills_files_updated_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/darkmatter/compose.md
+source_files_during_phase_5:
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/codex_app_server.rs
+    - claudine/cli/tests/l1/composition_outputs.rs
+    - claudine/cli/tests/l1/document_environment_routes.rs
+    - claudine/cli/tests/l1/ctx_per_run.rs
+    - claudine/cli/tests/l1/handoff_owners.rs
+    - claudine/cli/tests/l1/inline_completion_lifecycle.rs
+    - claudine/cli/tests/l1/lifecycle_message_drain.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/sequence_cli.rs
+    - claudine/cli/tests/l1/sequence_containers.rs
+    - claudine/cli/tests/l1/sequence_errors_cli.rs
+    - claudine/cli/tests/l1/sequence_groups.rs
+    - claudine/cli/tests/l1/sequence_jit.rs
+    - claudine/cli/tests/l1/sequence_schema.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/sequence.rs
+    - claudine/lib/src/composition/lifecycle/runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/container_runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/mod.rs
+    - claudine/lib/src/composition/runtime_state.rs
+    - claudine/lib/src/composition/runtime_state/tests.rs
+    - claudine/lib/src/composition/sequence/data.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/task/container_regressions.rs
+    - claudine/lib/src/composition/sequence/task/group.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+docs_updated_during_phase_5:
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/README.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/features/2026-10-24-sequence-containers/implementation-log.md
+    - claudine/features/2026-10-24-sequence-containers/plan.md
+docs_created_during_phase_5:
+    - claudine/docs/examples/sequence-containers.md
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/SKILL.md
 ---
 
 # Implementation Log for 2026-10-24-sequence-containers (9 phases)
@@ -1724,3 +1864,285 @@ resolved sequence configuration when layering caller properties.
 All five Phase 4 task boxes are now checked. Final validation below includes
 the last override regression and the removal of obsolete group-state
 parameters; later-phase task boxes remain open.
+
+
+### Final Phase 4 gates and handoff
+
+All final checks passed on macOS, using `NEXTEST_TEST_THREADS=4` for area
+runs. These results include the last override regression and group-parameter
+cleanup:
+
+| Gate | Final result |
+| --- | --- |
+| Claudine `just test` | **9,686 passed**, nine existing skips; 302.629 s |
+| Claudine `just lint` | Passed for all five area packages, transport guards, and documentation facets |
+| `just check-tier-coverage claudine` | Passed; zero stranded tests |
+| Darkmatter `just test` | **10,114 passed**, ten existing skips; 101.285 s |
+| `just _lint darkmatter` | Passed; 25.46 s |
+
+No test exceeded five seconds in either final area run. Claudine's longest
+was 4.550 s; Darkmatter's longest was 3.364 s. The targeted tests and
+requirement mapping are listed above, including every rename row, parsed
+conditions and lifecycle operands, source-presence controls, override origins,
+whole-root shadowing, group result timing, shipped artifacts, and persistence
+round trips. Earlier failures were corrected; no unresolved failure is waived.
+
+
+Claudine's nine unchanged ignored diagnostics:
+
+- `compose_ttff_perf::compose_emits_first_stderr_byte_within_budget`
+- `completion_perf::perf_compose_empty_partial_meets_target`
+- `completion_perf::perf_compose_long_prefix_meets_target`
+- `completion_perf::perf_inline_compose_empty_partial_meets_target`
+- `completion_perf::perf_enter_compose_partial_meets_target`
+- `system_prompt_perf_bench::bench_system_prompt_resolution_cold_and_warm`
+- `system_prompt_perf_bench::bench_resolve_and_prepare_step_by_step`
+- `system_prompt_perf_bench::bench_request_topology_probe_and_reuse`
+- `system_prompt_perf_bench::bench_raw_darkmatter_compose_passes`
+
+Darkmatter area's ten unchanged ignored cases:
+
+- `f35_6_rhythm_raw_samples` (measurement harness)
+- `f23_code_surface_raw_samples` (measurement harness)
+- `f35_7_link_policy_raw_samples` (measurement harness)
+- `resolve_alias_ll` (requires the user's login-shell alias)
+- `a_malformed_alias_target_is_parsed_once_and_reported_by_the_rejecting_alias` (DMLS alias projection pending)
+- `undeclared_properties_in_block_and_multi_line_expression_values_warn_at_their_own_ranges` (DMLS projection pending)
+- `tagged_anchored_and_aliased_expression_values_are_diagnosed_once_where_authored` (DMLS projection pending)
+- `an_aliased_dash_separated_key_fix_avoids_the_defining_scalars_quote` (DMLS projection pending)
+- `a_dash_separated_key_behind_an_unprovable_alias_offers_no_fix` (DMLS projection pending)
+- `aliases_are_analyzed_in_the_definition_the_yaml_parser_resolved` (DMLS projection pending)
+
+
+No new ignore, tier marker, CI cell, or relaxed deadline was introduced. L2/L3
+and remote OS runs were not needed: the changes affect expression/catalog
+values and their existing in-process/CLI/file persistence paths, with no new
+OS-specific implementation. The full existing L1 PTY tests ran without
+opening or focusing a terminal window. The unchanged macOS linker unwind
+warning remains non-fatal.
+
+The complete source/test inventory is above and in both documents' Phase 4
+frontmatter: 80 files (78 Rust files and two frozen prompt inputs). Seven
+documentation files and two skill files were updated; no documentation file
+was created. Both frontmatter blocks were read back with `md get`, preserving
+prior-phase fields and the cumulative package list. The spec was not changed.
+
+Implementation complete, ready for review. All Phase 4 tasks are checked;
+Phase 5's container runner and later phases remain open. `human_review` is
+false, and `message_to_agent` contains the replacement Phase 5 handoff. No
+formatting, staging, or commit command was run.
+
+
+## Phase 5
+
+### Requirement-to-test map before implementation
+
+- Root event order, initialization before preflight, blocked cleanup, skip, retry exhaustion and runtime overlays: new hermetic CLI `sequence_containers` tests, plus the shared runner's in-process event recorder tests.
+- Body-only steps inherit root events without firing them per step: CLI fake-provider recording test.
+- Native nested arrays and group dictionaries, lexical sequence restoration, shared run ID, empty nested sequences and by-reference execution: nested runner tests and normal CLI sequence invocations.
+- Atomic group state, tolerant groups, declaration-order bounded admission, unadmitted outcomes and terminal summaries: injected group-runner tests with deterministic barriers and CLI downstream-state assertions.
+- Failure propagation and exactly-once finalize, including terminal/finalize errors: lifecycle runner tests and nested CLI event traces. Timeouts retain failure routing.
+- Retry clears abandoned child outputs while retaining state and commits one final result: shared runner/nested/group tests and root CLI retry trace.
+- Recursive dry-run performs shell work without events/provider launch/write-back: CLI regression coverage.
+
+The phase changes runtime behavior rather than adding configuration fields; existing Phase 3 robustness matrices remain the parser contract. New container variants will be covered through the normal preflight and CLI paths. L1 hermetic subprocess tests cover filesystem/CLI boundaries; no real terminal is needed for this phase's non-cancellation behavior.
+
+### Foundation and native results
+
+- Added the shared guarded `ContainerRunner`, native task result values, and lexical accumulator restoration/clearing. Foundation nextest filter `container_runtime` passed 4/4. The native-result CLI regression passed with an outer string, nested array, and named group dictionary.
+- Root initialize now precedes static preflight; empty roots enter their lifecycle. Blocked cleanup, skip before invalid preflight, typed container resume refusal, finalize failure, and recursive dry-run targeted CLI cases passed. Two remaining targeted cases exposed body-step execution and a test recovery-input issue; investigation continues before checking off the runner.
+- The original targeted attempt encountered temporarily incomplete parallel edits at compile time. A later run completed 8 tests (2 passing, 6 failing); fixture provider/skip corrections and dry-run suppression led to 7/9 passing. These were development failures, not accepted gaps.
+- Existing ordinary document retry/resume dispatch already re-enters before finalize. Added event-recorder regressions at that dispatch boundary to protect it.
+
+### Nested sequences
+
+- Inline, referenced data, and referenced Markdown containers now preserve native arrays, shared run identity, unique local IDs and shallow neighbors, lexical outputs, and enclosing bindings on return. The existing Markdown parser is reused for referenced Markdown; no field semantics changed.
+- Nested sources are reread before start and retry. New child commands or prompt targets introduced after approval closes are refused before start. The source file's original authoring context remains authoritative.
+- Targeted preflight/runtime nextest filters passed 11/11 in 0.284 s, covering positions, source suffixes/origin, cycles, body-only Markdown, native results/restoration, empty arrays, retry retention, finalize failure, and no publication on failure.
+
+### Groups and just-in-time preparation
+
+- Group legs now admit in declaration order under the concurrency cap, use isolated runtime branches, and merge in declaration order only after successful group cleanup. Failed atomic groups withhold all staged leg state/results. Tolerant groups keep failed-leg mutations and expose structured terminal summaries.
+- Seven `container_group_contract` regressions pass, including deterministic Condvar synchronization, retry ordering/state, skipped legs, terminal summaries, and finalize failure.
+- Eight `group_preparation_contract` regressions pass for inline, referenced group and catalog rereads; retry rereads; unapproved command/template/new prompt refusal; malformed reread blocked cleanup. Every test completed below 0.1 s.
+- Preparation rereads source bytes. Unchanged documents reuse the already audited graph nodes while variables resolve afresh; changed sources are reparsed and compared with the original approvals. This also preserves the intentional internal legacy stage-fixture models without allowing retired public grammar.
+- Ordinary retry/resume event recordings and the full area L1 gate remain in verification. No formatting, staging, or commits have run.
+
+### Additional public runtime regressions
+
+- Before editing tests, mapped acceptance criteria 4, 6, 11, 16, 18, 20, and 23 to `TaskExecution::run` through current-grammar preflight fixtures. Added a declared child unit-test module, `task/container_regressions.rs`; its unmarked test names remain selected by L1 and compile through the library's existing unit-test target.
+- Deterministic concurrent nested-sequence legs use a bounded Condvar signal, with no sleeps or process launches. Leg A mutates its private state, waits until leg B writes an upcoming referenced source, then observes its own mutation and the changed file while retaining the original sibling value. Parent mutations and native outputs are asserted after settlement.
+- Added nested failure propagation with innermost-first cleanup and no later child launch, and a timed-out leg that retries through failure without dispatching cancellation.
+- Added the combined four-container lexical-binding shape, successful proxy cleanup ownership, nested concurrent inline-write collision refusal, and two named three-child/two-retry cases covering retained writes, cleared attempt outputs, exhaustion, exactly-once finalize, source-file immutability, and final publication.
+- The initial targeted development run exposed two fixture mistakes (a communication verb under `side_effect`, and the shell fake requiring a stdout mapping for its configured failure). Those fixtures were corrected. The next targeted run passed the failure-order and timeout cases; the remaining case's semantic assertions passed and its expected side-effect result was corrected to the public prior-value JSON output. Final verification of the settled eight-test module is delegated to the phase's sequential area gate.
+
+### Root execution and failure cleanup verification
+
+- The declared `sequence_containers` CLI module passed 13/13 in 1.416 s. It exercises normal invocation, native nested results, initialization before preflight, blocked cleanup with shells disabled, skip, no-session resume, body-only steps, root retry, finalize failure, empty roots, recursive dry-run, and proxy cleanup ownership.
+- Added the executable documentation artifact `docs/examples/sequence-containers.md`, a passive corpus test walking every shipped example's container lifecycle, and an end-to-end invocation of that exact artifact. The CLI fixture asserts source-file immutability and no audio spool publication.
+- A full-suite regression exposed missing transitive inline-write collision checks. The checker now walks each concurrent leg's nested groups/sequences, deduplicates ordered writes within a leg, and rejects collisions across legs. The exact nested two-leg failing input is retained in `nested_sequence_legs_reject_shared_inline_writeback_during_preflight`.
+- Added regressions for body preparation failures reaching enclosing failure/finalize and for cleanup errors remaining secondary to an original sequence/group failure. Shared runner diagnostics and nested propagation now retain both channels.
+- Migrated the remaining group consumers from positional array access to named dictionary members. A legacy sibling-completion test now uses a bounded Condvar to ensure both siblings are admitted before failure, replacing its timing assumption.
+- The area gate also found the pre-existing working-tree Codex test `composition_yolo_frontmatter_disables_the_codex_sandbox` invoking a file as a root subcommand. Added its missing `compose` argument without changing the surrounding unrelated implementation.
+- Root lifecycle tests are green; migration of older per-body-step lifecycle fixtures and the final full gates remain in progress. The plan's implementation tasks are checked, while its full-gate checkpoints remain open.
+
+### Acceptance criteria and concrete verification
+
+All new tests are L1: hermetic CLI/filesystem tests or injected public execution tests. The new CLI file is declared by `cli/tests/l1/main.rs`; library child modules are declared by the existing library unit-test target. No new feature-gated or terminal/browser target was introduced.
+
+| Criterion | Concrete tests |
+| --- | --- |
+| 1: native nesting, references, concurrent ordered legs | `root_events_wrap_all_children_once_and_expose_native_results`; `referenced_sequence_suffix_and_origin_are_preserved`; `nested_group_legs_keep_memory_private_but_reread_shared_files_between_steps` |
+| 3: container event order, blocked and skip | `root_initialize_skip_precedes_invalid_static_preflight`; `preflight_failure_emits_blocked_then_finalize_without_start`; `group_events_see_settled_summaries_and_finalize_before_publication`; `initialize_skip_runs_no_children_or_finalize_and_records_skipped_leg` |
+| 4: failure propagation and recovery | `unhandled_nested_failure_finalizes_innermost_first_and_never_starts_later_children`; `root_resume_reports_typed_no_session_error_and_cleans_up`; `retry_restarts_legs_without_intermediate_finalize_or_duplicate_result` |
+| 5, non-cancellation: atomic and tolerant groups | `default_fail_fast_withholds_mutations_outputs_and_unadmitted_legs`; `tolerated_failed_legs_merge_mutations_and_publish_native_named_results` |
+| 6: timeout routes through failure | `timed_out_nested_leg_uses_failure_retry_and_never_cancellation` |
+| 8: lexical group variables and terminal summaries | `group_events_see_settled_summaries_and_finalize_before_publication`; existing group-name/reserved-variable grammar matrix |
+| 9: complete lexical sequence positions | `nested_prompt_observes_shared_run_and_shallow_neighbors`; `inline_sequence_preflight_preserves_nested_positions_and_duplicates`; Phase 4 binding tests |
+| 11: innermost roots and restoration | `inner_group_and_sequence_roots_are_lexical_and_restored_after_return`; `child_results_are_native_and_parent_position_is_restored` |
+| 12: body steps have no own lifecycle | `body_only_steps_run_root_success_once`; `referenced_markdown_body_step_has_no_document_lifecycle` |
+| 13: publication after finalize only | `finalize_failure_discards_nested_native_result`; `group_finalize_error_discards_leg_mutations_and_result` |
+| 16: proxy cleanup ownership | `root_failure_proxy_runs_target_cleanup_without_source_cleanup`; `container_failure_proxy_skips_source_finalize_and_runs_target_finalize`; same-thread and group-thread proxy-cycle tests |
+| 18: empty, skipped, cycles and collisions | `empty_root_sequence_runs_one_lifecycle_with_empty_outputs`; `empty_sequence_returns_an_empty_native_array`; `sequence_reference_cycle_reports_the_active_chain`; `nested_sequence_legs_reject_shared_inline_writeback_during_preflight` |
+| 19, non-cancellation: cleanup and state | `blocked_cleanup_cannot_run_shell_commands`; `body_preparation_failure_runs_enclosing_failure_and_finalize`; `cleanup_errors_stay_secondary_to_the_original_container_failure`; atomic/tolerant group cases above |
+| 20: repeated retries, read timing and event adjacency | `two_retries_retain_mutations_and_publish_exactly_three_children_once`; `exhausting_two_retries_keeps_failure_and_publishes_nothing`; `nested_group_legs_keep_memory_private_but_reread_shared_files_between_steps`; `document_retry_reenters_directly_without_finalizing_failed_attempt`; `document_resume_reenters_directly_without_finalizing_failed_attempt` |
+| 23: runtime-only retry values | `root_retry_retains_writes_clears_abandoned_outputs_and_finalizes_once`; `retry_clears_child_outputs_and_finalizes_once_before_publication`; group retry and source-immutability assertions |
+
+Additional negative coverage includes invalid retry state, unapproved command/template/prompt introductions, malformed group rereads, source cycles, and finalizer failures. The shipped example corpus is read passively and the exact example is run through `claudine sequence`. Existing schema/grammar corpus and robustness matrix tests remain in the full gate; this phase adds no new load-bearing configuration field. Markdown source support reuses the existing frontmatter parser rather than introducing a second parser.
+
+### Documentation and comment drift
+
+- Replaced planned-runner markers in the current sequence topic, README overview, and Claudine skill with implemented behavior. Cancellation remains explicitly planned; container shell discovery and approval-position work remain assigned to Phase 7.
+- Added lifecycle/recovery and failure-propagation Mermaid diagrams, native result examples, atomic in-memory state limits, and the real-effects dry-run warning.
+- Corrected the prompt-versus-sequence diagnostic: a prompt leaf pointing at a sequence now names `sequence: <file>` rather than claiming all nesting is unsupported. Updated its existing message assertions.
+- Updated the task module documentation to describe native container dispatch; legacy setup/teardown models remain internal fixture machinery, never supported authoring grammar.
+- Preserved the root proxy action's authored location from the evaluated control instead of synthesizing an initialize location for every handoff.
+
+
+### Full-suite fixture migration and runtime guards
+
+- Migrated `composition_outputs`, `sequence_jit`, `document_environment_routes`, and `inline_completion_lifecycle` fixtures that previously attached per-step events to the root. Explicit prompt tasks now own those events; completion failure still proves that step three never launches after step two fails.
+- Updated `handoff_owners::sequence_start_proxy_replaces_the_container_before_any_body_step` to assert container-level proxy ownership: target cleanup runs, the source never finalizes, and no source child starts.
+- Added `ctx_per_run::container_events_refresh_current_after_nested_child_work`: root, group, and leg start events observe no staged files; their successful terminal events observe the child shell's staged file. The normal CLI test passed in 1.118 s under the area run.
+- Added `invalid_root_retry_state_still_finalizes_once`; invalid retry overlays now enter blocked cleanup after clearing abandoned output. Recursive dry-run also asserts that real shell work occurs while providers and lifecycle events remain suppressed.
+- The production error guard caught two nested-runner error string conversions. Both now preserve typed lifecycle diagnostics through `from_error_or_action`; no guard exemption was added. The subsequent full run passed that guard.
+- Refreshed the generated provider dispatch inventory using its existing update mode after the guard reported 1,853 current sites versus 1,851 recorded sites. The 12 inventory tests pass; no dispatch allowlist was expanded.
+- Audited removed overlay names in both production source trees. Remaining matches are authored `sequence` grammar or test assertions; runtime output access uses the separate sequence binding. `git diff --check` passed at this checkpoint.
+
+
+### Phase 5 source inventory
+
+The following source and test files were created or updated during this phase. Existing unrelated working-tree edits are preserved and excluded from this phase inventory.
+
+- `claudine/cli/src/commands/sequence.rs`
+- `claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs`
+- `claudine/cli/src/commands/wrap/sequence/container.rs`
+- `claudine/cli/src/commands/wrap/sequence/iterate.rs`
+- `claudine/cli/src/commands/wrap/sequence/jit/tests.rs`
+- `claudine/cli/src/commands/wrap/sequence/mod.rs`
+- `claudine/cli/src/commands/wrap/sequence/task_run.rs`
+- `claudine/cli/tests/l1/agent_text_is_data.rs`
+- `claudine/cli/tests/l1/codex_app_server.rs`
+- `claudine/cli/tests/l1/composition_outputs.rs`
+- `claudine/cli/tests/l1/document_environment_routes.rs`
+- `claudine/cli/tests/l1/ctx_per_run.rs`
+- `claudine/cli/tests/l1/handoff_owners.rs`
+- `claudine/cli/tests/l1/inline_completion_lifecycle.rs`
+- `claudine/cli/tests/l1/lifecycle_message_drain.rs`
+- `claudine/cli/tests/l1/main.rs`
+- `claudine/cli/tests/l1/sequence_cli.rs`
+- `claudine/cli/tests/l1/sequence_containers.rs`
+- `claudine/cli/tests/l1/sequence_errors_cli.rs`
+- `claudine/cli/tests/l1/sequence_groups.rs`
+- `claudine/cli/tests/l1/sequence_jit.rs`
+- `claudine/cli/tests/l1/sequence_schema.rs`
+- `claudine/lib/src/composition/error/mod.rs`
+- `claudine/lib/src/composition/lifecycle/prewarm/sequence.rs`
+- `claudine/lib/src/composition/lifecycle/runtime.rs`
+- `claudine/lib/src/composition/lifecycle/tests/container_runtime.rs`
+- `claudine/lib/src/composition/lifecycle/tests/mod.rs`
+- `claudine/lib/src/composition/runtime_state.rs`
+- `claudine/lib/src/composition/runtime_state/tests.rs`
+- `claudine/lib/src/composition/sequence/data.rs`
+- `claudine/lib/src/composition/sequence/preflight/mod.rs`
+- `claudine/lib/src/composition/sequence/preflight/shape.rs`
+- `claudine/lib/src/composition/sequence/preflight/tests.rs`
+- `claudine/lib/src/composition/sequence/task/container_regressions.rs`
+- `claudine/lib/src/composition/sequence/task/group.rs`
+- `claudine/lib/src/composition/sequence/task/mod.rs`
+- `claudine/lib/src/composition/sequence/task/sequence.rs`
+- `claudine/lib/src/composition/sequence/task/tests.rs`
+
+
+- The complete no-fail-fast area run exercised all 9,751 tests and found three remaining failures. The completion-verdict fixture now uses a direct prompt document (its earlier `prompt:` declaration accidentally required an inline file update); the message-drain fixture now uses explicit step documents and retains its two-delivery assertion. The proxy schema regression identified a real root-adapter omission: handoffs must retain the existing caller file-input records. Both root proxy paths now pass those records into canonical target preparation, preserving typed validation before target initialize.
+
+
+### Platform scope and remaining phases
+
+- Verification in this phase runs on macOS. The new runners use portable Rust synchronization and the existing request-scoped file resolution/canonicalization; no platform-specific process or terminal behavior was added. The `os` skill was consulted. Linux, native Windows, and WSL2 behavioral runs were not performed locally; their CI coverage remains required.
+- Cancellation dispatch and Ctrl-C cleanup remain Phase 6. Shell discovery/approval-position completion remains Phase 7; live prompt migration remains Phase 8. These are planned boundaries, not accepted failures of Phase 5.
+- Existing unrelated worktree changes remain intact. No formatting, staging, commits, focus-changing terminal/browser tests, or lifecycle-directory moves were performed.
+
+
+### Final verification
+
+- `just --justfile claudine/justfile test --no-fail-fast`: **9,751 passed**, 0 failed, 9 existing ignored tests, in 204.222 s. This is the area `just test` recipe with fail-fast disabled. Every new or changed test completed below 5 s. The 17 warning-threshold crossings were unchanged test cases:
+  - `claudine::l1 claudine_schemas_embedded::embedded_json_trigger_combinator`
+  - `claudine::l1 claudine_schemas_embedded::embedded_yaml_trigger_combinator`
+  - `claudine-cli::l1 agent_text_is_data::malformed_structured_agent_values_are_refused_not_saved_as_text`
+  - `claudine-cli::l1 compose_initialize_staged_boot::early_catch_shells_cannot_run_or_enable_another_catch_shell`
+  - `claudine-cli::l1 compose_schema_cli::compose_and_inline_bare_sidecar_advisory_render_once_and_silent_suppresses_it`
+  - `claudine-cli::l1 compose_schema_cli::compose_late_caller_file_verdict_names_the_launch_directory`
+  - `claudine-cli::l1 compose_schema_cli::compose_unresolved_caller_file_fails_before_initialize_when_non_interactive`
+  - `claudine-cli::l1 contamination_probes::an_uncontaminated_run_matches_the_expectations_every_probe_asserts`
+  - `claudine-cli::l1 ctx_launch_anchor::loop_route_keeps_launch_area_for_root_and_package_documents`
+  - `claudine-cli::l1 inline_completion_lifecycle::a_proxy_with_overlay_satisfies_the_targets_completion_schema`
+  - `claudine-cli::l1 inline_completion_lifecycle::sequence_step_params_satisfy_the_referenced_documents_completion_schema`
+  - `claudine-cli::l1 provider_tail_launch::embedded_credentials_reach_the_child_and_no_display_surface`
+  - `claudine-cli::l1 provider_tail_launch::other_failures_are_not_attributed_to_the_tail`
+  - `claudine-cli::l1 provider_tail_notice::a_switch_whose_record_is_typed_unknown_is_not_called_known`
+  - `claudine-cli::l1 sequence_sources_cli::every_string_list_form_classifies_through_the_real_invocation_path`
+  - `claudine-cli::l1 sequence_sources_cli::yaml_json_json5_jsonl_and_ndjson_sources_produce_the_same_plan`
+  - `claudine-cli::l1 wrap_sequence_composition::sequence_composition_dry_run_for_every_provider`
+
+The nine pre-existing ignored performance tests were `compose_ttff_perf::compose_emits_first_stderr_byte_within_budget`; `completion_perf::{perf_compose_empty_partial_meets_target, perf_compose_long_prefix_meets_target, perf_inline_compose_empty_partial_meets_target, perf_enter_compose_partial_meets_target}`; and `system_prompt_perf_bench::{bench_system_prompt_resolution_cold_and_warm, bench_resolve_and_prepare_step_by_step, bench_request_topology_probe_and_reuse, bench_raw_darkmatter_compose_passes}`. No test was newly ignored or moved to an unrun tier. Earlier failures described above were corrected; none remain in the final test gate.
+
+The macOS linker reported the existing large `__eh_frame` compact-unwind warning; it did not fail compilation or tests.
+
+
+- The first lint pass passed transport and lifecycle documentation guards, then reported two `collapsible_if` findings in the new group runner. Collapsed those conditions manually with no formatting command or lint exemption. The lint gate and focused group regressions are being rerun after that equivalent control-flow edit.
+
+
+- Final `just --justfile claudine/justfile lint`: **passed** for `claudine-catalog-types`, `claudine`, `claudine-contract`, `claudine-cli`, and `claudine-gen`; transport guard 9/9 and lifecycle documentation facet guard passed. Besides the two collapsed conditions, removed one redundant reference in the CLI sequence loop. No lint exemptions or formatting command were used.
+
+
+- The post-lint focused run exposed a synchronization gap in the new shared-file regression: the writer could truncate `next.yaml` while the reader was still doing its initial recursive preparation, producing a null-root source error. Added a bounded two-way Condvar handshake: the publisher waits until the reader reaches its first child, writes the complete source, then releases the reader. The original scenario and all downstream state/native-output assertions remain. No sleeps, retries, ignore, or production workaround were added.
+
+
+### Settled-tree verification and closeout
+
+- Focused post-lint regressions (`container_group_contract`, `container_regressions`, `sequence_containers`, `container_runtime`): **35/35 passed** in 2.089 s after fixing the deterministic handshake.
+- Settled-tree `just --justfile claudine/justfile test --no-fail-fast`: **9,751/9,751 passed** in 200.119 s, with the same nine existing ignored performance tests. No new or changed test exceeded 5 s. These 14 unchanged cases emitted slow warnings:
+  - `claudine::l1 claudine_schemas_embedded::embedded_json_trigger_combinator`
+  - `claudine::l1 claudine_schemas_embedded::embedded_yaml_trigger_combinator`
+  - `claudine-cli::l1 agent_text_is_data::malformed_structured_agent_values_are_refused_not_saved_as_text`
+  - `claudine-cli::l1 compose_initialize_staged_boot::early_catch_shells_cannot_run_or_enable_another_catch_shell`
+  - `claudine-cli::l1 compose_schema_cli::compose_late_caller_file_verdict_names_the_launch_directory`
+  - `claudine-cli::l1 compose_schema_cli::compose_unresolved_caller_file_fails_before_initialize_when_non_interactive`
+  - `claudine-cli::l1 inline_completion_lifecycle::sequence_step_params_satisfy_the_referenced_documents_completion_schema`
+  - `claudine-cli::l1 provider_tail_launch::embedded_credentials_reach_the_child_and_no_display_surface`
+  - `claudine-cli::l1 provider_tail_launch::other_failures_are_not_attributed_to_the_tail`
+  - `claudine-cli::l1 provider_tail_notice::a_switch_whose_record_is_typed_unknown_is_not_called_known`
+  - `claudine-cli::l1 sequence_sources_cli::every_string_list_form_classifies_through_the_real_invocation_path`
+  - `claudine-cli::l1 sequence_sources_cli::yaml_json_json5_jsonl_and_ndjson_sources_produce_the_same_plan`
+  - `claudine-cli::l1 tts_prewarm::every_accepted_playa_dry_run_spelling_prepares_nothing`
+  - `claudine-cli::l1 wrap_sequence_composition::sequence_composition_dry_run_for_every_provider`
+
+All observed development failures have been resolved. The final proxy schema regression asserts the typed diagnostic independent of its sentence capitalization, and still requires the target/property/partial path, actionable reason, no target initialize evaluation, and no provider launch.
+
+- Settled-tree `just --justfile claudine/justfile lint`: **passed** again, including the nine transport guards, documentation facets, and Clippy for all five area packages. All Phase 5 tasks and both Checkpoint 5 items are checked.
+
+- `just check-tier-coverage claudine`: **passed**, zero stranded tests. The area was listed with its declared library/CLI/contract/generator and rendezvous targets; no new test depends on a stubbed tier.
+- `git diff --check`: passed. Both plan and log metadata were read back with `md get`; all requested keys parse, the source inventory contains 38 unique paths, and the cumulative package list is preserved. Updated documentation includes the current sequence/lifecycle topics, README, executable example, generated dispatch inventory, plan/log, and Claudine skill.
+
+Implementation complete, ready for review. `human_review` is false. The replacement `message_to_agent` identifies the cancellation entry points for Phase 6 and the binding, source-reread, proxy, and caller-record invariants to preserve. No outstanding Phase 5 functionality or failing gate remains. No formatting, staging, commits, or feature-completion moves were performed.

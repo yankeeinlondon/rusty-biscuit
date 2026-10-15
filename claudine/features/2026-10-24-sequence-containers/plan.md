@@ -146,10 +146,149 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/claudine/SKILL.md
-source_files_during_phase_4: []
-docs_updated_during_phase_4: []
+source_files_during_phase_4:
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/preflight.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs
+    - claudine/cli/src/commands/wrap/harness_orch/shell_options.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/tests/common/drain_interrupt.rs
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/frozen_prompts/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/compose_caller_file_provenance.rs
+    - claudine/cli/tests/l1/compose_frontmatter_model.rs
+    - claudine/cli/tests/l1/compose_removed_validation_keys.rs
+    - claudine/cli/tests/l1/composition_outputs.rs
+    - claudine/cli/tests/l1/handoff_owners.rs
+    - claudine/cli/tests/l1/inline_completion_lifecycle.rs
+    - claudine/cli/tests/l1/lifecycle_message_drain.rs
+    - claudine/cli/tests/l1/lifecycle_message_drain_interrupt.rs
+    - claudine/cli/tests/l1/loop_cli.rs
+    - claudine/cli/tests/l1/preflight_execution_parity.rs
+    - claudine/cli/tests/l1/sequence_cli.rs
+    - claudine/cli/tests/l1/sequence_errors_cli.rs
+    - claudine/cli/tests/l1/sequence_groups.rs
+    - claudine/cli/tests/l1/sequence_jit.rs
+    - claudine/cli/tests/l1/sequence_magic_reference.rs
+    - claudine/cli/tests/l1/sequence_overlay_pty.rs
+    - claudine/cli/tests/l1/sequence_perf.rs
+    - claudine/cli/tests/l1/sequence_prompt_property.rs
+    - claudine/cli/tests/l1/sequence_schema.rs
+    - claudine/cli/tests/l1/sequence_shell_templates.rs
+    - claudine/cli/tests/l1/sequence_sources_cli.rs
+    - claudine/cli/tests/l1/wrap_compose_validation.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/bindings/containers.rs
+    - claudine/lib/src/composition/lifecycle/bindings/rename.rs
+    - claudine/lib/src/composition/lifecycle/bindings/rename/tests.rs
+    - claudine/lib/src/composition/lifecycle/bindings/tests.rs
+    - claudine/lib/src/composition/lifecycle/context/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/classify/tests.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/sequence/tests.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/tests.rs
+    - claudine/lib/src/composition/lifecycle/tests/audio_emission.rs
+    - claudine/lib/src/composition/lifecycle/tests/guard_runtime.rs
+    - claudine/lib/src/composition/looping/actions/tests.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/expression.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/preflight/tests.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/tests.rs
+    - claudine/lib/src/composition/reserved.rs
+    - claudine/lib/src/composition/runtime_state.rs
+    - claudine/lib/src/composition/runtime_state/tests.rs
+    - claudine/lib/src/composition/sequence/mod.rs
+    - claudine/lib/src/composition/sequence/model.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/reserved.rs
+    - claudine/lib/src/composition/sequence/task/group.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/templates.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/composition/sequence/tests.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/tests/l1/agent_errors_fleet.rs
+    - darkmatter/lib/src/markdown/compose/context/effective_state.rs
+    - darkmatter/lib/src/markdown/compose/expression/binding.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+docs_updated_during_phase_4:
+    - claudine/README.md
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/features/2026-10-24-sequence-containers/implementation-log.md
+    - claudine/features/2026-10-24-sequence-containers/plan.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
 docs_created_during_phase_4: []
-skills_files_updated_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/darkmatter/compose.md
+source_files_during_phase_5:
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/codex_app_server.rs
+    - claudine/cli/tests/l1/composition_outputs.rs
+    - claudine/cli/tests/l1/document_environment_routes.rs
+    - claudine/cli/tests/l1/ctx_per_run.rs
+    - claudine/cli/tests/l1/handoff_owners.rs
+    - claudine/cli/tests/l1/inline_completion_lifecycle.rs
+    - claudine/cli/tests/l1/lifecycle_message_drain.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/sequence_cli.rs
+    - claudine/cli/tests/l1/sequence_containers.rs
+    - claudine/cli/tests/l1/sequence_errors_cli.rs
+    - claudine/cli/tests/l1/sequence_groups.rs
+    - claudine/cli/tests/l1/sequence_jit.rs
+    - claudine/cli/tests/l1/sequence_schema.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/sequence.rs
+    - claudine/lib/src/composition/lifecycle/runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/container_runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/mod.rs
+    - claudine/lib/src/composition/runtime_state.rs
+    - claudine/lib/src/composition/runtime_state/tests.rs
+    - claudine/lib/src/composition/sequence/data.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/task/container_regressions.rs
+    - claudine/lib/src/composition/sequence/task/group.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+docs_updated_during_phase_5:
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/README.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/features/2026-10-24-sequence-containers/implementation-log.md
+    - claudine/features/2026-10-24-sequence-containers/plan.md
+docs_created_during_phase_5:
+    - claudine/docs/examples/sequence-containers.md
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/SKILL.md
 ---
 
 # Plan: Sequence containers
@@ -608,7 +747,7 @@ Cancellation (Phase 6) is stubbed to "not reachable" here.
 
 #### Wave 1 (foundation; sequential internally, one subagent)
 
-- [ ] **5.1 Container runner.**
+- [x] **5.1 Container runner.**
   - A single runner driving groups and sequences through `initialize` →
     preparation → `start`/`blocked` → children → terminal event →
     `finalize`, using `LifecycleRunGuard` so each primitive finalizes at most
@@ -626,19 +765,19 @@ Cancellation (Phase 6) is stubbed to "not reachable" here.
     behavior.
   - Files: `cli/src/commands/wrap/sequence/{mod,iterate,task_run,jit}.rs`,
     `lib/src/composition/lifecycle/runtime.rs`.
-- [ ] **5.2 Results model.** Native array (sequence) / dictionary (group)
+- [x] **5.2 Results model.** Native array (sequence) / dictionary (group)
   results through the task result, accumulator, and expression adapters;
   never flattened or JSON-encoded. Publication only after `finalize`
   completes; a `finalize` error publishes nothing (criterion 13).
 
 #### Wave 2 (concurrent after Wave 1; disjoint files)
 
-- [ ] **5.3 Sequence nesting.** Inline and by-reference nested sequences,
+- [x] **5.3 Sequence nesting.** Inline and by-reference nested sequences,
   `seq.*` production per step (`id` uniqueness suffixing, `index`, `count`,
   neighbors without recursive embedding, `run_id` shared across nested
   sequences), and restoration of the enclosing bindings.
   - Files: `sequence/*`, `task_run.rs`.
-- [ ] **5.4 Group runner.** Concurrent legs only, admitted in declaration
+- [x] **5.4 Group runner.** Concurrent legs only, admitted in declaration
   order under `max_parallel`; each leg gets a branched in-memory runtime
   state (per Spike A); declaration-order merge; no interactivity; keep
   write-back collision rejection and output rendering.
@@ -649,12 +788,12 @@ Cancellation (Phase 6) is stubbed to "not reachable" here.
   - `group.legs` and summary lists populated for terminal events and
     `finalize`.
   - Files: `sequence/task/group.rs`, group runner in the CLI.
-- [ ] **5.5 Failure propagation.** A failure travels task document `failure`
+- [x] **5.5 Failure propagation.** A failure travels task document `failure`
   → enclosing container `failure` → … → root exit `1`, each `finalize` on
   the way, innermost first. A sequence never proceeds past an unhandled
   failure. Timeouts (`timeout`, `step_timeout`) are failures through
   `failure` recovery and never fire `cancelled`.
-- [ ] **5.6 Container `retry`.** `max_attempts` counts additional attempts
+- [x] **5.6 Container `retry`.** `max_attempts` counts additional attempts
   and survives re-entry; clear `seq.outputs` and group outcome records
   between attempts while keeping frontmatter/runtime mutations; `retry.with`
   evaluated once, entering runtime state (Ruling 2), never written back;
@@ -663,15 +802,15 @@ Cancellation (Phase 6) is stubbed to "not reachable" here.
 
 #### Wave 3 (tests; may be split by criterion)
 
-- [ ] **5.7 Tests:** criteria 1, 3, 4, 5 (the non-cancel parts), 6, 8, 9,
+- [x] **5.7 Tests:** criteria 1, 3, 4, 5 (the non-cancel parts), 6, 8, 9,
   11, 12, 13, 16, 18, 19 (non-cancel parts), 20, 23. Use deterministic
   fixture signals (files/barriers), not sleeps, for the concurrent legs in
   criterion 20. Add event-recording assertions that a `retry`/`resume`
   attempt's terminal event is followed directly by the next attempt's events.
 
 **Checkpoint 5:**
-- [ ] criteria above pass on macOS; `just test` and `just lint` in `claudine/`
-- [ ] nothing in the production path still reads the removed overlay names
+- [x] criteria above pass on macOS; `just test` and `just lint` in `claudine/`
+- [x] nothing in the production path still reads the removed overlay names
 
 ---
 
