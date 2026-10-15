@@ -111,8 +111,8 @@ For `AuthStrategy::Basic`:
 
 ### 6) API-Level Runtime Policy Fields
 
-Every `RestApi` literal sets three fields (no `Default` for `RestApi`,
-endpoint policies may replace the API policy):
+Use API builder policy methods (no `Default` for `RestApi`; endpoint
+policies may replace the API policy). Stored policy fields are:
 
 - `cross_origin: CrossOrigin` — redirects and followed next-page links.
   `same_origin()` (default), `allow_origins([..])` (exact origins, credentials
@@ -129,18 +129,16 @@ definition must add its row there.
 
 ### 7) Pagination Defaults and Explicit Endpoint Collections
 
-Every `RestApi` literal also sets `default_pagination: Option<Strategy>` and
-`pagination_exceptions: Vec<PaginationException>` (empty: `None`, `vec![]`).
-`Endpoint.pagination: Option<Collection>` overrides a legacy exception row;
-OpenAI uses this form. Other providers retain their tables during migration. Types live in
-`schematic_define::pagination` (and the prelude), not the crate root.
+Use API `.default_pagination(strategy)` and endpoint `.pagination(Collection)`.
+There are no API exception tables or parameter-level legacy pagination fields.
+Types live in `schematic_define::pagination` and the prelude.
 The canonical behavior page is `schematic/docs/pagination.md`.
 
-- `pagination::resolve(api, endpoint)`: an endpoint collection, then a legacy row for the endpoint id, decides;
-  else a **GET** whose response is literally `Vec<T>` is a list inheriting the
-  default; else not a list. Wrappers, opt-outs, overrides, and non-GET lists
-  all need a row: `PaginationException::new("Id", Collection::at("data").item_type("Item"))`.
-  A root array is `Collection::root()`; `at("")` is invalid.
+- `pagination::resolve(api, endpoint)` uses the endpoint collection first;
+  otherwise a GET root typed `Vec<T>` response inherits the API default.
+  Wrappers, opt-outs, overrides, and non-GET lists need an explicit collection.
+  Use `.pagination(Collection::at("data").item_type("Item"))` or
+  `.pagination(Collection::root().unpaginated())`. `at("")` is invalid.
 - `caller_knobs` is exactly what the generated call exposes; alternates
   (`or_paginate`) are modeled and validated but add no knob.
 - `param_adoptions`/`adopted_params`: a strategy input with the same location
@@ -154,15 +152,13 @@ The canonical behavior page is `schematic/docs/pagination.md`.
 - `validate_pagination` feeds `schematic-gen`'s `validate_rust_client` as the
   `pagination-strategy` / `pagination-exception` / `pagination-parameter`
   features; rules are listed in `schematic/docs/generation/validation.md`.
-- `PaginationStyle`, `PaginationResponse`, and `with_pagination` are
-  superseded and inert: only the query params they materialize matter.
 - Definitions keep one API-local strategy helper (`github_page_number()`,
-  `bitbucket_next_link()`, ...) and never edit endpoint literals to page them.
+  `bitbucket_next_link()`, ...) and attach collections to endpoint builders.
   Authored: GitHub, GitLab, Gitea, Bitbucket, OpenAI, and ElevenLabs
   `GetHistory`/`ListSharedVoices` (93 pagers). Unverified providers (Anthropic,
   EMQX, Hugging Face, GitLab participants, Gitea trees) stay unpaginated: a
-  GET `Vec<T>` under a default needs a `Collection::root().unpaginated()` row,
-  and a wrapper gets an `.unpaginated()` row so it reads as a list.
+  GET `Vec<T>` under a default needs a `Collection::root().unpaginated()` assignment,
+  and a wrapper gets an `.unpaginated()` collection so it reads as a list.
 - `schematic/definitions/tests/pagination_coverage/` is exhaustive: every
   endpoint resolving as a list needs a row (origin, items, item type,
   strategy description, exact knobs, adopted fields), so authoring or
@@ -257,7 +253,8 @@ Schematic defines three extension structs, but exporter emission is currently:
 Document-level extension carries API-wide config (`module_path`, `request_suffix`, `env_mapping`, `headers`).
 Operation-level extension carries endpoint config (`request`, `response`, `headers`).
 
-Current serialized response shape uses enum tagging, e.g.:
+Serialized response shape uses enum tagging. This excerpt omits the typed
+descriptor and shortens the qualified Rust path; full transfer data retains both:
 
 ```yaml
 x-schematic:
@@ -282,7 +279,7 @@ Keep these aligned when docs/examples mention built-in APIs:
 - EMQX Basic: 36 endpoints, basic auth via `EMQX_API_KEY` + `EMQX_API_SECRET`
 - EMQX Bearer: 38 endpoints, bearer auth via `EMQX_TOKEN`
 - GitHub: 16 endpoints, bearer auth via `GITHUB_TOKEN` or `GH_TOKEN`
-- Gitea: 16 endpoints, API key auth via `GITEA_TOKEN` (uses `token ` prefix, not Bearer)
+- Gitea: 15 endpoints, API key auth via `GITEA_TOKEN` (uses `token ` prefix, not Bearer)
 
 ## Update Workflow
 
@@ -377,7 +374,7 @@ Read these as needed:
 - `schematic/schema/README.md` (generated crate)
 - `schematic/definitions/README.md` (built-in API catalog)
 
-For legacy detailed notes that may still be useful, see:
+For the focused definition and generation reference notes, see:
 
 - [`schematic/define.md`](./schematic/define.md) and the other pages in
   [`schematic/`](./schematic/SKILL.md)
@@ -397,10 +394,9 @@ Call `validate_reference(api, endpoint, &desc)` on transfer data: the destinatio
 have registered the whole matching wrapper shape. Reserved Option<TypeRef> structure
 is always None for authored registrations; non-null data fails validation.
 `schematic-definitions::registry::{assemble_module_group, SchemaRegistry::from_context}`
-produce definitions and ordered schemas from one context; current literal lookups
-remain until migration. Read `schematic/docs/typed-registration.md`. Shipped Ollama
-PullModelProgress/PushModelProgress currently lack JsonSchema; alias coverage uses a
-small fixture pending their migration. `just doctest` runs descriptor compile-fail
+produce definitions and ordered schemas from one context for every shipped REST
+provider and import. Explicitly register models in the intended order before
+building endpoints; destination-context validation checks every typed reference. Read `schematic/docs/typed-registration.md`. Ollama progress aliases use explicit typed alias registration. `just doctest` runs descriptor compile-fail
 examples; the existing fresh-output misuse guard also checks their diagnostic codes.
 
 ## Required-fact REST builders
@@ -414,8 +410,11 @@ or auth choices fail; explicit env mappings must agree independent of setter ord
 `Success` and `ErrorSet` are non-exhaustive placeholders; only `ErrorSet::none()`
 is available. Typed Schema descriptor evidence survives lowering and is validated
 at API build; JSON schemas without evidence fail the builder too. OpenAPI export consumes its wire shape. Root typed Vec responses
-retain GET list inference, while Option/nominal wrappers do not. Legacy providers,
-import emitter and external literals remain until migration. Read
+retain GET list inference, while Option/nominal wrappers do not. All shipped REST
+providers and the importer use builders; Endpoint/RestApi are non-exhaustive, so
+external literals cannot compile. REST Schema.module_path remains None; qualified
+type_name plus descriptors carry REST identity. The field is retained for
+WebSocket readers only. Endpoint oauth_scopes is removed; auth_policy is retained. Read
 `schematic/docs/definition-builders.md` for accepted forms and the Default allow-list.
 
 ## Imported builder assemblies
@@ -435,7 +434,16 @@ and malformed or conflicting expressions fail with context. JSON/YAML reject
 null/malformed declarations, duplicate keys and trailing invalid input. Empty
 foundation metadata imports remain possible; run_import rejects no usable endpoints.
 
-`EndpointBuilder::pagination(Collection)` and Endpoint.pagination override legacy
-API exception rows. OpenAI's untouched-by-import overlay assigns endpoint collections
-and rejects unknown IDs. ResolutionOrigin::Exception remains the interim serialized
-origin for both explicit forms; other providers/table removal remain later migration.
+`EndpointBuilder::pagination(Collection)` authors the explicit endpoint collection.
+OpenAI's untouched-by-import overlay assigns collections and rejects unknown IDs.
+`ResolutionOrigin::Exception` remains the serialized origin for explicit collections,
+without an API exceptions table. All 93 authored pagers preserve their controls.
+
+## Query-free route identity
+
+Shared validation, endpoint/API build, and import boundaries reject a remaining
+`?` in a definition path. Diagnostics name API, endpoint, and path. The importer
+normalizes supported source queries before this boundary. Gitea has one
+`GetGitTree` endpoint with optional Boolean `recursive`; there is no recursive
+request type. GitLab repository-file `ref` is a query input whose Rust name is
+`git_ref`. Query inputs never create another endpoint for the same method/path.

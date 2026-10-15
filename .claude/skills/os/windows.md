@@ -241,8 +241,11 @@ hold the rest:
   macOS with `(ulimit -s 768; <binary> …)` and size the frames with an lldb
   script over `frame.GetSP()` deltas. The fix is the binary's `build.rs`
   reserving 8 MiB (`/STACK:8388608` for msvc, `-Wl,--stack,8388608` for gnu,
-  via `cargo:rustc-link-arg-bin=<bin>=…`), as `darkmatter/cli`,
-  `claudine/cli`, and `sniff/cli` do. It covers the main thread only; spawned
+  via `cargo:rustc-link-arg-bin=<bin>=…`), as `darkmatter/cli` and
+  `claudine/cli` do (`sniff/cli` reserves 32 MiB). `schematic/gen` also reserves
+  8 MiB: its migrated catalog assembly overflowed the default main-thread
+  stack even for `generate --api gitea` and `--api ollama-native` on native
+  Windows; the existing generation/output-isolation CLI tests cover it. It covers the main thread only; spawned
   threads keep Rust's 2 MiB default.
 - **Killing `git` at a deadline leaves the real git running.** `git.exe` on
   `PATH` is the `Git\cmd\git.exe` launcher, which starts

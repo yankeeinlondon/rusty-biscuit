@@ -282,11 +282,11 @@ clashing `operationId` gets its API-name prefix, and the final
 Full rules: `schematic/docs/generation/validation.md`.
 
 ```bash
-$ schematic-gen validate --api gitea
-[WARN] severity=warning api=Gitea endpoint=GetGitTreeRecursive feature=query-in-path output=rust: ...
-  [PASS] rust
-  [PASS] openapi
-  [PASS] postman
+$ schematic-gen validate --api example
+[ERROR] severity=error api=Example endpoint=ReadTree feature=query-in-path output=rust: ...
+  [FAIL] rust
+  [FAIL] openapi
+  [FAIL] postman
 ```
 
 ## Generator Modules
