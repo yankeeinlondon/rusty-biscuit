@@ -1,4 +1,4 @@
-//! Validation of strategies, list shapes, and the exceptions table.
+//! Validation of strategies, endpoint collections, and list shapes.
 
 use std::collections::HashSet;
 use std::fmt;
@@ -18,7 +18,7 @@ use crate::types::{Endpoint, RestApi, RestMethod};
 pub enum PaginationRuleGroup {
     /// The shape of a strategy, alone or on its endpoint.
     Strategy,
-    /// A row of the exceptions table or the list shape it names.
+    /// An endpoint collection or the list shape it names.
     Exception,
     /// A strategy input against the endpoint's declared parameters.
     Parameter,
@@ -57,9 +57,7 @@ pub enum PaginationError {
     KeepAliveWithoutInput,
     InvalidPartitionMax,
     PartitionedFirstPageSession,
-    // Exceptions table and list shape
-    UnknownExceptionId { id: String, nearest: Option<String> },
-    DuplicateExceptionId(String),
+    // Endpoint collection and list shape
     InvalidItemSelector { selector: String, reason: &'static str },
     NotAnArrayLocation(String),
     MissingItemType,
@@ -100,8 +98,6 @@ impl PaginationError {
             Self::KeepAliveWithoutInput => "keep-alive-without-input",
             Self::InvalidPartitionMax => "invalid-partition-max",
             Self::PartitionedFirstPageSession => "partitioned-first-page-session",
-            Self::UnknownExceptionId { .. } => "unknown-exception-id",
-            Self::DuplicateExceptionId(_) => "duplicate-exception-id",
             Self::InvalidItemSelector { .. } => "invalid-item-selector",
             Self::NotAnArrayLocation(_) => "not-an-array-location",
             Self::MissingItemType => "missing-item-type",
@@ -117,9 +113,7 @@ impl PaginationError {
 
     pub fn group(&self) -> PaginationRuleGroup {
         match self {
-            Self::UnknownExceptionId { .. }
-            | Self::DuplicateExceptionId(_)
-            | Self::InvalidItemSelector { .. }
+            Self::InvalidItemSelector { .. }
             | Self::NotAnArrayLocation(_)
             | Self::MissingItemType
             | Self::AlternatesWithoutPrimary
@@ -210,16 +204,6 @@ impl fmt::Display for PaginationError {
                 "partitions require a session opened by a separate request; first-page opening \
                  creates independent sessions without shared cleanup",
             ),
-            Self::UnknownExceptionId { id, nearest } => {
-                write!(f, "exception names `{id}`, which is not an endpoint of this API")?;
-                match nearest {
-                    Some(nearest) => write!(f, "; did you mean `{nearest}`?"),
-                    None => Ok(()),
-                }
-            }
-            Self::DuplicateExceptionId(id) => {
-                write!(f, "endpoint `{id}` has more than one exception row")
-            }
             Self::InvalidItemSelector { selector, reason } => {
                 write!(f, "item selector `{selector}` is invalid: {reason}")
             }
@@ -278,45 +262,13 @@ impl fmt::Display for PaginationDiagnostic {
     }
 }
 
-/// Validates an API's default strategy, exceptions table, and every list it
+/// Validates an API's default strategy, endpoint collections, and every list it
 /// resolves.
 ///
 /// Intrinsic strategy errors of the API default are reported once, against no
 /// endpoint; each endpoint that inherits it is checked only for what depends
 /// on the endpoint (path parameters, methods, declared parameters).
 ///
-/// ## Examples
-///
-/// ```
-/// use schematic_define::pagination::{
-///     Collection, PaginationError, PaginationException, validate_pagination,
-/// };
-/// # use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
-/// # let api = |exceptions| RestApi {
-/// #     name: "Forge".into(), description: String::new(), base_url: "https://forge.test".into(),
-/// #     docs_url: None, auth: AuthStrategy::None, auth_policy: None, env_auth: vec![],
-/// #     env_username: None, headers: vec![], module_path: None, request_suffix: None,
-/// #     version: None, env_mapping: None, cross_origin: CrossOrigin::default(),
-/// #     request_id_header: None, secret_names: vec![], default_pagination: None,
-/// #     endpoints: vec![Endpoint {
-/// #         id: "ListReleases".into(), method: RestMethod::Get, path: "/releases".into(),
-/// #         description: String::new(), request: None,
-/// #         response: ApiResponse::json_type("Vec<Release>"), headers: vec![], params: None,
-/// #         oauth_scopes: None, cross_origin: None, pagination: None,
-/// #     }],
-/// #     pagination_exceptions: exceptions,
-/// # };
-///
-/// let typo = api(vec![PaginationException::new("ListRelease", Collection::root().unpaginated())]);
-/// let diagnostics = validate_pagination(&typo);
-/// assert_eq!(
-///     diagnostics[0].error,
-///     PaginationError::UnknownExceptionId {
-///         id: "ListRelease".into(),
-///         nearest: Some("ListReleases".into()),
-///     }
-/// );
-/// ```
 pub fn validate_pagination(api: &RestApi) -> Vec<PaginationDiagnostic> {
     let mut diagnostics = Vec::new();
     let mut push = |endpoint: Option<&str>, alternate: Option<&str>, error: PaginationError| {
@@ -330,25 +282,6 @@ pub fn validate_pagination(api: &RestApi) -> Vec<PaginationDiagnostic> {
     if let Some(default) = &api.default_pagination {
         for error in validate_strategy(default) {
             push(None, None, error);
-        }
-    }
-
-    let endpoint_ids: Vec<&str> = api.endpoints.iter().map(|e| e.id.as_str()).collect();
-    let mut seen = HashSet::new();
-    for entry in &api.pagination_exceptions {
-        let id = entry.endpoint.as_str();
-        if !seen.insert(id) {
-            push(Some(id), None, PaginationError::DuplicateExceptionId(id.to_owned()));
-        }
-        if !endpoint_ids.contains(&id) {
-            push(
-                Some(id),
-                None,
-                PaginationError::UnknownExceptionId {
-                    id: id.to_owned(),
-                    nearest: nearest_id(id, &endpoint_ids),
-                },
-            );
         }
     }
 
@@ -366,10 +299,7 @@ pub fn validate_pagination(api: &RestApi) -> Vec<PaginationDiagnostic> {
             }
         }
         let id = Some(endpoint.id.as_str());
-        if let Some(collection) = endpoint.pagination.as_ref().or_else(|| api
-            .pagination_exceptions
-            .iter()
-            .find(|entry| entry.endpoint == endpoint.id).map(|entry| &entry.collection))
+        if let Some(collection) = endpoint.pagination.as_ref()
         {
             for error in collection_errors(api, endpoint, collection) {
                 push(id, None, error);
@@ -406,32 +336,6 @@ pub fn validate_pagination(api: &RestApi) -> Vec<PaginationDiagnostic> {
         }
     }
     diagnostics
-}
-
-/// The endpoint id closest to `id` by edit distance, if one is close enough
-/// to be a likely typo.
-fn nearest_id(id: &str, candidates: &[&str]) -> Option<String> {
-    let limit = (id.chars().count() / 3).max(2);
-    candidates
-        .iter()
-        .map(|candidate| (edit_distance(id, candidate), *candidate))
-        .filter(|(distance, _)| *distance <= limit)
-        .min()
-        .map(|(_, candidate)| candidate.to_owned())
-}
-
-fn edit_distance(a: &str, b: &str) -> usize {
-    let b: Vec<char> = b.chars().collect();
-    let mut previous: Vec<usize> = (0..=b.len()).collect();
-    for (i, a_char) in a.chars().enumerate() {
-        let mut current = vec![i + 1];
-        for (j, b_char) in b.iter().enumerate() {
-            let substitution = previous[j] + usize::from(a_char != *b_char);
-            current.push(substitution.min(previous[j + 1] + 1).min(current[j] + 1));
-        }
-        previous = current;
-    }
-    previous[b.len()]
 }
 
 /// Errors in an authored collection shape.

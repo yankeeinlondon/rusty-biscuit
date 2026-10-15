@@ -9,7 +9,7 @@
 
 mod pagination_support;
 
-use pagination_support::{api, post, resolution, row};
+use pagination_support::{api, post, resolution};
 use schematic_define::RestMethod;
 use schematic_define::pagination::{
     Collection, CursorSource, InputParam, KeepAlive, Knob, MoreSignal, PageSize, PaginationError, Partition, ResolutionOrigin, SessionOpen,
@@ -45,7 +45,7 @@ fn a_rotating_handle_point_in_time_with_four_partitions_inherited_from_the_api_d
     let mut search = api("Search");
     search.default_pagination = Some(sliced_point_in_time());
     search.endpoints = vec![post("SearchLogs", "/{index}/_search", "SearchResponse")];
-    search.pagination_exceptions = vec![row("SearchLogs", Collection::at("hits.hits[*]._source").item_type("Hit"))];
+    { let (id, collection) = ("SearchLogs", Collection::at("hits.hits[*]._source").item_type("Hit"));  search.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection);  };
 
     assert_eq!(validate_pagination(&search), vec![]);
 
@@ -69,7 +69,7 @@ fn first_page_sessions_require_no_partitions_in_defaults_overrides_and_alternate
             let mut search = api("Search");
             search.endpoints = vec![post("SearchLogs", "/{index}/_search", "SearchResponse")];
             let collection = Collection::at("hits.hits[*]._source").item_type("Hit");
-            search.pagination_exceptions = vec![row("SearchLogs", match site {
+            { let (id, collection) = ("SearchLogs", match site {
                 "default" => {
                     search.default_pagination = Some(strategy);
                     collection
@@ -77,7 +77,7 @@ fn first_page_sessions_require_no_partitions_in_defaults_overrides_and_alternate
                 "override" => collection.paginate(strategy),
                 "alternate" => collection.paginate(sliced_point_in_time()).or_paginate("scroll", strategy),
                 _ => unreachable!(),
-            })];
+            });  search.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection);  };
             let diagnostics = validate_pagination(&search);
             if partitioned {
                 assert_eq!(diagnostics.len(), 1, "{site}: {diagnostics:?}");

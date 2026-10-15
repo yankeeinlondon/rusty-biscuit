@@ -389,8 +389,7 @@ impl OpenApiImport {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
-            pagination_exceptions: vec![],
-        })
+            })
     }
 
     /// Extracts operations from a PathItem.

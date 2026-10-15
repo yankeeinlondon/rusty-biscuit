@@ -2,17 +2,16 @@
 mod pagination_support;
 use pagination_support::api;
 use schematic_define::{DefinitionContext, Endpoint, RestApi};
-use schematic_define::pagination::{Collection, MoreSignal, PaginationException, Resolution, ResolutionOrigin, PaginationError, Strategy, resolve, validate_pagination};
+use schematic_define::pagination::{Collection, MoreSignal, Resolution, ResolutionOrigin, PaginationError, Strategy, resolve, validate_pagination};
 
 fn page() -> Strategy { Strategy::page_number("page", MoreSignal::NonEmptyPage).build() }
 
 #[test]
-fn endpoint_collection_precedes_legacy_row_and_preserves_inheritance() {
+fn endpoint_collection_overrides_default_and_preserves_inheritance() {
     let endpoint = Endpoint::get("List", "/items").describes("Items").returns_empty()
         .pagination(Collection::at("data").item_type("Item").unpaginated()).build().unwrap();
     let mut api = api("Test");
     api.default_pagination = Some(page());
-    api.pagination_exceptions.push(PaginationException::new("List", Collection::root().paginate(page())));
     assert!(matches!(resolve(&api, &endpoint), Resolution::Unpaginated { origin: ResolutionOrigin::Exception, .. }));
     let mut inherited = endpoint.clone();
     inherited.pagination = Some(Collection::at("data").item_type("Item"));

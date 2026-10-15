@@ -9,7 +9,7 @@
 use schematic_define::RestMethod;
 use schematic_define::pagination::{
     Collection, CursorSource, FollowUp, InputParam, KeepAlive, LinkSource, MoreSignal, PageSize,
-    PaginationException, Partition, Session, SessionStep, Strategy, ValueSource, strategy_knobs,
+    Partition, Session, SessionStep, Strategy, ValueSource, strategy_knobs,
     validate_strategy,
 };
 use serde_json::{Value, json};
@@ -59,7 +59,7 @@ fn every_dimension_survives_a_repeated_round_trip() {
 }
 
 #[test]
-fn every_kind_and_row_round_trips() {
+fn every_kind_and_collection_round_trips() {
     let kinds = [
         Strategy::page_number("page", MoreSignal::link_rel("next")).zero_based().build(),
         Strategy::offset("offset", MoreSignal::is_last("last")).one_based().build(),
@@ -73,18 +73,15 @@ fn every_kind_and_row_round_trips() {
         assert_eq!(serde_json::from_str::<Strategy>(&json).unwrap(), strategy, "{json}");
     }
     let rows = vec![
-        PaginationException::new("A", Collection::root().unpaginated()),
-        PaginationException::new("B", Collection::at("data").item_type("Item")),
-        PaginationException::new(
-            "C",
-            Collection::at("edges[*].node")
+        Collection::root().unpaginated(),
+        Collection::at("data").item_type("Item"),
+        Collection::at("edges[*].node")
                 .item_type("serde_json::Value")
                 .paginate(everything())
                 .or_paginate("keyset", Strategy::next_link(LinkSource::link_header("next"))),
-        ),
     ];
     let json = serde_json::to_string(&rows).unwrap();
-    assert_eq!(serde_json::from_str::<Vec<PaginationException>>(&json).unwrap(), rows);
+    assert_eq!(serde_json::from_str::<Vec<Collection>>(&json).unwrap(), rows);
 }
 
 #[test]
@@ -104,9 +101,9 @@ fn serialized_shape_is_tagged_and_readable() {
     assert_eq!(value["constants"], json!([]));
     assert_eq!(value["session"], Value::Null);
 
-    let row = serde_json::to_value(PaginationException::new("L", Collection::root().unpaginated())).unwrap();
-    assert_eq!(row["collection"]["pagination"], json!({ "policy": "unpaginated" }));
-    assert_eq!(row["collection"]["items"]["record"], json!(["each"]));
+    let row = serde_json::to_value(Collection::root().unpaginated()).unwrap();
+    assert_eq!(row["pagination"], json!({ "policy": "unpaginated" }));
+    assert_eq!(row["items"]["record"], json!(["each"]));
 }
 
 /// One edit to a serialized strategy.

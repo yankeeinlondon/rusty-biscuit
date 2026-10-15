@@ -16,11 +16,12 @@ use crate::types::{Endpoint, RestApi, RestMethod};
 /// What decided an endpoint's pagination.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ResolutionOrigin {
-    /// An endpoint collection or a legacy API exception (an override or opt-out).
+    /// An endpoint collection override or opt-out. The variant spelling is retained
+    /// in the serialized resolution format.
     Exception,
     /// The API's default strategy, inherited by a list.
     ApiDefault,
-    /// Nothing authored applies: a list with no default and no row.
+    /// Nothing authored applies: a list with no default and no explicit collection.
     Unauthored,
 }
 
@@ -40,7 +41,7 @@ pub struct ResolvedList {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum Resolution {
-    /// Not a list: no row, and not a GET with an explicit `Vec<T>` response.
+    /// Not a list: no collection, and not a GET with an explicit `Vec<T>` response.
     NotAList,
     /// A list without pagination.
     Unpaginated {
@@ -84,52 +85,11 @@ impl Resolution {
 
 /// Resolves `endpoint`'s pagination within `api`.
 ///
-/// The order is fixed: an endpoint collection takes precedence over a legacy
-/// row of `api.pagination_exceptions`; otherwise a GET endpoint whose response is an
-/// explicit `Vec<T>` is a root-array list that inherits the API default, or is
-/// unpaginated without one; otherwise the endpoint is not a list. Type
-/// aliases and opaque responses are never inferred to be lists. The first row
-/// for an id wins; validation rejects a duplicate.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_define::pagination::{resolve, MoreSignal, Resolution, ResolutionOrigin, Strategy};
-/// use schematic_define::{ApiResponse, Endpoint, RestMethod};
-/// # use schematic_define::{AuthStrategy, CrossOrigin, RestApi};
-/// # let mut api = RestApi {
-/// #     name: "Forge".into(), description: String::new(), base_url: "https://forge.test".into(),
-/// #     docs_url: None, auth: AuthStrategy::None, auth_policy: None, env_auth: vec![],
-/// #     env_username: None, headers: vec![], endpoints: vec![], module_path: None,
-/// #     request_suffix: None, version: None, env_mapping: None,
-/// #     cross_origin: CrossOrigin::default(), request_id_header: None, secret_names: vec![],
-/// #     default_pagination: None, pagination_exceptions: vec![],
-/// # };
-///
-/// api.default_pagination = Some(Strategy::page_number("page", MoreSignal::NonEmptyPage).build());
-/// let releases = Endpoint {
-///     id: "ListReleases".into(),
-///     method: RestMethod::Get,
-///     path: "/releases".into(),
-///     description: String::new(),
-///     request: None,
-///     response: ApiResponse::json_type("Vec<Release>"),
-///     headers: vec![],
-///     params: None,
-///     oauth_scopes: None, cross_origin: None, pagination: None,
-/// };
-///
-/// let resolution = resolve(&api, &releases);
-/// assert_eq!(resolution.origin(), Some(ResolutionOrigin::ApiDefault));
-/// assert_eq!(resolution.list().unwrap().item_type.as_deref(), Some("Release"));
-/// ```
+/// The endpoint collection decides first. Without one, a GET whose response
+/// is an explicit `Vec<T>` inherits the API default or stays unpaginated.
+/// Aliases and opaque responses require an explicit collection.
 pub fn resolve(api: &RestApi, endpoint: &Endpoint) -> Resolution {
-    let entry = api
-        .pagination_exceptions
-        .iter()
-        .find(|entry| entry.endpoint == endpoint.id);
-
-    let Some(collection) = endpoint.pagination.as_ref().or_else(|| entry.map(|entry| &entry.collection)) else {
+    let Some(collection) = endpoint.pagination.as_ref() else {
         if endpoint.method != RestMethod::Get {
             return Resolution::NotAList;
         }

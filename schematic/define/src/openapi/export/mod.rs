@@ -179,8 +179,7 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
-            pagination_exceptions: vec![],
-        }
+            }
     }
 
     fn create_test_api_with_endpoints() -> RestApi {
@@ -204,7 +203,7 @@ mod tests {
                     response: ApiResponse::json_type("ListResponse"),
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None, cross_origin: None, pagination: None,
+                    cross_origin: None, pagination: None,
                 },
                 Endpoint {
                     id: "GetItem".to_string(),
@@ -215,7 +214,7 @@ mod tests {
                     response: ApiResponse::json_type("Item"),
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None, cross_origin: None, pagination: None,
+                    cross_origin: None, pagination: None,
                 },
             ],
             module_path: None,
@@ -226,8 +225,7 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
-            pagination_exceptions: vec![],
-        }
+            }
     }
 
     #[test]
@@ -358,7 +356,7 @@ mod tests {
                 response: ApiResponse::Empty,
                 headers: vec![],
                 params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
+                cross_origin: None, pagination: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -368,8 +366,7 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
-            pagination_exceptions: vec![],
-        };
+            };
         let registry = TestRegistry::new();
         let options = ExportOptions::new();
 
@@ -405,7 +402,7 @@ mod tests {
                 response: ApiResponse::json_type("MissingResponse"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
+                cross_origin: None, pagination: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -415,8 +412,7 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
-            pagination_exceptions: vec![],
-        };
+            };
         let registry = TestRegistry::new();
         let options = ExportOptions::new();
 
@@ -452,7 +448,7 @@ mod tests {
                 response: ApiResponse::json_type("Model"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
+                cross_origin: None, pagination: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -462,8 +458,7 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
-            pagination_exceptions: vec![],
-        };
+            };
         let registry = TestRegistry::new().with_schema("Model");
         let options = ExportOptions::new();
 
@@ -511,7 +506,7 @@ mod tests {
                 response: ApiResponse::json_type("ResponseBody"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
+                cross_origin: None, pagination: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -521,8 +516,7 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
-            pagination_exceptions: vec![],
-        };
+            };
         let registry = TestRegistry::new()
             .with_schema("RequestBody")
             .with_schema("ResponseBody");
@@ -563,7 +557,7 @@ mod tests {
                 }],
                 ..Default::default()
             }),
-            oauth_scopes: None, cross_origin: None, pagination: None,
+            cross_origin: None, pagination: None,
         }];
 
         let doc = export(&api, &TestRegistry::new(), &ExportOptions::new())
@@ -606,7 +600,7 @@ mod tests {
                 response: ApiResponse::Empty,
                 headers: vec![],
                 params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
+                cross_origin: None, pagination: None,
             },
             Endpoint {
                 id: "DeleteItem".to_string(),
@@ -617,7 +611,7 @@ mod tests {
                 response: ApiResponse::Empty,
                 headers: vec![],
                 params: None,
-                oauth_scopes: None, cross_origin: None, pagination: None,
+                cross_origin: None, pagination: None,
             },
         ];
 

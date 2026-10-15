@@ -9,27 +9,11 @@
 //! ```
 //! use schematic_define::prelude::*;
 //!
-//! let api = RestApi {
-//!     name: "MyAPI".to_string(),
-//!     description: "My API".to_string(),
-//!     base_url: "https://api.example.com".to_string(),
-//!     docs_url: None,
-//!     auth: AuthStrategy::BearerToken { header: None },
-//!     auth_policy: None,
-//!     env_auth: vec!["API_KEY".to_string()],
-//!     env_username: None,
-//!     headers: vec![],
-//!     endpoints: vec![],
-//!     module_path: None,
-//!     request_suffix: None,
-//!     version: None,
-//!     env_mapping: None,
-//!     cross_origin: CrossOrigin::default(),
-//!     request_id_header: None,
-//!     secret_names: vec![],
-//!     default_pagination: None,
-//!     pagination_exceptions: vec![],
-//! };
+//! let ctx = DefinitionContext::types_in("crate::types");
+//! let api = RestApi::builder(&ctx, "MyAPI", "https://api.example.com")
+//!     .describes("My API")
+//!     .bearer_env(["API_KEY"])
+//!     .build().unwrap();
 //! ```
 //!
 //! ### WebSocket API
@@ -55,7 +39,7 @@ pub use crate::cross_origin::CrossOrigin;
 pub use crate::oauth::{OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement};
 pub use crate::pagination::{
     Carry, Collection, CursorLeg, CursorSource, FollowUp, InputParam, KeepAlive, LinkSource,
-    MoreSignal, PageSize, PaginationException, PaginationResponse, PaginationStyle, Partition,
+    MoreSignal, PageSize, Partition,
     Session, SessionStep, Strategy, ValueSource,
 };
 pub use crate::params::EndpointParams;

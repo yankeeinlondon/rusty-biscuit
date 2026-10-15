@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 
 use schematic_define::pagination::{
-    Collection, PaginationError, PaginationException, Resolution, Strategy, resolve,
+    Collection, PaginationError, Resolution, Strategy, resolve,
     validate_pagination,
 };
 use schematic_define::{
@@ -12,41 +12,11 @@ use schematic_define::{
 
 /// An API with no pagination and no endpoints.
 pub fn api(name: &str) -> RestApi {
-    RestApi {
-        name: name.to_string(),
-        description: format!("{name} fixture"),
-        base_url: "https://api.example.test".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::None,
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        headers: vec![],
-        endpoints: vec![],
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        env_mapping: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    }
+    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{name} fixture"); fixture.base_url = "https://api.example.test".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::None; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_username = None; fixture.headers = vec![]; fixture.endpoints = vec![]; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture }
 }
 
 pub fn endpoint(id: &str, method: RestMethod, path: &str, response: &str) -> Endpoint {
-    Endpoint {
-        id: id.to_string(),
-        method,
-        path: path.to_string(),
-        description: String::new(),
-        request: (method != RestMethod::Get).then(|| ApiRequest::json_type("Body")),
-        response: ApiResponse::json_type(response),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None, cross_origin: None, pagination: None,
-    }
+    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = method; fixture.path = path.to_string(); fixture.description = String::new(); fixture.request = (method != RestMethod::Get).then(|| ApiRequest::json_type("Body")); fixture.response = ApiResponse::json_type(response); fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }
 }
 
 pub fn get(id: &str, path: &str, response: &str) -> Endpoint {
@@ -83,14 +53,10 @@ pub fn with_headers(mut endpoint: Endpoint, names: &[&str]) -> Endpoint {
     endpoint
 }
 
-pub fn row(endpoint: &str, collection: Collection) -> PaginationException {
-    PaginationException::new(endpoint, collection)
-}
-
-/// An API holding `endpoint`, with `collection` as its only exceptions row.
-pub fn listed(endpoint: Endpoint, collection: Collection) -> RestApi {
+/// An API holding an endpoint with its explicit collection.
+pub fn listed(mut endpoint: Endpoint, collection: Collection) -> RestApi {
     let mut api = api("Fixture");
-    api.pagination_exceptions = vec![row(&endpoint.id, collection)];
+    endpoint.pagination = Some(collection);
     api.endpoints = vec![endpoint];
     api
 }
@@ -100,7 +66,7 @@ pub fn errors(api: &RestApi) -> Vec<PaginationError> {
     validate_pagination(api).into_iter().map(|d| d.error).collect()
 }
 
-/// The errors of `endpoint` paged by `strategy` through an exceptions row.
+/// The errors of `endpoint` paged by `strategy` through its explicit collection.
 pub fn endpoint_errors(endpoint: Endpoint, items: &str, strategy: impl Into<Strategy>) -> Vec<PaginationError> {
     let collection = if items.is_empty() {
         Collection::root()

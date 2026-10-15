@@ -60,8 +60,7 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
-            pagination_exceptions: vec![],
-        }
+            }
     }
 
     #[test]

@@ -58,9 +58,6 @@
 //! - [`ParamDef`] - Single parameter definition
 //! - [`QueryParamType`] - Parameter value type
 //! - [`ParamStyle`] - Parameter serialization style
-//! - [`PaginationStyle`] - Legacy pagination query parameters, superseded by
-//!   [`pagination::Strategy`]
-//! - [`PaginationResponse`] - Legacy response pagination signal; nothing reads it
 //!
 //! List pagination is authored per API through the [`pagination`] module.
 //!
@@ -69,41 +66,19 @@
 //! Define a simple API with bearer token authentication:
 //!
 //! ```
-//! use schematic_define::{RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse, CrossOrigin};
+//! use schematic_define::{DefinitionContext, RestApi, Endpoint};
 //!
-//! let api = RestApi {
-//!     name: "OpenAI".to_string(),
-//!     description: "OpenAI API".to_string(),
-//!     base_url: "https://api.openai.com/v1".to_string(),
-//!     docs_url: Some("https://platform.openai.com/docs/api-reference".to_string()),
-//!     auth: AuthStrategy::BearerToken { header: None },
-//!     auth_policy: None,
-//!     env_auth: vec!["OPENAI_API_KEY".to_string()],
-//!     env_username: None,
-//!     headers: vec![],
-//!     endpoints: vec![
-//!         Endpoint {
-//!             id: "ListModels".to_string(),
-//!             method: RestMethod::Get,
-//!             path: "/models".to_string(),
-//!             description: "List available models".to_string(),
-//!             request: None,
-//!             response: ApiResponse::json_type("ListModelsResponse"),
-//!             headers: vec![],
-//!             params: None,
-//!             oauth_scopes: None, cross_origin: None, pagination: None,
-//!         },
-//!     ],
-//!     module_path: None,
-//!     request_suffix: None,
-//!     version: None,
-//!     env_mapping: None,
-//!     cross_origin: CrossOrigin::default(),
-//!     request_id_header: None,
-//!     secret_names: vec![],
-//!     default_pagination: None,
-//!     pagination_exceptions: vec![],
-//! };
+//! let mut ctx = DefinitionContext::types_in("crate::types");
+//! let endpoint = Endpoint::get("ListModels", "/models")
+//!     .describes("List available models")
+//!     .returns_json::<serde_json::Value>(&mut ctx)
+//!     .build().unwrap();
+//! let api = RestApi::builder(&ctx, "OpenAI", "https://api.openai.com/v1")
+//!     .describes("OpenAI API")
+//!     .bearer_env(["OPENAI_API_KEY"])
+//!     .docs_url("https://platform.openai.com/docs/api-reference")
+//!     .endpoints([endpoint])
+//!     .build().unwrap();
 //!
 //! assert_eq!(api.name, "OpenAI");
 //! assert_eq!(api.endpoints.len(), 1);
@@ -171,7 +146,6 @@ pub use models::{
     TypeRef,
 };
 pub use oauth::{OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement};
-pub use pagination::{PaginationResponse, PaginationStyle};
 pub use params::{EndpointParams, ParamDef, ParamStyle, QueryParamType};
 pub use request::{ApiRequest, FormField, FormFieldKind};
 pub use response::ApiResponse;

@@ -97,7 +97,9 @@ impl<T> SchemaObject for T where
 ///
 /// ## Code Generation Behavior
 ///
-/// The generator uses [`Schema::full_path()`] to produce type references in generated code:
+/// WebSocket generation uses [`Schema::full_path()`] to qualify message types.
+/// REST builders store the fully qualified context path in `type_name`; REST
+/// generation ignores `module_path`, which remains for shared WebSocket schemas.
 ///
 /// | Constructor | Result | Generated Code |
 /// |-------------|--------|----------------|
@@ -114,10 +116,10 @@ impl<T> SchemaObject for T where
 pub struct Schema {
     /// The Rust type name (e.g., "ListModelsResponse").
     pub type_name: String,
-    /// Module path where this type is defined (e.g., "crate::models").
+    /// WebSocket message module path. REST typed schemas always leave this unset.
     pub module_path: Option<String>,
     /// Typed authoring evidence, checked against the destination context at API build.
-    /// Legacy schemas have no evidence until their authoring is migrated.
+    /// Stored schemas may lack evidence; REST API builders reject those references.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub descriptor: Option<crate::TypeDesc>,
 }

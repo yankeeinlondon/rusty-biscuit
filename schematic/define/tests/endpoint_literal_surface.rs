@@ -28,14 +28,11 @@ fn endpoint_builder_and_parameter_default_preserve_unpaginated_behavior() {
     let endpoint = endpoint_literal(&mut ctx);
     let params = endpoint.params.as_ref().unwrap();
     assert_eq!(params.query[0].name, "per_page");
-    assert!(params.pagination.is_none() && params.response_pagination.is_none());
     assert_eq!(
         EndpointParams {
             query: vec![],
             header: vec![],
             cookie: vec![],
-            pagination: None,
-            response_pagination: None,
         },
         EndpointParams::default()
     );

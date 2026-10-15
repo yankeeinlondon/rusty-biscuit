@@ -92,7 +92,7 @@ impl Endpoint {
     pub fn new(id: impl Into<String>, method: RestMethod, path: impl Into<String>) -> EndpointBuilder {
         EndpointBuilder { endpoint: Endpoint { id: id.into(), method, path: path.into(),
             description: String::new(), request: None, response: ApiResponse::Empty,
-            headers: vec![], params: None, oauth_scopes: None, cross_origin: None, pagination: None }, successes: 0, error: None, state: PhantomData }
+            headers: vec![], params: None, cross_origin: None, pagination: None }, successes: 0, error: None, state: PhantomData }
     }
     pub fn get(id: impl Into<String>, path: impl Into<String>) -> EndpointBuilder { Self::new(id, RestMethod::Get, path) }
     pub fn post(id: impl Into<String>, path: impl Into<String>) -> EndpointBuilder { Self::new(id, RestMethod::Post, path) }
@@ -153,6 +153,9 @@ impl EndpointBuilder<Present, Present> {
         if ep.id.trim().is_empty() || ep.description.trim().is_empty() || !ep.path.starts_with('/') {
             return Err(invalid("<endpoint>", &ep.id, "id and description must be nonempty and path must start with /"));
         }
+        if ep.path.contains('?') {
+            return Err(invalid("<endpoint>", &ep.id, format!("path `{}` contains a query; declare query parameters separately", ep.path)));
+        }
         if ep.method == RestMethod::Get && ep.request.is_some() {
             return Err(invalid("<endpoint>", &ep.id, "GET endpoint cannot declare a request body"));
         }
@@ -176,7 +179,7 @@ impl RestApi {
             docs_url: None, auth: AuthStrategy::None, auth_policy: None, env_auth: vec![], env_username: None,
             headers: vec![], endpoints: vec![], module_path: None, request_suffix: None, version: None,
             env_mapping: None, cross_origin: CrossOrigin::same_origin(), request_id_header: None, secret_names: vec![],
-            default_pagination: None, pagination_exceptions: vec![] }, auth_choices: 0, error: None, state: PhantomData }
+            default_pagination: None }, auth_choices: 0, error: None, state: PhantomData }
     }
 }
 #[allow(missing_docs)]
@@ -232,10 +235,10 @@ impl RestApiBuilder<'_, Present, Present> {
         }
         if let Some(mapping) = &api.env_mapping {
             let expected = RestApi::legacy_env_mapping_for(&api.auth, &api.env_auth, api.env_username.as_deref());
-            if (expected.bearer_token.is_some() && mapping.bearer_token != expected.bearer_token)
-                || (expected.basic_user.is_some() && mapping.basic_user != expected.basic_user)
-                || (expected.basic_pass.is_some() && mapping.basic_pass != expected.basic_pass)
-                || (expected.api_key.is_some() && mapping.api_key != expected.api_key) {
+            if (expected.bearer_token.is_some() && mapping.bearer_token.is_some() && mapping.bearer_token != expected.bearer_token)
+                || (expected.basic_user.is_some() && mapping.basic_user.is_some() && mapping.basic_user != expected.basic_user)
+                || (expected.basic_pass.is_some() && mapping.basic_pass.is_some() && mapping.basic_pass != expected.basic_pass)
+                || (expected.api_key.is_some() && mapping.api_key.is_some() && mapping.api_key != expected.api_key) {
                 return Err(fail("explicit environment mapping conflicts with authentication declaration"));
             }
         }
@@ -250,6 +253,9 @@ impl RestApiBuilder<'_, Present, Present> {
                 format!("{}: {}", diagnostic.error.rule(), diagnostic.error)));
         }
         for ep in &api.endpoints {
+            if ep.path.contains('?') {
+                return Err(invalid(&api.name, &ep.id, format!("path `{}` contains a query; declare query parameters separately", ep.path)));
+            }
             if ep.method == RestMethod::Get && ep.request.is_some() {
                 return Err(invalid(&api.name, &ep.id, "GET endpoint cannot declare a request body"));
             }

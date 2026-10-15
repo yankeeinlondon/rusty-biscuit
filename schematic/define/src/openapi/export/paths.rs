@@ -85,7 +85,6 @@ pub(super) fn map_operation<R: SchemaRegistryLike>(
             request: endpoint.request.clone(),
             response: endpoint.response.clone(),
             headers: endpoint.headers.clone(),
-            oauth_scopes: endpoint.oauth_scopes.clone(),
         };
         extensions.insert("x-schematic".to_string(), op_ext.into());
     }

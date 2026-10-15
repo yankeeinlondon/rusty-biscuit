@@ -734,7 +734,7 @@ mod tests {
                     response: ApiResponse::json_type("Folder"),
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None, cross_origin: None, pagination: None,
+                    cross_origin: None, pagination: None,
                 },
                 // FormData endpoint with file upload
                 Endpoint {
@@ -752,7 +752,7 @@ mod tests {
                     response: ApiResponse::json_type("File"),
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None, cross_origin: None, pagination: None,
+                    cross_origin: None, pagination: None,
                 },
                 // GET endpoint with no request body
                 Endpoint {
@@ -764,7 +764,7 @@ mod tests {
                     response: ApiResponse::json_type("ListFilesResponse"),
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None, cross_origin: None, pagination: None,
+                    cross_origin: None, pagination: None,
                 },
                 // Binary download
                 Endpoint {
@@ -776,7 +776,7 @@ mod tests {
                     response: ApiResponse::Binary,
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None, cross_origin: None, pagination: None,
+                    cross_origin: None, pagination: None,
                 },
             ],
             module_path: None,
@@ -787,8 +787,7 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
-            pagination_exceptions: vec![],
-        };
+            };
 
         assert_eq!(api.name, "FileService");
         assert_eq!(api.endpoints.len(), 4);

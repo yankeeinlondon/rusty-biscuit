@@ -211,47 +211,7 @@ mod tests {
         assert!(parsed.oauth_redirect_uri.is_none());
     }
 
-    #[test]
-    fn endpoint_with_oauth_scopes_serde() {
-        use crate::response::ApiResponse;
-        use crate::types::{Endpoint, RestMethod};
 
-        let endpoint = Endpoint {
-            id: "ListRepos".into(),
-            method: RestMethod::Get,
-            path: "/repos".into(),
-            description: "List repositories".into(),
-            request: None,
-            response: ApiResponse::json_type("ListReposResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: Some(vec!["repo".into(), "read:org".into()]), cross_origin: None, pagination: None,
-        };
 
-        // Verify the field is accessible
-        assert_eq!(
-            endpoint.oauth_scopes.as_ref().unwrap(),
-            &["repo", "read:org"]
-        );
-    }
 
-    #[test]
-    fn endpoint_without_oauth_scopes() {
-        use crate::response::ApiResponse;
-        use crate::types::{Endpoint, RestMethod};
-
-        let endpoint = Endpoint {
-            id: "Health".into(),
-            method: RestMethod::Get,
-            path: "/health".into(),
-            description: "Health check".into(),
-            request: None,
-            response: ApiResponse::json_type("HealthResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None, cross_origin: None, pagination: None,
-        };
-
-        assert!(endpoint.oauth_scopes.is_none());
-    }
 }

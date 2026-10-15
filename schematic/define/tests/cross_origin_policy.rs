@@ -60,19 +60,9 @@ fn allow_origins_keeps_order_and_exact_strings() {
 
 #[test]
 fn endpoints_support_cross_origin_override_and_no_graphql_export() {
-    let endpoint = Endpoint {
-        id: "Ping".to_string(),
-        method: RestMethod::Get,
-        path: "/ping".to_string(),
-        description: "Ping".to_string(),
-        request: None,
-        response: ApiResponse::Empty,
-        headers: vec![],
-        params: None,
-        oauth_scopes: None, cross_origin: None, pagination: None,
-    };
+    let endpoint = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "Ping".to_string(); fixture.method = RestMethod::Get; fixture.path = "/ping".to_string(); fixture.description = "Ping".to_string(); fixture.request = None; fixture.response = ApiResponse::Empty; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture };
 
-    // Exhaustive, without `..`: a new `Endpoint` field fails to compile here.
+    // The public transfer fields remain readable after construction.
     let Endpoint {
         id,
         method,
@@ -82,9 +72,9 @@ fn endpoints_support_cross_origin_override_and_no_graphql_export() {
         response,
         headers,
         params,
-        oauth_scopes,
         cross_origin,
         pagination,
+        ..
     } = endpoint;
     assert_eq!(id, "Ping");
     assert_eq!(method, RestMethod::Get);
@@ -94,7 +84,6 @@ fn endpoints_support_cross_origin_override_and_no_graphql_export() {
     assert_eq!(response, ApiResponse::Empty);
     assert!(headers.is_empty());
     assert!(params.is_none());
-    assert!(oauth_scopes.is_none());
     assert!(cross_origin.is_none());
     assert!(pagination.is_none());
     assert_eq!(Endpoint::get("Ping", "/ping").describes("Ping").returns_empty().cross_origin(CrossOrigin::deny()).build().unwrap().cross_origin, Some(CrossOrigin::deny()));

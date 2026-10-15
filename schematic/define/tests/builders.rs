@@ -72,9 +72,7 @@ fn accepted_successes_and_requests_preserve_stored_wire_shapes() {
 fn endpoint_builder_equals_legacy_literal_without_normalization() {
     let built = Endpoint::get("Get", "/items").describes("Get items").header("Accept", "text/plain")
         .params(EndpointParams::new()).returns_text().build().unwrap();
-    let literal = Endpoint { id: "Get".into(), method: RestMethod::Get, path: "/items".into(),
-        description: "Get items".into(), request: None, response: ApiResponse::Text,
-        headers: vec![("Accept".into(), "text/plain".into())], params: Some(EndpointParams::default()), oauth_scopes: None, cross_origin: None, pagination: None };
+    let literal = { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = "Get".into(); fixture.method = RestMethod::Get; fixture.path = "/items".into(); fixture.description = "Get items".into(); fixture.request = None; fixture.response = ApiResponse::Text; fixture.headers = vec![("Accept".into(), "text/plain".into())]; fixture.params = Some(EndpointParams::default()); fixture.cross_origin = None; fixture.pagination = None; fixture };
     assert_eq!(built, literal);
     assert_eq!(serde_json::to_value(built).unwrap(), serde_json::to_value(literal).unwrap());
 }
@@ -346,22 +344,14 @@ fn missing_destination_references_fail_in_both_form_encodings() {
 }
 
 #[test]
-fn api_builder_preserves_legacy_literal_metadata_and_authoring_order() {
+fn api_builder_preserves_transfer_metadata_and_authoring_order() {
     let ctx = DefinitionContext::types_in("::models");
     let ep = Endpoint::get("Get", "/").describes("Get").returns_empty().build().unwrap();
     let built = RestApi::builder(&ctx, "Fixture", "https://example.com").describes("API")
         .bearer_env(["TOKEN", "TOKEN_FALLBACK"]).docs_url("https://example.com/docs").version("1")
         .module_path("::models").request_suffix("Request").header("X-First", "one").header("X-Second", "two")
         .endpoints([ep.clone()]).default_errors(ErrorSet::none()).build().unwrap();
-    let literal = RestApi {
-        name: "Fixture".into(), description: "API".into(), base_url: "https://example.com".into(),
-        docs_url: Some("https://example.com/docs".into()), auth: AuthStrategy::BearerToken { header: None },
-        auth_policy: None, env_auth: vec!["TOKEN".into(), "TOKEN_FALLBACK".into()], env_username: None,
-        headers: vec![("X-First".into(), "one".into()), ("X-Second".into(), "two".into())], endpoints: vec![ep],
-        module_path: Some("::models".into()), request_suffix: Some("Request".into()), version: Some("1".into()),
-        env_mapping: None, cross_origin: schematic_define::CrossOrigin::default(), request_id_header: None,
-        secret_names: vec![], default_pagination: None, pagination_exceptions: vec![],
-    };
+    let literal = { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = "Fixture".into(); fixture.description = "API".into(); fixture.base_url = "https://example.com".into(); fixture.docs_url = Some("https://example.com/docs".into()); fixture.auth = AuthStrategy::BearerToken { header: None }; fixture.auth_policy = None; fixture.env_auth = vec!["TOKEN".into(), "TOKEN_FALLBACK".into()]; fixture.env_username = None; fixture.headers = vec![("X-First".into(), "one".into()), ("X-Second".into(), "two".into())]; fixture.endpoints = vec![ep]; fixture.module_path = Some("::models".into()); fixture.request_suffix = Some("Request".into()); fixture.version = Some("1".into()); fixture.env_mapping = None; fixture.cross_origin = schematic_define::CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; fixture };
     assert_eq!(built, literal);
     assert_eq!(serde_json::to_value(built).unwrap(), serde_json::to_value(literal).unwrap());
 }
@@ -402,5 +392,22 @@ fn primitive_and_free_form_json_successes_remain_component_free() {
         let wire = schema.descriptor.unwrap().wire_schema();
         assert!(wire.get("$ref").is_none());
         assert!(wire == json!({}) || wire == json!({"type":"string"}));
+    }
+}
+
+#[test]
+fn explicit_empty_mapping_preserves_the_absence_of_environment_credentials() {
+    let ctx = DefinitionContext::types_in("::models");
+    for before_auth in [false, true] {
+        let api = if before_auth {
+            RestApi::builder(&ctx, "Local", "http://localhost:1234").describes("Local")
+                .env_mapping(EnvMapping::default()).bearer_env(["LM_API_TOKEN"]).build()
+        } else {
+            RestApi::builder(&ctx, "Local", "http://localhost:1234").describes("Local")
+                .bearer_env(["LM_API_TOKEN"]).env_mapping(EnvMapping::default()).build()
+        }.unwrap();
+        assert_eq!(api.env_auth, ["LM_API_TOKEN"]);
+        assert_eq!(api.env_mapping, Some(EnvMapping::default()));
+        assert_eq!(api.default_env_mapping(), EnvMapping::default());
     }
 }

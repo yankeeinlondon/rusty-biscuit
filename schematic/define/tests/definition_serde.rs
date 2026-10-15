@@ -16,7 +16,7 @@ fn parameter_variants_round_trip_twice() {
                 description: Some("Filter".into()), param_type: param_type.clone(),
                 explode: true, style };
             let params = EndpointParams { query: vec![param.clone()], header: vec![param.clone()],
-                cookie: vec![param], pagination: None, response_pagination: None };
+                cookie: vec![param],  };
             let first = serde_json::to_string(&params).unwrap();
             let restored: EndpointParams = serde_json::from_str(&first).unwrap();
             let second = serde_json::to_string(&restored).unwrap();
@@ -31,8 +31,7 @@ fn parameter_variants_round_trip_twice() {
 
 #[test]
 fn parameter_collections_reject_malformed_json_matrix() {
-    let control = json!({"query": [], "header": [], "cookie": [],
-        "pagination": null, "response_pagination": null});
+    let control = json!({"query": [], "header": [], "cookie": []});
     assert_eq!(serde_json::from_value::<EndpointParams>(control.clone()).unwrap(), EndpointParams::default());
     for field in ["query", "header", "cookie"] {
         for replacement in [None, Some(Value::Null), Some(json!(123)),
@@ -48,19 +47,11 @@ fn parameter_collections_reject_malformed_json_matrix() {
     for input in ["{\"query\":[],\"header\":[],\"cookie\":[]} garbage", "{"] {
         assert!(serde_json::from_str::<EndpointParams>(input).is_err());
     }
-    for field in ["pagination", "response_pagination"] {
-        let mut absent = control.clone();
-        absent.as_object_mut().unwrap().remove(field);
-        assert_eq!(serde_json::from_value::<EndpointParams>(absent).unwrap(), EndpointParams::default());
-        let mut wrong = control.clone();
-        wrong[field] = json!(123);
-        assert!(serde_json::from_value::<EndpointParams>(wrong).is_err());
-    }
 }
 
 #[test]
-fn legacy_pagination_and_origin_policy_variants_round_trip() {
-    use schematic_define::{CrossOrigin, PaginationStyle};
+fn origin_policy_variants_round_trip() {
+    use schematic_define::CrossOrigin;
     for policy in [CrossOrigin::same_origin(), CrossOrigin::allow_origins(Vec::<String>::new()),
         CrossOrigin::allow_origins(["https://uploads.example.com"]),
         CrossOrigin::allow_without_credentials(), CrossOrigin::danger_allow_any(), CrossOrigin::deny()] {
@@ -68,20 +59,5 @@ fn legacy_pagination_and_origin_policy_variants_round_trip() {
         let restored: CrossOrigin = serde_json::from_str(&text).unwrap();
         assert_eq!(restored.name(), policy.name());
         assert_eq!(restored, policy);
-    }
-    for style in [PaginationStyle::github(), PaginationStyle::offset_limit("skip", "take", 0, u32::MAX),
-        PaginationStyle::cursor("after", None, 0), PaginationStyle::cursor("after", Some("limit"), u32::MAX)] {
-        let text = serde_json::to_string(&style).unwrap();
-        let restored: PaginationStyle = serde_json::from_str(&text).unwrap();
-        assert_eq!(restored.to_query_params(), style.to_query_params());
-        assert_eq!(restored, style);
-    }
-    for invalid in [
-        r#"{"Cursor":{"cursor_param":"after","limit_param":null,"default_limit":"1"}}"#,
-        r#"{"Cursor":{"cursor_param":"after","limit_param":null,"default_limit":-1}}"#,
-        r#"{"Cursor":{"cursor_param":"after","limit_param":null,"default_limit":4294967296}}"#,
-        r#"{"Cursor":{"cursor_param":"after","limit_param":null}}"#,
-    ] {
-        assert!(serde_json::from_str::<PaginationStyle>(invalid).is_err(), "{invalid}");
     }
 }

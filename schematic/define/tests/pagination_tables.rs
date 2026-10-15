@@ -1,10 +1,10 @@
-//! API-level pagination: resolution order, the exceptions table, adoption of
-//! declared parameters, and the legacy metadata's independence.
+//! Pagination resolution from API defaults and endpoint collections, including
+//! adoption of declared parameters.
 
 mod pagination_support;
 
 use pagination_support::{
-    api, endpoint, errors, get, listed, post, resolution, row, with_headers, with_query,
+    api, endpoint, errors, get, listed, post, resolution, with_headers, with_query,
     with_required_query,
 };
 use schematic_define::pagination::{
@@ -13,7 +13,7 @@ use schematic_define::pagination::{
     ParamLocation, Partition, Resolution, ResolutionOrigin, ResolvedList, Session, Strategy, ValueSource, adopted_params,
     caller_knobs, param_adoptions, root_array_item_type, validate_pagination,
 };
-use schematic_define::{ApiResponse, EndpointParams, PaginationResponse, PaginationStyle, RestMethod};
+use schematic_define::{ApiResponse, RestMethod};
 
 fn page_default() -> Strategy {
     Strategy::page_number("page", MoreSignal::link_rel("next"))
@@ -87,7 +87,7 @@ fn only_get_with_an_explicit_vec_is_recognized() {
 }
 
 #[test]
-fn a_row_decides_before_inference() {
+fn an_endpoint_collection_decides_before_inference() {
     let mut forge = api("Forge");
     forge.default_pagination = Some(page_default());
     let offset = Strategy::offset("skip", MoreSignal::NonEmptyPage).build();
@@ -98,12 +98,12 @@ fn a_row_decides_before_inference() {
         post("SearchThings", "/search", "Vec<Thing>"),
         get("ListOthers", "/others", "Others"),
     ];
-    forge.pagination_exceptions = vec![
-        row("GetTagReference", Collection::root().unpaginated()),
-        row("ListRuns", Collection::at("runs").item_type("Run")),
-        row("SearchThings", Collection::root()),
-        row("ListOthers", Collection::at("items").item_type("Other").paginate(offset.clone())),
-    ];
+    for (id, collection) in [
+        ("GetTagReference", Collection::root().unpaginated()),
+        ("ListRuns", Collection::at("runs").item_type("Run")),
+        ("SearchThings", Collection::root()),
+        ("ListOthers", Collection::at("items").item_type("Other").paginate(offset.clone())),
+    ] { forge.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection); };
 
     assert_eq!(resolution(&forge, "ListTags").origin(), Some(ResolutionOrigin::ApiDefault));
     assert_eq!(
@@ -114,7 +114,7 @@ fn a_row_decides_before_inference() {
     assert_eq!(runs.origin(), Some(ResolutionOrigin::ApiDefault));
     assert_eq!(runs.list().unwrap().items, Collection::at("runs").items);
     assert_eq!(runs.list().unwrap().item_type.as_deref(), Some("Run"));
-    // A non-GET endpoint is a list only through a row; its root `Vec<T>` names
+    // A non-GET endpoint is a list only through an explicit collection; its root `Vec<T>` names
     // the item type.
     let search = resolution(&forge, "SearchThings");
     assert_eq!(search.origin(), Some(ResolutionOrigin::ApiDefault));
@@ -132,10 +132,10 @@ fn a_row_decides_before_inference() {
 }
 
 #[test]
-fn a_wrapper_row_without_a_default_is_an_unpaginated_list() {
+fn a_wrapper_collection_without_a_default_is_an_unpaginated_list() {
     let mut plain = api("Plain");
     plain.endpoints = vec![get("ListModels", "/models", "Models")];
-    plain.pagination_exceptions = vec![row("ListModels", Collection::at("data").item_type("Model"))];
+    { let (id, collection) = ("ListModels", Collection::at("data").item_type("Model"));  plain.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection);  };
     assert!(matches!(
         resolution(&plain, "ListModels"),
         Resolution::Unpaginated { origin: ResolutionOrigin::Unauthored, .. }
@@ -152,56 +152,8 @@ fn root_array_item_type_reads_only_an_explicit_vec() {
     assert_eq!(root_array_item_type(&ApiResponse::Text), None);
 }
 
-// ---------------------------------------------------------------------------
-// R5: the exceptions table
-// ---------------------------------------------------------------------------
-
 #[test]
-fn unknown_row_id_is_rejected_with_the_nearest_endpoint() {
-    let mut forge = api("Forge");
-    forge.endpoints = vec![get("ListReleases", "/releases", "Vec<Release>"), get("ListTags", "/tags", "Vec<Tag>")];
-    forge.pagination_exceptions = vec![
-        row("ListReleaze", Collection::root().unpaginated()),
-        row("DeleteEverything", Collection::root().unpaginated()),
-    ];
-    let diagnostics = validate_pagination(&forge);
-    assert_eq!(diagnostics.len(), 2);
-    assert_eq!(diagnostics[0].endpoint.as_deref(), Some("ListReleaze"));
-    assert_eq!(
-        diagnostics[0].error,
-        PaginationError::UnknownExceptionId { id: "ListReleaze".into(), nearest: Some("ListReleases".into()) }
-    );
-    assert_eq!(
-        diagnostics[0].to_string(),
-        "unknown-exception-id: exception names `ListReleaze`, which is not an endpoint of this API; \
-         did you mean `ListReleases`?"
-    );
-    assert_eq!(
-        diagnostics[1].error,
-        PaginationError::UnknownExceptionId { id: "DeleteEverything".into(), nearest: None }
-    );
-    assert_eq!(diagnostics[1].error.group(), PaginationRuleGroup::Exception);
-
-    // The valid sibling.
-    forge.pagination_exceptions = vec![row("ListReleases", Collection::root().unpaginated())];
-    assert_eq!(validate_pagination(&forge), vec![]);
-}
-
-#[test]
-fn duplicate_row_id_is_rejected_and_the_first_row_decides() {
-    let mut forge = api("Forge");
-    forge.default_pagination = Some(page_default());
-    forge.endpoints = vec![get("ListReleases", "/releases", "Vec<Release>")];
-    forge.pagination_exceptions = vec![
-        row("ListReleases", Collection::root().unpaginated()),
-        row("ListReleases", Collection::root()),
-    ];
-    assert_eq!(errors(&forge), vec![PaginationError::DuplicateExceptionId("ListReleases".into())]);
-    assert!(matches!(resolution(&forge, "ListReleases"), Resolution::Unpaginated { .. }));
-}
-
-#[test]
-fn row_list_shape_rules() {
+fn endpoint_collection_list_shape_rules() {
     let shape = |endpoint, collection: Collection| errors(&listed(endpoint, collection.paginate(page_default())));
 
     assert_eq!(
@@ -244,7 +196,7 @@ fn row_list_shape_rules() {
 }
 
 #[test]
-fn an_unpaginated_row_needs_no_item_type() {
+fn an_unpaginated_collection_needs_no_item_type() {
     let opt_out = listed(get("ListAuthUsers", "/users", "Paged"), Collection::at("data").unpaginated());
     assert_eq!(validate_pagination(&opt_out), vec![]);
 }
@@ -463,54 +415,6 @@ fn partition_inputs_are_adopted_with_their_knob() {
     let declared = with_query(get("L", "/l", "Vec<T>"), &["slice", "slices"]);
     let roles: Vec<ManagedRole> = adopted_params(&declared, &strategy).iter().map(|a| a.role).collect();
     assert_eq!(roles, [ManagedRole::PartitionIndex, ManagedRole::PartitionCount]);
-}
-
-// ---------------------------------------------------------------------------
-// R8: legacy metadata is inert
-// ---------------------------------------------------------------------------
-
-#[test]
-fn legacy_pagination_metadata_does_not_change_resolution() {
-    let plain_params = EndpointParams::default()
-        .with_query_param("page", schematic_define::QueryParamType::Integer, false, None)
-        .with_query_param("per_page", schematic_define::QueryParamType::Integer, false, None);
-    let mut legacy_params = EndpointParams::default().with_pagination(PaginationStyle::github());
-    legacy_params.response_pagination = Some(PaginationResponse::LinkHeader);
-    assert_eq!(
-        legacy_params.query.iter().map(|p| &p.name).collect::<Vec<_>>(),
-        plain_params.query.iter().map(|p| &p.name).collect::<Vec<_>>()
-    );
-
-    for default in [None, Some(page_default())] {
-        let build = |params: EndpointParams| {
-            let mut forge = api("Forge");
-            forge.default_pagination = default.clone();
-            let mut releases = get("ListReleases", "/releases", "Vec<Release>");
-            releases.params = Some(params);
-            forge.endpoints = vec![releases];
-            forge
-        };
-        let with_legacy = build(legacy_params.clone());
-        let without = build(plain_params.clone());
-        let legacy_endpoint = &with_legacy.endpoints[0];
-        let plain_endpoint = &without.endpoints[0];
-        assert_eq!(resolution(&with_legacy, "ListReleases"), resolution(&without, "ListReleases"));
-        assert_eq!(caller_knobs(&resolution(&with_legacy, "ListReleases")), caller_knobs(&resolution(&without, "ListReleases")));
-        assert_eq!(validate_pagination(&with_legacy), validate_pagination(&without));
-        if let Some(strategy) = &default {
-            // The materialized parameters are adopted either way.
-            assert_eq!(adopted_params(legacy_endpoint, strategy), adopted_params(plain_endpoint, strategy));
-            assert_eq!(adopted_params(legacy_endpoint, strategy).len(), 2);
-        }
-    }
-
-    // Legacy metadata alone never makes a list.
-    let mut forge = api("Forge");
-    forge.default_pagination = Some(page_default());
-    let mut wrapper = get("ListThings", "/things", "Things");
-    wrapper.params = Some(EndpointParams::default().with_pagination(PaginationStyle::bitbucket()));
-    forge.endpoints = vec![wrapper];
-    assert_eq!(resolution(&forge, "ListThings"), Resolution::NotAList);
 }
 
 #[test]
