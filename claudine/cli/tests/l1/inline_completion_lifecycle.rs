@@ -651,24 +651,22 @@ fn a_refused_body_fires_failure_with_the_body_unchanged_code() {
 /// `fail_fast` stops the run before step 3 launches.
 #[test]
 fn a_sequence_applies_the_verdict_per_step_and_fail_fast_stops_at_step_two() {
-    let source = concat!(
-        "---\n",
-        "$schema:\n",
-        "  marker: 'string(required)'\n",
-        "marker: seed\n",
-        "agent: goose\n",
-        "sequence:\n",
-        "  - alpha\n",
-        "  - beta\n",
-        "  - gamma\n",
-        "start:\n",
-        // `state` is the per-step object, so the branch reads its id.
-        "  - when: \"seq.id == 'beta'\"\n",
-        "    then: {set: {marker: '{{ 42 }}'}}\n",
-        "---\n",
-        "Step {{ seq }}.\n",
-    );
-    let fixture = Fixture::new(source);
+    let fixture = Fixture::new(concat!(
+        "---\nagent: goose\nsequence:\n",
+        "  - {name: alpha, prompt: step.md}\n",
+        "  - {name: beta, prompt: step.md}\n",
+        "  - {name: gamma, prompt: step.md}\n---\n",
+    ));
+    fs::write(
+        fixture.document.parent().unwrap().join("step.md"),
+        concat!(
+            "---\n$schema:\n  marker: 'string(required)'\n",
+            "marker: seed\nagent: goose\nstart:\n",
+            "  - when: \"seq.id == 'beta'\"\n",
+            "    then: {set: {marker: '{{ 42 }}'}}\n",
+            "---\nStep {{ seq.name }}.\n",
+        ),
+    ).unwrap();
     let counter = fixture.path().join("calls.txt");
     write_executable(
         &fixture.bin.join("goose"),

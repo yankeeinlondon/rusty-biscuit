@@ -185,7 +185,7 @@ fn sequence_parallel_group_nested_output_stays_raw() {
     fs::write(fixture.cwd().join("emit.sh"), "printf '%s\\n' '{{ ctx.repo }}'\n").unwrap();
     fs::write(
         fixture.cwd().join("reader.md"),
-        "---\ntitle: reader\n---\nEntry: [{{ fm.entry }}]\nNested: [{{ last(seq.outputs)[0] }}]\n",
+        "---\ntitle: reader\n---\nEntry: [{{ fm.entry }}]\nNested: [{{ last(seq.outputs).templated }}]\n",
     )
     .unwrap();
     let md = fixture.cwd().join("seq.md");
@@ -204,7 +204,7 @@ sequence:
   - name: beta
     prompt: reader.md
     params:
-      entry: "{{ last(seq.outputs)[0] }}"
+      entry: "{{ last(seq.outputs).templated }}"
 ---
 Body.
 "#,

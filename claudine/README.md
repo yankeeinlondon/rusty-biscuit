@@ -130,7 +130,7 @@ Three canonical commands:
 
 - **`claudine compose <file-ref> [key=value ...]`** — compose a Markdown file and send it as a prompt (no file mutation)
 - **`claudine inline-compose <file-ref> [key=value ...]`** — use the frontmatter `prompt` property to generate content and replace the document body, preserving frontmatter byte-for-byte
-- **`claudine sequence <file-ref> [key=value ...]`** — run a serial sequence of composition steps declared in one document, with a shared shell approval cache and concurrent task groups; see [Sequences](docs/topics/flow-control/sequences.md) for container grammar and planned nested execution
+- **`claudine sequence <file-ref> [key=value ...]`** — run a serial sequence of composition steps declared in one document, with a shared shell approval cache, nested sequences, concurrent task groups, and container lifecycle recovery; see [Sequences](docs/topics/flow-control/sequences.md)
 
 **Inline Shorthand.** You can override frontmatter values using `key=value` positional arguments. Values are parsed as JSON5 first (supporting numbers, booleans, arrays) and fall back to plain strings. These shorthand overrides win over `--set` JSON blobs.
 
@@ -323,3 +323,6 @@ Uses the following libraries from this monorepo:
 - `darkmatter` - Composition pipeline (transclusion, interpolation, `::shell`) and Markdown-to-terminal rendering
 - `playa` - Sound effect playback (88 embedded effects)
 - `sniff` - System and environment detection (OS, hardware, git, repo context)
+
+Prompt frontmatter can set `yolo: true` to enable the agent's native permission
+bypass. See [composition permissions](docs/topics/composition.md#provider-auto-approval-with-yolo).

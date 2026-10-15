@@ -609,7 +609,7 @@ use super::lifecycle::{
     LIFECYCLE_EVENT_KEYS, validate_no_err_in_no_error_events,
     validate_no_nested_spans_in_literals,
 };
-use super::hints::{ParsedAgentHint, parse_agent_hint_full, parse_interactive_hint, parse_model_hint};
+use super::hints::{ParsedAgentHint, parse_agent_hint_full, parse_interactive_hint, parse_model_hint, parse_yolo_hint};
 use super::guardrails::render_guardrails;
 use super::types::{
     CompositionClosurePlan, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
@@ -983,6 +983,7 @@ fn effective_surface(
         agent: agent_hint,
         model: model_hint,
         interactive: interactive_hint,
+        yolo: composed.frontmatter().as_map().get("yolo").map_or(Ok(None), parse_yolo_hint)?,
         agent_invalid: agent_full.invalid,
         agent_was_list: agent_full.is_list,
     };

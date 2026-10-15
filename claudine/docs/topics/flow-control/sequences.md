@@ -25,10 +25,8 @@ sequence:
           - warn: Validation failed
 ```
 
-The grammar accepts these containers; **nested container execution is
-planned**. Until the container runner is available, execution rejects a
-nested sequence explicitly before any child runs. An empty nested list is
-valid grammar. Only an inline list can carry container lifecycle events
+Nested containers execute recursively. An empty nested list returns an empty
+array and still runs its container lifecycle. Only an inline list can carry container lifecycle events
 on its task; a reference carries those events in its referenced document.
 
 Groups are concurrent: omit `execution:`. Both `execution: parallel` and
@@ -44,8 +42,8 @@ A sequence document's `fail_fast:` and `--fail-fast` are removed; failure
 handling belongs in lifecycle events. No `CLAUDINE_FAIL_FAST` value is
 injected into child sessions. The `cancelled:` lifecycle event accepts an
 empty stack as an explicit cancellation opt-in; null is an error.
-Cancellation dispatch and container recovery are **planned** with the
-container runner.
+Container recovery uses `retry` or `proxy`; `resume` requires a live provider
+session and is an error on a container. Cancellation dispatch is **planned**.
 
 ## The two meanings of `prompt`
 
@@ -84,7 +82,7 @@ A task declares **exactly one** executable field:
 | `shell: <string \| string[]>` | One or more shell commands |
 | `side_effect: <action>` | One Darkmatter side effect, written as a one-verb lifecycle dictionary in short or long form (`side_effect: { set_frontmatter: ["state.md", "status", "done"] }`) |
 | `group: <group-ref \| inline group>` | A [group](#groups) |
-| `sequence: <list \| file-ref>` | An ordered nested container; execution is planned |
+| `sequence: <list \| file-ref>` | An ordered nested container returning an array |
 | `task: <file-ref>` | An externalized `kind: task` file |
 
 Declaring two is a typed error naming both fields.
@@ -207,8 +205,8 @@ leg name to `{name, outcome, output, err}`, and the declaration-ordered
 the map. Failed output can contain partial stdout; an unadmitted leg has
 null output and retains its cancellation cause. These result fields are
 empty during initialize/start/blocked, and absent inside a leg, where only
-`group` variables are visible. Group result construction is available to the
-binding layer; dispatch of container events remains planned.
+`group` variables are visible. Terminal events run after every admitted leg
+settles.
 
 ### Keys you cannot author as state
 
@@ -484,19 +482,27 @@ What is *not* re-derived at a step boundary: the step list. A
 plan under execution.
 
 **Mid-run failures.** A just-in-time composition failure is a failure of *that
-step*: recorded in the summary and stopping the sequence. Container lifecycle
-recovery is planned; document-level `fail_fast` is rejected.
+step*: recorded in the summary and routed to the enclosing container
+`failure` handler. Without recovery, the sequence stops; document-level
+`fail_fast` is rejected.
 
 ## The output array
 
-Every executed task pushes its final stdout onto `seq.outputs`, in execution order.
+Every completed child publishes one native result to `seq.outputs`, in execution
+order, after its `finalize` succeeds.
 The previous task's output is `{{ last(seq.outputs) }}`.
 
 - A task with no stdout pushes an empty string, so entries stay aligned with
   executed tasks.
-- A **parallel group** pushes a single entry that is itself an array — one
-  string per task, in **declaration** order, never completion order. The overall
-  shape is `(string | string[])[]`.
+- A nested sequence publishes an array; a group publishes a dictionary keyed
+  by leg name in declaration order. These values stay native when nested, for
+  example `["first", ["inner"], {"lint": "clean"}]`.
+- A failed container publishes nothing. A group with `fail_fast: true` also
+  withholds all leg mutations on failure. With `fail_fast: false`, leg failures
+  are handled and their mutations merge in declaration order. A failing
+  `finalize` withholds the result and the staged leg mutations. This isolates
+  in-memory state only; file edits and other external effects are not rolled
+  back.
 - Single-document `compose` / `inline-compose` use the same key, so a prompt
   written with `{{ last(seq.outputs) }}` behaves identically standalone and
   mid-sequence.
@@ -616,9 +622,8 @@ sequence:
 A single-task group is legitimate — it is the honest way to get a semantic name
 or `variables` scoping around one task.
 
-A group leg may itself declare a group or a sequence task. Nested sequence
-execution is **planned**; the current runner rejects a nested sequence before
-child work starts.
+A group leg may itself declare a group or a sequence task. Each leg receives
+a private in-memory runtime branch; siblings share the filesystem.
 
 **Group `loop` is blocked.** Iteration commit semantics are unratified, so a
 group carrying `loop` is rejected at preflight with a typed, actionable error
@@ -633,7 +638,7 @@ are rejected.
 Task `setup:` and `teardown:` are removed grammar, even when their values are
 empty or null. For a prompt task, put `initialize`, `start`, and `finalize` on
 the prompt document. For ordered non-prompt work, use an inline `sequence:`;
-its lifecycle execution is **planned**.
+its lifecycle surrounds its ordered children.
 
 ```yaml
 sequence:
@@ -679,7 +684,7 @@ when every command exits `0`. Stdout is concatenated in declaration order.
 
 Groups always run concurrently. `execution: serial` and `execution: parallel`
 are rejected with replacement guidance. An inline `sequence:` expresses ordered
-work; nested sequence execution is **planned**.
+work; its children run in declaration order.
 
 ### Parallel groups
 
@@ -697,9 +702,9 @@ group:
 - **Scheduling** — all tasks launch at once unless `max_parallel` is set, in
   which case they admit in **declaration order** as slots free up.
 - **Snapshot isolation** — every task receives the same state snapshot and the
-  same `outputs` view, taken when the group starts. Live-disk re-reads happen
-  between *steps*, never between sibling tasks, so a sibling's mid-group file
-  edits are invisible inside the group.
+  same `seq.outputs` view, taken when the group starts. In-memory mutations
+  stay private until settlement. Nested steps re-read live files, so a sibling's
+  file edits can be visible when a later nested step prepares.
 - **State merge** — mutations fold in **task-declaration order**, never
   completion order. Disjoint keys merge cleanly; when two tasks wrote the same
   key the later-declared task wins and Claudine warns on stderr naming the key
@@ -707,8 +712,10 @@ group:
 - **Failure policy** — the grammar accepts group `fail_fast` (default `true`).
   Canceling siblings after a failure and dispatching `cancelled` lifecycle
   events are **planned**. The current runner lets started legs complete and
-  fails the group if any leg failed. A failed leg's partial stdout remains in
-  its output slot.
+  fails an atomic group if any leg failed, stops new admissions, and withholds
+  its leg mutations and result. With `fail_fast: false`, it succeeds after leg
+  failures and merges failed-leg mutations. Terminal summaries retain partial
+  stdout for failed legs.
 - **No interactivity** — a late required property becomes a task *failure*
   inside a parallel group, never a TTY prompt: N concurrent tasks cannot share
   one terminal. Serial contexts keep the standard interactive collection.
@@ -747,8 +754,8 @@ writes complete frames, so sibling writers cannot tear an ANSI sequence.
 
 An unhandled step failure stops the sequence. Document `fail_fast:` and the
 `--fail-fast` flag are removed grammar. Claudine does not inject
-`CLAUDINE_FAIL_FAST` into child processes. Container lifecycle recovery is
-**planned**.
+`CLAUDINE_FAIL_FAST` into child processes. Containers handle recovery through
+`retry` or `proxy` in their lifecycle events.
 
 | Code | Meaning |
 |---|---|
@@ -800,9 +807,60 @@ Any step may define `operation`, whose value becomes the `OPERATION`
 environment variable for that step — the same dimension the `--operation` CLI
 switch sets, and a reportable field in Claudine's logs.
 
-## Planned container execution
+## Remaining planned behavior
 
-The grammar supports nested sequence and group tasks, inline container
-lifecycle events, and group `fail_fast`. Execution of nested containers,
-container recovery, and cancellation event dispatch are **planned**. Group
-`loop` remains rejected. Persisted checkpoint/resume is not available.
+Cancellation event dispatch is **planned**. Group `loop` remains rejected.
+Persisted checkpoint/resume is not available.
+
+
+## Container lifecycle and recovery
+
+Try the [executable container example](../../examples/sequence-containers.md)
+for a sequence containing both a nested sequence and a group.
+
+Root sequences initialize before static preflight. Nested containers initialize
+when reached and prepare just before their children start. A body-only step
+composes the sequence document body without entering another lifecycle.
+
+```mermaid
+flowchart TD
+    I[initialize] --> P[preparation]
+    I -->|skip| X[done without finalize]
+    P -->|ready| S[start]
+    P -->|error| B[blocked]
+    S --> C[children]
+    C --> T[success or failure]
+    T -->|retry| P
+    T -->|proxy| H[target lifecycle]
+    T --> F[finalize]
+    B --> F
+    F --> R[publish successful result]
+```
+
+`retry.max_attempts` counts additional attempts. Initialize runs once; a retry
+starts another preparation and `start`, without finalizing the abandoned
+attempt. Child results and group outcome summaries reset, while runtime writes
+survive. `retry.with` values become runtime writes and never modify the source
+file. Finalize runs once after the last attempt.
+
+```yaml
+failure:
+  - retry:
+      max_attempts: 1
+      with: { attempt_note: second }
+```
+
+An unhandled child failure runs cleanup from the innermost primitive outward
+and exits with status 1. Logging or `stop` in a failure handler does not recover
+it. Timeouts follow this failure path, never cancellation.
+
+```mermaid
+flowchart LR
+    D[document failure and finalize] --> G[group failure and finalize]
+    G --> S[sequence failure and finalize]
+    S --> E[exit 1]
+```
+
+Dry-run fires no lifecycle events recursively and launches no provider or
+inline write-back. It still executes shell tasks and composition shell
+expansions against initial state: those commands can have real effects.

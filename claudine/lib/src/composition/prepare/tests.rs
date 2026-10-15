@@ -1605,3 +1605,11 @@ fn rename_validation_uses_active_authored_overrides_and_never_scans_runtime_data
     let error = prepare_direct(&source, options).unwrap_err();
     assert!(matches!(error, CompositionError::RemovedGrammar { ref removed, .. } if removed == "state.name"), "{error}");
 }
+
+#[test]
+fn direct_composition_parses_yolo_hint() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, &[("yolo", json!(true))], "Content");
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
+    assert!(prepared.selection_hints.yolo_enabled(false));
+}

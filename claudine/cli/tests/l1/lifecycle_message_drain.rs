@@ -552,7 +552,12 @@ fn sequence_last_step_success_message_is_delivered_before_exit() {
     let document = fixture.cwd().join("steps.md");
     write(
         &document,
-        "---\nsequence:\n  - alpha\n  - beta\nsuccess:\n  message: \"seq-success-{{ seq.name }}\"\n---\nRun step {{ seq.name }}\n",
+        "---\nsequence:\n  - {name: alpha, prompt: step.md}\n  - {name: beta, prompt: step.md}\n---\n",
+    );
+
+    write(
+        &fixture.cwd().join("step.md"),
+        "---\nsuccess:\n  message: \"seq-success-{{ seq.name }}\"\n---\nRun step {{ seq.name }}\n",
     );
 
     let listener = WebhookListener::start(ListenerMode::WithholdUntilReleased);

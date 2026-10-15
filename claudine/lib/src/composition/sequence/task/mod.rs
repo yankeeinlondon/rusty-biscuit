@@ -1,37 +1,18 @@
-//! Atomic task execution: one outcome contract for every task variant.
+//! Task dispatch with native container results and atomic publication.
 //!
-//! A [`PreflightTask`] describes *what could run*; [`TaskExecution`] runs it.
-//! Every variant — `prompt`, `shell`, `side_effect`, `group` — passes through
-//! the same three stages and reports the same [`TaskOutcome`], so a scheduler
-//! never learns what kind of work it just ran. A `group` is the one variant
-//! that is itself a scheduler: see [`group`].
+//! Shell and side-effect tasks return text; prompt documents delegate their
+//! lifecycle to the provider wrapper. Nested sequences and concurrent groups
+//! use the shared container lifecycle driver and return arrays or dictionaries.
+//! A result is published only after successful cleanup. Group legs keep private
+//! runtime branches until the owning group's terminal events and finalize settle.
 //!
-//! ## Stage contract
-//!
-//! `setup` → primary → `teardown`, with these ratified rules (spec → *Task
-//! Resolution and Lifecycle Semantics*):
-//!
-//! - a failed `setup` skips the primary action, but **not** `teardown`
-//! - `teardown` runs exactly once whenever `setup` has *started*, including
-//!   after a failed or interrupted primary, and reads the current `err`
-//! - a failed `teardown` converts an otherwise successful task to failure; when
-//!   the primary already failed, its error stays primary and the teardown error
-//!   attaches as a secondary diagnostic
-//! - the output is appended only after `teardown` completes, so no later work
-//!   observes an output from a task whose teardown failed it
-//!
-//! A stack shape that will not parse fails the task *before* setup starts, so
-//! nothing runs and no teardown is owed.
-//!
-//! ## Seams
-//!
-//! Composing and launching a `prompt:` document is the wrapper's job, so it
-//! enters through [`PromptTaskRunner`]; shell commands enter through
-//! [`TaskShellRunner`]. Both are injected, which is what lets the whole stage
-//! contract be tested without a provider or a process.
+//! The injected prompt and shell runners let tests observe public outcomes
+//! without launching providers. Internal setup/teardown fields remain available
+//! to legacy execution fixtures; authored task grammar rejects those keys.
 
 mod group;
 mod shell;
+mod sequence;
 mod templates;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -155,6 +136,8 @@ impl TaskDiagnostic {
 /// The structured result of running one task.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TaskOutcome {
+    /// Native task result; containers retain arrays and named objects.
+    pub result: Value,
     /// Success, failure, or interruption.
     pub status: TaskStatus,
     /// The task's captured stdout — provider final text, concatenated command
@@ -165,7 +148,7 @@ pub struct TaskOutcome {
     /// multi-command task reads as its results one per line and a blank line
     /// the command actually wrote survives.
     pub stdout: String,
-    /// `true` when this outcome's `stdout` was committed to `outputs`.
+    /// `true` when this outcome's native `result` was committed to `seq.outputs`.
     pub output_committed: bool,
     /// Runtime state written by this task's stages, in first-write order.
     pub mutations: Vec<RuntimeMutation>,
@@ -195,6 +178,8 @@ impl TaskOutcome {
 /// to compose and launch.
 #[derive(Debug, Clone)]
 pub struct PromptTaskRequest {
+    /// Compose only the body; the enclosing sequence owns lifecycle events.
+    pub body_only: bool,
     /// Established lexical group variables; absent outside groups.
     pub lifecycle_group: Option<Map<String, Value>>,
     /// The context captured by the document barrier, reused without a second capture.
@@ -280,6 +265,11 @@ pub struct PromptRunOutcome {
 ///
 /// The wrapper implements this; the library never owns provider launch.
 pub trait PromptTaskRunner: Sync {
+    /// Whether containers should compose recursively without dispatching lifecycle events.
+    fn is_dry_run(&self) -> bool {
+        false
+    }
+
     /// Check the document's late shell inputs before this task's setup runs.
     fn validate(&self, _request: &PromptTaskRequest) -> Result<(), CompositionError> {
         Ok(())
@@ -293,9 +283,9 @@ pub trait PromptTaskRunner: Sync {
     /// code through [`PromptRunOutcome::exit_code`].
     fn run(&self, request: &PromptTaskRequest) -> Result<PromptRunOutcome, CompositionError>;
 
-    /// Open the composition run one serial group member executes as.
+    /// Open the composition run an ordered sequence child executes as.
     ///
-    /// A serial member is a run and document of its own. Late shell readers
+    /// Each child is a run and document of its own. Late shell readers
     /// open at the group barrier; other members open at dispatch, observing
     /// what earlier members changed. `None` keeps the group's snapshot for the member's fields,
     /// which is all a runner without launch evidence can offer.
@@ -303,7 +293,7 @@ pub trait PromptTaskRunner: Sync {
         None
     }
 
-    /// Refresh Git/run observations for a serial member without late shell inputs,
+    /// Refresh Git/run observations for an ordered child without late shell inputs,
     /// so ordinary reads see earlier members' changes. Retain the document and its
     /// environment; a new document capture would change the member's input snapshot.
     fn refresh_member_run(&self, _task: &PreflightTask, run: &TaskRun) -> TaskRun {
@@ -450,29 +440,19 @@ impl TaskExecution<'_> {
             group_output,
         } = self.run_stages(validated);
 
-        // A serial group's members each committed their own entry as they ran, so
-        // the group must not add a wrapper entry on top of them. A *parallel*
-        // group is the opposite: its members wrote into private buffers that were
-        // discarded, and the group owes one nested entry with a slot per member —
-        // including for members that failed.
-        let commits_output = !matches!(self.task.action, PreflightAction::Group(_));
-        let mut output_committed = false;
-        if let Some(runtime) = self.runtime {
-            // Either way the commit happens here, after `teardown`: a teardown
-            // that failed an otherwise successful task owes no output.
-            if let Some(entry) = group_output {
-                runtime.append_output_entry(entry);
-                output_committed = true;
-            } else if status == TaskStatus::Succeeded && commits_output {
-                // The transport newline was already removed where the text was
-                // produced — per command for a shell task, once for a provider —
-                // so this appends the entry as-is rather than trimming again.
-                runtime.append_output_entry(Value::String(stdout.clone()));
-                output_committed = true;
-            }
+        let publishes = group_output.is_some() || !matches!(self.task.action, PreflightAction::Group(_) | PreflightAction::Sequence(_));
+        let result = group_output.unwrap_or_else(|| {
+            if matches!(self.task.action, PreflightAction::Group(_) | PreflightAction::Sequence(_)) {
+                Value::Null
+            } else { Value::String(stdout.clone()) }
+        });
+        let output_committed = status == TaskStatus::Succeeded && publishes && self.runtime.is_some();
+        if output_committed {
+            self.runtime.expect("commit has a runtime").append_output_entry(result.clone());
         }
 
         TaskOutcome {
+            result,
             status,
             stdout,
             output_committed,
@@ -486,6 +466,17 @@ impl TaskExecution<'_> {
 
     /// The stage machine, without output commit or timing bookkeeping.
     fn run_stages(&self, validated: Option<&ValidatedTask>) -> StageOutcome {
+        if let PreflightAction::Group(group) = &self.task.action {
+            let outcome = self.run_group_container(group);
+            let (status, error) = match outcome.result {
+                PrimaryResult::Succeeded => (TaskStatus::Succeeded, None),
+                PrimaryResult::Failed(error) => (TaskStatus::Failed, Some(error)),
+                PrimaryResult::Interrupted => (TaskStatus::Interrupted, None),
+            };
+            return StageOutcome { status, error, stdout: outcome.stdout,
+                secondary_errors: outcome.secondary, group_tasks: outcome.group_tasks,
+                group_output: outcome.group_output };
+        }
         let mut task = self.task.clone();
         self.graph.settle_task_shell_modes(&mut task);
         TaskExecution { task: &task, ..*self }.run_settled_stages(validated)
@@ -728,6 +719,7 @@ impl TaskExecution<'_> {
                 action,
                 authored_set_order,
             } => self.run_side_effect(action, authored_set_order.as_deref()),
+            PreflightAction::Sequence(sequence) => self.run_sequence(sequence),
             PreflightAction::Group(definition) => self.run_group(definition, group.expect("groups pass the step barrier")),
         }
     }
@@ -743,15 +735,15 @@ impl TaskExecution<'_> {
             execution.prompt.validate(&request)?;
             Some(request)
         } else { None };
-        let group = if let PreflightAction::Group(group) = &task.action {
-            Some(execution.validate_group(group)?)
-        } else { None };
-        Ok(ValidatedTask { late, prompt, group })
+        // Containers own their preparation after initialize, including when a
+        // parent group freezes its ordinary members' shell inputs.
+        Ok(ValidatedTask { late, prompt, group: None })
     }
 
     fn prompt_request(&self, path: &std::path::Path, reference: &str) -> Result<PromptTaskRequest, CompositionError> {
         let params = self.evaluate_params()?;
         Ok(PromptTaskRequest {
+            body_only: false,
             lifecycle_group: self.stack.group.cloned(),
             prepared_context: Default::default(),
             document_epoch: Default::default(),
@@ -1407,13 +1399,13 @@ impl StageOutcome {
 /// to `outputs`, but a scheduler reporting the task — and a parallel group
 /// keeping a slot per sibling — needs the text the work managed to produce.
 struct PrimaryOutcome {
+    group_binding: Option<super::super::lifecycle::bindings::GroupBinding>,
     stdout: String,
     result: PrimaryResult,
     /// Populated only by a group: one entry per member task that ran.
     group_tasks: Vec<GroupTaskResult>,
-    /// The nested `outputs` entry a completed parallel group owes — one string
-    /// per member in declaration order. `None` for every other task variant,
-    /// including a serial group, whose members each committed their own entry.
+    /// A completed container's native result, retained until its cleanup succeeds.
+    /// `None` for ordinary tasks and skipped containers.
     group_output: Option<Value>,
     /// Diagnostics a member task raised that did not decide the group's
     /// outcome.
@@ -1439,6 +1431,7 @@ impl PrimaryOutcome {
 
     fn new(stdout: String, result: PrimaryResult) -> Self {
         Self {
+            group_binding: None,
             stdout,
             result,
             group_tasks: Vec::new(),

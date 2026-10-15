@@ -291,6 +291,21 @@ pub enum PreflightAction {
     },
     /// Execute a group.
     Group(PreflightGroup),
+    /// Execute a nested sequence as one native array result.
+    Sequence(Box<PreflightSequence>),
+}
+
+/// A nested sequence with its frozen approval graph and authoring source.
+#[derive(Debug, Clone)]
+pub struct PreflightSequence {
+    /// Normalized child positions and authored values.
+    pub plan: super::super::model::SequencePlan,
+    /// Children in declaration order.
+    pub steps: Vec<PreflightStep>,
+    /// Events belonging to this container, rather than its children.
+    pub lifecycle: Box<crate::composition::LifecycleConfig>,
+    /// Source used to resolve child references and compose body-only steps.
+    pub origin_path: PathBuf,
 }
 
 /// A resolved group and its member tasks.

@@ -370,9 +370,10 @@ fn set_preserves_a_whole_value_type_end_to_end() {
 fn a_sequence_accumulates_one_entry_per_step() {
     let fixture = CliProcessFixture::named("composition-outputs");
     // Each launch emits a distinct line so the accumulator's order is visible.
-    write_executable(
-        &fixture.bin_dir().join("goose"),
-        r#"#!/bin/sh
+    let records = common::launch_recorder::install(
+        &fixture,
+        "goose",
+        r#"
 count=0
 if [ -f "$HOME/n.txt" ]; then
   IFS= read -r count < "$HOME/n.txt"
@@ -386,7 +387,7 @@ exit 0
     let md = fixture.cwd().join("seq.md");
     fs::write(
         &md,
-        "---\nsequence:\n  - alpha\n  - beta\nfinalize:\n  info: 'acc n={{ length(seq.outputs) }} last={{ last(seq.outputs) }}'\n---\nRun {{seq}}.\n",
+        "---\nsequence:\n  - alpha\n  - beta\nfinalize:\n  info: 'acc n={{ length(seq.outputs) }} first={{ first(seq.outputs) }} last={{ last(seq.outputs) }}'\n---\nRun {{seq}} prior=[{{ last(seq.outputs) }}].\n",
     )
     .unwrap();
 
@@ -395,13 +396,20 @@ exit 0
         &["sequence", "--goose", md.to_str().unwrap()],
     );
 
+    let prompts: Vec<String> = common::launch_recorder::launches(&records)
+        .into_iter()
+        .map(|argv| {
+            let at = argv.iter().position(|arg| arg == "-t").expect("goose run -t <prompt>");
+            argv[at + 1].clone()
+        })
+        .collect();
+    assert_eq!(prompts.len(), 2);
+    assert!(prompts[0].contains("prior=[]"), "{prompts:?}");
+    assert!(prompts[1].contains("prior=[output-1]"), "{prompts:?}");
+    assert_eq!(stderr.matches("acc n=").count(), 1, "{stderr}");
     assert!(
-        stderr.contains("acc n=1 last=output-1"),
-        "step 1's entry must be committed; stderr:\n{stderr}"
-    );
-    assert!(
-        stderr.contains("acc n=2 last=output-2"),
-        "step 2 must see both entries, its own last; stderr:\n{stderr}"
+        stderr.contains("acc n=2 first=output-1 last=output-2"),
+        "the container finalizes once with both entries in order; stderr:\n{stderr}"
     );
 }
 

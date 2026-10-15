@@ -289,6 +289,10 @@ pub enum CompositionError {
     #[error("frontmatter `interactive` must be a boolean (true/false), got {0}")]
     InteractiveHintWrongType(String),
 
+    /// The `yolo` frontmatter property is not a boolean.
+    #[error("frontmatter `yolo` must be a boolean (true/false), got {0}")]
+    YoloHintWrongType(String),
+
     /// The `agent` frontmatter hint matches multiple providers.
     #[error("agent hint `{hint}` is ambiguous; matches: {matches}")]
     AgentHintAmbiguous {
@@ -1770,10 +1774,10 @@ pub enum CompositionError {
 
     /// A `prompt:` task referenced a document that itself declares `sequence:`.
     ///
-    /// Nested sequences are out of scope in v1 (spec → *Static Preflight*).
+    /// A sequence document needs an explicit container executable.
     #[error(
-        "nested sequences are not supported: `{path}` declares `sequence:` but is \
-         referenced as a prompt task from `{referenced_from}`"
+        "`{path}` declares `sequence:` but is referenced as a prompt task from \
+         `{referenced_from}`; use `sequence: <file>` instead"
     )]
     SequenceNestedSequence {
         /// The referenced prompt document.
@@ -3463,6 +3467,9 @@ impl CompositionError {
             }
             CompositionError::ModelHintWrongType(_) => {
                 Some(FrontmatterHighlight::Property("model".to_string()))
+            }
+            CompositionError::YoloHintWrongType(_) => {
+                Some(FrontmatterHighlight::Property("yolo".to_string()))
             }
             CompositionError::InteractiveHintWrongType(_) => {
                 Some(FrontmatterHighlight::Property("interactive".to_string()))

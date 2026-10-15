@@ -858,6 +858,30 @@ No model specified! OpenCode requires a model in non-interactive mode.
 
 The shorthand booleans and the `--provider` value both accept fuzzy input (`cl` → `claude`, `gem` → `gemini`, `oc` → `opencode`). The [argv normalizer](argv-normalization.md) rewrites every shorthand into a canonical `--provider <slug>` pair before clap runs, so runtime provider selection only ever reads the single `--provider` field.
 
+### Provider auto-approval with `yolo`
+
+Set `yolo: true` to request the provider's native permission bypass for a prompt:
+
+```yaml
+---
+agent: codex
+yolo: true
+---
+Commit the staged files.
+```
+
+For Codex this disables approvals and sandboxing, allowing Git to write a
+linked worktree's metadata outside the workspace. Other providers use their
+native YOLO mode, subject to their supported session modes.
+
+`--yolo` (or `CLAUDINE_YOLO=true`) takes precedence; `yolo: false`, `null`,
+or an absent property does not enable bypass. Other types are rejected.
+The active document's setting is re-read for retry, resume, and proxy launches,
+and dry-run output reports the resolved intent.
+
+This property controls the provider session. Claudine's own shell preflight
+still requires approval or an explicit `--yolo` / `CLAUDINE_YOLO=true`.
+
 ### The `--interactive` and `--no-interactive` Flags
 
 `-i` / `--interactive` forces an **interactive provider session**; `--no-interactive` forces a **non-interactive provider session**. Both flags control the session mode, not provider selection, and the composed prompt is still prepared first before being passed to the provider.

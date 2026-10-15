@@ -502,10 +502,9 @@ Body.
     );
 }
 
-/// A parallel group commits one nested `outputs` entry in declaration order,
-/// even when the members finish in the opposite order.
+/// A parallel group publishes one dictionary with results keyed by leg name.
 #[test]
-fn a_parallel_group_commits_a_declaration_ordered_nested_entry() {
+fn a_parallel_group_commits_one_named_result() {
     let fixture = CliProcessFixture::named("sequence-groups");
     fake_goose(&fixture);
     fs::write(
@@ -514,9 +513,6 @@ fn a_parallel_group_commits_a_declaration_ordered_nested_entry() {
     )
     .unwrap();
     let md = fixture.cwd().join("seq.md");
-    // `first` sleeps the longest, so completion order is the reverse of
-    // declaration order. Indexing the nested entry positionally is what proves
-    // the slots follow declaration order rather than arrival order.
     fs::write(
         &md,
         r#"---
@@ -526,13 +522,13 @@ sequence:
       name: bundle
       tasks:
         - name: first
-          shell: "sleep 1; printf 'from-first\n'"
+          shell: "printf 'from-first\n'"
         - name: second
           shell: "printf 'from-second\n'"
   - name: beta
     prompt: reader.md
     params:
-      entry: "slot0={{ last(seq.outputs)[0] }} slot1={{ last(seq.outputs)[1] }}"
+      entry: "slot0={{ last(seq.outputs).first }} slot1={{ last(seq.outputs).second }}"
 ---
 
 Body.
@@ -548,8 +544,7 @@ Body.
     assert_eq!(code, 0, "stderr:\n{stderr}");
     assert!(
         stderr.contains("entry is slot0=from-first slot1=from-second"),
-        "the nested entry's slots must follow declaration order, not the \
-         reversed completion order; stderr:\n{stderr}"
+        "the named entry must retain each member's result; stderr:\n{stderr}"
     );
 }
 

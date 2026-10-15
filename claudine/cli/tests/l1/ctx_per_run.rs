@@ -861,3 +861,31 @@ fn sequence_preflight_observes_git_state_once_for_every_prompt_document() {
     assert_eq!(run.code, Some(0), "{}", run.output);
     assert_eq!(volatile_observations(&run.output), "file_changes (4)", "{}", run.output);
 }
+
+#[test]
+fn container_events_refresh_current_after_nested_child_work() {
+    let fixture = repo("current-container-events");
+    let source = fixture.cwd().join("sequence.md");
+    write(&source, r#"---
+start: [{ stdout: 'root-start {{ length(current.staged_files) }}' }]
+success: [{ stdout: 'root-success {{ length(current.staged_files) }}' }]
+sequence:
+  - name: group
+    group:
+      name: checks
+      start: [{ stdout: 'group-start {{ length(current.staged_files) }}' }]
+      success: [{ stdout: 'group-success {{ length(current.staged_files) }}' }]
+      tasks:
+        - name: leg
+          start: [{ stdout: 'leg-start {{ length(current.staged_files) }}' }]
+          success: [{ stdout: 'leg-success {{ length(current.staged_files) }}' }]
+          sequence:
+            - { name: stage, shell: 'git add a.txt' }
+---
+"#);
+    let output = fixture.command().args(["sequence", "--claude", "--yolo", "--silent"])
+        .arg(&source).assert().success().get_output().clone();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.lines().collect::<Vec<_>>(), ["root-start 0", "group-start 0", "leg-start 0",
+        "leg-success 1", "group-success 1", "root-success 1"]);
+}

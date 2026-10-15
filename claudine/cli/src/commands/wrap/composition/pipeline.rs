@@ -401,7 +401,7 @@ fn resolve_selection_and_launch(
         if !silent && !request.header_emitted {
             crate::output::emit_execution_header(
                 provider,
-                request.yolo,
+                request.provider_yolo(),
                 request.session_interactive,
                 detail_requested,
                 request.repo,
@@ -453,7 +453,7 @@ fn prepare_environment_and_mcp(
         let silent = request.silent;
         let mcp_requested = request.mcp || !request.mcp_use.is_empty();
         let raw_agent_params: Vec<String> = std::env::args().skip(1).collect();
-        let yolo_enabled = request.yolo;
+        let yolo_enabled = request.provider_yolo();
         // Taken before the allow-list runs: once `build_child_env_with_launch`
         // has sanitized for this profile, a credential it stripped is
         // unrecoverable, and a rebuild onto a provider entitled to it could only
@@ -780,11 +780,11 @@ fn construct_argv_and_system_prompt(
 
         // `effective_yolo` is the single source of truth for whether the
         // provider's native bypass actually took effect on this launch.
-        // Reporter / badge surfaces should read this — never `request.yolo`
+        // Reporter / badge surfaces should read this — never the requested intent
         // (intent) on its own, since interactive OpenCode silently suppresses
         // the flag.
         let mut effective_yolo = false;
-        if request.yolo {
+        if request.provider_yolo() {
             let mut env_overrides = Vec::new();
             let outcome = profile.apply_yolo_for_mode(
                 &mut child_args,
@@ -806,7 +806,7 @@ fn construct_argv_and_system_prompt(
         // post-apply truth so the dispatch reporter (which stamps event
         // metadata from this var) reflects what actually landed, not what
         // was intended. `build_child_env_with_launch` set this from
-        // `request.yolo` before we knew the outcome — replace it now.
+        // the requested intent before we knew the outcome — replace it now.
         env_plan.env.insert(
             "YOLO".into(),
             if effective_yolo { "true" } else { "false" }.into(),
@@ -816,7 +816,7 @@ fn construct_argv_and_system_prompt(
         // as the last Claudine overlay, mirroring the direct wrapper's Stage 10.5.
         // Runs after the MCP fold above so it cannot be weakened by the MCP or
         // system-prompt writers; gated on YOLO having actually taken effect
-        // (`effective_yolo`, not `request.yolo`) plus non-interactive.
+        // (`effective_yolo`, not requested intent) plus non-interactive.
         crate::commands::wrap::wrapper_stages::apply_opencode_yolo_config_overlay(
             provider,
             effective_yolo,
@@ -830,7 +830,7 @@ fn construct_argv_and_system_prompt(
         tracing::debug!(
             target: "claudine::wrap::yolo",
             provider = %profile.provider(),
-            request_yolo = request.yolo,
+            request_yolo = request.provider_yolo(),
             effective_yolo,
             non_interactive = effective_non_interactive,
             child_args = ?crate::commands::wrap::env::redact_sensitive_args(&child_args),
@@ -1199,7 +1199,7 @@ fn construct_argv_and_system_prompt(
                     facets: lp::DocumentLaunchFacets {
                         provider,
                         non_interactive: effective_non_interactive,
-                        yolo_requested: request.yolo,
+                        yolo_requested: request.provider_yolo(),
                         is_inline,
                         model: target.model.clone(),
                         mcp_body_tags,

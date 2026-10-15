@@ -121,6 +121,10 @@ impl Walk<'_> {
             PreflightAction::Group(group) => {
                 queued += group.tasks.iter().map(|member| self.task(member)).sum::<usize>();
             }
+            PreflightAction::Sequence(sequence) => {
+                queued += sequence.steps.iter().filter_map(|step| step.task.as_ref())
+                    .map(|child| self.task(child)).sum::<usize>();
+            }
             PreflightAction::Shell { .. } | PreflightAction::SideEffect { .. } => {}
         }
         queued

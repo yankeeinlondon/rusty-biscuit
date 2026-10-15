@@ -58,7 +58,7 @@ mod shape;
 pub use reapproval::PreflightApproval;
 pub use shape::{
     ApprovedCommand, ApprovedSetValue, CommandSiteId, GroupExecution, PreflightAction,
-    PreflightGroup, PreflightStep, PreflightTask, PreparedShellSite, ShellSiteKind, SiteMode,
+    PreflightGroup, PreflightSequence, PreflightStep, PreflightTask, PreparedShellSite, ShellSiteKind, SiteMode,
     TaskDiagnosticProvenance, TaskPosition,
 };
 
@@ -124,6 +124,7 @@ type GraphShellAuthorization = Option<(darkmatter::markdown::compose::shell_expa
 /// The complete statically-knowable picture of one sequence invocation.
 #[derive(Debug, Clone, Default)]
 pub struct PreflightGraph {
+    authored_sources: HashMap<PathBuf, Option<Vec<u8>>>,
     /// Authorization granted by the graph audit, separate from discovery.
     shell_authorization: std::sync::Arc<std::sync::Mutex<GraphShellAuthorization>>,
     /// One node per step, in sequence order.
@@ -242,6 +243,21 @@ fn site_source_context(site: &PreparedShellSite) -> biscuit_terminal::errors::So
 }
 
 impl PreflightGraph {
+    fn capture_source(&mut self, path: &Path) {
+        self.authored_sources.entry(path.to_path_buf()).or_insert_with(|| std::fs::read(path).ok());
+    }
+
+    /// Unchanged source bytes retain their audited nodes; live variables still
+    /// resolve at each container preparation boundary.
+    pub(crate) fn sources_unchanged(&self) -> bool {
+        !self.authored_sources.is_empty() && self.authored_sources.iter().all(|(path, original)| {
+            match (original, std::fs::read(path)) {
+                (Some(original), Ok(current)) => original == &current,
+                _ => false,
+            }
+        })
+    }
+
     pub(crate) fn record_shell_authorization(
         &self,
         approved: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
@@ -422,6 +438,78 @@ pub fn build_preflight_graph_with_invocation(
     Ok(loader.graph)
 }
 
+fn load_preparation_source(path: &Path) -> Result<ResolvedCompositionSource, CompositionError> {
+    let original_text = std::fs::read_to_string(path).map_err(|source| CompositionError::MarkdownLoad {
+        path: path.to_path_buf(), source: super::super::error::MarkdownLoadCause::Read(source),
+    })?;
+    let markdown = if path.extension().and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("md") || extension.eq_ignore_ascii_case("markdown"))
+    {
+        Markdown::try_from(path).map_err(|source| CompositionError::MarkdownLoad {
+            path: path.to_path_buf(), source: super::super::error::MarkdownLoadCause::Parse(Box::new(source)),
+        })?
+    } else {
+        let loaded = super::data::load_document(path)?;
+        let root = expect_object(&loaded.value, "container source", path)?;
+        let mut frontmatter = darkmatter::markdown::Frontmatter::new();
+        for (key, value) in root {
+            frontmatter.insert(&key, value).map_err(|source| CompositionError::MarkdownLoad {
+                path: path.to_path_buf(), source: super::super::error::MarkdownLoadCause::Parse(Box::new(source)),
+            })?;
+        }
+        Markdown::with_frontmatter(frontmatter.with_mapping_orders(loaded.orders), "")
+    };
+    Ok(ResolvedCompositionSource {
+        original_ref: path.to_string_lossy().into_owned(), resolved_path: path.to_path_buf(), original_text, markdown,
+    })
+}
+
+/// Re-read a nested container at its preparation boundary while retaining the
+/// original approval graph as the authority for every executable command.
+pub(crate) fn prepare_nested_sequence(
+    task: &PreflightTask, state: &EffectiveState, context: ComposeContext,
+    resolution: &biscuit_file::FileResolutionContext, in_group: bool,
+) -> Result<(PreflightSequence, PreflightGraph), CompositionError> {
+    let source = load_preparation_source(&task.origin_path)?;
+    let document = super::data::load_document(&task.origin_path)?.value;
+    let raw_task = document.pointer(task.authored.pointer()).and_then(Value::as_object)
+        .ok_or_else(|| CompositionError::SequenceInvalid("nested sequence disappeared before preparation".into()))?;
+    let value = raw_task.get("sequence").ok_or_else(|| CompositionError::SequenceInvalid(
+        "nested `sequence:` executable changed before preparation".into(),
+    ))?;
+    let mut loader = Loader::new(&source, context, resolution.clone());
+    loader.step_frontmatter = Arc::new(state.data().clone());
+    loader.ancestry.push(canonical(&task.origin_path));
+    let sequence = loader.load_sequence(
+        value, raw_task, &task.origin_path, &task.label, &task.diagnostic.task_property,
+        &task.authored, state,
+        Placement { position: task.position, in_group },
+    )?;
+    Ok((sequence, loader.graph))
+}
+
+/// Re-read a group's authored executable, including external and catalog references.
+pub(crate) fn prepare_nested_group(
+    task: &PreflightTask, state: &EffectiveState, context: ComposeContext,
+    resolution: &biscuit_file::FileResolutionContext,
+) -> Result<(PreflightGroup, PreflightGraph), CompositionError> {
+    let source = load_preparation_source(&task.origin_path)?;
+    let document = super::data::load_document(&task.origin_path)?.value;
+    let raw_task = document.pointer(task.authored.pointer()).and_then(Value::as_object)
+        .ok_or_else(|| CompositionError::SequenceInvalid("group disappeared before preparation".into()))?;
+    let value = raw_task.get("group").ok_or_else(|| CompositionError::SequenceInvalid(
+        "group executable changed before preparation".into(),
+    ))?;
+    let mut loader = Loader::new(&source, context, resolution.clone());
+    loader.step_frontmatter = Arc::new(state.data().clone());
+    loader.ancestry.push(canonical(&task.origin_path));
+    let group = loader.load_group(
+        value, &task.origin_path, &task.label, &property_child(&task.diagnostic.task_property, "group"),
+        &task.authored.child("group"), state, task.position,
+    )?;
+    Ok((group, loader.graph))
+}
+
 /// Walk state: the graph under construction plus the ancestry stack and the
 /// parsed-document cache shared by independent branches.
 struct Loader<'a> {
@@ -514,6 +602,7 @@ impl<'a> Loader<'a> {
 
     fn walk_plan(&mut self, plan: &SequencePlan) -> Result<(), CompositionError> {
         let source_path = self.source.resolved_path.clone();
+        self.graph.capture_source(&source_path);
         let mut authored = crate::composition::prepare::frontmatter_to_value(self.source.markdown.frontmatter());
         if let Value::Object(values) = &mut authored {
             // The plan owns the already-resolved sequence configuration.
@@ -698,10 +787,9 @@ impl<'a> Loader<'a> {
                 PreflightAction::Group(group)
             }
             ExecutableField::Sequence => {
-                return Err(CompositionError::SequenceUnsupportedConstruct {
-                    construct: "nested sequence execution".into(),
-                    detail: "nested sequence grammar is valid; container execution is not implemented yet".into(),
-                });
+                PreflightAction::Sequence(Box::new(self.load_sequence(
+                    value, options, origin, label, property, authored, state, placement,
+                )?))
             }
             ExecutableField::Task => {
                 let reference = expect_reference(value, "task", label)?;
@@ -760,6 +848,65 @@ impl<'a> Loader<'a> {
         };
         self.collect_lifecycle_shell(&mut task, &site)?;
         Ok(task)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn load_sequence(
+        &mut self, value: &Value, options: &Map<String, Value>, origin: &Path,
+        label: &str, property: &str, authored: &AuthoredOrder,
+        state: &EffectiveState, placement: Placement,
+    ) -> Result<PreflightSequence, CompositionError> {
+        use super::grammar::{SequenceSourceSpec, classify_source};
+        let (plan, child_origin, child_authored, events, entered) = match classify_source(value)? {
+            SequenceSourceSpec::Inline(items) => {
+                let mut plan = super::normalize::normalize_plan(
+                    &items, super::model::SequenceSource::Inline, origin, true,
+                )?;
+                plan.authored = authored.child("sequence");
+                (plan, origin.to_path_buf(), authored.child("sequence"), options.clone(), false)
+            }
+            SequenceSourceSpec::Reference(reference) => {
+                let path = self.resolve_reference(&reference.reference, origin)?;
+                self.enter(&path)?;
+                let (document, order) = self.load_data_document(&path)?;
+                let context = self.source_context_for(origin);
+                let resolution = context.as_ref().map(SourceContext::file_resolution_context)
+                    .unwrap_or(&self.file_resolution_context);
+                let globals = self.step_frontmatter.iter().map(|(k,v)| (k.clone(),v.clone())).collect();
+                let plan = source_resolution::load_referenced_sequence(
+                    &reference, &path, origin, &globals, true, resolution,
+                )?;
+                let events = if reference.offset.is_none() && reference.operator.is_none() {
+                    document.as_object().cloned().unwrap_or_default()
+                } else { Map::new() };
+                let child_authored = if let Some(offset) = &reference.offset {
+                    offset.split('.').fold(order, |cursor, segment| cursor.child(segment))
+                } else if document.is_array() { order } else { order.child("sequence") };
+                (plan, path, child_authored, events, true)
+            }
+            _ => return Err(CompositionError::SequenceInvalid(
+                "a nested `sequence:` must be a list or file reference".into(),
+            )),
+        };
+        let mut event_root = Map::new();
+        for key in super::grammar::CONTAINER_EVENT_KEYS {
+            if let Some(value) = events.get(*key) { event_root.insert((*key).into(), value.clone()); }
+        }
+        let lifecycle = parse_lifecycle_config(&Value::Object(event_root), &child_origin)?;
+        let mut steps = Vec::with_capacity(plan.steps.len());
+        for (index, step) in plan.steps.iter().enumerate() {
+            let child_label = format!("{label} → step {} (`{}`)", index + 1, step.state.id);
+            let child_property = if entered { format!("sequence[{index}]") }
+                else { property_child(property, &format!("sequence[{index}]")) };
+            let task = step.executable.as_ref().map(|executable| self.load_step_task(
+                executable, &child_origin, &child_label, &child_property,
+                &child_authored.at(index), state, None,
+                Placement { position: placement.position.child(index), in_group: placement.in_group },
+            )).transpose()?;
+            steps.push(PreflightStep { index, id: step.state.id.clone(), name: step.name.clone(), task });
+        }
+        if entered { self.leave(); }
+        Ok(PreflightSequence { plan, steps, lifecycle: Box::new(lifecycle), origin_path: child_origin })
     }
 
     /// Expand a `task: <file-ref>` reference into the task it names.
@@ -1029,25 +1176,38 @@ impl<'a> Loader<'a> {
         }
 
         for task in &group.tasks {
-            let PreflightAction::Prompt { path, .. } = &task.action else {
-                continue;
-            };
-            let Some(document) = self.graph.prompt_document(path) else {
-                continue;
-            };
-            if !document.inline_compose {
-                continue;
-            }
             let owner = task.name.clone().unwrap_or_else(|| task.label.clone());
-            if let Some(first) = claimed.get(path) {
-                return Err(CompositionError::SequenceWriteBackCollision {
-                    group: group.name.clone(),
-                    target: path.clone(),
-                    first: first.clone(),
-                    second: owner,
-                });
+            let mut pending = vec![task];
+            let mut targets = std::collections::BTreeSet::new();
+            while let Some(task) = pending.pop() {
+                match &task.action {
+                    PreflightAction::Prompt { path, .. } => {
+                        if self.graph.prompt_document(path).is_some_and(|document| document.inline_compose) {
+                            targets.insert(path.clone());
+                        }
+                    }
+                    PreflightAction::Group(nested) => pending.extend(nested.tasks.iter()),
+                    PreflightAction::Sequence(nested) => {
+                        pending.extend(nested.steps.iter().filter_map(|step| step.task.as_ref()));
+                        if nested.steps.iter().any(|step| step.task.is_none()) {
+                            let inline = self.documents.get(&nested.origin_path)
+                                .is_some_and(|(document, _)| document.get("prompt").is_some_and(Value::is_string))
+                                || (nested.origin_path == self.source_path && self.source_inline_compose());
+                            if inline { targets.insert(nested.origin_path.clone()); }
+                        }
+                    }
+                    PreflightAction::Shell { .. } | PreflightAction::SideEffect { .. } => {}
+                }
             }
-            claimed.insert(path.clone(), owner);
+            for path in targets {
+                if let Some(first) = claimed.get(&path) {
+                    return Err(CompositionError::SequenceWriteBackCollision {
+                        group: group.name.clone(), target: path,
+                        first: first.clone(), second: owner.clone(),
+                    });
+                }
+                claimed.insert(path, owner.clone());
+            }
         }
         Ok(())
     }
@@ -1061,10 +1221,11 @@ impl<'a> Loader<'a> {
 
     /// Load a `prompt:` document as a graph leaf.
     ///
-    /// Prompt documents are leaves by construction: one that declares its own
-    /// `sequence:` is a nested sequence, which v1 rejects.
+    /// A prompt remains a leaf. A referenced document with `sequence:` needs
+    /// the explicit `sequence:` executable so its container owns the lifecycle.
     fn load_prompt(&mut self, reference: &str, origin: &Path) -> Result<PathBuf, CompositionError> {
         let path = self.resolve_reference(reference, origin)?;
+        self.graph.capture_source(&path);
         if let Some(existing) = self.graph.prompt_document(&path) {
             let _ = existing;
             return Ok(path);
@@ -1720,6 +1881,7 @@ impl<'a> Loader<'a> {
         &mut self,
         path: &Path,
     ) -> Result<(Value, AuthoredOrder), CompositionError> {
+        self.graph.capture_source(path);
         if let Some((value, orders)) = self.documents.get(path) {
             return Ok((value.clone(), AuthoredOrder::at_root(Arc::clone(orders))));
         }

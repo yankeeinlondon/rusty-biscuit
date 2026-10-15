@@ -631,25 +631,21 @@ fn a_cycle_within_one_tasks_chain_is_refused() {
 /// A step that runs the sequence document's own body keeps its scope across a
 /// handoff too: the target's output is the one entry the step publishes.
 #[test]
-fn sequence_body_step_proxy_publishes_the_targets_output_once() {
+fn sequence_start_proxy_replaces_the_container_before_any_body_step() {
     let fixture = fixture("handoff-body-step");
     write_target(&fixture);
     let doc = write_doc(
         &fixture,
         "sequence.md",
-        &format!(
-            "---\nsequence:\n    - name: first\n    - name: second\n      side_effect: {{ append_line: [\"events.log\", \"second step outputs={{{{ length(seq.outputs) }}}}\"] }}\n{}---\nBody {{{{ seq }}}}.\n",
-            "start:\n    - when: \"seq.name == 'first'\"\n      then:\n          - append_line: [\"events.log\", \"body start\"]\n          - proxy: ./target.md\n",
-        ),
+        "---\nsequence:\n    - name: first\n    - name: second\n      side_effect: { append_line: [\"events.log\", \"unexpected second step\"] }\nstart:\n    - append_line: [\"events.log\", \"container start\"]\n    - proxy: ./target.md\nfinalize:\n    - append_line: [\"events.log\", \"unexpected source finalize\"]\n---\nBody {{ seq }}.\n",
     );
 
     let run = run_sequence(&fixture, &doc);
 
-    let mut expected = vec!["body start"];
+    let mut expected = vec!["container start"];
     expected.extend(TARGET_TRAIL);
-    expected.push("second step outputs=1");
     assert_eq!(events(&fixture), expected, "{}", run.output);
-    assert_step_one_succeeded_once(&run);
+    assert!(!run.output.contains("step 1/2 succeeded"), "{}", run.output);
     assert_eq!(run.code, Some(0), "{}", run.output);
 }
 

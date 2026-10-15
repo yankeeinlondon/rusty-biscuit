@@ -1,49 +1,7 @@
-//! Group scheduling — the only place in a sequence where work runs concurrently.
-//!
-//! A group is a bundle of tasks executed under one sequence step. `execution:`
-//! picks the scheduler; everything else about a group is shared between the two.
-//!
-//! Common to both (spec → *Groups*):
-//!
-//! - **`group.*` is a scope, not state.** Group variables are evaluated once at
-//!   group start, enter as a lexical scope for the duration of the group, and are
-//!   gone the moment it finishes; the next sequence step cannot see them.
-//! - **First failure decides the group, `fail_fast` decides the sequence.** A
-//!   group has no fail-fast control of its own.
-//!
-//! ## `execution: serial` (the default)
-//!
-//! Member tasks run one at a time against the *same* runtime cell as the rest of
-//! the sequence, so task 2 sees task 1's ordinary `set` writes. Shell template
-//! late inputs are frozen for all members at group entry, before member setup.
-//! Each member commits its own entry, so a serial group grows `outputs` entry by
-//! entry rather than adding a wrapper entry. The first failure stops the group
-//! and the remaining tasks do not run.
-//!
-//! ## `execution: parallel`
-//!
-//! Members run on scoped threads, admitted in declaration order and bounded by
-//! `max_parallel` when set. Three rules make the observable result independent of
-//! completion order (spec → *Concurrency*):
-//!
-//! - **Snapshot isolation.** State and `outputs` are captured once at group start
-//!   and shared by every member; each member's own writes go to private cells —
-//!   both the runtime buffer a `set` accumulates in and the live document view a
-//!   lifecycle stack resolves against, because a write reaches both. No live file
-//!   is re-read between siblings.
-//! - **All siblings finish.** A failure never cancels in-flight work — discarding
-//!   a half-finished agent run costs more than letting it land — and every member
-//!   keeps an `outputs` slot holding whatever stdout it produced.
-//! - **Declaration-ordered folding.** The nested `outputs` entry, the mutation
-//!   merge (later-declared wins, with a warning on a contested key), and the
-//!   summary all walk the tasks in declaration order, never completion order.
-//!
-//! An interrupted parallel group commits neither mutations nor outputs: the run
-//! is being torn down, and a half-scheduled group's state is not a state any
-//! later step should read.
+//! Concurrent group legs use isolated runtime branches and declaration-order
+//! admission and folding. A failed atomic group publishes no leg state or result.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -54,11 +12,12 @@ use super::super::super::error::CompositionError;
 use super::super::super::lifecycle::context::LifecycleErrorInfo;
 use super::super::super::lifecycle::executor::StackExecutionContext;
 use super::super::super::runtime_state::{RuntimeSnapshot, RuntimeState};
-use super::super::preflight::{GroupExecution, PreflightGroup, PreflightTask};
+use super::super::preflight::{PreflightGroup, PreflightTask};
 use super::{
     PrimaryOutcome, TaskDiagnostic, TaskExecution, TaskOutcome, TaskRun, TaskStage, TaskStatus,
 };
 use crate::render::{TaskBar, TaskLiveOutput, TaskStream};
+use crate::composition::lifecycle::bindings::{GroupBinding, GroupLegResult, LegOutcome};
 
 /// A poisoned result slot means a member task panicked; the group's result is
 /// incomplete and cannot be reported honestly.
@@ -85,7 +44,7 @@ pub struct GroupTaskResult {
     pub name: String,
     /// How the task finished.
     pub status: TaskStatus,
-    /// Wall-clock time across the task's three stages.
+    /// Wall-clock time across the leg's execution.
     pub duration: Duration,
 }
 
@@ -97,6 +56,193 @@ pub(super) struct ValidatedGroup {
 }
 
 impl TaskExecution<'_> {
+    pub(super) fn run_group_container(&self, group: &PreflightGroup) -> PrimaryOutcome {
+        use crate::composition::lifecycle::{LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal};
+        use crate::composition::lifecycle::executor::DisabledShellRunner;
+        use crate::composition::lifecycle::runtime::{ContainerEventDecision as Decision, ContainerRunner};
+
+        let before = self.runtime.map_or_else(RuntimeSnapshot::default, |runtime| runtime.snapshot());
+        let runtime = Arc::new(RuntimeState::from_snapshot(before));
+        let live = Mutex::new(self.stack.live_frontmatter_snapshot()
+            .unwrap_or_else(|| self.stack.frontmatter.clone()));
+        let private_stack = self.stack.with_private_cells(&runtime, Some(&live));
+        let execution = TaskExecution { runtime: Some(&runtime), stack: &private_stack, ..*self };
+        let context = LifecycleRuntimeContext {
+            settings: self.stack.settings, messaging: self.stack.messaging, term: self.stack.term,
+            source_path: &group.origin_path, repo_root: self.stack.repo_root,
+            launch_area: self.stack.ctx_base_dir, context: self.stack.prepared_context,
+        };
+        let mut runner = ContainerRunner::new(LifecycleRunGuard::new(
+            &group.lifecycle, &context, self.stack.emitter));
+        let mut binding = GroupBinding::default();
+        let mut signal = LifecycleSignal::Initialize;
+        let mut result = PrimaryOutcome::succeeded(String::new());
+        let mut error = None;
+        let mut shell_enabled = false;
+        let mut prepared = None;
+        let mut current_group = None;
+        loop {
+            if signal == LifecycleSignal::Start {
+                shell_enabled = false;
+                let preparation = execution.member_state().and_then(|state| {
+                    let context = self.stack.prepared_context.cloned()
+                        .unwrap_or_else(|| state.context().clone());
+                    let fresh = if self.graph.sources_unchanged() {
+                        group.clone()
+                    } else {
+                        let (fresh, graph) = super::super::preflight::prepare_nested_group(
+                            self.task, &state, context, self.stack.file_resolution_context,
+                        )?;
+                        self.verify_nested_graph(&graph)?;
+                        fresh
+                    };
+                    let validated = (TaskExecution { state: &state, ..execution }).validate_group(&fresh)?;
+                    Ok((fresh, validated))
+                });
+                match preparation {
+                    Ok((fresh, validated)) => {
+                        runner.guard_mut().set_config((*fresh.lifecycle).clone());
+                        binding.variables = validated.variables.clone();
+                        current_group = Some(fresh);
+                        prepared = Some(validated);
+                        shell_enabled = true;
+                    }
+                    Err(failure) => {
+                        let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary, &failure);
+                        runner.set_error(diagnostic.info.clone()); error = Some(diagnostic.info.clone());
+                        result = PrimaryOutcome::failed(diagnostic); signal = LifecycleSignal::Blocked;
+                    }
+                }
+            }
+            let group = current_group.as_ref().unwrap_or(group);
+            live.lock().expect(SLOT_POISONED).extend(runtime.snapshot().mutations);
+            let group_value = binding.event_value(signal);
+            let mut stack = private_stack.with_signal(signal);
+            stack.scope = None;
+            stack.group = Some(&group_value);
+            stack.err = error.as_ref();
+            if !shell_enabled { stack.shell_runner = &DisabledShellRunner; }
+            let event = if self.prompt.is_dry_run() {
+                let outcome = Default::default();
+                let decision = runner.record_outcome(signal, &outcome);
+                crate::composition::lifecycle::runtime::ContainerEventResult { outcome, decision }
+            } else { runner.execute_event(signal, &stack) };
+            match event.decision {
+                Decision::Continue if signal == LifecycleSignal::Initialize => {
+                    signal = LifecycleSignal::Start;
+                }
+                Decision::Continue => {
+                    let state = match execution.member_state() {
+                        Ok(state) => state,
+                        Err(failure) => {
+                            let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary, &failure);
+                            runner.set_error(diagnostic.info.clone()); error = Some(diagnostic.info.clone());
+                            result = PrimaryOutcome::failed(diagnostic); signal = LifecycleSignal::Blocked;
+                            continue;
+                        }
+                    };
+                    let attempt = TaskExecution { state: &state, ..execution };
+                    match prepared.take().map_or_else(|| attempt.validate_group(group), Ok) {
+                        Ok(validated) => {
+                            result = attempt.run_group(group, &validated);
+                            binding = result.group_binding.take().unwrap_or_default();
+                            binding.variables = validated.variables;
+                            match &result.result {
+                                super::PrimaryResult::Succeeded => signal = LifecycleSignal::Success,
+                                super::PrimaryResult::Failed(diagnostic) => {
+                                    runner.set_error(diagnostic.info.clone());
+                                    error = Some(diagnostic.info.clone()); signal = LifecycleSignal::Failure;
+                                }
+                                super::PrimaryResult::Interrupted => {
+                                    runner.guard_mut().defuse();
+                                    return result;
+                                }
+                            }
+                        }
+                        Err(failure) => {
+                            let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary, &failure);
+                            runner.set_error(diagnostic.info.clone()); error = Some(diagnostic.info.clone());
+                            result = PrimaryOutcome::failed(diagnostic); signal = LifecycleSignal::Blocked;
+                        }
+                    }
+                }
+                Decision::Failure { error: raised } => {
+                    error = raised.or(error); signal = LifecycleSignal::Failure;
+                }
+                Decision::Finalize { error: raised, .. } => {
+                    error = raised.or(error); signal = LifecycleSignal::Finalize;
+                }
+                Decision::Finished { failed } => {
+                    if failed {
+                        let info = runner.primary_error().cloned().or(error)
+                            .unwrap_or_else(|| LifecycleErrorInfo::from_action_failure("error", "group finalization failed"));
+                        result.secondary.extend(runner.secondary_errors().iter().cloned().map(|info|
+                            TaskDiagnostic { stage: TaskStage::Primary, info }));
+                        result.result = super::PrimaryResult::Failed(TaskDiagnostic { stage: TaskStage::Primary, info });
+                    } else if let Some(parent) = self.runtime
+                        && let Err(failure) = parent.set_batch(self.stack.effect_engine,
+                            &runtime.snapshot().mutations, &Map::new())
+                    {
+                        return PrimaryOutcome::failed(TaskDiagnostic {
+                            stage: TaskStage::Primary,
+                            info: LifecycleErrorInfo::from_error_or_action("set", &failure),
+                        });
+                    }
+                    return result;
+                }
+                Decision::Retry { delay, overlay } => {
+                    binding = GroupBinding::default();
+                    if let Err(failure) = runtime.set_batch(self.stack.effect_engine, &overlay, &Map::new()) {
+                        let diagnostic = TaskDiagnostic {
+                            stage: TaskStage::Primary,
+                            info: LifecycleErrorInfo::from_error_or_action("set", &failure),
+                        };
+                        runner.set_error(diagnostic.info.clone()); error = Some(diagnostic.info.clone());
+                        result = PrimaryOutcome::failed(diagnostic); signal = LifecycleSignal::Blocked;
+                        continue;
+                    }
+                    if !delay.is_zero() { std::thread::sleep(delay); }
+                    error = None;
+                    // Re-enter preparation without re-emitting initialize.
+                    signal = LifecycleSignal::Start;
+                }
+                Decision::Skip => return PrimaryOutcome::succeeded(String::new()),
+                Decision::Abort(abort) => {
+                    let failure = match abort {
+                        crate::composition::lifecycle::runtime::LifecycleTransitionAbort::ResumeWithoutSession =>
+                            CompositionError::LifecycleResumeWithoutSession { source_path: group.origin_path.clone() },
+                        _ => CompositionError::LifecycleDeferNotImplemented { source_path: group.origin_path.clone() },
+                    };
+                    let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary, &failure);
+                    runner.set_error(diagnostic.info.clone()); error = Some(diagnostic.info.clone());
+                    result = PrimaryOutcome::failed(diagnostic); signal = LifecycleSignal::Finalize;
+                }
+                Decision::SetupRecoveryUnsupported { event, action } => {
+                    let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary,
+                        &CompositionError::LifecycleSetupPhaseRecoveryUnsupported {
+                            source_path: group.origin_path.clone(), event: event.property_name().into(), action: action.into(),
+                        });
+                    runner.set_error(diagnostic.info.clone()); error = Some(diagnostic.info.clone());
+                    result = PrimaryOutcome::failed(diagnostic); signal = LifecycleSignal::Failure;
+                }
+                Decision::Proxy { target, overlay } => {
+                    let result = execution.run_container_proxy(&target, overlay);
+                    if matches!(result.result, super::PrimaryResult::Succeeded)
+                        && let Some(parent) = self.runtime
+                        && let Err(failure) = parent.set_batch(self.stack.effect_engine,
+                            &runtime.snapshot().mutations, &Map::new())
+                    {
+                        return PrimaryOutcome::failed(TaskDiagnostic {
+                            stage: TaskStage::Primary,
+                            info: LifecycleErrorInfo::from_error_or_action("set", &failure),
+                        });
+                    }
+                    return result;
+                }
+            }
+        }
+    }
+
     /// The attributed live stream for one member task, when a sink is wired.
     ///
     /// `None` — the `--silent` shape — costs nothing: no frame is rendered at
@@ -120,18 +266,11 @@ impl TaskExecution<'_> {
         let overlay = self.member_overlay();
         let stack = self.stack.with_group(&variables);
         let state = self.member_state()?;
-        let group_run = if group.execution == GroupExecution::Parallel {
-            self.prompt.open_group_run(group)
-        } else { None };
+        let group_run = self.prompt.open_group_run(group);
         let mut members = Vec::with_capacity(group.tasks.len());
         let mut runs = Vec::with_capacity(group.tasks.len());
         for task in &group.tasks {
-            let run = match group.execution {
-                GroupExecution::Serial if task.late_sites().next().is_none()
-                    && !matches!(task.action, super::PreflightAction::Prompt { .. }) => None,
-                GroupExecution::Serial => self.prompt.open_member_run(task),
-                GroupExecution::Parallel => self.prompt.open_leg_run(task, group_run.as_ref()),
-            };
+            let run = self.prompt.open_leg_run(task, group_run.as_ref());
             let member_stack = StackExecutionContext {
                 source_path: &task.diagnostic.source_path,
                 prepared_context: run.as_ref().map(|opened| &opened.context)
@@ -162,115 +301,7 @@ impl TaskExecution<'_> {
         let variables = &validated.variables;
         let scope_overlay = self.member_overlay();
         let scope_stack = self.stack.with_group(variables);
-        match group.execution {
-            GroupExecution::Serial => self.run_serial(group, &scope_overlay, &scope_stack, validated),
-            GroupExecution::Parallel => self.run_parallel(group, &scope_overlay, &scope_stack, validated),
-        }
-    }
-
-    /// Declaration-ordered execution against the sequence's own live layers.
-    fn run_serial(
-        &self,
-        group: &PreflightGroup,
-        scope_overlay: &Value,
-        scope_stack: &StackExecutionContext<'_>,
-        validated: &ValidatedGroup,
-    ) -> PrimaryOutcome {
-        let mut results = Vec::with_capacity(group.tasks.len());
-        let mut collected: Vec<String> = Vec::with_capacity(group.tasks.len());
-        let mut failure: Option<TaskDiagnostic> = None;
-        let mut secondary: Vec<TaskDiagnostic> = Vec::new();
-        let mut interrupted = false;
-
-        for (index, task) in group.tasks.iter().enumerate() {
-            let started = Instant::now();
-            // Serial work shares the parallel geometry with nothing drawn in the
-            // gutter, so switching between the two modes does not shift the
-            // stream sideways (spec → *Reporting Concurrency*).
-            let stream = self.task_stream(task, TaskBar::Invisible);
-            if let Some(stream) = &stream {
-                stream.open();
-            }
-            // Rebuilt per task, not once per group: a serial member reads the
-            // `set` writes and the `outputs` entry its predecessor produced.
-            let member_state = match self.member_state() {
-                Ok(state) => state,
-                Err(error) => {
-                    failure = Some(TaskDiagnostic::from_composition(TaskStage::Primary, &error));
-                    break;
-                }
-            };
-            // Keep the context and document epoch used at the group barrier;
-            // ordinary runtime values still come from the live member state.
-            let current_run;
-            let member_run = match validated.runs[index].as_ref() {
-                Some(run) if validated.members[index].late.is_empty()
-                    && validated.members[index].prompt.is_none() => {
-                    current_run = Some(self.prompt.refresh_member_run(task, run));
-                    current_run.as_ref()
-                }
-                Some(run) => Some(run),
-                None => {
-                    current_run = self.prompt.open_member_run(task);
-                    current_run.as_ref()
-                }
-            };
-            let member_stack = StackExecutionContext {
-                source_path: &task.diagnostic.source_path,
-                prepared_context: member_run
-                    .as_ref()
-                    .map(|opened| &opened.context)
-                    .or(scope_stack.prepared_context),
-                ..scope_stack.with_signal(scope_stack.signal)
-            };
-            let member = TaskExecution {
-                task,
-                state: &member_state,
-                stack: &member_stack,
-                overlay: Some(scope_overlay),
-                live: stream.as_ref(),
-                run_evidence: member_run.as_ref().map(|opened| &opened.run),
-                document: member_run
-                    .as_ref()
-                    .and_then(|opened| opened.document.as_ref())
-                    .or(self.document),
-                ..*self
-            };
-            let outcome = member.run_validated(Some(&validated.members[index]));
-            let duration = started.elapsed();
-            if let Some(stream) = &stream {
-                stream.close(outcome.status.into(), duration);
-            }
-            results.push(GroupTaskResult {
-                name: task.name.clone().unwrap_or_else(|| task.label.clone()),
-                status: outcome.status,
-                duration,
-            });
-            collected.push(outcome.stdout);
-            secondary.extend(outcome.secondary_errors);
-
-            match outcome.status {
-                TaskStatus::Succeeded => {}
-                TaskStatus::Failed => {
-                    failure = outcome.error;
-                    break;
-                }
-                TaskStatus::Interrupted => {
-                    interrupted = true;
-                    break;
-                }
-            }
-        }
-
-        // The group's own text is informational: each member already committed
-        // its entry, so nothing here reaches `outputs`.
-        let stdout = collected.join("\n");
-        let outcome = match (interrupted, failure) {
-            (true, _) => PrimaryOutcome::interrupted(stdout),
-            (false, Some(diagnostic)) => PrimaryOutcome::failed_with(stdout, diagnostic),
-            (false, None) => PrimaryOutcome::succeeded(stdout),
-        };
-        outcome.with_group_tasks(results).with_secondary(secondary)
+        self.run_parallel(group, &scope_overlay, &scope_stack, validated)
     }
 
     /// Bounded-concurrency execution with snapshot isolation.
@@ -344,7 +375,7 @@ impl TaskExecution<'_> {
             .max_parallel
             .unwrap_or(group.tasks.len())
             .clamp(1, group.tasks.len().max(1));
-        let cursor = AtomicUsize::new(0);
+        let admission = Mutex::new((0usize, false, None));
 
         std::thread::scope(|scope| {
             for _ in 0..workers {
@@ -352,10 +383,16 @@ impl TaskExecution<'_> {
                     .stack_size(MEMBER_THREAD_STACK_BYTES)
                     .spawn_scoped(scope, || {
                     loop {
-                        let index = cursor.fetch_add(1, Ordering::SeqCst);
-                        let Some(task) = group.tasks.get(index) else {
-                            break;
+                        let index = {
+                            let mut admission = admission.lock().expect(SLOT_POISONED);
+                            if admission.0 >= group.tasks.len() || (group.fail_fast && admission.1) {
+                                break;
+                            }
+                            let index = admission.0;
+                            admission.0 += 1;
+                            index
                         };
+                        let task = &group.tasks[index];
                         let started = Instant::now();
                         // Each concurrent task takes its own palette entry, so
                         // interleaved frames stay attributable without relying
@@ -400,6 +437,13 @@ impl TaskExecution<'_> {
                         if let Some(stream) = &stream {
                             stream.close(outcome.status.into(), duration);
                         }
+                        if outcome.status != TaskStatus::Succeeded {
+                            let mut admission = admission.lock().expect(SLOT_POISONED);
+                            admission.1 = true;
+                            if admission.2.is_none() {
+                                admission.2 = outcome.error.as_ref().map(|error| error.info.clone());
+                            }
+                        }
                         *slots[index].lock().expect(SLOT_POISONED) =
                             Some(MemberRun { duration, outcome });
                     }
@@ -408,7 +452,8 @@ impl TaskExecution<'_> {
             }
         });
 
-        self.fold_parallel_results(group, slots)
+        let triggering_failure = admission.into_inner().expect(SLOT_POISONED).2;
+        self.fold_parallel_results(group, slots, triggering_failure)
     }
 
     /// Reduce the finished members into one group outcome, in declaration order.
@@ -416,28 +461,47 @@ impl TaskExecution<'_> {
         &self,
         group: &PreflightGroup,
         slots: Vec<Mutex<Option<MemberRun>>>,
+        triggering_failure: Option<LifecycleErrorInfo>,
     ) -> PrimaryOutcome {
-        let runs: Vec<MemberRun> = slots
+        let runs: Vec<Option<MemberRun>> = slots
             .into_iter()
-            .filter_map(|slot| slot.into_inner().expect(SLOT_POISONED))
+            .map(|slot| slot.into_inner().expect(SLOT_POISONED))
             .collect();
 
         let mut results = Vec::with_capacity(runs.len());
-        let mut entries: Vec<Value> = Vec::with_capacity(runs.len());
+        let mut entries = Map::new();
         let mut secondary: Vec<TaskDiagnostic> = Vec::new();
         let mut failure: Option<TaskDiagnostic> = None;
         let mut interrupted = false;
+        let mut binding = GroupBinding { variables: Map::new(), legs: Vec::new() };
+        let cancelled_error = triggering_failure.as_ref().map_or(Value::Null, LifecycleErrorInfo::to_value);
 
         for (task, run) in group.tasks.iter().zip(&runs) {
             let name = task.name.clone().unwrap_or_else(|| task.label.clone());
+            let Some(run) = run else {
+                binding.legs.push(GroupLegResult { name, outcome: LegOutcome::Cancelled,
+                    output: Value::Null, err: cancelled_error.clone() });
+                continue;
+            };
+            binding.legs.push(GroupLegResult {
+                name: name.clone(),
+                outcome: match run.outcome.status {
+                    TaskStatus::Succeeded if run.outcome.result.is_null() && !run.outcome.output_committed => LegOutcome::Skipped,
+                    TaskStatus::Succeeded => LegOutcome::Succeeded,
+                    TaskStatus::Failed => LegOutcome::Failed,
+                    TaskStatus::Interrupted => LegOutcome::Cancelled,
+                },
+                output: run.outcome.result.clone(),
+                err: run.outcome.error.as_ref().map_or(Value::Null,
+                    |error| error.info.to_value()),
+            });
             results.push(GroupTaskResult {
-                name,
+                name: name.clone(),
                 status: run.outcome.status,
                 duration: run.duration,
             });
-            // Every task keeps a slot, including a failed one — its partial
-            // stdout is the only record of what the work managed to produce.
-            entries.push(Value::String(run.outcome.stdout.clone()));
+            // Failed legs retain their native partial result for terminal summaries.
+            entries.insert(name, run.outcome.result.clone());
             secondary.extend(run.outcome.secondary_errors.clone());
             match run.outcome.status {
                 TaskStatus::Succeeded => {}
@@ -452,25 +516,23 @@ impl TaskExecution<'_> {
             }
         }
 
-        let stdout = entries
-            .iter()
-            .filter_map(Value::as_str)
-            .collect::<Vec<_>>()
-            .join("\n");
+        let stdout = runs.iter().flatten()
+            .map(|run| run.outcome.stdout.as_str()).collect::<Vec<_>>().join("\n");
 
         // An interrupted group commits nothing: the run is being torn down, and a
         // half-scheduled group's state is not a state any later step should read.
         let outcome = if interrupted {
             PrimaryOutcome::interrupted(stdout)
+        } else if group.fail_fast && failure.is_some() {
+            PrimaryOutcome::failed_with(stdout, failure.expect("failed leg has a diagnostic"))
+                .with_group_output(Value::Object(entries))
         } else {
             secondary.extend(self.merge_parallel_mutations(group, &runs));
-            let outcome = match failure {
-                Some(diagnostic) => PrimaryOutcome::failed_with(stdout, diagnostic),
-                None => PrimaryOutcome::succeeded(stdout),
-            };
-            outcome.with_group_output(Value::Array(entries))
+            PrimaryOutcome::succeeded(stdout).with_group_output(Value::Object(entries))
         };
-        outcome.with_group_tasks(results).with_secondary(secondary)
+        let mut outcome = outcome.with_group_tasks(results).with_secondary(secondary);
+        outcome.group_binding = Some(binding);
+        outcome
     }
 
     /// Fold every member's mutation delta into the sequence cell.
@@ -488,7 +550,7 @@ impl TaskExecution<'_> {
     fn merge_parallel_mutations(
         &self,
         group: &PreflightGroup,
-        runs: &[MemberRun],
+        runs: &[Option<MemberRun>],
     ) -> Vec<TaskDiagnostic> {
         let mut refused = Vec::new();
         let Some(runtime) = self.runtime else {
@@ -496,6 +558,7 @@ impl TaskExecution<'_> {
         };
         let mut written: HashMap<&str, String> = HashMap::new();
         for (task, run) in group.tasks.iter().zip(runs) {
+            let Some(run) = run else { continue; };
             let name = task.name.clone().unwrap_or_else(|| task.label.clone());
             for mutation in &run.outcome.mutations {
                 if let Some(earlier) = written.get(mutation.key.as_str()) {
@@ -543,13 +606,7 @@ impl TaskExecution<'_> {
         Ok(resolved)
     }
 
-    /// The effective state one member task resolves `params`/`timeout`/action
-    /// stacks against.
-    ///
-    /// Layered lowest-first, matching
-    /// [`layered_set_overrides`][super::super::super::runtime_state::layered_set_overrides]:
-    /// the step's own state, the mutations accumulated so far, `outputs` as it
-    /// stands, the reserved overlay, and the group scope.
+    /// Apply accumulated runtime writes without exposing group variables as frontmatter.
     fn member_state(
         &self,
     ) -> Result<EffectiveState, CompositionError> {
@@ -559,11 +616,7 @@ impl TaskExecution<'_> {
         self.member_state_from(&snapshot)
     }
 
-    /// [`Self::member_state`] against a caller-supplied snapshot.
-    ///
-    /// A serial member passes the *live* snapshot so it reads its predecessor's
-    /// writes; a parallel group passes the group-start snapshot once and shares
-    /// the result with every sibling.
+    /// All concurrent siblings compose against the same group-entry snapshot.
     fn member_state_from(
         &self,
         snapshot: &RuntimeSnapshot,

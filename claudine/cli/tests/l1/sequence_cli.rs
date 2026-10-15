@@ -955,7 +955,7 @@ fn sequence_rejects_direct_group_execution() {
 }
 
 /// A `prompt:` task pointing at a document that itself declares `sequence:` is
-/// a nested sequence, which v1 rejects during preflight.
+/// an executable mismatch; the author must use `sequence: <file>`.
 #[test]
 #[cfg(unix)]
 fn sequence_rejects_a_nested_sequence_prompt_document() {
@@ -974,7 +974,7 @@ fn sequence_rejects_a_nested_sequence_prompt_document() {
 
     let (stderr, launched) = run_preflight(&fixture, &md_file, &[]);
     assert!(
-        stderr.contains("nested sequences are not supported"),
+        stderr.contains("prompt task") && stderr.contains("sequence:"),
         "stderr: {stderr}"
     );
     assert!(!launched, "preflight must abort before any launch");
@@ -1114,7 +1114,7 @@ fn preflight_failure_aborts_before_any_valid_step() {
 
     let (stderr, launched) = run_preflight(&fixture, &md_file, &[]);
     assert!(
-        stderr.contains("nested sequences are not supported"),
+        stderr.contains("prompt task") && stderr.contains("sequence:"),
         "stderr: {stderr}"
     );
     assert!(
@@ -1143,7 +1143,7 @@ fn dry_run_performs_the_same_preflight() {
 
     let (stderr, launched) = run_preflight(&fixture, &md_file, &["--dry-run"]);
     assert!(
-        stderr.contains("nested sequences are not supported"),
+        stderr.contains("prompt task") && stderr.contains("sequence:"),
         "--dry-run must run the same preflight; stderr: {stderr}"
     );
     assert!(!launched);

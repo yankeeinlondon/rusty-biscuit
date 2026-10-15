@@ -145,6 +145,7 @@ pub(super) enum StepOutcome {
 pub(super) fn run_sequence_steps(
     run: &SequenceRunContext<'_>,
     perf_accumulator: &mut Option<crate::perf::SequencePerfAccumulator>,
+    runtime_state: &Arc<RuntimeState>,
 ) -> Result<(SequenceRunSummary, bool)> {
     let total_steps = run.plan.steps.len();
     let mut summary = SequenceRunSummary {
@@ -154,9 +155,6 @@ pub(super) fn run_sequence_steps(
         steps: Vec::with_capacity(total_steps),
     };
 
-    // One cell for the whole sequence: `outputs` accumulates across steps and a
-    // `set` from step 1 is still visible in step 5.
-    let runtime_state = std::sync::Arc::new(RuntimeState::new());
 
     let mut interrupt_observed = false;
     for step_index in 0..total_steps {
@@ -204,7 +202,7 @@ pub(super) fn run_sequence_steps(
         }
 
         let start = std::time::Instant::now();
-        let outcome = run_one_step(run, step_index, &runtime_state);
+        let outcome = run_one_step(run, step_index, runtime_state);
         let duration = start.elapsed();
         let interrupted_step = matches!(outcome, StepOutcome::Interrupted { .. });
 
@@ -322,7 +320,7 @@ fn run_one_step(
     // Dry-run composes against the *initial* state so late-binding references
     // render exactly as a first-step composition would see them.
     let snapshot = (!run.shared.dry_run).then(|| runtime_state.snapshot());
-    let set_overrides = jit::step_set_overrides(
+    let mut set_overrides = jit::step_set_overrides(
         run.plan,
         step_index,
         run.user_set_overrides.as_ref(),
@@ -337,6 +335,9 @@ fn run_one_step(
         .steps
         .get(step_index)
         .is_some_and(|step| step.task.is_some());
+    if !has_executable {
+        super::container::mask_body_events(&mut set_overrides);
+    }
     // Each step is a document of its own: it captures its environment here,
     // once, before anything of it is prepared, and every stage of it — its
     // composition, `initialize`, task, prompt document, loop iterations,

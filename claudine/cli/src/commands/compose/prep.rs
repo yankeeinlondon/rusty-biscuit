@@ -629,7 +629,7 @@ pub(crate) fn prepare_and_run_active_document(
         .map(|scope| scope.env_overrides.clone())
         .unwrap_or_default();
     if let Some(ref target) = resolved_target {
-        install_agent_env_for_composition(target, shared.yolo, &mut env_overrides);
+        install_agent_env_for_composition(target, raw_hints.yolo_enabled(shared.yolo), &mut env_overrides);
     }
 
     // Render the execution line the moment the agent is known. Eager
@@ -651,7 +651,7 @@ pub(crate) fn prepare_and_run_active_document(
     let header_emitted = match (shared.silent, resolved_target.as_ref()) {
         (false, Some(target)) => emit_execution_header(
             target.provider,
-            shared.yolo,
+            raw_hints.yolo_enabled(shared.yolo),
             header_interactive,
             verbose > 0,
             shared.repo,

@@ -18,6 +18,7 @@ use tracing::info_span;
 use crate::commands::compose::SharedComposeArgs;
 use crate::log;
 
+mod container;
 mod iterate;
 mod jit;
 mod phase1c;
@@ -249,6 +250,84 @@ pub(crate) fn execute_sequence(
     source_context: claudine::invocation_context::SourceContext,
     file_resolution_context: biscuit_file::FileResolutionContext,
 ) -> Result<i32> {
+    use claudine::composition::lifecycle::{DefaultLifecycleEmitter, LifecycleRuntimeContext, LifecycleSignal, parse_lifecycle_config};
+    use claudine::composition::lifecycle::bindings::SequenceBinding;
+    use claudine::composition::lifecycle::executor::StackExecutionContext;
+    use claudine::composition::lifecycle::runtime::ContainerEventDecision;
+    use claudine::composition::lifecycle::context::LifecycleErrorInfo;
+    let runtime = Arc::new(composition::RuntimeState::new());
+    let seq = SequenceBinding::container(&plan.sequence_id, Vec::new()).to_value();
+    runtime.set_sequence_binding(seq.clone());
+    let mut frontmatter: serde_json::Map<String, serde_json::Value> = source.markdown.frontmatter().as_map().iter().map(|(k,v)| (k.clone(),v.clone())).collect();
+    if let Some(values) = user_set_overrides.as_ref().and_then(serde_json::Value::as_object) {
+        frontmatter.extend(values.clone());
+    }
+    let lifecycle = parse_lifecycle_config(&serde_json::Value::Object(frontmatter.clone()), &source.resolved_path)?;
+    let config = claudine::dispatch::loader::load_claudine_config(None, source_context.repository_root()).ok();
+    let settings = config.as_ref().map(claudine::dispatch::loader::bridge_tts_settings).unwrap_or_default();
+    let messaging = config.as_ref().map(claudine::dispatch::loader::bridge_messaging_settings).unwrap_or_else(|| claudine::messaging::RuntimeMessagingSettings { user: None, repo: None });
+    let term = log::terminal();
+    let emitter = DefaultLifecycleEmitter;
+    let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
+    let context = invocation.capture_launch_context(&requirements);
+    let engine = darkmatter::effects::EffectEngine::builder().mutation_root(source_context.base_dir()).build();
+    let live = Mutex::new(frontmatter.clone());
+    let lifecycle_context = LifecycleRuntimeContext { settings: &settings, messaging: &messaging, term: &term,
+        source_path: &source.resolved_path, repo_root: source_context.repository_root(), launch_area: Some(file_resolution_context.request_cwd()), context: Some(&context) };
+    let stack = StackExecutionContext { seq: Some(&seq), signal: LifecycleSignal::Initialize, scope: None,
+        frontmatter: &frontmatter, live_frontmatter: Some(&live), runtime_state: Some(&runtime), err: None,
+        timing: None, current: Some(invocation.current_authority().memoized()), group: None, loop_values: None, base_dir: Some(source_context.base_dir()),
+        ctx_base_dir: Some(file_resolution_context.request_cwd()), prepared_context: Some(&context), file_resolution_context: &file_resolution_context,
+        effect_engine: &engine, shell_runner: invocation.shell_runner(), emitter: &emitter, term: &term,
+        source_path: &source.resolved_path, repo_root: source_context.repository_root(), messaging: &messaging, settings: &settings };
+    let mut root = container::RootRun::new(&lifecycle, &lifecycle_context, stack, Arc::clone(&runtime));
+    if !shared.dry_run {
+        match root.event(LifecycleSignal::Initialize, None)? {
+            ContainerEventDecision::Continue => {},
+            ContainerEventDecision::Skip => return Ok(0),
+            ContainerEventDecision::Proxy { target, overlay } => return container::run_proxy(source, shared, &invocation, &source_context, &file_resolution_context, user_set_overrides.as_ref(), &caller_input_records, &runtime, root.proxy_location.take().expect("proxy decision carries its authored location"), target, overlay, verbose),
+            ContainerEventDecision::Finished { failed } => return Ok(i32::from(failed)),
+            other => return Err(color_eyre::eyre::eyre!("invalid initialize transition: {other:?}")),
+        }
+    }
+    let mut startup_timings = startup_timings;
+    loop {
+        let outcome = execute_sequence_inner(source, plan.clone(), shared, user_set_overrides.clone(), caller_input_records.clone(), execution_options.clone(), verbose, perf_enabled, startup_timings.take(), invocation.clone(), source_context.clone(), file_resolution_context.clone(), &mut root);
+        if shared.dry_run { return outcome; }
+        let (signal, error) = match &outcome {
+            Ok(130) => return outcome,
+            Ok(0) => (LifecycleSignal::Success, None),
+            Ok(_) => (LifecycleSignal::Failure, root.child_error.take().or_else(|| Some(LifecycleErrorInfo::from_action_failure("sequence", "a sequence child failed")))),
+            Err(error) => (if root.started { LifecycleSignal::Failure } else { LifecycleSignal::Blocked }, Some(LifecycleErrorInfo::from_error_or_action("sequence", error.as_ref()))),
+        };
+        runtime.set_sequence_binding(seq.clone());
+        let decision = root.pending.take().map(Ok).unwrap_or_else(|| root.event(signal, error));
+        match decision? {
+            ContainerEventDecision::Retry { delay, overlay } => root.retry(delay, &overlay)?,
+            ContainerEventDecision::Proxy { target, overlay } => return container::run_proxy(source, shared, &invocation, &source_context, &file_resolution_context, user_set_overrides.as_ref(), &caller_input_records, &runtime, root.proxy_location.take().expect("proxy decision carries its authored location"), target, overlay, verbose),
+            ContainerEventDecision::Finished { failed } => return if failed { outcome.and(Ok(1)) } else { Ok(0) },
+            ContainerEventDecision::Skip => return Ok(0),
+            other => return Err(color_eyre::eyre::eyre!("invalid terminal transition: {other:?}")),
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_sequence_inner(
+    source: &ResolvedCompositionSource,
+    plan: SequencePlan,
+    shared: &SharedComposeArgs,
+    user_set_overrides: Option<serde_json::Value>,
+    caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
+    execution_options: SequenceExecutionOptions,
+    verbose: u8,
+    perf_enabled: bool,
+    startup_timings: Option<crate::perf::StartupTimings>,
+    invocation: claudine::invocation_context::InvocationContext,
+    source_context: claudine::invocation_context::SourceContext,
+    file_resolution_context: biscuit_file::FileResolutionContext,
+    root: &mut container::RootRun<'_>,
+) -> Result<i32> {
     let silent = shared.silent;
 
     // Inline vs compose is decided once for the whole sequence by the
@@ -299,8 +378,8 @@ pub(crate) fn execute_sequence(
     if !silent {
         let term = log::terminal();
         let status = Status::from_prose(format!(
-            "<b>Sequence:</b> <yellow>{}</yellow> step(s), <i>fail_fast</i> is set to <blue>{}</blue>",
-            total_steps, effective_fail_fast
+            "<b>Sequence:</b> <yellow>{}</yellow> step(s)",
+            total_steps
         ))
         .state(StatusState::Info);
         log::message(&status.render(&term));
@@ -447,7 +526,7 @@ pub(crate) fn execute_sequence(
     // state becomes `None` and the seam renders it from the installed
     // snapshot. No picker fires and no agent-resolution failure aborts.
     let resolved_targets: Vec<Option<claudine::composition::ResolvedExecutionTarget>> = if shared
-        .dry_run
+        .dry_run || total_steps == 0
     {
         let target = dry_run_sequence_target(
             explicit_provider,
@@ -743,9 +822,23 @@ pub(crate) fn execute_sequence(
         verbose,
         perf_enabled,
     };
+    if !shared.dry_run {
+        root.started = true;
+        let decision = root.event(claudine::composition::LifecycleSignal::Start, None)?;
+        if !matches!(decision, claudine::composition::lifecycle::runtime::ContainerEventDecision::Continue) {
+            root.pending = Some(decision);
+            return Ok(1);
+        }
+    }
     let (summary, interrupt_observed) =
-        iterate::run_sequence_steps(&run_context, &mut perf_accumulator)?;
+        iterate::run_sequence_steps(&run_context, &mut perf_accumulator, &root.runtime)?;
 
+    if let Some(step) = summary.steps.iter().find(|step| !step.success) {
+        let mut error = claudine::composition::lifecycle::context::LifecycleErrorInfo::from_action_failure(
+            "sequence", step.error.clone().unwrap_or_else(|| "a sequence child failed".into()));
+        error.snapshot = step.error_snapshot.clone();
+        root.child_error = Some(error);
+    }
     if let Some(acc) = perf_accumulator.as_mut() {
         acc.set_invocation_work(&prep_context.invocation.work_snapshot());
     }

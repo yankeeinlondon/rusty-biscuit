@@ -2470,3 +2470,48 @@ mod container_yaml_matrix {
         }
     }
 }
+
+mod nesting {
+    use super::*;
+
+    #[test]
+    fn inline_sequence_preflight_preserves_nested_positions_and_duplicates() {
+        let dir = TempDir::new().unwrap();
+        let path = write_source(dir.path(), "root.md", &[("sequence", json!([
+            {"name":"outer","sequence":[
+                {"name":"same","shell":"echo first"},
+                {"name":"same","shell":"echo second"}
+            ]}
+        ]))], "body");
+        let graph = graph_for(&path).unwrap();
+        let PreflightAction::Sequence(inner) = &graph.steps[0].task.as_ref().unwrap().action else { panic!("nested sequence") };
+        assert_eq!(inner.steps.iter().map(|step| step.id.as_str()).collect::<Vec<_>>(), ["same", "same-2"]);
+        assert_eq!(inner.steps[0].task.as_ref().unwrap().position, TaskPosition::First);
+        assert_eq!(inner.steps[1].task.as_ref().unwrap().position, TaskPosition::Later);
+        assert_eq!(graph.shell_commands.iter().map(|command| command.command.as_str()).collect::<Vec<_>>(), ["echo first", "echo second"]);
+    }
+
+    #[test]
+    fn referenced_sequence_suffix_and_origin_are_preserved() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir(dir.path().join("nested")).unwrap();
+        write_yaml(&dir.path().join("nested"), "steps.json", &json!({"rows":[{"title":"child","shell":"echo child"}]}));
+        let path = write_source(dir.path(), "root.md", &[("sequence", json!([
+            {"name":"outer","sequence":"nested/steps.json -> rows ::name(title)"}
+        ]))], "body");
+        let graph = graph_for(&path).unwrap();
+        let PreflightAction::Sequence(inner) = &graph.steps[0].task.as_ref().unwrap().action else { panic!("nested sequence") };
+        assert_eq!(inner.steps[0].name, "child");
+        assert_eq!(inner.steps[0].task.as_ref().unwrap().origin_path, biscuit_file::canonicalize_simplified(&dir.path().join("nested/steps.json")).unwrap());
+    }
+
+    #[test]
+    fn sequence_reference_cycle_reports_the_active_chain() {
+        let dir = TempDir::new().unwrap();
+        write_yaml(dir.path(), "a.json", &json!({"sequence":[{"name":"b","sequence":"b.json"}]}));
+        write_yaml(dir.path(), "b.json", &json!({"sequence":[{"name":"a","sequence":"a.json"}]}));
+        let path = write_source(dir.path(), "root.md", &[("sequence", json!([{"name":"a","sequence":"a.json"}]))], "body");
+        let CompositionError::SequenceReferenceCycle { chain } = err_for(&path) else { panic!("cycle diagnostic") };
+        assert_eq!(chain.iter().map(|path| path.file_name().unwrap().to_str().unwrap()).collect::<Vec<_>>(), ["root.md", "a.json", "b.json", "a.json"]);
+    }
+}

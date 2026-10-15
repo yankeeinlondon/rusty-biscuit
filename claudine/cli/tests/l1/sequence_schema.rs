@@ -559,7 +559,7 @@ Step {{ seq }}.
         .collect::<Vec<_>>()
         .join(" ");
     assert!(
-        collapsed.contains("schema validation failed for"),
+        collapsed.to_ascii_lowercase().contains("schema validation failed for"),
         "expected the typed schema surface; stderr:\n{plain}"
     );
     assert!(

@@ -370,7 +370,7 @@ pub(crate) fn rebuild_launch_identity(
     let facets = launch_plan::DocumentLaunchFacets {
         provider,
         non_interactive,
-        yolo_requested: intent.cli_yolo,
+        yolo_requested: document.selection_hints.yolo_enabled(intent.cli_yolo),
         is_inline: intent.is_inline,
         model: model.clone(),
         mcp_body_tags: mcp_tags.clone(),

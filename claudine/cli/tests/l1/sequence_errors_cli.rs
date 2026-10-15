@@ -485,7 +485,7 @@ fn a_nested_sequence_prompt_document_is_rejected() {
 
     let stderr = run_and_flatten(&workspace, &doc, &[]);
     assert!(
-        stderr.contains("nested sequences are not supported"),
+        stderr.contains("prompt task") && stderr.contains("sequence:"),
         "stderr:\n{stderr}"
     );
 }

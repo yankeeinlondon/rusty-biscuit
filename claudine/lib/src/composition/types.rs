@@ -474,6 +474,8 @@ pub struct EffectiveSelectionHints {
     /// `None` means absent or explicitly `null`, preserving today's default
     /// non-interactive behavior.
     pub interactive: Option<bool>,
+    /// Provider permission bypass requested by this document.
+    pub yolo: Option<bool>,
     /// `agent` strings that did not match the known provider catalog.
     ///
     /// Kept separate from [`Self::agent`] so existing resolution code can
@@ -488,6 +490,13 @@ pub struct EffectiveSelectionHints {
     /// this to route a single-entry all-invalid list to the zero-installed
     /// list state rather than the single-invalid state.
     pub agent_was_list: bool,
+}
+
+impl EffectiveSelectionHints {
+    /// Explicit CLI/environment intent wins over the document's default.
+    pub fn yolo_enabled(&self, cli_yolo: bool) -> bool {
+        cli_yolo || self.yolo.unwrap_or(false)
+    }
 }
 
 /// The caller's input layers, reapplied at every canonical preparation of
@@ -845,7 +854,7 @@ pub struct CompositionExecutionRequest {
     pub explicit_provider: Option<Provider>,
     /// Providers to exclude from automatic selection.
     pub excluded: BTreeSet<Provider>,
-    /// Enable provider-specific YOLO/auto-approval mode.
+    /// CLI/environment YOLO intent; document defaults are resolved separately.
     pub yolo: bool,
     /// Preserve these env vars even when they match sensitive-name filters.
     pub include: Vec<String>,
@@ -1079,4 +1088,11 @@ pub struct SequenceTaskResult {
     pub interrupted: bool,
     /// Wall-clock duration of the task.
     pub duration: std::time::Duration,
+}
+
+impl CompositionExecutionRequest {
+    /// Provider bypass intent, including the active document's default.
+    pub fn provider_yolo(&self) -> bool {
+        self.prepared.selection_hints.yolo_enabled(self.yolo)
+    }
 }

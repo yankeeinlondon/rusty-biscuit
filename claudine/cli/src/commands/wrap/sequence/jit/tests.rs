@@ -407,6 +407,7 @@ mod layering {
     fn snapshot(mutations: &[(&str, Value)], outputs: &[&str]) -> RuntimeSnapshot {
         RuntimeSnapshot {
             seq: None,
+            proxy_chain: Vec::new(),
             mutations: mutations
                 .iter()
                 .map(|(k, v)| ((*k).to_string(), v.clone()))

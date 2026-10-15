@@ -2701,7 +2701,7 @@ mod authored_set_order {
         );
         let fixture = Fixture::build(dir, &source).unwrap();
 
-        assert_eq!(outputs_of(&fixture), json!([EXPECTED_OUTPUT]));
+        assert_eq!(outputs_of(&fixture), json!([{"fixture-leg-0": EXPECTED_OUTPUT}]));
     }
 
     #[test]
@@ -2726,7 +2726,7 @@ mod authored_set_order {
         );
         let fixture = Fixture::build(dir, &source).unwrap();
 
-        assert_eq!(outputs_of(&fixture), json!([EXPECTED_OUTPUT]));
+        assert_eq!(outputs_of(&fixture), json!([{"fixture-leg-0": EXPECTED_OUTPUT}]));
     }
 
     #[test]
@@ -2757,7 +2757,7 @@ mod authored_set_order {
         );
         let fixture = Fixture::build(dir, &source).unwrap();
 
-        assert_eq!(outputs_of(&fixture), json!([EXPECTED_OUTPUT]));
+        assert_eq!(outputs_of(&fixture), json!([{"fixture-leg-0": EXPECTED_OUTPUT}]));
     }
 
     #[test]
@@ -2839,7 +2839,7 @@ mod authored_set_order {
         );
         let fixture = Fixture::build(dir, &source).unwrap();
 
-        assert_eq!(outputs_of(&fixture), json!([EXPECTED_OUTPUT]));
+        assert_eq!(outputs_of(&fixture), json!([{"fixture-leg-0": EXPECTED_OUTPUT}]));
     }
 
     #[test]
@@ -3934,9 +3934,9 @@ mod outcome_contract {
     }
 }
 
-// -- serial groups (phase 9) ------------------------------------------------
+// -- group definitions ------------------------------------------------------
 
-mod serial_groups {
+mod group_definitions {
     use super::*;
 
     fn assert_group_set_failure(
@@ -4000,7 +4000,7 @@ mod serial_groups {
         write_yaml(
             root,
             "group.yaml",
-            &json!({ "kind": "group", "name": "bundle", "tasks": tasks }),
+            &json!({ "kind": "group", "name": "bundle", "max_parallel": 1, "tasks": tasks }),
         );
         write_yaml(
             root,
@@ -4009,12 +4009,12 @@ mod serial_groups {
                 "kind": "group-catalog",
                 "groups": [
                     { "name": "other", "tasks": [{ "shell": "unused" }] },
-                    { "name": "bundle", "tasks": tasks },
+                    { "name": "bundle", "max_parallel": 1, "tasks": tasks },
                 ],
             }),
         );
         match site {
-            "inline" => json!({ "name": "alpha", "group": { "name": "bundle", "tasks": tasks } }),
+            "inline" => json!({ "name": "alpha", "group": { "name": "bundle", "max_parallel": 1, "tasks": tasks } }),
             "file" => json!({ "name": "alpha", "group": "group.yaml" }),
             "catalog" => json!({ "name": "alpha", "group": "bundle@catalog.yaml" }),
             other => panic!("unknown definition site `{other}`"),
@@ -4062,7 +4062,7 @@ mod serial_groups {
                 ("second".to_string(), TaskStatus::Succeeded),
             ],
         );
-        assert_eq!(outputs, json!(["out one", "out two"]));
+        assert_eq!(outputs, json!([{"first": "out one", "second": "out two"}]));
         for (label, other_commands, other_tasks, other_outputs) in &observed[1..] {
             assert_eq!(*other_commands, commands, "{label} commands diverged");
             assert_eq!(*other_tasks, tasks, "{label} task results diverged");
@@ -4160,6 +4160,7 @@ mod serial_groups {
                 "name": "alpha",
                 "group": {
                     "name": "bundle",
+                    "max_parallel": 1,
                     "tasks": [{ "task": "task.yaml" }],
                 },
             }),
@@ -4182,10 +4183,9 @@ mod serial_groups {
         );
     }
 
-    /// A serial group grows `outputs` entry by entry. It never adds a wrapper
-    /// entry of its own on top of its members'.
+    /// A completed group publishes one named result after all legs settle.
     #[test]
-    fn a_serial_group_appends_one_entry_per_task_and_none_of_its_own() {
+    fn a_group_appends_one_named_result_for_its_legs() {
         let dir = TempDir::new().unwrap();
         let source = one_step_source(
             dir.path(),
@@ -4193,6 +4193,7 @@ mod serial_groups {
                 "name": "alpha",
                 "group": {
                     "name": "bundle",
+                    "max_parallel": 1,
                     "tasks": [{ "shell": "one" }, { "shell": "two" }],
                 },
             }),
@@ -4207,11 +4208,11 @@ mod serial_groups {
         let outcome = fixture.execute(&wiring);
 
         assert!(outcome.succeeded(), "{}", failure_message(&outcome));
-        assert_eq!(runtime.output_count(), 2);
-        assert_eq!(runtime.outputs_value(), json!(["alpha out", "beta out"]));
+        assert_eq!(runtime.output_count(), 1);
+        assert_eq!(runtime.outputs_value(), json!([{"fixture-leg-0": "alpha out", "fixture-leg-1": "beta out"}]));
         assert!(
-            !outcome.output_committed,
-            "the group itself must not commit an entry",
+            outcome.output_committed,
+            "the completed group commits one entry",
         );
     }
 
@@ -4225,21 +4226,18 @@ mod serial_groups {
             dir.path(),
             json!({
                 "name": "alpha",
-                "group": {
-                    "name": "bundle",
-                    "tasks": [
+                "sequence": [
                         {
                             "name": "writer",
-                            "shell": "one",
-                            "teardown": [{ "set": { "marker": "written" } }],
+                            "sequence": [{"name": "write", "shell": "one"}],
+                            "finalize": [{ "set": { "marker": "written" } }],
                         },
                         {
                             "name": "reader",
                             "prompt": "target.md",
                             "params": { "seen": "{{ marker }}", "prior": "{{ last(seq.outputs) }}" },
                         },
-                    ],
-                },
+                ],
             }),
         );
         let fixture = Fixture::build(dir, &source).unwrap();
@@ -4256,10 +4254,10 @@ mod serial_groups {
         assert!(outcome.succeeded(), "{}", failure_message(&outcome));
         let request = prompt.last();
         assert_eq!(request.params["seen"], json!("written"));
-        assert_eq!(request.params["prior"], json!("writer said this"));
+        assert_eq!(request.params["prior"], json!(["writer said this"]));
         assert_eq!(
             runtime.outputs_value(),
-            json!(["writer said this", "reader said that"]),
+            json!([[["writer said this"], "reader said that"]]),
         );
     }
 
@@ -4374,6 +4372,7 @@ mod serial_groups {
                 "name": "alpha",
                 "group": {
                     "name": "bundle",
+                    "max_parallel": 1,
                     "tasks": [
                         { "name": "ok", "shell": "one" },
                         { "name": "boom", "shell": "two" },
@@ -4416,8 +4415,8 @@ mod serial_groups {
                 .collect::<Vec<_>>(),
             vec![("ok", TaskStatus::Succeeded), ("boom", TaskStatus::Failed)],
         );
-        // Only the successful member committed an entry.
-        assert_eq!(runtime.outputs_value(), json!(["one out"]));
+        // A failed group publishes no partial result.
+        assert_eq!(runtime.outputs_value(), json!([]));
         assert!(failure_message(&outcome).contains("exited with code 3"));
     }
 
@@ -4432,6 +4431,7 @@ mod serial_groups {
                 "name": "alpha",
                 "group": {
                     "name": "bundle",
+                    "max_parallel": 1,
                     "tasks": [{ "shell": "one" }, { "shell": "two" }],
                 },
             }),
@@ -4477,7 +4477,7 @@ mod serial_groups {
         assert_eq!(shell.commands(), vec!["solo".to_string()]);
         assert_eq!(outcome.group_tasks.len(), 1);
         assert_eq!(outcome.group_tasks[0].name, "only");
-        assert_eq!(runtime.outputs_value(), json!(["solo out"]));
+        assert_eq!(runtime.outputs_value(), json!([{"only": "solo out"}]));
     }
 
     /// A group task may itself be an external `kind: task` file; the reference
@@ -4530,7 +4530,7 @@ mod parallel_groups {
     fn parallel_step(commands: &[&str], max_parallel: Option<usize>) -> Value {
         let mut group = serde_json::Map::new();
         group.insert("name".to_string(), json!("bundle"));
-        group.insert("execution".to_string(), json!("parallel"));
+
         group.insert(
             "tasks".to_string(),
             Value::Array(
@@ -4567,7 +4567,7 @@ mod parallel_groups {
 
         assert!(outcome.succeeded(), "{}", failure_message(&outcome));
         assert_eq!(shell.peak_in_flight(), 2, "`max_parallel: 2` was exceeded");
-        assert_eq!(runtime.outputs_value(), json!([["a", "b", "c", "d"]]));
+        assert_eq!(runtime.outputs_value(), json!([{"a":"a", "b":"b", "c":"c", "d":"d"}]));
     }
 
     /// Absent `max_parallel` means "launch them all".
@@ -4612,7 +4612,7 @@ mod parallel_groups {
 
         assert!(outcome.succeeded(), "{}", failure_message(&outcome));
         assert_eq!(shell.peak_in_flight(), 1);
-        assert_eq!(runtime.outputs_value(), json!([["a", "b"]]));
+        assert_eq!(runtime.outputs_value(), json!([{"a":"a", "b":"b"}]));
     }
 
     /// The nested entry is positional, so inverting completion order against
@@ -4640,7 +4640,7 @@ mod parallel_groups {
         assert!(outcome.succeeded(), "{}", failure_message(&outcome));
         assert_eq!(
             runtime.outputs_value(),
-            json!([["out first", "out second", "out third"]]),
+            json!([{"first":"out first", "second":"out second", "third":"out third"}]),
             "the entry must follow declaration order, not completion order",
         );
         assert_eq!(
@@ -4653,8 +4653,7 @@ mod parallel_groups {
         );
     }
 
-    /// One nested entry, not one per member — that is what distinguishes a
-    /// parallel group from a serial one in `outputs`.
+    /// Every group publishes one native dictionary after its lifecycle settles.
     #[test]
     fn a_parallel_group_commits_exactly_one_nested_entry() {
         let dir = TempDir::new().unwrap();
@@ -4672,7 +4671,7 @@ mod parallel_groups {
 
         assert!(outcome.succeeded(), "{}", failure_message(&outcome));
         assert_eq!(runtime.output_count(), 1);
-        assert_eq!(runtime.outputs_value(), json!([["one", "two"]]));
+        assert_eq!(runtime.outputs_value(), json!([{"a":"one", "b":"two"}]));
         assert!(
             outcome.output_committed,
             "the group owns the entry its members do not commit",
@@ -4781,26 +4780,42 @@ mod parallel_groups {
         );
         assert_eq!(
             runtime.outputs_value(),
-            json!(["before the group", ["p", "k", "z"]]),
+            json!(["before the group", {"p":"p", "k":"k", "z":"z"}]),
         );
     }
 
     /// A failure never cancels a sibling: canceling a mid-flight agent run
     /// discards useful work.
     #[test]
-    fn every_sibling_runs_to_completion_after_one_fails() {
+    fn every_admitted_sibling_runs_to_completion_after_one_fails() {
         let dir = TempDir::new().unwrap();
         let source = one_step_source(dir.path(), parallel_step(&["boom", "slow"], None));
         let fixture = Fixture::build(dir, &source).unwrap();
         let recorder = Recorder::default();
-        // The failure lands first; the survivor is still running when it does.
-        let shell = FakeTaskShell::default()
-            .stdout_for("boom", "partial output")
-            .failing("boom")
-            .stdout_for("slow", "finished anyway")
-            .delay("slow", 60);
+        struct AdmittedShell {
+            started: Mutex<usize>,
+            changed: std::sync::Condvar,
+        }
+        impl TaskShellRunner for AdmittedShell {
+            fn run(&self, command: &str, _timeout: Duration, _interrupt: Option<&AtomicBool>,
+                _live: Option<&Arc<TaskLiveOutput>>) -> Result<ShellCommandOutput, TaskShellError>
+            {
+                let mut started = self.started.lock().unwrap();
+                *started += 1;
+                self.changed.notify_all();
+                let (started, wait) = self.changed.wait_timeout_while(started,
+                    Duration::from_secs(2), |started| *started < 2).unwrap();
+                assert_eq!(*started, 2, "both siblings must be admitted before failure");
+                assert!(!wait.timed_out());
+                Ok(ShellCommandOutput { stdout: command.into(), exit_code: i32::from(command == "boom"),
+                    interrupted: false, timed_out: false, runaway: None })
+            }
+        }
+        let shell = AdmittedShell { started: Mutex::new(0), changed: std::sync::Condvar::new() };
         let runtime = Arc::new(RuntimeState::new());
-        let mut wiring = Wiring::new(&recorder, &shell);
+        let fake = FakeTaskShell::default();
+        let mut wiring = Wiring::new(&recorder, &fake);
+        wiring.shell = &shell;
         wiring.runtime = Some(&runtime);
 
         let outcome = fixture.execute(&wiring);
@@ -4819,8 +4834,8 @@ mod parallel_groups {
         );
         assert_eq!(
             runtime.outputs_value(),
-            json!([["partial output", "finished anyway"]]),
-            "a failed task keeps its slot and its partial stdout",
+            json!([]),
+            "a failed group publishes no partial output",
         );
     }
 
@@ -5036,7 +5051,7 @@ mod parallel_groups {
             observed[0], observed[1],
             "completion order must not reach any observable result",
         );
-        assert_eq!(observed[0].0, json!([["one", "two", "three"]]));
+        assert_eq!(observed[0].0, json!([{"one":"one", "two":"two", "three":"three"}]));
     }
 
     /// Concurrency must never reach process-global state: `setenv` is not
@@ -5111,8 +5126,8 @@ mod parallel_groups {
         );
         assert_eq!(
             runtime.outputs_value(),
-            json!([["fine", ""]]),
-            "the failed task keeps an (empty) slot",
+            json!([]),
+            "a failed group publishes no result",
         );
     }
 }
@@ -5190,7 +5205,7 @@ mod group_framing {
             "name": "alpha",
             "group": {
                 "name": "bundle",
-                "execution": execution,
+                "max_parallel": if execution == "serial" { 1 } else { commands.len() },
                 "tasks": commands
                     .iter()
                     .map(|command| json!({ "name": command, "shell": command }))
@@ -5293,7 +5308,7 @@ mod group_framing {
     }
 
     #[test]
-    fn a_serial_group_uses_the_invisible_bar_at_the_same_left_edge() {
+    fn a_cap_of_one_preserves_the_group_bar_at_the_same_left_edge() {
         let serial = Arc::new(FrameSink::default());
         run(&["alpha", "bravo"], "serial", &serial);
         let parallel = Arc::new(FrameSink::default());
@@ -5301,8 +5316,8 @@ mod group_framing {
 
         let serial_lines = serial.visible_lines();
         assert!(
-            serial_lines.iter().all(|line| !line.contains('│')),
-            "serial work drew a visible bar: {serial_lines:?}"
+            serial_lines.iter().all(|line| line.contains('│')),
+            "capped group lost its attribution bar: {serial_lines:?}"
         );
         // Same geometry: the content column is identical in both modes.
         let column = |lines: &[String], needle: &str| -> usize {
@@ -5406,7 +5421,7 @@ mod group_framing {
         assert!(outcome.succeeded(), "{}", failure_message(&outcome));
         assert_eq!(
             runtime.outputs_value(),
-            json!([["a", "b"]]),
+            json!([{"task-a":"a", "task-b":"b"}]),
             "silencing the frames must not change the run"
         );
         assert!(
@@ -5492,19 +5507,19 @@ mod group_framing {
     }
 
     #[test]
-    fn a_serial_members_body_shares_the_invisible_bar_geometry() {
+    fn a_capped_members_body_keeps_its_group_bar_geometry() {
         let sink = Arc::new(FrameSink::default());
         run(&["alpha", "bravo"], "serial", &sink);
 
         let data = sink.visible_channel_lines(Channel::Data);
         assert!(
-            data.iter().all(|line| !line.contains('│')),
-            "serial body output drew a visible bar: {data:?}"
+            data.iter().all(|line| line.contains('│')),
+            "capped group body lost its attribution bar: {data:?}"
         );
-        // Same left edge as a parallel body line: two columns of gutter.
+        // Capping admission preserves the same group gutter.
         for line in &data {
             assert!(
-                line.starts_with("  ") && !line.starts_with("   "),
+                line.starts_with("│ "),
                 "serial body output shifted its left edge: {line:?}"
             );
         }
@@ -6055,3 +6070,569 @@ mod late_values {
     }
 
 }
+
+mod container_group_contract {
+    use super::*;
+
+    #[test]
+    fn default_fail_fast_withholds_mutations_outputs_and_unadmitted_legs() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), json!({"name": "container", "group": {
+            "name": "atomic", "max_parallel": 1,
+            "tasks": [
+                {"name": "failed", "sequence": [{"name": "work", "shell": "bad"}],
+                    "initialize": [{"set": {"leaked": true}}]},
+                {"name": "unadmitted", "shell": "never"}
+            ]
+        }}));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default().stdout_for("bad", "partial").failing("bad");
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+        let outcome = fixture.execute(&wiring);
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        assert!(!outcome.output_committed);
+        assert_eq!(runtime.outputs_value(), json!([]));
+        assert!(runtime.snapshot().mutations.iter().all(|(key, _)| key != "leaked"));
+        assert_eq!(shell.commands(), vec!["bad"]);
+    }
+
+    #[test]
+    fn concurrent_legs_obey_cap_and_merge_declaration_order_without_shared_state() {
+        #[derive(Default)]
+        struct BarrierShell {
+            counters: Mutex<(usize, usize, usize)>,
+            changed: std::sync::Condvar,
+            runtime: Arc<RuntimeState>,
+        }
+        impl TaskShellRunner for BarrierShell {
+            fn run(&self, command: &str, _timeout: Duration, _interrupt: Option<&AtomicBool>,
+                _live: Option<&Arc<TaskLiveOutput>>) -> Result<ShellCommandOutput, TaskShellError>
+            {
+                assert!(self.runtime.snapshot().mutations.is_empty(), "leg state escaped before group finalization");
+                let mut counts = self.counters.lock().unwrap();
+                counts.0 += 1; counts.1 += 1; counts.2 = counts.2.max(counts.1);
+                let pair = counts.0.div_ceil(2) * 2;
+                self.changed.notify_all();
+                let (mut counts, timeout) = self.changed.wait_timeout_while(counts,
+                    Duration::from_secs(2), |counts| counts.0 < pair).unwrap();
+                assert!(!timeout.timed_out(), "max_parallel failed to admit the second leg");
+                counts.1 -= 1;
+                Ok(ShellCommandOutput { stdout: command.to_string(), exit_code: 0,
+                    timed_out: false, interrupted: false, runaway: None })
+            }
+        }
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), json!({"name": "container", "group": {
+            "name": "concurrent", "max_parallel": 2,
+            "tasks": [
+                {"name": "a", "sequence": [{"name": "work", "shell": "a"}], "initialize": [{"set": {"marker": "a"}}]},
+                {"name": "b", "sequence": [{"name": "work", "shell": "b"}], "initialize": [{"set": {"marker": "b"}}]},
+                {"name": "c", "sequence": [{"name": "work", "shell": "c"}], "initialize": [{"set": {"marker": "c"}}]},
+                {"name": "d", "sequence": [{"name": "work", "shell": "d"}], "initialize": [{"set": {"marker": "d"}}]}
+            ]
+        }}));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let fake = FakeTaskShell::default();
+        let runtime = Arc::new(RuntimeState::new());
+        let shell = BarrierShell { runtime: runtime.clone(), ..Default::default() };
+        let mut wiring = Wiring::new(&recorder, &fake);
+        wiring.runtime = Some(&runtime); wiring.shell = &shell;
+        let outcome = fixture.execute(&wiring);
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(shell.counters.lock().unwrap().2, 2);
+        assert_eq!(runtime.outputs_value(), json!([{"a":["a"], "b":["b"], "c":["c"], "d":["d"]}]));
+        assert_eq!(runtime.snapshot().mutations.get("marker"), Some(&json!("d")));
+        assert_eq!(outcome.group_tasks.iter().map(|leg| leg.name.as_str()).collect::<Vec<_>>(), vec!["a", "b", "c", "d"]);
+    }
+
+    #[test]
+    fn initialize_skip_runs_no_children_or_finalize_and_records_skipped_leg() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), json!({"name": "container", "group": {
+            "name": "outer", "success": [{"info": "outcome={{ group.legs.skipped.outcome }}"}],
+            "tasks": [{"name": "skipped", "group": {
+                "name": "inner", "initialize": ["skip"],
+                "start": [{"info": "must not start"}],
+                "finalize": [{"info": "must not finalize"}],
+                "tasks": [{"name": "never", "shell": "never"}]
+            }}]
+        }}));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+        let outcome = fixture.execute(&wiring);
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert!(shell.commands().is_empty());
+        assert_eq!(recorder.events(), vec!["info:outcome=skipped"]);
+        assert_eq!(runtime.outputs_value(), json!([{"skipped":null}]));
+    }
+
+    #[test]
+    fn retry_restarts_legs_without_intermediate_finalize_or_duplicate_result() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), json!({"name": "container", "group": {
+            "name": "retrying",
+            "initialize": [{"info": "initialize"}],
+            "start": [{"info": "start={{ length(group.failed) }}"}],
+            "failure": [{"info": "failure={{ as_csv(group.failed) }}"},
+                {"retry": {"max_attempts": 1, "with": {"retry_data": {"number": 7}}}}],
+            "success": [{"info": "success={{ retry_data.number }}"}],
+            "finalize": [{"info": "finalize"}],
+            "tasks": [{"name": "leg", "shell": "attempt"}]
+        }}));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::with_results(vec![
+            ShellCommandOutput { stdout: "discarded".into(), exit_code: 1,
+                timed_out: false, interrupted: false, runaway: None },
+            ShellCommandOutput { stdout: "retained".into(), exit_code: 0,
+                timed_out: false, interrupted: false, runaway: None },
+        ]);
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+        let outcome = fixture.execute(&wiring);
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(recorder.events(), vec!["info:initialize", "info:start=0", "info:failure=leg",
+            "info:start=0", "info:success=7", "info:finalize"]);
+        assert_eq!(runtime.outputs_value(), json!([{"leg": "retained"}]));
+        assert_eq!(runtime.snapshot().mutations.get("retry_data"), Some(&json!({"number":7})));
+    }
+
+    #[test]
+    fn group_events_see_settled_summaries_and_finalize_before_publication() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), json!({"name": "container", "group": {
+            "name": "summary", "fail_fast": false, "max_parallel": 1,
+            "initialize": [{"info": "initialize"}],
+            "start": [{"info": "start={{ length(group.failed) }}"}],
+            "success": [{"info": "failed={{ as_csv(group.failed) }};good={{ as_csv(group.succeeded) }}"}],
+            "finalize": [{"info": "finalize={{ group.legs.bad.output }}"}],
+            "tasks": [{"name": "bad", "shell": "bad"}, {"name": "good", "shell": "good"}]
+        }}));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default().stdout_for("bad", "partial").failing("bad")
+            .stdout_for("good", "answer");
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+        let outcome = fixture.execute(&wiring);
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(recorder.events(), vec!["info:initialize", "info:start=0", "info:failed=bad;good=good", "info:finalize=partial"]);
+        assert_eq!(runtime.outputs_value(), json!([{"bad":"partial", "good":"answer"}]));
+    }
+
+    #[test]
+    fn group_finalize_error_discards_leg_mutations_and_result() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), json!({"name": "container", "group": {
+            "name": "atomic", "finalize": [{"error": "finalization failed"}],
+            "tasks": [{"name": "writer", "side_effect": {"set": {"leaked": true}}}]
+        }}));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+        let outcome = fixture.execute(&wiring);
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        assert_eq!(runtime.outputs_value(), json!([]));
+        assert!(runtime.snapshot().mutations.is_empty());
+    }
+
+    #[test]
+    fn tolerated_failed_legs_merge_mutations_and_publish_native_named_results() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), json!({"name": "container", "group": {
+            "name": "tolerated", "fail_fast": false, "max_parallel": 1,
+            "tasks": [
+                {"name": "failed", "sequence": [{"name": "work", "shell": "bad"}],
+                    "initialize": [{"set": {"marker": "failed-write"}}]},
+                {"name": "good", "sequence": [{"name": "work", "shell": "good"}],
+                    "initialize": [{"set": {"other": 7}}]}
+            ]
+        }}));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default().stdout_for("bad", "partial").failing("bad")
+            .stdout_for("good", "answer");
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+        let outcome = fixture.execute(&wiring);
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(runtime.outputs_value(), json!([{"failed":[], "good":["answer"]}]));
+        let mutations: Map<String, Value> = runtime.snapshot().mutations.into_iter().collect();
+        assert_eq!(mutations.get("marker"), Some(&json!("failed-write")));
+        assert_eq!(mutations.get("other"), Some(&json!(7)));
+    }
+}
+
+mod nested_sequences {
+    use super::*;
+
+    #[test]
+    fn child_results_are_native_and_parent_position_is_restored() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), json!({"name":"outer","sequence":[
+            {"name":"child","shell":"first"},
+            {"name":"child","sequence":[{"name":"leaf","shell":"second"}]}
+        ]}));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::with_stdout(&["one", "two"]);
+        let runtime = Arc::new(RuntimeState::new());
+        let outer = json!({"name":"outer","index":7,"count":9,"run_id":"shared-run"});
+        runtime.set_sequence_binding(outer.clone());
+        runtime.append_output("before");
+        let outcome = fixture.execute(&Wiring { runtime: Some(&runtime), ..Wiring::new(&recorder, &shell) });
+        assert!(outcome.succeeded(), "{:?}", outcome.error);
+        assert_eq!(outcome.result, json!(["one", ["two"]]));
+        assert_eq!(runtime.outputs_value(), json!(["before", ["one", ["two"]]]));
+        let restored = runtime.sequence_value();
+        assert_eq!(restored["name"], outer["name"]);
+        assert_eq!(restored["index"], 7);
+        assert_eq!(restored["run_id"], "shared-run");
+    }
+
+    #[test]
+    fn nested_prompt_observes_shared_run_and_shallow_neighbors() {
+        let dir = TempDir::new().unwrap();
+        write_source(dir.path(), "prompt.md", &[], "Prompt.");
+        let source = one_step_source(dir.path(), json!({"name":"outer","sequence":[
+            {"name":"same","prompt":"prompt.md"}, {"name":"same","prompt":"prompt.md"}
+        ]}));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let prompt = FakePrompt::succeeding("answer");
+        let runtime = Arc::new(RuntimeState::new());
+        runtime.set_sequence_binding(json!({"run_id":"outer-invocation"}));
+        let outcome = fixture.execute(&Wiring { prompt: &prompt, runtime: Some(&runtime), ..Wiring::new(&recorder, &shell) });
+        assert!(outcome.succeeded(), "{:?}", outcome.error);
+        let requests = prompt.requests.lock().unwrap();
+        let first = requests[0].set_overrides.sequence_value().unwrap();
+        let second = requests[1].set_overrides.sequence_value().unwrap();
+        assert_eq!(first["run_id"], "outer-invocation");
+        assert_eq!(second["run_id"], "outer-invocation");
+        assert_eq!(first["index"], 1);
+        assert_eq!(second["index"], 2);
+        assert_eq!(second["count"], 2);
+        assert_eq!(first["next"]["id"], "same-2");
+        assert_eq!(second["previous"]["id"], "same");
+        assert!(first["next"].get("next").is_none());
+        assert!(second["previous"].get("previous").is_none());
+        assert_eq!(first["outputs"], json!([]));
+        assert_eq!(second["outputs"], json!(["answer"]));
+    }
+
+    #[test]
+    fn referenced_markdown_body_step_has_no_document_lifecycle() {
+        let dir = TempDir::new().unwrap();
+        write_source(dir.path(), "inner.md", &[
+            ("sequence", json!([{"name":"body"}])),
+            ("start", json!([{"notify":"container-start"}])),
+        ], "Nested document body.");
+        let source = one_step_source(dir.path(), json!({"name":"outer","sequence":"inner.md"}));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let prompt = FakePrompt::succeeding("composed-body");
+        let runtime = Arc::new(RuntimeState::new());
+        let outcome = fixture.execute(&Wiring { prompt: &prompt, runtime: Some(&runtime), ..Wiring::new(&recorder, &shell) });
+        assert!(outcome.succeeded(), "{:?}", outcome.error);
+        assert_eq!(outcome.result, json!(["composed-body"]));
+        assert!(prompt.last().body_only);
+        assert_eq!(recorder.events().iter().filter(|event| event.as_str() == "notify:container-start").count(), 1);
+    }
+
+    #[test]
+    fn retry_clears_child_outputs_and_finalizes_once_before_publication() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), json!({"name":"outer","sequence":[
+            {"name":"first","shell":"first"}, {"name":"second","shell":"second"}
+        ], "initialize":[{"notify":"initialize"}], "start":[{"notify":"start"}],
+           "failure":[{"notify":"failure"},{"retry":{"max_attempts":1,"delay":"0s","with":{"retry_value":7}}}],
+           "success":[{"notify":"success {{ retry_value }}"}], "finalize":[{"notify":"finalize"}]}));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::with_results(vec![
+            ShellCommandOutput { stdout:"discarded".into(), exit_code:0, timed_out:false, interrupted:false, runaway:None },
+            ShellCommandOutput { stdout:"failed".into(), exit_code:1, timed_out:false, interrupted:false, runaway:None },
+            ShellCommandOutput { stdout:"kept-first".into(), exit_code:0, timed_out:false, interrupted:false, runaway:None },
+            ShellCommandOutput { stdout:"kept-second".into(), exit_code:0, timed_out:false, interrupted:false, runaway:None },
+        ]);
+        let runtime = Arc::new(RuntimeState::new());
+        let outcome = fixture.execute(&Wiring { runtime: Some(&runtime), ..Wiring::new(&recorder, &shell) });
+        assert!(outcome.succeeded(), "{:?}", outcome.error);
+        assert_eq!(outcome.result, json!(["kept-first","kept-second"]));
+        assert_eq!(runtime.outputs_value(), json!([["kept-first","kept-second"]]));
+        assert_eq!(runtime.snapshot().mutations.get("retry_value"), Some(&json!(7)));
+        assert_eq!(recorder.events(), ["notify:initialize","notify:start","notify:failure","notify:start","notify:success 7","notify:finalize"]);
+    }
+
+    #[test]
+    fn finalize_failure_discards_nested_native_result() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), json!({"name":"outer","sequence":[
+            {"name":"child","shell":"child"}
+        ], "finalize":[{"shell":"cleanup"}]}));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        recorder.fail_stack_shell();
+        let shell = FakeTaskShell::with_stdout(&["unpublished"]);
+        let runtime = Arc::new(RuntimeState::new());
+        let outcome = fixture.execute(&Wiring { runtime: Some(&runtime), ..Wiring::new(&recorder, &shell) });
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        assert!(!outcome.output_committed);
+        assert_eq!(runtime.outputs_value(), json!([]));
+        assert!(outcome.error.unwrap().message().contains("cleanup"));
+    }
+
+    #[test]
+    fn container_proxy_cycle_returns_a_typed_failure() {
+        let dir = TempDir::new().unwrap();
+        write_yaml(dir.path(), "a.yaml", &json!({"sequence":[],"initialize":[{"proxy":"b.yaml"}]}));
+        write_yaml(dir.path(), "b.yaml", &json!({"sequence":[],"initialize":[{"proxy":"a.yaml"}]}));
+        let source = write_source(dir.path(), "root.md", &[("sequence", json!([
+            {"name":"a","sequence":"a.yaml"}, {"name":"b","sequence":"b.yaml"}
+        ]))], "Body.");
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let runtime = Arc::new(RuntimeState::new());
+        let outcome = fixture.execute(&Wiring { runtime: Some(&runtime), ..Wiring::new(&recorder, &shell) });
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        assert!(failure_message(&outcome).contains("forms a cycle"), "{}", failure_message(&outcome));
+        assert_eq!(runtime.outputs_value(), json!([]));
+    }
+
+    #[test]
+    fn container_proxy_cycle_crossing_group_thread_returns_a_typed_failure() {
+        let dir = TempDir::new().unwrap();
+        write_yaml(dir.path(), "a.yaml", &json!({"sequence":[],"initialize":[{"proxy":"b.yaml"}]}));
+        write_yaml(dir.path(), "b.yaml", &json!({"sequence":[{"name":"parallel","group":{"tasks":[{"name":"leg","sequence":[],"initialize":[{"proxy":"a.yaml"}]}]}}]}));
+        let source = write_source(dir.path(), "root.md", &[("sequence", json!([
+            {"name":"a","sequence":"a.yaml"}, {"name":"b","sequence":"b.yaml"}
+        ]))], "Body.");
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let runtime = Arc::new(RuntimeState::new());
+        let outcome = fixture.execute(&Wiring { runtime: Some(&runtime), ..Wiring::new(&recorder, &shell) });
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        assert!(failure_message(&outcome).contains("forms a cycle"), "{}", failure_message(&outcome));
+        assert_eq!(runtime.outputs_value(), json!([]));
+    }
+
+    #[test]
+    fn changed_nested_source_refuses_new_commands_before_start() {
+        let dir = TempDir::new().unwrap();
+        write_yaml(dir.path(), "inner.yaml", &json!({"sequence":[{"name":"child","shell":"approved"}]}));
+        let source = one_step_source(dir.path(), json!({"name":"outer","sequence":"inner.yaml"}));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        write_yaml(fixture._dir.path(), "inner.yaml", &json!({"sequence":[{"name":"child","shell":"unapproved"}]}));
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::with_stdout(&["must not run"]);
+        let runtime = Arc::new(RuntimeState::new());
+        let outcome = fixture.execute(&Wiring { runtime: Some(&runtime), ..Wiring::new(&recorder, &shell) });
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        assert!(outcome.error.unwrap().message().contains("approval closed"));
+        assert!(shell.commands().is_empty());
+        assert_eq!(runtime.outputs_value(), json!([]));
+    }
+
+    #[test]
+    fn empty_sequence_returns_an_empty_native_array() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), json!({"name":"outer","sequence":[]}));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let runtime = Arc::new(RuntimeState::new());
+        let outcome = fixture.execute(&Wiring { runtime: Some(&runtime), ..Wiring::new(&recorder, &shell) });
+        assert!(outcome.succeeded(), "{:?}", outcome.error);
+        assert_eq!(outcome.result, json!([]));
+        assert_eq!(runtime.outputs_value(), json!([[]]));
+    }
+
+    #[test]
+    fn failure_stops_nested_sequence_and_publishes_nothing() {
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), json!({"name":"outer","sequence":[
+            {"name":"first","shell":"first"}, {"name":"later","shell":"must-not-run"}
+        ]}));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::with_results(vec![ShellCommandOutput { stdout:"partial".into(), exit_code:1, timed_out:false, interrupted:false, runaway:None }]);
+        let runtime = Arc::new(RuntimeState::new());
+        runtime.append_output("before");
+        let outcome = fixture.execute(&Wiring { runtime: Some(&runtime), ..Wiring::new(&recorder, &shell) });
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        assert!(!outcome.output_committed);
+        assert_eq!(runtime.outputs_value(), json!(["before"]));
+        assert_eq!(shell.commands(), ["first"]);
+    }
+}
+
+mod group_preparation_contract {
+    use super::*;
+
+    macro_rules! refused_preparation {
+        ($name:ident, $replacement:expr, $message:literal) => {
+            #[test]
+            fn $name() {
+                let dir = TempDir::new().unwrap();
+                fs::write(dir.path().join("target.md"), "---\ntitle: target\n---\nBody.").unwrap();
+                let group = json!({"name":"inline",
+                    "start":[{"info":"must not start"}], "blocked":[{"info":"blocked"}],
+                    "finalize":[{"info":"finalize"}], "tasks":[{"name":"leg","shell":"approved"}]});
+                let source = one_step_source(dir.path(), json!({"name":"container","group":group.clone()}));
+                let fixture = Fixture::build(dir, &source).unwrap();
+                let mut changed = group;
+                let replacement: Value = $replacement;
+                for (key, value) in replacement.as_object().unwrap() { changed[key] = value.clone(); }
+                one_step_source(fixture._dir.path(), json!({"name":"container","group":changed}));
+                let recorder = Recorder::default();
+                let shell = FakeTaskShell::default();
+                let prompt = FakePrompt::succeeding("must not run");
+                let runtime = Arc::new(RuntimeState::new());
+                let mut wiring = Wiring::new(&recorder, &shell);
+                wiring.runtime = Some(&runtime); wiring.prompt = &prompt;
+                let outcome = fixture.execute(&wiring);
+                assert_eq!(outcome.status, TaskStatus::Failed);
+                assert!(failure_message(&outcome).contains($message), "{}", failure_message(&outcome));
+                assert_eq!(recorder.events(), vec!["info:blocked", "info:finalize"]);
+                assert!(shell.commands().is_empty());
+                assert!(prompt.requests.lock().unwrap().is_empty());
+                assert_eq!(runtime.outputs_value(), json!([]));
+            }
+        };
+    }
+    refused_preparation!(new_child_template_is_refused,
+        json!({"tasks":[{"name":"leg","shell":"echo {{ seq.index }}"}]}),
+        "introduced a template after sequence approval closed");
+    refused_preparation!(new_prompt_target_is_refused,
+        json!({"tasks":[{"name":"leg","prompt":"target.md"}]}), "unapproved prompt document");
+    refused_preparation!(malformed_reread_runs_cleanup_without_start_or_publication,
+        json!({"variables":null}), "`variables` must be an object");
+
+    #[test]
+    fn retry_rereads_source_without_repeating_initialize() {
+        struct RewritingShell { directory: PathBuf, calls: std::sync::atomic::AtomicUsize }
+        fn step(label: &str) -> Value {
+            json!({"name":"container", "group":{"name":"retrying",
+                "variables":{"label":label},
+                "initialize":[{"info":"initialize"},{"set":{"retained":7}}],
+                "start":[{"info":"start={{ group.label }}:{{ retained }}"}],
+                "failure":[{"info":"failure"},{"retry":{"max_attempts":1}}],
+                "success":[{"info":"success"}], "finalize":[{"info":"finalize"}],
+                "tasks":[{"name":"leg","shell":"attempt"}]}})
+        }
+        impl TaskShellRunner for RewritingShell {
+            fn run(&self, _command: &str, _timeout: Duration, _interrupt: Option<&AtomicBool>,
+                _live: Option<&Arc<TaskLiveOutput>>) -> Result<ShellCommandOutput, TaskShellError>
+            {
+                let first = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0;
+                if first { one_step_source(&self.directory, step("new")); }
+                Ok(ShellCommandOutput { stdout: if first {"discarded"} else {"retained"}.into(),
+                    exit_code: if first {1} else {0}, timed_out:false, interrupted:false, runaway:None })
+            }
+        }
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), step("old"));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let recorder = Recorder::default();
+        let fake = FakeTaskShell::default();
+        let shell = RewritingShell { directory:fixture._dir.path().to_path_buf(), calls:Default::default() };
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &fake); wiring.shell = &shell; wiring.runtime = Some(&runtime);
+        let outcome = fixture.execute(&wiring);
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(recorder.events(), vec!["info:initialize", "info:start=old:7", "info:failure",
+            "info:start=new:7", "info:success", "info:finalize"]);
+        assert_eq!(runtime.outputs_value(), json!([{"leg":"retained"}]));
+        assert_eq!(runtime.snapshot().mutations.get("retained"), Some(&json!(7)));
+    }
+
+    #[test]
+    fn inline_group_rereads_variables_and_lifecycle_after_initial_audit() {
+        let dir = TempDir::new().unwrap();
+        let group = |label: &str| json!({"name":"inline", "variables":{"label":label},
+            "start":[{"info":format!("start-{label}={{{{ group.label }}}}")}],
+            "tasks":[{"name":"leg","shell":"approved"}]});
+        let source = one_step_source(dir.path(), json!({"name":"container","group":group("old")}));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        one_step_source(fixture._dir.path(), json!({"name":"container","group":group("new")}));
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default().stdout_for("approved", "answer");
+        let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(recorder.events(), vec!["info:start-new=new"]);
+        assert_eq!(outcome.result, json!({"leg":"answer"}));
+    }
+
+    macro_rules! external_source {
+        ($name:ident, $catalog:expr) => {
+            #[test]
+            fn $name() {
+                let dir = TempDir::new().unwrap();
+                let path = dir.path().join("group.yaml");
+                let document = |label: &str| {
+                    let group = json!({"name":"bundle", "variables":{"label":label},
+                        "start":[{"info":"value={{ group.label }}"}],
+                        "tasks":[{"name":"leg","shell":"approved"}]});
+                    if $catalog { json!({"kind":"group-catalog","groups":[group]}) }
+                    else { let mut group = group; group["kind"] = json!("group"); group }
+                };
+                fs::write(&path, serde_json::to_string(&document("old")).unwrap()).unwrap();
+                let reference = if $catalog { "bundle@group.yaml" } else { "group.yaml" };
+                let source = one_step_source(dir.path(), json!({"name":"container","group":reference}));
+                let fixture = Fixture::build(dir, &source).unwrap();
+                fs::write(&path, serde_json::to_string(&document("new")).unwrap()).unwrap();
+                let recorder = Recorder::default();
+                let shell = FakeTaskShell::default().stdout_for("approved", "answer");
+                let outcome = fixture.execute(&Wiring::new(&recorder, &shell));
+                assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+                assert_eq!(recorder.events(), vec!["info:value=new"]);
+                assert_eq!(outcome.result, json!({"leg":"answer"}));
+            }
+        };
+    }
+    external_source!(external_group_rereads_its_authoring_document, false);
+    external_source!(catalog_group_rereads_its_selected_entry, true);
+
+    #[test]
+    fn new_child_command_is_blocked_before_start_and_publishes_nothing() {
+        let dir = TempDir::new().unwrap();
+        let group = |command: &str| json!({"name":"inline",
+            "start":[{"info":"must not start"}],
+            "blocked":[{"info":"blocked"}], "finalize":[{"info":"finalize"}],
+            "tasks":[{"name":"leg","shell":command}]});
+        let source = one_step_source(dir.path(), json!({"name":"container","group":group("approved")}));
+        let fixture = Fixture::build(dir, &source).unwrap();
+        one_step_source(fixture._dir.path(), json!({"name":"container","group":group("new-command")}));
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::default();
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell); wiring.runtime = Some(&runtime);
+        let outcome = fixture.execute(&wiring);
+        assert_eq!(outcome.status, TaskStatus::Failed);
+        assert!(failure_message(&outcome).contains("after sequence approval closed"));
+        assert_eq!(recorder.events(), vec!["info:blocked", "info:finalize"]);
+        assert!(shell.commands().is_empty());
+        assert_eq!(runtime.outputs_value(), json!([]));
+    }
+}
+
+#[path = "container_regressions.rs"]
+mod container_regressions;

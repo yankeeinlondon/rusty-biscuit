@@ -1516,3 +1516,21 @@ If the frontmatter is not an object (e.g., a bare string or list), lifecycle par
 - [Composition](../composition.md) — the composition pipeline and loop behavior
 - [Configuring Actions](../configuring-actions.md) — messaging routes and action configuration
 - [Non-Interactive Sessions](../non-interactive-sessions.md) — stderr rendering and terminal output
+
+
+## Sequence and group containers
+
+Sequences and groups use the same event order as documents: initialize,
+preparation, start, a terminal event, then finalize. The root sequence
+initializes before static preflight. Nested sources are reread before start;
+preparation errors run blocked and finalize with shell execution disabled.
+A body-only sequence step composes its source body without running the source
+lifecycle again.
+
+Container retry starts another attempt without repeating initialize or running
+the abandoned attempt's finalize. It clears child results while retaining
+runtime writes, including evaluated `retry.with` values. A container has no
+provider session, so resume raises the no-session error. Proxy transfers its
+place to the target without finalizing the source. Results publish after
+finalize succeeds. See [Sequences](sequences.md#container-lifecycle-and-recovery)
+for examples, result shapes, and failure propagation.

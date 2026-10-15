@@ -562,11 +562,15 @@ fn a_later_step_selects_its_model_and_starts_its_shells_from_its_own_map() {
         "claude",
         "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"done\",\"session_id\":\"s\",\"is_error\":false}'",
     );
+    fixture.write_doc(
+        "step.md",
+        &format!(
+            "---\nstart:\n        - set:\n              shell_mark: \"$(printenv DOC_MARK)\"\n        - shell: 'echo start-shell $DOC_MARK>>events.log'\n        - append_line: [\"events.log\", 'start set={{{{ shell_mark }}}} {READS}']\n---\nmodel={{{{ env.MODEL }}}} {READS}\n\n::shell printenv DOC_MARK\n"
+        ),
+    );
     let sequence = fixture.write_doc(
         "seq.md",
-        &format!(
-            "---\nsequence:\n  - name: first\n  - name: second\nstart:\n        - set:\n              shell_mark: \"$(printenv DOC_MARK)\"\n        - shell: 'echo start-shell $DOC_MARK>>events.log'\n        - append_line: [\"events.log\", 'start set={{{{ shell_mark }}}} {READS}']\n---\nmodel={{{{ env.MODEL }}}} {READS}\n\n::shell printenv DOC_MARK\n"
-        ),
+        "---\nsequence:\n  - { name: first, prompt: step.md }\n  - { name: second, prompt: step.md }\n---\n",
     );
     let map = |name: &str, model: &str| {
         let mut map = fixture.map(name);

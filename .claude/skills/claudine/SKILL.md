@@ -211,15 +211,22 @@ The **local control plane** is platform-native and per stable OS user: a Unix-do
 
 Sequence tasks accept an exclusive `sequence:` list or file reference (source
 suffix grammar applies). Inline list tasks alone accept container lifecycle
-keys; nested execution remains explicitly unsupported until the container
-runner lands. Groups reject `execution:` (concurrency is implicit), require
+keys. Nested inline and referenced sequences execute recursively; group legs
+may themselves be containers. Groups reject `execution:` (concurrency is implicit), require
 unique nonempty leg names, reject reserved variables `legs`, `succeeded`,
 `failed`, `cancelled`, and retain boolean `fail_fast` only on group objects.
 Task `setup:`/`teardown:` and sequence-document `fail_fast:` are removed
 grammar. The CLI rejects `--fail-fast` before source loading, keeps explicit
 provider `--` tails opaque, and no longer injects `CLAUDINE_FAIL_FAST`.
 `cancelled` is a parsed lifecycle event with a cleanup-only action set;
-actual cancellation dispatch is planned. Internal legacy task-stage tests
+actual cancellation dispatch is planned. Container events use
+`lifecycle::runtime::ContainerRunner` and `LifecycleRunGuard`; root initialize
+precedes static preflight, nested preparation is just in time. Retry preserves
+mutations and clears child results, with no finalize until the final attempt.
+Native sequence arrays and group dictionaries publish only after finalize.
+Atomic failed groups withhold all leg mutations; tolerant groups merge failed
+leg mutations in declaration order. Body-only steps mask source lifecycle keys
+through data overrides so canonical rereads do not fire container events again. Internal legacy task-stage tests
 construct preflight models directly; they do not authorize old YAML syntax.
 The canonical shipped trigger schema lives in `claudine/schemas/`, not
 Darkmatter's docs tree. See [Sequences](topics/flow-control/sequences.md).
@@ -244,8 +251,10 @@ root fallback for reads introduced by transclusion; Darkmatter's explicit
 `seq` string presentation uses the existing name-coercion keys for `seq`,
 `seq.previous`, and `seq.next`; typed expression evaluation retains objects.
 Sequence task templates defer `seq`/`group`/`loop`, including the first task.
-Nested container execution remains planned; the future runner must use these
-values for own events and scope restoration rather than merge root fields.
+Container runners use complete lexical roots for their own events and restore
+the enclosing roots on exit. `RuntimeState::replace_sequence_scope` restores
+position and outputs while keeping mutations; group workers clone the snapshot
+so in-memory writes and proxy ancestry remain isolated across branches.
 
 ## Structured shell authorization
 

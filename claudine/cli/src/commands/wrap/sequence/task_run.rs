@@ -123,7 +123,7 @@ pub(super) fn run_step_task(
         runtime_state: Some(runtime_state),
         err: None,
         timing: None,
-        current: None,
+        current: Some(run.prep_context.invocation.current_authority().memoized()),
         group: None,
         loop_values: None,
         base_dir: Some(task_source_context.base_dir()),
@@ -308,6 +308,11 @@ fn push_action_scan(action: &PreflightAction, scan: &mut String) {
             }
         }
         PreflightAction::SideEffect { action, .. } => push_json_scan(action, scan),
+        PreflightAction::Sequence(sequence) => {
+            for step in &sequence.steps {
+                if let Some(task) = &step.task { push_task_scan(task, scan); }
+            }
+        }
         PreflightAction::Group(group) => {
             let PreflightGroup {
                 name,
@@ -367,6 +372,7 @@ fn task_requirements(
                 }
             }
             PreflightAction::Group(nested) => pending.extend(nested.tasks.iter()),
+            PreflightAction::Sequence(nested) => pending.extend(nested.steps.iter().filter_map(|step| step.task.as_ref())),
             PreflightAction::Shell { .. } | PreflightAction::SideEffect { .. } => {}
         }
     }
@@ -496,6 +502,7 @@ impl<'a> WrapperPromptRunner<'a> {
 }
 
 impl PromptTaskRunner for WrapperPromptRunner<'_> {
+    fn is_dry_run(&self) -> bool { self.run.shared.dry_run }
     fn validate(&self, request: &PromptTaskRequest) -> Result<(), CompositionError> {
         let document = request.document.as_ref().unwrap_or(&self.run.prep_context.invocation);
         let source = composition::resolve_composition_source_in_context(
@@ -511,8 +518,10 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         context.deferred_shell_roots = request.deferred_shell_roots.clone();
         context.document_shell_values = Some(request.document_shell_values.clone());
         let (_, env) = self.document_target(document);
+        let mut overrides = request.set_overrides.clone();
+        if request.body_only { super::container::mask_body_events(&mut overrides); }
         let options = super::jit::step_prepare_options(
-            &source, &context, request.set_overrides.clone(), &env, false,
+            &source, &context, overrides, &env, false,
         );
         let lifecycle = composition::validate_document_shell_late_values(&source, &options)?;
         let approval_options = super::super::apply_composition_shell_overrides(
@@ -658,10 +667,12 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         prompt_compose_context.deferred_shell_roots = request.deferred_shell_roots.clone();
         prompt_compose_context.document_shell_values = Some(request.document_shell_values.clone());
         let (document_target, document_env_overrides) = self.document_target(&document);
+        let mut overrides = request.set_overrides.clone();
+        if request.body_only { super::container::mask_body_events(&mut overrides); }
         let composed = super::jit::compose_step(
             &source,
             &prompt_compose_context,
-            &request.set_overrides,
+            &overrides,
             &document_env_overrides,
             self.run.approved.clone(),
             // A referenced prompt document *is* its body; composing it to

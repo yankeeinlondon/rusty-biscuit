@@ -364,11 +364,9 @@ fn run_sequence_inner(
     // Every later re-read sheds them too (`reload_composition_source`).
     let source = composition::without_formal_sequence_keys(&source);
 
-    // A dynamic source legitimately resolves to nothing — a clean repository
-    // makes `{{ ctx.dirty_files }}` empty. Authored empty lists are no-ops too.
+    // Empty containers still enter their lifecycle and produce an empty result.
     if plan.steps.is_empty() {
         emit_empty_sequence_notice(&source.resolved_path);
-        return Ok(0);
     }
 
     let caller_input_records =

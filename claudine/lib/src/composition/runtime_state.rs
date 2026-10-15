@@ -54,6 +54,8 @@ pub struct RuntimeSnapshot {
     pub outputs: Vec<Value>,
     /// Innermost sequence position, separate from authored mutations.
     pub seq: Option<Value>,
+    /// Active container handoffs, inherited by parallel runtime branches.
+    pub proxy_chain: Vec<std::path::PathBuf>,
 }
 
 /// The shared runtime cell. See the [module docs](self).
@@ -90,6 +92,40 @@ impl RuntimeState {
     /// Install a child position without publishing it as frontmatter.
     pub fn set_sequence_binding(&self, value: Value) {
         self.inner.lock().expect(POISONED).seq = Some(value);
+    }
+
+    /// Discard an abandoned container attempt's results while retaining its writes.
+    pub fn clear_outputs(&self) {
+        self.inner.lock().expect(POISONED).outputs.clear();
+    }
+
+    /// Restore the enclosing lexical accumulator without undoing child mutations.
+    pub fn replace_sequence_scope(&self, seq: Option<Value>, outputs: Vec<Value>) {
+        let mut inner = self.inner.lock().expect(POISONED);
+        inner.seq = seq;
+        inner.outputs = outputs;
+    }
+
+    /// Enter a container handoff and restore its enclosing chain on drop.
+    pub(crate) fn enter_container_proxy<'a>(
+        &'a self, source: &std::path::Path, target: &std::path::Path, authored: &str,
+    ) -> Result<ContainerProxyGuard<'a>, super::error::CompositionError> {
+        let mut inner = self.inner.lock().expect(POISONED);
+        let before = inner.proxy_chain.len();
+        if inner.proxy_chain.is_empty() {
+            inner.proxy_chain.push(biscuit_file::canonicalize_simplified(source).unwrap_or_else(|_| source.to_path_buf()));
+        }
+        if !super::lifecycle::control::proxy_handoff_allowed(&inner.proxy_chain, target) {
+            let error = super::error::CompositionError::LifecycleProxyCycle {
+                source_path: source.to_path_buf(), target: authored.into(),
+                chain: inner.proxy_chain.iter().map(|path| biscuit_file::to_portable_string(path)).collect(),
+                limit: super::lifecycle::control::MAX_PROXY_HOPS,
+            };
+            inner.proxy_chain.truncate(before);
+            return Err(error);
+        }
+        inner.proxy_chain.push(target.to_path_buf());
+        Ok(ContainerProxyGuard { runtime: self, before })
     }
 
     /// The lexical sequence with the current committed outputs.
@@ -173,8 +209,7 @@ impl RuntimeState {
         self.append_output_entry(Value::String(trim_transport_newline(text).to_string()));
     }
 
-    /// Commit an already-shaped entry — a string for an atomic task, an array
-    /// of strings for a completed parallel group.
+    /// Commit a native result: text, a sequence array, or a named group object.
     pub fn append_output_entry(&self, entry: Value) {
         self.inner.lock().expect(POISONED).outputs.push(entry);
     }
@@ -191,8 +226,7 @@ impl RuntimeState {
 
     /// The most recent entry, when it is a plain string.
     ///
-    /// A completed parallel group commits an array entry; there is no single
-    /// text for it, so this yields `None` rather than a flattened join.
+    /// Container results have no single text, so they yield `None` without flattening.
     pub fn last_output_text(&self) -> Option<String> {
         match self.inner.lock().expect(POISONED).outputs.last() {
             Some(Value::String(text)) => Some(text.clone()),
@@ -416,3 +450,15 @@ pub fn layered_set_overrides(
 
 #[cfg(test)]
 mod tests;
+
+/// Restores a lexical handoff chain without discarding runtime mutations.
+pub(crate) struct ContainerProxyGuard<'a> {
+    runtime: &'a RuntimeState,
+    before: usize,
+}
+
+impl Drop for ContainerProxyGuard<'_> {
+    fn drop(&mut self) {
+        self.runtime.inner.lock().expect(POISONED).proxy_chain.truncate(self.before);
+    }
+}

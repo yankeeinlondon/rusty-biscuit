@@ -297,3 +297,20 @@ fn initialize_outputs_seeds_only_when_absent() {
     assert_eq!(empty.to_value(), json!({}));
     assert_eq!(empty.sequence_value().unwrap()["outputs"], json!([]));
 }
+
+#[test]
+fn container_scope_restore_and_retry_keep_native_results_and_mutations() {
+    let state = RuntimeState::new();
+    state.set(&engine(), "note", json!("retained"), &base()).unwrap();
+    state.append_output_entry(json!({"alpha": [1, null], "beta": false}));
+    let outer = state.snapshot();
+    state.replace_sequence_scope(Some(json!({"name": "inner"})), Vec::new());
+    state.append_output_entry(json!([{"deep": 2}]));
+    assert_eq!(state.outputs_value(), json!([[{"deep": 2}]]));
+    state.clear_outputs();
+    assert_eq!(state.outputs_value(), json!([]));
+    assert_eq!(state.snapshot().mutations.get("note"), Some(&json!("retained")));
+    state.replace_sequence_scope(outer.seq, outer.outputs);
+    assert_eq!(state.outputs_value(), json!([{"alpha": [1, null], "beta": false}]));
+    assert!(state.last_output_text().is_none());
+}
