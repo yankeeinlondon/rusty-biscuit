@@ -8,11 +8,7 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages:
-    - darkmatter
-    - darkmatter-cli
-    - claudine
-    - claudine-cli
+packages: ["darkmatter", "darkmatter-cli", "claudine", "claudine-cli", "test-toolkit"]
 source_files_during_phase_2:
     - darkmatter/lib/src/markdown/compose/shell_expansion/template/mod.rs
     - darkmatter/lib/src/markdown/compose/shell_expansion/template/grammar.rs
@@ -96,6 +92,126 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/compose.md
     - .claude/skills/claudine/cli-commands.md
+source_files_during_phase_4:
+    - claudine/cli/Cargo.toml
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/wrap/harness_orch/shell_options.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run/tests.rs
+    - claudine/cli/tests/bin/argv_recorder/main.rs
+    - claudine/cli/tests/bin/fake_goose/main.rs
+    - claudine/cli/tests/l1/composition_seams.rs
+    - claudine/cli/tests/l1/document_environment_routes.rs
+    - claudine/cli/tests/l1/level1_dry_run_pty.rs
+    - claudine/cli/tests/l1/lifecycle_shell_templates.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/sequence_cli.rs
+    - claudine/cli/tests/l1/sequence_errors_cli.rs
+    - claudine/cli/tests/l1/sequence_shell_templates.rs
+    - claudine/cli/tests/l1/shell_approval_prompt.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/lifecycle/action_shape.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/set_shell_values.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/shell_templates.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/parse.rs
+    - claudine/lib/src/composition/lifecycle/shell_template.rs
+    - claudine/lib/src/composition/lifecycle/structured_shell.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+    - claudine/lib/src/composition/looping/seed.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/preflight/tests.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/reapproval.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/shell.rs
+    - claudine/lib/src/composition/sequence/task/shell/structured_tests.rs
+    - claudine/lib/src/composition/sequence/task/templates.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/harness/shell.rs
+    - claudine/lib/tests/l1/agent_errors_fleet.rs
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/src/approval.rs
+    - darkmatter/cli/tests/bin/argv_recorder/main.rs
+    - darkmatter/cli/tests/l1/approval_prompt.rs
+    - darkmatter/cli/tests/l1/compose_shell_template.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/justfile
+    - darkmatter/lib/src/markdown/compose/body_origin.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/assignment.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/execution_tests.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/tests.rs
+    - darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+    - darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/parser.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/site.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/fill.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/target.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/typing.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/tests/l1/data_origin.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/shell_result_values.rs
+    - darkmatter/lib/tests/l1/shell_template_discovery.rs
+    - darkmatter/lib/tests/l1/shell_template_execution.rs
+    - tools/test-toolkit/src/argv_recorder.rs
+    - tools/test-toolkit/src/lib.rs
+docs_updated_during_phase_4:
+    - claudine/docs/dependencies.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/pre-flight-checks.md
+    - claudine/features/2026-10-23-shell-template-approval/implementation-log.md
+    - claudine/features/2026-10-23-shell-template-approval/plan.md
+    - darkmatter/docs/dependencies.md
+    - darkmatter/docs/inline/preflight-checks.md
+    - darkmatter/docs/inline/shell-expansion.md
+    - tools/test-toolkit/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/darkmatter/compose.md
+
+source_files_during_phase_5: ["claudine/cli/tests/l1/lifecycle_shell_templates.rs", "claudine/cli/tests/l1/sequence_shell_templates.rs", "darkmatter/cli/tests/l1/compose_shell_template.rs", "darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs", "darkmatter/lib/src/markdown/compose/shell_expansion/site.rs", "darkmatter/lib/src/markdown/compose/shell_expansion/tokenize.rs", "darkmatter/lib/src/markdown/compose/shell_expansion/types.rs", "darkmatter/lib/tests/l1/shell_template_execution.rs", "tools/test-toolkit/src/argv_recorder.rs"]
+docs_updated_during_phase_5: ["claudine/docs/topics/flow-control/sequences.md", "darkmatter/docs/inline/shell-expansion.md", "tools/test-toolkit/README.md"]
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: [".claude/skills/claudine/SKILL.md"]
+source_files_during_phase_6: ["claudine/lib/src/composition/sequence/preflight/reapproval.rs", "claudine/lib/src/composition/sequence/preflight/shape.rs", "claudine/lib/src/composition/sequence/task/mod.rs"]
+docs_updated_during_phase_6: ["claudine/README.md", "claudine/docs/topics/pre-flight-checks.md", "claudine/docs/topics/flow-control/sequences.md", "claudine/docs/topics/flow-control/lifecycle.md", "claudine/features/2026-10-23-shell-template-approval/plan.md", "claudine/features/2026-10-23-shell-template-approval/implementation-log.md", "claudine/features/2026-10-23-shell-template-approval/spec.md", "darkmatter/README.md", "darkmatter/docs/inline/preflight-checks.md"]
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: [".claude/skills/claudine/SKILL.md", ".claude/skills/darkmatter/compose.md"]
+source_code: ["claudine/cli/Cargo.toml", "claudine/cli/src/commands/compose/prep.rs", "claudine/cli/src/commands/wrap/composition/staged_boot.rs", "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/shell_approval.rs", "claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs", "claudine/cli/src/commands/wrap/harness_orch/shell_options.rs", "claudine/cli/src/commands/wrap/sequence/iterate.rs", "claudine/cli/src/commands/wrap/sequence/jit.rs", "claudine/cli/src/commands/wrap/sequence/jit/tests.rs", "claudine/cli/src/commands/wrap/sequence/mod.rs", "claudine/cli/src/commands/wrap/sequence/phase1c.rs", "claudine/cli/src/commands/wrap/sequence/task_run.rs", "claudine/cli/src/commands/wrap/sequence/task_run/tests.rs", "claudine/cli/tests/bin/argv_recorder/main.rs", "claudine/cli/tests/bin/fake_goose/main.rs", "claudine/cli/tests/l1/composition_seams.rs", "claudine/cli/tests/l1/document_environment_routes.rs", "claudine/cli/tests/l1/level1_dry_run_pty.rs", "claudine/cli/tests/l1/lifecycle_shell_templates.rs", "claudine/cli/tests/l1/main.rs", "claudine/cli/tests/l1/sequence_cli.rs", "claudine/cli/tests/l1/sequence_errors_cli.rs", "claudine/cli/tests/l1/sequence_shell_templates.rs", "claudine/cli/tests/l1/shell_approval_prompt.rs", "claudine/cli/tests/l1/shell_missing_values.rs", "claudine/lib/src/composition/coordinator/tests.rs", "claudine/lib/src/composition/error/mod.rs", "claudine/lib/src/composition/error/tests.rs", "claudine/lib/src/composition/lifecycle/action_shape.rs", "claudine/lib/src/composition/lifecycle/actions.rs", "claudine/lib/src/composition/lifecycle/bindings.rs", "claudine/lib/src/composition/lifecycle/executor.rs", "claudine/lib/src/composition/lifecycle/executor/tests/mod.rs", "claudine/lib/src/composition/lifecycle/executor/tests/set_shell_values.rs", "claudine/lib/src/composition/lifecycle/executor/tests/shell_templates.rs", "claudine/lib/src/composition/lifecycle/mod.rs", "claudine/lib/src/composition/lifecycle/parse.rs", "claudine/lib/src/composition/lifecycle/shell_template.rs", "claudine/lib/src/composition/lifecycle/structured_shell.rs", "claudine/lib/src/composition/lifecycle/validate.rs", "claudine/lib/src/composition/looping/seed.rs", "claudine/lib/src/composition/mod.rs", "claudine/lib/src/composition/preflight.rs", "claudine/lib/src/composition/preflight/tests.rs", "claudine/lib/src/composition/prepare.rs", "claudine/lib/src/composition/prepare/bootstrap/tests.rs", "claudine/lib/src/composition/prepare/service/tests.rs", "claudine/lib/src/composition/prepare/tests.rs", "claudine/lib/src/composition/schema/tests.rs", "claudine/lib/src/composition/sequence/preflight/mod.rs", "claudine/lib/src/composition/sequence/preflight/reapproval.rs", "claudine/lib/src/composition/sequence/preflight/shape.rs", "claudine/lib/src/composition/sequence/preflight/tests.rs", "claudine/lib/src/composition/sequence/task/mod.rs", "claudine/lib/src/composition/sequence/task/shell.rs", "claudine/lib/src/composition/sequence/task/shell/structured_tests.rs", "claudine/lib/src/composition/sequence/task/templates.rs", "claudine/lib/src/composition/sequence/task/tests.rs", "claudine/lib/src/composition/types.rs", "claudine/lib/src/harness/audit.rs", "claudine/lib/src/harness/error.rs", "claudine/lib/src/harness/shell.rs", "claudine/lib/src/invocation_context/document_tests.rs", "claudine/lib/tests/l1/agent_errors_fleet.rs", "darkmatter/cli/Cargo.toml", "darkmatter/cli/src/approval.rs", "darkmatter/cli/tests/bin/argv_recorder/main.rs", "darkmatter/cli/tests/l1/approval_prompt.rs", "darkmatter/cli/tests/l1/compose_shell.rs", "darkmatter/cli/tests/l1/compose_shell_template.rs", "darkmatter/cli/tests/l1/main.rs", "darkmatter/justfile", "darkmatter/lib/src/markdown/compose/body_origin.rs", "darkmatter/lib/src/markdown/compose/context/options.rs", "darkmatter/lib/src/markdown/compose/expression/binding.rs", "darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs", "darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/assignment.rs", "darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/execution_tests.rs", "darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/tests.rs", "darkmatter/lib/src/markdown/compose/inline/interpolation.rs", "darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs", "darkmatter/lib/src/markdown/compose/mod.rs", "darkmatter/lib/src/markdown/compose/nested.rs", "darkmatter/lib/src/markdown/compose/pipeline/mod.rs", "darkmatter/lib/src/markdown/compose/pipeline/phases.rs", "darkmatter/lib/src/markdown/compose/preflight/approval.rs", "darkmatter/lib/src/markdown/compose/preflight/collect.rs", "darkmatter/lib/src/markdown/compose/preflight/lifecycle.rs", "darkmatter/lib/src/markdown/compose/preflight/mod.rs", "darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs", "darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs", "darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs", "darkmatter/lib/src/markdown/compose/shell_expansion/parser.rs", "darkmatter/lib/src/markdown/compose/shell_expansion/policy.rs", "darkmatter/lib/src/markdown/compose/shell_expansion/site.rs", "darkmatter/lib/src/markdown/compose/shell_expansion/store.rs", "darkmatter/lib/src/markdown/compose/shell_expansion/template/approval.rs", "darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs", "darkmatter/lib/src/markdown/compose/shell_expansion/template/canonical.rs", "darkmatter/lib/src/markdown/compose/shell_expansion/template/fill.rs", "darkmatter/lib/src/markdown/compose/shell_expansion/template/grammar.rs", "darkmatter/lib/src/markdown/compose/shell_expansion/template/matching.rs", "darkmatter/lib/src/markdown/compose/shell_expansion/template/mod.rs", "darkmatter/lib/src/markdown/compose/shell_expansion/template/target.rs", "darkmatter/lib/src/markdown/compose/shell_expansion/template/tests.rs", "darkmatter/lib/src/markdown/compose/shell_expansion/template/typing.rs", "darkmatter/lib/src/markdown/compose/shell_expansion/tokenize.rs", "darkmatter/lib/src/markdown/compose/shell_expansion/types.rs", "darkmatter/lib/src/markdown/compose/tests/schema.rs", "darkmatter/lib/src/markdown/schemas/mod.rs", "darkmatter/lib/src/markdown/schemas/simplified/mod.rs", "darkmatter/lib/src/markdown/schemas/simplified/subtype.rs", "darkmatter/lib/src/markdown/types.rs", "darkmatter/lib/tests/l1/data_origin.rs", "darkmatter/lib/tests/l1/main.rs", "darkmatter/lib/tests/l1/preflight_repository_sigils.rs", "darkmatter/lib/tests/l1/shell_result_values.rs", "darkmatter/lib/tests/l1/shell_template_discovery.rs", "darkmatter/lib/tests/l1/shell_template_execution.rs", "darkmatter/lib/tests/l1/shell_template_policy.rs", "darkmatter/lib/tests/l1/transcluded_shell_failure.rs", "tools/test-toolkit/src/argv_recorder.rs", "tools/test-toolkit/src/lib.rs"]
+documentation: ["claudine/README.md", "claudine/docs/dependencies.md", "claudine/docs/topics/composition.md", "claudine/docs/topics/flow-control/lifecycle.md", "claudine/docs/topics/flow-control/sequences.md", "claudine/docs/topics/pre-flight-checks.md", "claudine/features/2026-10-23-shell-template-approval/implementation-log.md", "claudine/features/2026-10-23-shell-template-approval/plan.md", "claudine/features/2026-10-23-shell-template-approval/spec.md", "darkmatter/README.md", "darkmatter/docs/dependencies.md", "darkmatter/docs/inline/preflight-checks.md", "darkmatter/docs/inline/shell-expansion.md", "tools/test-toolkit/README.md"]
+completed_phase: 6
+implemented: true
 ---
 
 # Shell Template Approval Implementation Plan
@@ -217,14 +333,14 @@ Use one table-driven matrix test for this format, parameterized over whitelist a
 
 ### Wave 7 — Independent Runtime Integration
 
-- [ ] **Shared Validation**
+- [x] **Shared Validation**
   - Depends on Phase 3. Implement Darkmatter's shared template resolver/validator and structured filled-chain dispatch interface, consumed by all adapters.
   - Evaluate each placeholder once, validate its original value and constraints, convert supported scalars with the existing conversion engine, and concatenate within one argument. Reject null, arrays/objects, and embedded NUL before spawn.
   - Validate complete chains and runtime blacklists before their first segment. Enforce approved membership before authorization can reach result-cache lookup or spawning.
   - Wire body directives, shell blocks, and frontmatter expansion; preserve stage order. Keep typed authorization/input failures unsuppressible by shell fallback, `when_error`, or transclusion notices; diagnostic text names expression/type/location without exposing values.
   - Build reusable portable native recording/child fixtures with the Test Toolkit and runtime binary lookup for downstream tests. Pin executable resolution to a direct-dispatch path that refuses interpreter-dependent targets without fallback.
 
-- [ ] **Sequence Position**
+- [x] **Sequence Position**
   - Depends on Phase 3; can run concurrently with Shared Validation using the agreed runtime API, in sequence preflight/shape/prepared-task code.
   - Carry static first-task eligibility recursively: a first action qualifies, all legs of a first group qualify, a first nested sequence qualifies only through its own first child. Later descendants stay templates; skipped predecessors and retry/resume do not change position.
   - Treat container terminal events and all `group.*` readers as templates. Preserve source owner and task parameters when preparing child documents and task stacks.
@@ -235,18 +351,18 @@ Use one table-driven matrix test for this format, parameterized over whitelist a
 
 These tasks depend on both Wave 7 tasks. They can run concurrently with separate file ownership; shared interface changes go through the Phase 1 contract owner.
 
-- [ ] **Sequence Dispatch**
+- [x] **Sequence Dispatch**
   - Add structured template mode to `composition/sequence/task/shell.rs` and its calling task runner, using the shared validation/membership/policy path.
   - Preserve native process-tree establishment and teardown, stream/capture separation, timeout budgets, volume caps, cancellation, and bounded reader settlement. Direct dispatch must not bypass Unix process-group or Windows Job Object ownership.
   - Test chain short-circuit behavior after whole-chain validation, argument boundaries, deadline/cancellation cleanup, and a blocked later chain segment preventing all spawns.
 
-- [ ] **Lifecycle Dispatch**
+- [x] **Lifecycle Dispatch**
   - Add template mode to lifecycle shell and whole-value `$(...)` set execution. Route single-document compose/inline-compose/wrapper preparation and loop/retry/resume/proxy re-audits through structured approvals.
   - Evaluate ordinary holes against current event state and set holes against the existing pre-write snapshot; retain approval-time captured `ctx.*`/`env.*` snapshots.
   - Preserve resolved-byte commands exactly, update the disabled runner to refuse every structured path, and preserve initialization/early-handler prohibition and unsuppressible typed failures despite `no_error` or timeout fallback.
   - Test reusable shape approval across three loop iterations and refusal of changed exact bytes on iteration 2, plus lifecycle mutation visibility and changed constraints.
 
-- [ ] **Approval Prompts**
+- [x] **Approval Prompts**
   - Update `darkmatter/cli/src/approval.rs` and Claudine's installed handler in `lib/src/harness/shell.rs` to display expression/type, original-validator disclosure when broader string approval is used, and only eligible choices.
   - Implement all persistence rows from specification section 8, chain executable lists, typed write failure, no-terminal refusal, and once semantics for each mode.
   - Render with biscuit-terminal components. Use injected scripted input/output for tests; no real providers, focused windows, or interactive test requirements.
@@ -257,12 +373,12 @@ These tasks depend on both Wave 7 tasks. They can run concurrently with separate
 
 ### Wave 9 — Independent Acceptance Suites
 
-- [ ] **Execution Corpus**
+- [x] **Execution Corpus**
   - Depends on Phase 4. In Darkmatter-owned test files, cover the store/matching/covers corpus, missing-value behavior, type provenance, direct argv substitution, ordered redirections, and all invalid grammar/target cases.
   - Assert `a b`, shell-looking values, quotes, backslashes, Unicode, newlines, percent/exclamation signs, empty words, adjacent holes, and NUL through native recorded argv or explicit pre-spawn refusal. Avoid tests that merely assert a parser result.
   - Verify original declared-value validation and secret-free error chains, not just the top-level message. Include malformed persisted constraints with and without semicolons and the policy matrix.
 
-- [ ] **Orchestration Corpus**
+- [x] **Orchestration Corpus**
   - Can run concurrently with Execution Corpus in Claudine-owned test files. Use `CliProcessFixture`, private CWD/home, fake providers, and child-local `PLAYA_DRY_RUN`/private spool; assert no unintended publication or leaked children.
   - Cover the spec's late-output and build/clean scenarios, no-terminal failure before step 1, later known-value template approval, caller null failures, and missing/invalid late values preventing an earlier command in the same step from running.
   - Cover changed task/event/child values, indirect deferral, static group/nested positions, terminal events, skipped predecessors, retry/resume, and parse-cache reuse boundaries available in today's traversal.
@@ -270,7 +386,7 @@ These tasks depend on both Wave 7 tasks. They can run concurrently with separate
 
 ### Wave 10 — Validation Gate
 
-- [ ] **Package Gates**
+- [x] **Package Gates**
   - After Wave 9, run `just test` and `just lint` from `darkmatter/` and `claudine/`; use nextest through these recipes, never `cargo test`. Do not run `cargo fmt` or commit.
   - Use targeted tests while developing, then the required area gates once integrated. Compile affected reverse consumers of changed public APIs according to actual blast radius; do not run a workspace-wide suite or add CI coverage cells.
   - Exercise the portable native argument and runner-contract cases on macOS, Linux, native Windows, and WSL2 through existing cross-check mechanisms. Load the OS skill and select configured build hosts; cross-compilation alone does not prove argv behavior.
@@ -282,18 +398,18 @@ These tasks depend on both Wave 7 tasks. They can run concurrently with separate
 
 ### Wave 11 — Documentation and Audit
 
-- [ ] **Public Documentation**
+- [x] **Public Documentation**
   - Depends on implemented behavior and Phase 5 findings. Update `darkmatter/docs/inline/preflight-checks.md`, `claudine/docs/topics/pre-flight-checks.md`, and the sequence/lifecycle topic pages, both area READMEs, and both area skills.
   - Explain exact versus shape choices with compact examples, type matching/disclosure, missing versus empty values, first versus later task approval, late-value timing, direct-dispatch restrictions, canonical policy syntax, blacklists, and authorization versus result caching.
   - Add a Mermaid approval-to-runtime flow showing the first-task branch and the step-entry/command-entry barriers. Describe current behavior without linking to or naming feature/fix snapshots in topic docs.
   - Update behavior-changing symbol comments, especially approved-byte invariants in sequence preflight/task runners. Update dependency documentation only if crates actually changed; remove any planned markers for behavior now shipped.
 
-- [ ] **Acceptance Audit**
+- [x] **Acceptance Audit**
   - Can run concurrently with Public Documentation against separate review/log files. Audit all 17 criteria and all nine requirements against implementation, tests, matrix, typed diagnostic propagation, and recorded OS evidence.
   - Review each robustness finding across its whole row and column; search for bypasses that interpolate then tokenize, manufacture exact approvals, drop partial argument positions, re-read ambient environment, reuse filled prepared state, or swallow policy/validation failures.
   - Record departures and outstanding dependency cases in `implementation-log.md`, leaving the finalized specification unchanged. If findings require code changes, rerun the affected tests/gates before marking completion; documentation alone cannot close missing behavior.
 
-- [ ] **Review Handoff**
+- [x] **Review Handoff**
   - Depends on both Wave 11 tasks. Verify changed files are scoped to this feature, all required evidence is recorded, and plan checkboxes reflect actual completion.
   - Report implementation complete, ready for review only when all required behavior and evidence are satisfied. Leave the feature in its active directory; the author closes review and moves it to `_completed`.
 
