@@ -1,9 +1,155 @@
 ---
 total_phases: 9
 created: 2026-10-12
-phase: 1
+phase: 2
 agent: claude/sonnet
 yolo: true
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+    - claudine
+    - claudine-cli
+    - messenger
+    - messenger-cli
+    - darkmatter-cli
+    - darkmatter
+
+source_files_during_phase_2:
+    - messenger/lib/src/research/refresh/runner.rs
+    - messenger/lib/src/research/refresh/state.rs
+    - messenger/lib/src/research/refresh/prepare.rs
+    - messenger/lib/src/research/refresh/check.rs
+    - messenger/lib/src/research/refresh/promote.rs
+    - messenger/lib/src/research/refresh/select.rs
+    - messenger/lib/src/research/refresh/cleanup.rs
+    - messenger/lib/src/research/refresh/mod.rs
+    - messenger/cli/src/research.rs
+    - messenger/cli/src/research_lifecycle.rs
+    - messenger/justfile
+    - messenger/lib/tests/research_refresh.rs
+    - messenger/cli/tests/research_lifecycle_cli.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/mod.rs
+    - claudine/cli/src/args.rs
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/telemetry.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/exec/termination/windows.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/captured.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/inherited.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/retained.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+    - claudine/cli/src/commands/wrap/exec/wiring/session.rs
+    - claudine/cli/src/completion/engine/tests.rs
+    - claudine/cli/tests/l1/sequence_errors_cli.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/completion_ownership.rs
+    - claudine/cli/tests/l1/provider_tail_ownership.rs
+    - claudine/cli/tests/common/owned_value_options.rs
+    - claudine/cli/tests/l1/error_guards/transport-allow.toml
+docs_updated_during_phase_2:
+    - claudine/docs/cli/index.md
+    - claudine/docs/cli/sequence.md
+    - claudine/README.md
+    - claudine/docs/topics/completions/shell-completions.md
+    - claudine/docs/dependencies.md
+    - docs/dependencies.md
+    - messenger/cli/README.md
+    - messenger/docs/user-guide.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/messenger/research-contract.md
+    - .claude/skills/messenger/SKILL.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/claudine/timeline.md
+source_files_during_phase_3:
+    - claudine/cli/src/argv/partition.rs
+    - claudine/cli/src/argv/partition/tests.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/src/commands/wrap/sequence/review.rs
+    - claudine/cli/src/commands/wrap/sequence/review/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run/tests.rs
+    - claudine/cli/src/completion/engine/tests.rs
+    - claudine/cli/src/completion/schema_completion/tests.rs
+    - claudine/cli/tests/common/owned_value_options.rs
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/review-loop.md
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/completion_ownership.rs
+    - claudine/cli/tests/l1/composition_outputs.rs
+    - claudine/cli/tests/l1/ctx_per_run.rs
+    - claudine/cli/tests/l1/document_environment_routes.rs
+    - claudine/cli/tests/l1/handoff_owners.rs
+    - claudine/cli/tests/l1/launch_trigger_schemas.rs
+    - claudine/cli/tests/l1/lifecycle_downgrade_outcome.rs
+    - claudine/cli/tests/l1/lifecycle_mixed_span_validation.rs
+    - claudine/cli/tests/l1/loop_cli.rs
+    - claudine/cli/tests/l1/provider_tail_notice.rs
+    - claudine/cli/tests/l1/sequence_cli.rs
+    - claudine/cli/tests/l1/sequence_ctrl_c_windows.rs
+    - claudine/cli/tests/l1/sequence_errors_cli.rs
+    - claudine/cli/tests/l1/sequence_groups.rs
+    - claudine/cli/tests/l1/sequence_jit.rs
+    - claudine/cli/tests/l1/sequence_perf.rs
+    - claudine/cli/tests/l1/sequence_shell_templates.rs
+    - claudine/cli/tests/l1/sequence_sources_cli.rs
+    - claudine/cli/tests/l1/tts_prewarm.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/audio.rs
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/parse.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/sequence/tests.rs
+    - claudine/lib/src/composition/lifecycle/runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/grammar.rs
+    - claudine/lib/src/composition/lifecycle/tests/nested_span.rs
+    - claudine/lib/src/composition/lifecycle/tests/parse_config.rs
+    - claudine/lib/src/composition/sequence/formal.rs
+    - claudine/lib/src/composition/sequence/grammar.rs
+    - claudine/lib/src/composition/sequence/mod.rs
+    - claudine/lib/src/composition/sequence/model.rs
+    - claudine/lib/src/composition/sequence/normalize.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/runtime_fixture.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/reserved.rs
+    - claudine/lib/src/composition/sequence/source.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/composition/sequence/tests.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/lib/tests/l1/lifecycle_lift_ready_guard.rs
+    - claudine/schemas/action.yaml
+    - claudine/schemas/claudine.yaml
+    - claudine/schemas/lifecycle.yaml
+    - darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+
+docs_updated_during_phase_3:
+    - claudine/README.md
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/features/2026-10-24-sequence-containers/implementation-log.md
+    - claudine/features/2026-10-24-sequence-containers/plan.md
+    - claudine/schemas/README.md
+
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/claudine/SKILL.md
+source_files_during_phase_4: []
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 ---
 
 # Plan: Sequence containers
@@ -132,13 +278,13 @@ findings into `implementation-log.md` in this feature directory as a short
 "Spike result" entry. A spike that answers its question by reading code does
 not need a prototype.
 
-- [ ] **Spike A: runtime-state branching.** Question: can the existing
+- [x] **Spike A: runtime-state branching.** Question: can the existing
   runtime state (`lib/src/composition/runtime_state.rs`) be cloned/branched
   per leg in memory and merged back in declaration order, including for a
   nested sequence leg, without touching disk? Output: the exact branch/merge
   API to use in Phase 5, and whether `group.rs`'s current merge handles a
   nested-sequence leg or needs a new merge type.
-- [ ] **Spike B: guard and runtime re-entry.** Question: does
+- [x] **Spike B: guard and runtime re-entry.** Question: does
   `LifecycleRunGuard` (`lifecycle/mod.rs`) plus `lifecycle/runtime.rs` already
   model `retry`/`resume` without `finalize`, and what must change to add
   `cancelled` as a terminal event with the section 4 action set? Output: a
@@ -148,28 +294,28 @@ not need a prototype.
 
 #### Wave 1 (concurrent, read-only)
 
-- [ ] **1.1 Dependency check.**
+- [x] **1.1 Dependency check.**
   - Confirm in the tree: lifecycle-grammar's `loop.*` roots and event grammar,
     shell-template-approval's late-value classification and first-task
     approval, fm-namespace's reserved `seq`/`loop`/`group`.
   - Record in `implementation-log.md` which are implemented and which are
     spec-only. Report blockers per Rule 1.
   - Files: none changed except the log.
-- [ ] **1.2 Messenger lock inventory.**
+- [x] **1.2 Messenger lock inventory.**
   - Find an existing advisory-lock crate in the workspace (`cargo tree`,
     `docs/dependencies.md`) and the current `fleet.lock`/liveness code in
     `messenger/lib/src/research/refresh/{state,prepare,cleanup,promote}.rs`.
   - Output: the lock crate choice and the list of ledger readers to delete.
-- [ ] **1.3 Spike A** (above).
-- [ ] **1.4 Spike B** (above).
-- [ ] **1.5 Baseline.** Run `just test` and `just lint` in `claudine/` and
+- [x] **1.3 Spike A** (above).
+- [x] **1.4 Spike B** (above).
+- [x] **1.5 Baseline.** Run `just test` and `just lint` in `claudine/` and
   `messenger/` and record pre-existing failures so later failures are
   attributable. The working tree already has unrelated uncommitted changes;
   note them and do not touch them.
 
 #### Wave 2 (author gate)
 
-- [ ] **1.6 Rulings.** Present the nine rulings with their defaults and the
+- [x] **1.6 Rulings.** Present the nine rulings with their defaults and the
   spike/dependency findings to the author. With `yolo: true`, proceed on the
   defaults and record each as "assumed" in `implementation-log.md`.
 
@@ -196,16 +342,22 @@ Applies because Messenger reads `run.json` (and tolerates an old
 the matrix from a real fixture record produced by the current code; a control
 row proves the unedited record loads):
 
-| Shape | `status` | `resumptions` | stage results |
-| --- | --- | --- | --- |
-| absent | typed `RunRecordInvalid`; never default `active` | typed error; never `0` | typed error; never "no stages done" |
-| explicit null | same typed error as absent, distinguishable message | typed error | typed error |
-| wrong type, whole field | typed error | typed error | typed error |
-| wrong type, one element | n/a | n/a | typed error naming the element; never dropped |
-| wrong type, every element | n/a | n/a | typed error; never read as empty |
-| empty | `""` is an unknown-status typed error | n/a | `[]` is "no stages", distinct from absent |
-| duplicate key | typed parse error | typed parse error | typed parse error |
-| trailing content | rejected | rejected | rejected |
+| Shape | `status` | `resumptions` | stage results | `invocations` |
+| --- | --- | --- | --- | --- |
+| absent | typed `RunRecordInvalid`; never default `active` | typed error; never `0` | typed error; never "no stages done" | legacy migration: `0` |
+| explicit null | same typed error as absent, distinguishable message | typed error | typed error | typed error; never zero |
+| wrong type, whole field | typed error | typed error | typed error | typed error |
+| wrong type, one element | n/a | n/a | typed error naming the element; never dropped | n/a (scalar) |
+| wrong type, every element | n/a | n/a | typed error; never read as empty | n/a (scalar) |
+| empty | `""` is an unknown-status typed error | n/a | `[]` is "no stages", distinct from absent | typed error for string or collection |
+| duplicate key | typed parse error | typed parse error | typed parse error | typed parse error |
+| trailing content | rejected | rejected | rejected | rejected |
+
+The runner also reads `invocations` (JSON): absence explicitly migrates a
+ledger-era record to zero; `null`, wrong scalar or collection types, negative
+values, duplicate keys, and trailing content are typed errors. Zero admits the
+first launch when below the positive `limits.max_invocations`; the exact cap
+refuses without rewriting the record. Resuming preserves the count.
 
 Plus the ledger-era cases: `status: "exhausted"` loads (Ruling 8), never maps
 to success, and is refused for promotion; an unknown status string is a typed
@@ -218,7 +370,7 @@ Smells to grep before declaring done: `#[serde(default)]` on those fields,
 
 #### Wave 1: replacement protection (messenger only)
 
-- [ ] **2.1 Runner lock.**
+- [x] **2.1 Runner lock.**
   - Add the Messenger-owned runner holding an OS-backed fleet lock for the
     whole execution (one research run at a time), per Ruling 6.
   - Record `finished`, `interrupted`, `stopped` in the existing `run.json`.
@@ -226,12 +378,12 @@ Smells to grep before declaring done: `#[serde(default)]` on those fields,
     resume limit, preparation lock, refusal to promote incomplete research.
   - Files: `messenger/lib/src/research/refresh/{state,prepare}.rs`, new
     runner module if needed.
-- [ ] **2.2 Stale-run recovery and refusals.**
+- [x] **2.2 Stale-run recovery and refusals.**
   - Cleanup and promotion are refused while a run is live.
   - An `active` record whose runner no longer holds the lock is reported as
     stale and recovered explicitly (Ruling 7), never silently.
   - Files: `cleanup.rs`, `promote.rs`, `check.rs`, `select.rs`.
-- [ ] **2.3 Run-record matrix test** (above) and the criterion 22 tests: live
+- [x] **2.3 Run-record matrix test** (above) and the criterion 22 tests: live
   runner refuses second run; interrupted runner recorded `interrupted`; stale
   `active` recovered explicitly; ledger-era `exhausted` readable or actionable
   migration error; cleanup/promotion refused during a live run.
@@ -244,7 +396,7 @@ ledger still present.
 
 Subagents own disjoint areas.
 
-- [ ] **2.4 Messenger ledger removal.**
+- [x] **2.4 Messenger ledger removal.**
   - Remove `LedgerView` and `budget.json` reads, the `exhausted` derivation
     from the ledger, `RefreshError::Ledger` and its `grant`/`resume`
     guidance, the ledger-lock check in cleanup, the ledger line in
@@ -253,7 +405,7 @@ Subagents own disjoint areas.
     emission in `prepare.rs`.
   - Files: `messenger/lib/src/research/refresh/*`,
     `messenger/cli/src/research_lifecycle.rs`.
-- [ ] **2.5 Claudine CLI ledger removal.**
+- [x] **2.5 Claudine CLI ledger removal.**
   - Delete `cli/src/budget/`, `cli/src/commands/budget.rs`, the `budget`
     subcommand registration, the `sequence --budget-ledger` option and
     plumbing, `BUDGET_EXHAUSTED_EXIT_CODE`/`BUDGET_BLOCKED_EXIT_CODE`, the
@@ -263,10 +415,10 @@ Subagents own disjoint areas.
     `tests/common/owned_value_options.rs`, and `completion/engine/tests.rs`
     to drop ledger cases.
   - Files: `claudine/cli/**`.
-- [ ] **2.6 Completions.** Remove `budget` and `--budget-ledger` from the
+- [x] **2.6 Completions.** Remove `budget` and `--budget-ledger` from the
   completion engine, owned-value tables, and every generated completion
   script (regenerate through the repo's own recipe, not by hand).
-- [ ] **2.7 Docs and skills.**
+- [x] **2.7 Docs and skills.**
   - Delete `claudine/docs/cli/budget.md`; edit `docs/cli/sequence.md`,
     `claudine/README.md`, `docs/topics/completions/shell-completions.md`
     (only the `--budget-ledger` mention), both `dependencies.md` files,
@@ -274,17 +426,17 @@ Subagents own disjoint areas.
     `claudine` and `messenger` skills.
   - Remove exit codes `76`/`77` from every exit-code table.
   - Add a dated entry to `.claude/skills/claudine/timeline.md`.
-- [ ] **2.8 Unused dependencies.** Check `claudine-cli` and `messenger` for
+- [x] **2.8 Unused dependencies.** Check `claudine-cli` and `messenger` for
   crates now unused (keep `sysinfo` where it still has a user); remove and
   update dependency docs.
 
 **Checkpoint 2b (criterion 15, 22):**
-- [ ] `claudine budget init x.json` is an unknown-subcommand usage error;
+- [x] `claudine budget init x.json` is an unknown-subcommand usage error;
   `claudine sequence --budget-ledger x.json run.md` is an unknown-option
   usage error (L1 tests).
-- [ ] `rg -n -i 'budget_ledger|BudgetLedger|budget-ledger|claudine budget'`
+- [x] `rg -n -i 'budget_ledger|BudgetLedger|budget-ledger|claudine budget'`
   outside `**/features/**`, `**/fixes/**`, `timeline.md` returns nothing.
-- [ ] `just test` and `just lint` pass in `claudine/` and `messenger/`;
+- [x] `just test` and `just lint` pass in `claudine/` and `messenger/`;
   `messenger research prepare` emits no `--budget-ledger` and no
   `claudine budget init` step.
 
@@ -312,8 +464,8 @@ fixture is accepted.
 | absent | task has no container executable (normal) | typed error: group needs ≥ 1 leg | `true` | no opt-in | typed error (leg); step name per existing rule | none |
 | explicit null | typed error (not absent) | typed error | typed error | typed error; not an empty opt-in stack | typed error | typed error |
 | wrong type, whole | typed error (must be list or file ref string) | typed error | typed error (non-boolean) | typed error | typed error | typed error |
-| wrong type, one element | typed error naming index | typed error naming index | n/a | typed error naming index | n/a | typed error naming key |
-| wrong type, every element | typed error; never `[]` | typed error | n/a | typed error | n/a | typed error |
+| wrong type, one element | typed error naming index | typed error naming index | n/a | typed error naming index | n/a | n/a: values may be arbitrary JSON |
+| wrong type, every element | typed error; never `[]` | typed error | n/a | typed error | n/a | n/a: values may be arbitrary JSON |
 | empty | `[]` is a valid empty sequence returning `[]` (spec section 1) | typed error (groups need a leg) | n/a | `[]` is a valid opt-in with an empty stack (spec section 1) | `""` typed error | `{}` valid |
 | duplicate key | typed error | typed error | typed error | typed error | typed error | typed error |
 | trailing/invalid content | document rejected | rejected | rejected | rejected | rejected | rejected |
@@ -335,7 +487,7 @@ Smells to grep before declaring done: `#[serde(default)]` on `tasks`,
 
 #### Wave 1 (disjoint files, concurrent)
 
-- [ ] **3.1 Lifecycle event model.**
+- [x] **3.1 Lifecycle event model.**
   - Add `cancelled` to the event enum and the container event table in the
     lift-ready slice: `lifecycle/parse.rs`, `action_shape.rs`, `actions.rs`,
     `validate.rs`, `signatures.rs`.
@@ -346,12 +498,12 @@ Smells to grep before declaring done: `#[serde(default)]` on `tasks`,
     time (runtime phase enforces); parsing allows it.
   - Prerequisite: Spike B output.
   - Files: `claudine/lib/src/composition/lifecycle/{parse,action_shape,actions,validate,signatures}.rs`.
-- [ ] **3.2 Lift-ready guard test (criterion 14).**
+- [x] **3.2 Lift-ready guard test (criterion 14).**
   - Add a test asserting the five modules above import no Claudine runtime
     types (settings, provider layer, messaging, TTS/Playa). Make it fail on a
     deliberate temporary import before keeping it.
   - Files: new test only.
-- [ ] **3.3 Sequence/group grammar.**
+- [x] **3.3 Sequence/group grammar.**
   - Add the inline `sequence:` executable (list or file reference with
     `-> offset` and `::operator` suffixes) to task parsing; make it exclusive
     with the other executables.
@@ -370,7 +522,7 @@ Smells to grep before declaring done: `#[serde(default)]` on `tasks`,
 
 #### Wave 2 (depends on Wave 1)
 
-- [ ] **3.4 Schemas and completions (requirement 5).**
+- [x] **3.4 Schemas and completions (requirement 5).**
   - Add `cancelled` to Claudine's schema partials on every primitive; drop
     the document-level `fail_fast` and the generated sequence overlays from
     `darkmatter/docs/schemas/claudine.yaml` payload; update group, task, and
@@ -380,13 +532,13 @@ Smells to grep before declaring done: `#[serde(default)]` on `tasks`,
     working tree; edit only the lines this task needs.
   - Files: `darkmatter/docs/schemas/claudine.yaml`, schema partials,
     `claudine/cli/src/completion/schema_completion/*`.
-- [ ] **3.5 Grammar tests.** Implement the matrix tests above and the
+- [x] **3.5 Grammar tests.** Implement the matrix tests above and the
   criterion 2 tests (each removed key raises its typed error before anything
   runs).
 
 **Checkpoint 3:**
-- [ ] matrix tests, criterion 2 and 14 tests pass
-- [ ] `just test` and `just lint` pass in `claudine/`; schema-related
+- [x] matrix tests, criterion 2 and 14 tests pass
+- [x] `just test` and `just lint` pass in `claudine/`; schema-related
   `darkmatter` tests pass (`just test darkmatter` from the repo root)
 
 ---
@@ -402,7 +554,7 @@ against fixtures.
 
 #### Wave 1
 
-- [ ] **4.1 Binding catalog.**
+- [x] **4.1 Binding catalog.**
   - In `lifecycle/bindings.rs`: define `seq.*` and `group.*` contents per
     spec section 7, read-only runtime roots (not assignable through `set`,
     not persisted by inline-compose), and the availability table additions
@@ -416,14 +568,14 @@ against fixtures.
   - `{{ seq }}` string shorthand to `seq.name`, also for `previous`/`next`.
   - Files: `lifecycle/bindings*.rs`, Darkmatter's shared binding view only
     if the interface requires it (check first; prefer Claudine-side).
-- [ ] **4.2 Group result values.** Build `group.legs`/`succeeded`/`failed`/
+- [x] **4.2 Group result values.** Build `group.legs`/`succeeded`/`failed`/
   `cancelled` data types and the empty-vs-populated timing per event
   (empty in `initialize`/`start`/`blocked`; absent inside a leg except
   variables).
 
 #### Wave 2
 
-- [ ] **4.3 Hard-rename errors.**
+- [x] **4.3 Hard-rename errors.**
   - Typed error naming the replacement for each old name in the section 7
     table. Implementation must walk **parsed** root reads, including static
     bracket access, across body, conditions, lifecycle operands, and shell
@@ -432,12 +584,12 @@ against fixtures.
     property of that name (including `null`); `fm.previous` is never a
     renamed root; `ctx.state` and quoted strings are never flagged.
   - Audit and migrate implicit `fm.outputs`/`fm.state` access.
-- [ ] **4.4 Remove generated overlays.** Delete the code that injects
+- [x] **4.4 Remove generated overlays.** Delete the code that injects
   `state`, `previous`, `next`, `outputs`, `sequence_id`, `previous_state`,
   `next_state`, `step`, `total_steps`, root `is_first`/`is_last` into
   frontmatter, in lockstep with Phase 5's `seq` production (the removal and
   the producer land in one change set; coordinate with Phase 5 Wave 1).
-- [ ] **4.5 Binding tests** for criteria 9 (the parts testable without a
+- [x] **4.5 Binding tests** for criteria 9 (the parts testable without a
   runner), 10, 11, and the step-key reserved-name error.
 
 **Checkpoint 4:** `just test`/`just lint` in `claudine/`; the rename-error
