@@ -85,7 +85,7 @@ use crate::params::{ParamDef, ParamStyle, QueryParamType};
 /// assert_eq!(params.len(), 2);
 /// ```
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PaginationStyle {
     /// Page number-based pagination (page + per_page).
     PageNumber {

@@ -22,7 +22,7 @@
 /// assert_eq!(param.name, "tags");
 /// assert!(!param.required);
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParamDef {
     /// Parameter name as used in the API.
     pub name: String,
@@ -65,7 +65,7 @@ pub struct ParamDef {
 /// ]);
 /// ```
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum QueryParamType {
     /// UTF-8 string parameter.
     String,
@@ -110,7 +110,7 @@ pub enum QueryParamType {
 /// | SpaceDelimited | `tags=a%20b%20c` | `tags=a&tags=b&tags=c` |
 /// | PipeDelimited | `tags=a\|b\|c` | `tags=a&tags=b&tags=c` |
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ParamStyle {
     /// Form style (default for query parameters).
     ///

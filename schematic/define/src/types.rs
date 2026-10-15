@@ -124,7 +124,7 @@ pub enum RestMethod {
 /// assert_eq!(api.name, "SimpleApi");
 /// assert_eq!(api.endpoints.len(), 1);
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RestApi {
     /// Unique identifier for this API (used for generated type names).
     ///
@@ -461,7 +461,7 @@ impl RestApi {
 ///     oauth_scopes: None,
 /// };
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Endpoint {
     /// Identifier for this endpoint (becomes the enum variant and struct name).
     ///

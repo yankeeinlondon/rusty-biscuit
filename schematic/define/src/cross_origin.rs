@@ -36,7 +36,7 @@
 // enums: the generator translates every policy into runtime configuration, and
 // an exhaustive match makes a new variant a compile error there instead of a
 // wildcard arm that could emit a looser policy.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum CrossOrigin {
     /// Follow only to the base origin.
     #[default]

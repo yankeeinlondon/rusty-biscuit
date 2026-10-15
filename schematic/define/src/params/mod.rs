@@ -83,7 +83,7 @@ pub use param_def::{ParamDef, ParamStyle, QueryParamType};
 /// assert!(params.header.is_empty());
 /// assert!(params.cookie.is_empty());
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct EndpointParams {
     /// Query string parameters.
     pub query: Vec<ParamDef>,
