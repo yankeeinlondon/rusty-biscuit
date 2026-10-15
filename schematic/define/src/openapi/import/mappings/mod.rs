@@ -96,7 +96,7 @@ pub fn map_operation(
             } else {
                 Some(params)
             },
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         diagnostics,
     ))

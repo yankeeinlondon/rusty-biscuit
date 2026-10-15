@@ -107,7 +107,7 @@ pub enum RestMethod {
 ///             response: ApiResponse::json_type("HealthResponse"),
 ///             headers: vec![],
 ///             params: None,
-///             oauth_scopes: None, cross_origin: None,
+///             oauth_scopes: None, cross_origin: None, pagination: None,
 ///         },
 ///     ],
 ///     module_path: None,
@@ -415,7 +415,7 @@ impl RestApi {
 ///     response: ApiResponse::json_type("User"),
 ///     headers: vec![],
 ///     params: None,
-///     oauth_scopes: None, cross_origin: None,
+///     oauth_scopes: None, cross_origin: None, pagination: None,
 /// };
 ///
 /// assert!(endpoint.path.contains("{user_id}"));
@@ -435,7 +435,7 @@ impl RestApi {
 ///     response: ApiResponse::json_type("User"),
 ///     headers: vec![],
 ///     params: None,
-///     oauth_scopes: None, cross_origin: None,
+///     oauth_scopes: None, cross_origin: None, pagination: None,
 /// };
 ///
 /// assert!(endpoint.request.is_some());
@@ -458,7 +458,7 @@ impl RestApi {
 ///     response: ApiResponse::json_type("FileUploadResponse"),
 ///     headers: vec![],
 ///     params: None,
-///     oauth_scopes: None, cross_origin: None,
+///     oauth_scopes: None, cross_origin: None, pagination: None,
 /// };
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -508,6 +508,9 @@ pub struct Endpoint {
     /// Replaces the API policy for this endpoint; callers may only tighten it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cross_origin: Option<crate::CrossOrigin>,
+    /// Explicit collection shape and pagination policy, taking precedence over legacy API rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pagination: Option<crate::pagination::Collection>,
 }
 
 #[cfg(test)]

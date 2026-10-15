@@ -302,7 +302,7 @@ impl fmt::Display for PaginationDiagnostic {
 /// #         id: "ListReleases".into(), method: RestMethod::Get, path: "/releases".into(),
 /// #         description: String::new(), request: None,
 /// #         response: ApiResponse::json_type("Vec<Release>"), headers: vec![], params: None,
-/// #         oauth_scopes: None, cross_origin: None,
+/// #         oauth_scopes: None, cross_origin: None, pagination: None,
 /// #     }],
 /// #     pagination_exceptions: exceptions,
 /// # };
@@ -366,12 +366,12 @@ pub fn validate_pagination(api: &RestApi) -> Vec<PaginationDiagnostic> {
             }
         }
         let id = Some(endpoint.id.as_str());
-        if let Some(entry) = api
+        if let Some(collection) = endpoint.pagination.as_ref().or_else(|| api
             .pagination_exceptions
             .iter()
-            .find(|entry| entry.endpoint == endpoint.id)
+            .find(|entry| entry.endpoint == endpoint.id).map(|entry| &entry.collection))
         {
-            for error in collection_errors(api, endpoint, &entry.collection) {
+            for error in collection_errors(api, endpoint, collection) {
                 push(id, None, error);
             }
         }
@@ -434,7 +434,7 @@ fn edit_distance(a: &str, b: &str) -> usize {
     previous[b.len()]
 }
 
-/// Errors in the list shape an exceptions row names.
+/// Errors in an authored collection shape.
 fn collection_errors(api: &RestApi, endpoint: &Endpoint, collection: &Collection) -> Vec<PaginationError> {
     let mut errors = Vec::new();
     if let Some(reason) = collection.items.syntax_problem() {

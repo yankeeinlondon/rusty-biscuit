@@ -74,7 +74,7 @@ fn endpoint_builder_equals_legacy_literal_without_normalization() {
         .params(EndpointParams::new()).returns_text().build().unwrap();
     let literal = Endpoint { id: "Get".into(), method: RestMethod::Get, path: "/items".into(),
         description: "Get items".into(), request: None, response: ApiResponse::Text,
-        headers: vec![("Accept".into(), "text/plain".into())], params: Some(EndpointParams::default()), oauth_scopes: None, cross_origin: None };
+        headers: vec![("Accept".into(), "text/plain".into())], params: Some(EndpointParams::default()), oauth_scopes: None, cross_origin: None, pagination: None };
     assert_eq!(built, literal);
     assert_eq!(serde_json::to_value(built).unwrap(), serde_json::to_value(literal).unwrap());
 }

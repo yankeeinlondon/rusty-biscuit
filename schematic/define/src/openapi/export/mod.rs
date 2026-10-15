@@ -204,7 +204,7 @@ mod tests {
                     response: ApiResponse::json_type("ListResponse"),
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None, cross_origin: None,
+                    oauth_scopes: None, cross_origin: None, pagination: None,
                 },
                 Endpoint {
                     id: "GetItem".to_string(),
@@ -215,7 +215,7 @@ mod tests {
                     response: ApiResponse::json_type("Item"),
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None, cross_origin: None,
+                    oauth_scopes: None, cross_origin: None, pagination: None,
                 },
             ],
             module_path: None,
@@ -358,7 +358,7 @@ mod tests {
                 response: ApiResponse::Empty,
                 headers: vec![],
                 params: None,
-                oauth_scopes: None, cross_origin: None,
+                oauth_scopes: None, cross_origin: None, pagination: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -405,7 +405,7 @@ mod tests {
                 response: ApiResponse::json_type("MissingResponse"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None, cross_origin: None,
+                oauth_scopes: None, cross_origin: None, pagination: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -452,7 +452,7 @@ mod tests {
                 response: ApiResponse::json_type("Model"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None, cross_origin: None,
+                oauth_scopes: None, cross_origin: None, pagination: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -511,7 +511,7 @@ mod tests {
                 response: ApiResponse::json_type("ResponseBody"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None, cross_origin: None,
+                oauth_scopes: None, cross_origin: None, pagination: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -563,7 +563,7 @@ mod tests {
                 }],
                 ..Default::default()
             }),
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         }];
 
         let doc = export(&api, &TestRegistry::new(), &ExportOptions::new())
@@ -606,7 +606,7 @@ mod tests {
                 response: ApiResponse::Empty,
                 headers: vec![],
                 params: None,
-                oauth_scopes: None, cross_origin: None,
+                oauth_scopes: None, cross_origin: None, pagination: None,
             },
             Endpoint {
                 id: "DeleteItem".to_string(),
@@ -617,7 +617,7 @@ mod tests {
                 response: ApiResponse::Empty,
                 headers: vec![],
                 params: None,
-                oauth_scopes: None, cross_origin: None,
+                oauth_scopes: None, cross_origin: None, pagination: None,
             },
         ];
 

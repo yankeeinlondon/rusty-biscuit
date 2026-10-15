@@ -69,7 +69,7 @@ fn endpoints_support_cross_origin_override_and_no_graphql_export() {
         response: ApiResponse::Empty,
         headers: vec![],
         params: None,
-        oauth_scopes: None, cross_origin: None,
+        oauth_scopes: None, cross_origin: None, pagination: None,
     };
 
     // Exhaustive, without `..`: a new `Endpoint` field fails to compile here.
@@ -84,6 +84,7 @@ fn endpoints_support_cross_origin_override_and_no_graphql_export() {
         params,
         oauth_scopes,
         cross_origin,
+        pagination,
     } = endpoint;
     assert_eq!(id, "Ping");
     assert_eq!(method, RestMethod::Get);
@@ -95,6 +96,7 @@ fn endpoints_support_cross_origin_override_and_no_graphql_export() {
     assert!(params.is_none());
     assert!(oauth_scopes.is_none());
     assert!(cross_origin.is_none());
+    assert!(pagination.is_none());
     assert_eq!(Endpoint::get("Ping", "/ping").describes("Ping").returns_empty().cross_origin(CrossOrigin::deny()).build().unwrap().cross_origin, Some(CrossOrigin::deny()));
 
     let lib_source = include_str!("../src/lib.rs");

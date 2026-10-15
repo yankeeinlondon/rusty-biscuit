@@ -16,7 +16,7 @@ use crate::types::{Endpoint, RestApi, RestMethod};
 /// What decided an endpoint's pagination.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ResolutionOrigin {
-    /// A row of the API's exceptions table (an override or an opt-out).
+    /// An endpoint collection or a legacy API exception (an override or opt-out).
     Exception,
     /// The API's default strategy, inherited by a list.
     ApiDefault,
@@ -84,10 +84,10 @@ impl Resolution {
 
 /// Resolves `endpoint`'s pagination within `api`.
 ///
-/// The order is fixed: (1) a row of `api.pagination_exceptions` for the
-/// endpoint id decides; (2) otherwise a GET endpoint whose response is an
+/// The order is fixed: an endpoint collection takes precedence over a legacy
+/// row of `api.pagination_exceptions`; otherwise a GET endpoint whose response is an
 /// explicit `Vec<T>` is a root-array list that inherits the API default, or is
-/// unpaginated without one; (3) otherwise the endpoint is not a list. Type
+/// unpaginated without one; otherwise the endpoint is not a list. Type
 /// aliases and opaque responses are never inferred to be lists. The first row
 /// for an id wins; validation rejects a duplicate.
 ///
@@ -116,7 +116,7 @@ impl Resolution {
 ///     response: ApiResponse::json_type("Vec<Release>"),
 ///     headers: vec![],
 ///     params: None,
-///     oauth_scopes: None, cross_origin: None,
+///     oauth_scopes: None, cross_origin: None, pagination: None,
 /// };
 ///
 /// let resolution = resolve(&api, &releases);
@@ -129,7 +129,7 @@ pub fn resolve(api: &RestApi, endpoint: &Endpoint) -> Resolution {
         .iter()
         .find(|entry| entry.endpoint == endpoint.id);
 
-    let Some(entry) = entry else {
+    let Some(collection) = endpoint.pagination.as_ref().or_else(|| entry.map(|entry| &entry.collection)) else {
         if endpoint.method != RestMethod::Get {
             return Resolution::NotAList;
         }
@@ -154,7 +154,6 @@ pub fn resolve(api: &RestApi, endpoint: &Endpoint) -> Resolution {
         };
     };
 
-    let collection = &entry.collection;
     let item_type = collection.item_type.clone().or_else(|| {
         collection
             .items

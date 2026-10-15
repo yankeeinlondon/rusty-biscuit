@@ -163,7 +163,8 @@ impl OpenApiImport {
     pub fn build(self) -> Result<OpenApiImportResult, super::super::error::OpenApiError> {
         let mut diagnostics = Vec::new();
 
-        let doc = self.parse_source(&mut diagnostics)?;
+        let mut doc = self.parse_source(&mut diagnostics)?;
+        super::query_paths::normalize(&mut doc, &mut diagnostics)?;
 
         self.validate_constraints(&doc)?;
 
@@ -234,6 +235,7 @@ impl OpenApiImport {
                 })?;
 
                 let content = Self::normalize(&content, diagnostics);
+                super::query_paths::check_text(&content, false)?;
                 serde_yaml_ng::from_str(&content).map_err(|e| {
                     super::super::error::OpenApiError::Parse {
                         message: e.to_string(),
@@ -243,6 +245,7 @@ impl OpenApiImport {
             }
             OpenApiSource::Json(content) => {
                 let content = Self::normalize(content, diagnostics);
+                super::query_paths::check_text(&content, true)?;
                 serde_json::from_str(&content).map_err(|e| {
                     super::super::error::OpenApiError::Parse {
                         message: e.to_string(),
@@ -252,6 +255,7 @@ impl OpenApiImport {
             }
             OpenApiSource::Yaml(content) => {
                 let content = Self::normalize(content, diagnostics);
+                super::query_paths::check_text(&content, false)?;
                 serde_yaml_ng::from_str(&content).map_err(|e| {
                     super::super::error::OpenApiError::Parse {
                         message: e.to_string(),
@@ -262,6 +266,7 @@ impl OpenApiImport {
             OpenApiSource::Bytes(bytes) => {
                 let content = String::from_utf8_lossy(bytes);
                 let content = Self::normalize(&content, diagnostics);
+                super::query_paths::check_text(&content, false)?;
                 serde_yaml_ng::from_str(&content).map_err(|e| {
                     super::super::error::OpenApiError::Parse {
                         message: e.to_string(),
@@ -345,7 +350,13 @@ impl OpenApiImport {
                     &mut used_names,
                     &self.options,
                 ) {
-                    Ok((endpoint, mut op_diags)) => {
+                    Ok((mut endpoint, mut op_diags)) => {
+                        if let Some(names) = operation.extensions.get("x-schematic-query-rust-names").and_then(serde_json::Value::as_object)
+                            && let Some(params) = &mut endpoint.params {
+                                for param in &mut params.query {
+                                    param.rust_name = names.get(&param.name).and_then(serde_json::Value::as_str).map(str::to_string);
+                                }
+                        }
                         endpoints.push(endpoint);
                         diagnostics.append(&mut op_diags);
                     }

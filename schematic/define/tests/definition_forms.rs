@@ -83,7 +83,13 @@ fn pager_marker_requires_matching_strategy_and_authored_required_default() {
                 let result = RestApi::builder(&ctx, "Forms", "https://a.test").describes("Forms").no_auth()
                     .default_pagination(strategy).endpoints([ep]).build();
                 if !matched { assert!(result.is_err()); }
-                else if !required || default { assert!(result.is_ok(), "{result:?}"); }
+                else if !required || default {
+                    let api = result.as_ref().unwrap();
+                    let resolution = schematic_define::pagination::resolve(api, &api.endpoints[0]);
+                    let adopted = schematic_define::pagination::adopted_params(&api.endpoints[0], resolution.strategy().unwrap());
+                    assert!(adopted.iter().any(|entry| entry.name == "limit" && entry.location == schematic_define::pagination::ParamLocation::Query));
+                    assert!(schematic_define::pagination::caller_knobs(&resolution).iter().any(|knob| matches!(knob, schematic_define::pagination::Knob::PageSize { param, .. } if param == "limit")));
+                }
                 if matched && required && !default {
                     let error = result.unwrap_err().to_string();
                     assert!(error.contains("pager-managed-required-without-default"), "{error}");

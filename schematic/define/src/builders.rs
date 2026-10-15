@@ -92,7 +92,7 @@ impl Endpoint {
     pub fn new(id: impl Into<String>, method: RestMethod, path: impl Into<String>) -> EndpointBuilder {
         EndpointBuilder { endpoint: Endpoint { id: id.into(), method, path: path.into(),
             description: String::new(), request: None, response: ApiResponse::Empty,
-            headers: vec![], params: None, oauth_scopes: None, cross_origin: None }, successes: 0, error: None, state: PhantomData }
+            headers: vec![], params: None, oauth_scopes: None, cross_origin: None, pagination: None }, successes: 0, error: None, state: PhantomData }
     }
     pub fn get(id: impl Into<String>, path: impl Into<String>) -> EndpointBuilder { Self::new(id, RestMethod::Get, path) }
     pub fn post(id: impl Into<String>, path: impl Into<String>) -> EndpointBuilder { Self::new(id, RestMethod::Post, path) }
@@ -136,6 +136,7 @@ impl<D, S> EndpointBuilder<D, S> {
     pub fn request_text_with_content_type(mut self, content_type: impl Into<String>) -> Self { self.endpoint.request = Some(ApiRequest::Text { content_type: content_type.into() }); self }
     pub fn request_binary_with_content_type(mut self, content_type: impl Into<String>) -> Self { self.endpoint.request = Some(ApiRequest::Binary { content_type: content_type.into() }); self }
     pub fn request_binary(mut self) -> Self { self.endpoint.request = Some(ApiRequest::Binary { content_type: "application/octet-stream".into() }); self }
+    pub fn pagination(mut self, collection: crate::pagination::Collection) -> Self { self.endpoint.pagination = Some(collection); self }
     pub fn cross_origin(mut self, policy: CrossOrigin) -> Self { self.endpoint.cross_origin = Some(policy); self }
     pub fn header_param(mut self, param: ParamDef) -> Self { self.endpoint.params.get_or_insert_with(EndpointParams::new).header.push(param); self }
     pub fn cookie(mut self, param: ParamDef) -> Self { self.endpoint.params.get_or_insert_with(EndpointParams::new).cookie.push(param); self }

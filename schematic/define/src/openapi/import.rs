@@ -45,6 +45,7 @@ mod diagnostics;
 mod mappings;
 pub mod naming;
 mod normalize;
+mod query_paths;
 mod resolver;
 
 pub use builder::{

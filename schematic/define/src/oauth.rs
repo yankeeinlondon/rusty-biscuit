@@ -225,7 +225,7 @@ mod tests {
             response: ApiResponse::json_type("ListReposResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: Some(vec!["repo".into(), "read:org".into()]), cross_origin: None,
+            oauth_scopes: Some(vec!["repo".into(), "read:org".into()]), cross_origin: None, pagination: None,
         };
 
         // Verify the field is accessible
@@ -249,7 +249,7 @@ mod tests {
             response: ApiResponse::json_type("HealthResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         };
 
         assert!(endpoint.oauth_scopes.is_none());
