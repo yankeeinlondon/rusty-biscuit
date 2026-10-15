@@ -198,7 +198,7 @@ pub fn define_bitbucket_api() -> RestApi {
                 response: ApiResponse::json_type("Repository"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             // =================================================================
             // Directory and File Contents
@@ -218,7 +218,7 @@ pub fn define_bitbucket_api() -> RestApi {
                 response: ApiResponse::Binary,
                 headers: vec![],
                 params: Some(bitbucket_pagination()),
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             // =================================================================
             // Pull Requests
@@ -237,7 +237,7 @@ pub fn define_bitbucket_api() -> RestApi {
                     false,
                     Some("Filter by state (OPEN, MERGED, DECLINED, SUPERSEDED)"),
                 )),
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             Endpoint {
                 id: "GetPullRequest".to_string(),
@@ -248,7 +248,7 @@ pub fn define_bitbucket_api() -> RestApi {
                 response: ApiResponse::json_type("PullRequest"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             Endpoint {
                 id: "ListPullRequestComments".to_string(),
@@ -260,7 +260,7 @@ pub fn define_bitbucket_api() -> RestApi {
                 response: ApiResponse::json_type("PaginatedResponse<PullRequestComment>"),
                 headers: vec![],
                 params: Some(bitbucket_pagination()),
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             // =================================================================
             // Issues
@@ -274,7 +274,7 @@ pub fn define_bitbucket_api() -> RestApi {
                 response: ApiResponse::json_type("PaginatedResponse<Issue>"),
                 headers: vec![],
                 params: Some(bitbucket_pagination()),
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             Endpoint {
                 id: "GetIssue".to_string(),
@@ -285,7 +285,7 @@ pub fn define_bitbucket_api() -> RestApi {
                 response: ApiResponse::json_type("Issue"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             Endpoint {
                 id: "ListIssueComments".to_string(),
@@ -296,7 +296,7 @@ pub fn define_bitbucket_api() -> RestApi {
                 response: ApiResponse::json_type("PaginatedResponse<IssueComment>"),
                 headers: vec![],
                 params: Some(bitbucket_pagination()),
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             Endpoint {
                 id: "ListIssueChanges".to_string(),
@@ -307,7 +307,7 @@ pub fn define_bitbucket_api() -> RestApi {
                 response: ApiResponse::json_type("PaginatedResponse<IssueChange>"),
                 headers: vec![],
                 params: Some(bitbucket_pagination()),
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             // =================================================================
             // Branches
@@ -322,7 +322,7 @@ pub fn define_bitbucket_api() -> RestApi {
                 response: ApiResponse::json_type("Branch"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             // =================================================================
             // Tags
@@ -336,7 +336,7 @@ pub fn define_bitbucket_api() -> RestApi {
                 response: ApiResponse::json_type("PaginatedResponse<Tag>"),
                 headers: vec![],
                 params: Some(bitbucket_pagination()),
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             Endpoint {
                 id: "GetTag".to_string(),
@@ -347,7 +347,7 @@ pub fn define_bitbucket_api() -> RestApi {
                 response: ApiResponse::json_type("Tag"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             // =================================================================
             // Downloads
@@ -361,7 +361,7 @@ pub fn define_bitbucket_api() -> RestApi {
                 response: ApiResponse::json_type("PaginatedResponse<Download>"),
                 headers: vec![],
                 params: Some(bitbucket_pagination()),
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             Endpoint {
                 id: "GetDownload".to_string(),
@@ -372,7 +372,7 @@ pub fn define_bitbucket_api() -> RestApi {
                 response: ApiResponse::Binary,
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             // =================================================================
             // Workspace Repositories
@@ -386,7 +386,7 @@ pub fn define_bitbucket_api() -> RestApi {
                 response: ApiResponse::json_type("PaginatedResponse<Repository>"),
                 headers: vec![],
                 params: Some(bitbucket_pagination()),
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
         ],
         module_path: Some("bitbucket".to_string()),

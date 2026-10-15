@@ -22,7 +22,7 @@ pub fn all() -> Vec<Endpoint> {
                     Some("The previous page's `next_page_token`"),
                 ),
             ])),
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "GetVoice".to_string(),
@@ -33,7 +33,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("VoiceResponseModel"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "DeleteVoice".to_string(),
@@ -44,7 +44,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("StatusResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "GetDefaultVoiceSettings".to_string(),
@@ -55,7 +55,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("VoiceSettings"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "GetVoiceSettings".to_string(),
@@ -66,7 +66,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("VoiceSettings"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "UpdateVoiceSettings".to_string(),
@@ -77,7 +77,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("StatusResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "GetVoiceSampleAudio".to_string(),
@@ -88,7 +88,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::Binary,
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "DeleteVoiceSample".to_string(),
@@ -99,7 +99,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("StatusResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "AddVoiceSample".to_string(),
@@ -116,7 +116,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("AddSampleResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "ListSharedVoices".to_string(),
@@ -127,7 +127,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListSharedVoicesResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "AddSharedVoice".to_string(),
@@ -138,7 +138,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("AddSharedVoiceResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "CreatePvcVoice".to_string(),
@@ -149,7 +149,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("AddSharedVoiceResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "UpdatePvcVoice".to_string(),
@@ -160,7 +160,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("StatusResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "TrainPvcVoice".to_string(),
@@ -171,7 +171,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("StatusResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
     ]
 }

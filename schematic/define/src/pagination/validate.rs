@@ -29,6 +29,7 @@ pub enum PaginationRuleGroup {
 #[non_exhaustive]
 pub enum PaginationError {
     // Strategy shape
+    UnmatchedManagedParam(String),
     CursorWithoutEndSignal,
     FullPageOnCursor,
     FullPageWithoutPageSize,
@@ -76,6 +77,7 @@ impl PaginationError {
     /// The rule's stable kebab-case id.
     pub fn rule(&self) -> &'static str {
         match self {
+            Self::UnmatchedManagedParam(_) => "unmatched-pager-managed-parameter",
             Self::CursorWithoutEndSignal => "cursor-without-end-signal",
             Self::FullPageOnCursor => "full-page-on-cursor",
             Self::FullPageWithoutPageSize => "full-page-without-page-size",
@@ -124,7 +126,8 @@ impl PaginationError {
             | Self::AlternatesOnUnpaginated
             | Self::DuplicateLabel(_)
             | Self::InvalidLabel(_) => PaginationRuleGroup::Exception,
-            Self::CollidesWithEndpointParam(_)
+            Self::UnmatchedManagedParam(_)
+            | Self::CollidesWithEndpointParam(_)
             | Self::AdoptionWithoutKnob(_)
             | Self::PagerManagedRequiredWithoutDefault(_) => PaginationRuleGroup::Parameter,
             _ => PaginationRuleGroup::Strategy,
@@ -135,6 +138,7 @@ impl PaginationError {
 impl fmt::Display for PaginationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UnmatchedManagedParam(name) => write!(f, "pager-managed parameter `{name}` has no matching strategy input and caller control"),
             Self::CursorWithoutEndSignal => f.write_str(
                 "a cursor read only from items has no end signal; add `more_when(..)`",
             ),
@@ -298,7 +302,7 @@ impl fmt::Display for PaginationDiagnostic {
 /// #         id: "ListReleases".into(), method: RestMethod::Get, path: "/releases".into(),
 /// #         description: String::new(), request: None,
 /// #         response: ApiResponse::json_type("Vec<Release>"), headers: vec![], params: None,
-/// #         oauth_scopes: None,
+/// #         oauth_scopes: None, cross_origin: None,
 /// #     }],
 /// #     pagination_exceptions: exceptions,
 /// # };
@@ -349,6 +353,18 @@ pub fn validate_pagination(api: &RestApi) -> Vec<PaginationDiagnostic> {
     }
 
     for endpoint in &api.endpoints {
+        let resolution = resolve(api, endpoint);
+        let adopted = resolution.strategy().map(|strategy| super::adopted_params(endpoint, strategy)).unwrap_or_default();
+        if let Some(params) = &endpoint.params {
+            for (location, parameters) in [(super::ParamLocation::Query, &params.query),
+                (super::ParamLocation::Header, &params.header), (super::ParamLocation::Cookie, &params.cookie)] {
+                for param in parameters.iter().filter(|param| param.pager_managed) {
+                    if !adopted.iter().any(|entry| entry.location == location && entry.name == param.name) {
+                        push(Some(&endpoint.id), None, PaginationError::UnmatchedManagedParam(param.name.clone()));
+                    }
+                }
+            }
+        }
         let id = Some(endpoint.id.as_str());
         if let Some(entry) = api
             .pagination_exceptions

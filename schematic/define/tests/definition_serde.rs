@@ -12,7 +12,7 @@ fn parameter_variants_round_trip_twice() {
     ] {
         for style in [ParamStyle::Form, ParamStyle::Simple, ParamStyle::SpaceDelimited,
             ParamStyle::PipeDelimited, ParamStyle::DeepObject] {
-            let param = ParamDef { name: "filter".into(), required: true,
+            let param = ParamDef { rust_name: None, secret: false, pager_managed: false, name: "filter".into(), required: true,
                 description: Some("Filter".into()), param_type: param_type.clone(),
                 explode: true, style };
             let params = EndpointParams { query: vec![param.clone()], header: vec![param.clone()],

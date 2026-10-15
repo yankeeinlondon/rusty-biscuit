@@ -16,7 +16,7 @@ use crate::output::assemble::assemble_api_module;
 use crate::validation::validate_rust_client;
 
 fn param(name: &str, required: bool) -> ParamDef {
-    ParamDef {
+    ParamDef { rust_name: None, secret: false, pager_managed: false,
         name: name.to_string(),
         required,
         description: None,
@@ -39,7 +39,7 @@ fn get(id: &str, path: &str, response: &str, query: Vec<ParamDef>) -> Endpoint {
             query,
             ..Default::default()
         }),
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     }
 }
 

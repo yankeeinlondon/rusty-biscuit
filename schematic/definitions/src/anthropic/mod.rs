@@ -135,7 +135,7 @@ pub fn define_anthropic_api() -> RestApi {
                 response: ApiResponse::json_type("MessageResponse"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             // Token counting for cost estimation
             Endpoint {
@@ -147,7 +147,7 @@ pub fn define_anthropic_api() -> RestApi {
                 response: ApiResponse::json_type("CountTokensResponse"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             // Model discovery
             Endpoint {
@@ -159,7 +159,7 @@ pub fn define_anthropic_api() -> RestApi {
                 response: ApiResponse::json_type("ListModelsResponse"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             Endpoint {
                 id: "RetrieveModel".to_string(),
@@ -170,7 +170,7 @@ pub fn define_anthropic_api() -> RestApi {
                 response: ApiResponse::json_type("ModelInfo"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
         ],
         module_path: None,

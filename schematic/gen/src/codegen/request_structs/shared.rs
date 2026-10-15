@@ -73,8 +73,21 @@ pub fn to_snake_case(s: &str) -> String {
 #[derive(Debug, Clone)]
 pub struct QueryParamInfo {
     pub name: String,
+    /// Explicit Rust spelling; the query/header/cookie key stays `name`.
+    pub rust_name: Option<String>,
     pub description: Option<String>,
     pub param_type: QueryParamType,
+}
+
+impl QueryParamInfo {
+    pub fn field_name(&self) -> String {
+        self.rust_name.clone().unwrap_or_else(|| param_field_name(&self.name))
+    }
+
+    pub fn serde_rename(&self) -> TokenStream {
+        let wire = &self.name;
+        if self.field_name() == *wire { quote! {} } else { quote! { #[serde(rename = #wire)] } }
+    }
 }
 
 /// Extracts query parameters from an endpoint's params field.
@@ -97,6 +110,7 @@ fn param_infos(params: &[ParamDef]) -> Vec<QueryParamInfo> {
         .iter()
         .map(|p| QueryParamInfo {
             name: p.name.clone(),
+            rust_name: p.rust_name.clone(),
             description: p.description.clone(),
             param_type: p.param_type.clone(),
         })
@@ -164,7 +178,7 @@ pub fn generate_path_format(
         quote! { let query: Vec<(String, String)> = Vec::new(); }
     } else {
         let query_param_collectors = query_params.iter().map(|qp| {
-            let field_name = format_ident!("{}", param_field_name(&qp.name));
+            let field_name = format_ident!("{}", qp.field_name());
             let param_name = &qp.name;
 
             match &qp.param_type {

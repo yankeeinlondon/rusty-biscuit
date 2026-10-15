@@ -58,13 +58,8 @@ fn allow_origins_keeps_order_and_exact_strings() {
     );
 }
 
-/// Frozen to today's surface: `Endpoint` has no cross-origin field or setter,
-/// and the crate exports no GraphQL primitive.
-///
-/// A later spec that adds a per-endpoint override (spec 4a) or a GraphQL
-/// primitive (spec 5) retires or updates this test.
 #[test]
-fn endpoints_have_no_cross_origin_override_and_no_graphql_export() {
+fn endpoints_support_cross_origin_override_and_no_graphql_export() {
     let endpoint = Endpoint {
         id: "Ping".to_string(),
         method: RestMethod::Get,
@@ -74,7 +69,7 @@ fn endpoints_have_no_cross_origin_override_and_no_graphql_export() {
         response: ApiResponse::Empty,
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     };
 
     // Exhaustive, without `..`: a new `Endpoint` field fails to compile here.
@@ -88,6 +83,7 @@ fn endpoints_have_no_cross_origin_override_and_no_graphql_export() {
         headers,
         params,
         oauth_scopes,
+        cross_origin,
     } = endpoint;
     assert_eq!(id, "Ping");
     assert_eq!(method, RestMethod::Get);
@@ -98,6 +94,8 @@ fn endpoints_have_no_cross_origin_override_and_no_graphql_export() {
     assert!(headers.is_empty());
     assert!(params.is_none());
     assert!(oauth_scopes.is_none());
+    assert!(cross_origin.is_none());
+    assert_eq!(Endpoint::get("Ping", "/ping").describes("Ping").returns_empty().cross_origin(CrossOrigin::deny()).build().unwrap().cross_origin, Some(CrossOrigin::deny()));
 
     let lib_source = include_str!("../src/lib.rs");
     let exported = lib_source
@@ -111,9 +109,4 @@ fn endpoints_have_no_cross_origin_override_and_no_graphql_export() {
         "the crate root exports a GraphQL name"
     );
 
-    let endpoint_source = include_str!("../src/types.rs");
-    assert!(
-        !endpoint_source.contains("fn cross_origin"),
-        "`Endpoint` (src/types.rs) gained a cross-origin setter"
-    );
 }

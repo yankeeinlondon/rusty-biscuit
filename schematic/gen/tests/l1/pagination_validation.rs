@@ -26,7 +26,7 @@ fn endpoint(id: &str, path: &str, response: &str) -> Endpoint {
         response: ApiResponse::json_type(response),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     }
 }
 

@@ -461,7 +461,7 @@ mod tests {
                     response: ApiResponse::json_type("MissingType"),
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None,
+                    oauth_scopes: None, cross_origin: None,
                 },
                 Endpoint {
                     id: "Get2".to_string(),
@@ -472,7 +472,7 @@ mod tests {
                     response: ApiResponse::json_type("MissingType"), // Same type
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None,
+                    oauth_scopes: None, cross_origin: None,
                 },
             ],
             module_path: None,
@@ -519,7 +519,7 @@ mod tests {
                 response: ApiResponse::Empty,
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -564,7 +564,7 @@ mod tests {
                     response: ApiResponse::Binary,
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None,
+                    oauth_scopes: None, cross_origin: None,
                 },
                 Endpoint {
                     id: "Text".to_string(),
@@ -575,7 +575,7 @@ mod tests {
                     response: ApiResponse::Text,
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None,
+                    oauth_scopes: None, cross_origin: None,
                 },
                 Endpoint {
                     id: "Empty".to_string(),
@@ -586,7 +586,7 @@ mod tests {
                     response: ApiResponse::Empty,
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None,
+                    oauth_scopes: None, cross_origin: None,
                 },
             ],
             module_path: None,

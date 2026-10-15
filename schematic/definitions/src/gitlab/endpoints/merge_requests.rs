@@ -29,7 +29,7 @@ pub fn all() -> Vec<Endpoint> {
                         Some("Filter by merge request state"),
                     ),
             ),
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "GetMergeRequest".to_string(),
@@ -40,7 +40,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("MergeRequest"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "ListMergeRequestCommits".to_string(),
@@ -51,7 +51,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_vec_type("Commit"),
             headers: vec![],
             params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitlab())),
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "ListMergeRequestChanges".to_string(),
@@ -62,7 +62,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("MergeRequestChanges"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
     ]
 }

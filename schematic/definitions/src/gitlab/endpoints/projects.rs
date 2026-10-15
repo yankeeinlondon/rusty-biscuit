@@ -36,7 +36,7 @@ pub fn all() -> Vec<Endpoint> {
                         Some("Subdirectory path to list"),
                     ),
             ),
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "GetRepositoryFile".to_string(),
@@ -48,7 +48,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("FileContent"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "GetProject".to_string(),
@@ -59,7 +59,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("Project"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "ListGroupProjects".to_string(),
@@ -114,7 +114,7 @@ pub fn all() -> Vec<Endpoint> {
                         Some("Include projects from subgroups"),
                     ),
             ),
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
     ]
 }

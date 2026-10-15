@@ -732,6 +732,11 @@ fn check_sent_params(api: &RestApi, endpoint: &Endpoint, diagnostics: &mut Vec<V
                     message,
                 ));
             };
+            if let Some(name) = &param.rust_name
+                && (syn::parse_str::<syn::Ident>(name).is_err() || name == "self" || name == "Self" || name == "crate" || name == "super" || name == "_")
+            {
+                push(format!("{location} parameter `{}` has invalid Rust name `{name}`", param.name));
+            }
             if wire_name_is_token && !is_http_token(&param.name) {
                 push(format!(
                     "{location} parameter name `{}` is not a valid {location} name",
@@ -791,8 +796,8 @@ fn referenced_type_names(endpoint: &Endpoint) -> Vec<(&'static str, &str)> {
 
 /// Checks the fields of an endpoint's request struct and form body struct.
 ///
-/// Field names come from [`sanitize_rust_field_ident`], exactly as the
-/// emitters derive them, so distinct wire names can still collide
+/// Field names preserve explicit Rust names or use [`sanitize_rust_field_ident`],
+/// exactly as the emitters derive them, so distinct wire names can still collide
 /// (`{user-id}` and `user_id`). Query, header, and cookie builders are all
 /// `with_<field>`, so a builder collision is a field collision.
 fn check_request_struct_fields(
@@ -811,9 +816,9 @@ fn check_request_struct_fields(
         ));
     };
 
-    let mut fields: Vec<(String, String)> = Vec::new();
+    let mut fields: Vec<(String, String, bool)> = Vec::new();
     for name in extract_path_params(&endpoint.path) {
-        fields.push((format!("path parameter `{name}`"), name.to_string()));
+        fields.push((format!("path parameter `{name}`"), name.to_string(), false));
     }
     let no_params: &[ParamDef] = &[];
     let (query, header, cookie) = endpoint.params.as_ref().map_or(
@@ -822,13 +827,14 @@ fn check_request_struct_fields(
     );
     for (location, declared) in [("query", query), ("header", header), ("cookie", cookie)] {
         for param in declared {
-            fields.push((format!("{location} parameter `{}`", param.name), param.name.clone()));
+            let field = param.rust_name.as_ref().unwrap_or(&param.name).clone();
+            fields.push((format!("{location} parameter `{}`", param.name), field, param.rust_name.is_some()));
         }
     }
 
     let mut struct_fields: Vec<(String, String)> = Vec::new();
-    for (source, wire) in &fields {
-        let field = sanitize_rust_field_ident(wire);
+    for (source, wire, explicit) in &fields {
+        let field = if *explicit { wire.clone() } else { sanitize_rust_field_ident(wire) };
         // An unrepresentable name falls back to an opaque `field`.
         if field == "field" && wire != "field" {
             push(
@@ -1045,6 +1051,24 @@ mod tests {
     use schematic_define::params::{EndpointParams, ParamStyle, QueryParamType};
     use schematic_define::{ApiKeyLocation, AuthStrategy, FormField, RestMethod};
 
+    #[test]
+    fn rust_parameter_aliases_are_validated_and_collide_by_rust_name_only() {
+        let mut ep = get("List");
+        let mut reference = param("ref", false);
+        reference.rust_name = Some("git_ref".into());
+        ep.params = Some(params(vec![reference.clone(), param("git_ref", false)], vec![], vec![]));
+        let api = api_with(vec![ep.clone()]);
+        assert!(validate_rust_client(&[&api]).iter().any(|d| d.feature == Feature::GeneratedNameCollision));
+        assert!(validate_openapi(&[&api]).is_empty());
+        assert!(validate_postman(&[&api]).is_empty());
+        reference.rust_name = Some("not a name".into());
+        ep.params = Some(params(vec![reference], vec![], vec![]));
+        let api = api_with(vec![ep]);
+        assert!(validate_rust_client(&[&api]).iter().any(|d| d.message.contains("invalid Rust name")));
+        assert!(validate_openapi(&[&api]).is_empty());
+        assert!(validate_postman(&[&api]).is_empty());
+    }
+
     fn make_test_api() -> RestApi {
         {
             schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "TestApi".to_string(), "https://api.test.com".to_string())
@@ -1078,7 +1102,7 @@ mod tests {
     }
 
     fn param(name: &str, required: bool) -> ParamDef {
-        ParamDef {
+        ParamDef { rust_name: None, secret: false, pager_managed: false,
             name: name.to_string(),
             required,
             description: None,
@@ -1625,7 +1649,7 @@ mod tests {
                     let mut endpoint = get("Items");
                     endpoint.params = Some(params(
                         vec![],
-                        vec![ParamDef {
+                        vec![ParamDef { rust_name: None, secret: false, pager_managed: false,
                             param_type: QueryParamType::Array(Box::new(QueryParamType::Array(
                                 Box::new(QueryParamType::String),
                             ))),
@@ -1651,7 +1675,7 @@ mod tests {
 
     #[test]
     fn request_inputs_the_client_sends_pass_rust_validation() {
-        let array = |name: &str| ParamDef {
+        let array = |name: &str| ParamDef { rust_name: None, secret: false, pager_managed: false,
             param_type: QueryParamType::Array(Box::new(QueryParamType::Integer)),
             ..param(name, true)
         };

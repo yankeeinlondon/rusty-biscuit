@@ -24,12 +24,12 @@ fn endpoint(id: &str, method: RestMethod, path: &str, description: &str) -> Endp
         response: ApiResponse::json_type("Widget"),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     }
 }
 
 fn param(name: &str, param_type: QueryParamType, description: Option<&str>) -> ParamDef {
-    ParamDef {
+    ParamDef { rust_name: None, secret: false, pager_managed: false,
         name: name.to_string(),
         required: false,
         description: description.map(str::to_string),

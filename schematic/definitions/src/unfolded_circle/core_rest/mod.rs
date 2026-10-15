@@ -76,7 +76,7 @@ pub fn define_unfolded_circle_core_rest_api() -> RestApi {
         response: ApiResponse::json_type("ApiResponseMessage"),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     });
     endpoints.push(Endpoint {
         id: "Logout".to_string(),
@@ -87,7 +87,7 @@ pub fn define_unfolded_circle_core_rest_api() -> RestApi {
         response: ApiResponse::Empty,
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     });
     endpoints.push(Endpoint {
         id: "GetSystemInfo".to_string(),
@@ -98,7 +98,7 @@ pub fn define_unfolded_circle_core_rest_api() -> RestApi {
         response: ApiResponse::json_type("SystemInfo"),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     });
     endpoints.push(Endpoint {
         id: "ExportBackup".to_string(),
@@ -109,7 +109,7 @@ pub fn define_unfolded_circle_core_rest_api() -> RestApi {
         response: ApiResponse::Binary,
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     });
     endpoints.push(Endpoint {
         id: "RestoreBackup".to_string(),
@@ -120,7 +120,7 @@ pub fn define_unfolded_circle_core_rest_api() -> RestApi {
         response: ApiResponse::json_type("BackupRestoreReportItems"),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     });
     endpoints.push(Endpoint {
         id: "UploadResource".to_string(),
@@ -131,7 +131,7 @@ pub fn define_unfolded_circle_core_rest_api() -> RestApi {
         response: ApiResponse::json_type("ResourceItems"),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     });
     endpoints.push(Endpoint {
         id: "GetResource".to_string(),
@@ -142,7 +142,7 @@ pub fn define_unfolded_circle_core_rest_api() -> RestApi {
         response: ApiResponse::Binary,
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     });
     endpoints.push(Endpoint {
         id: "InstallCustomIntegration".to_string(),
@@ -153,7 +153,7 @@ pub fn define_unfolded_circle_core_rest_api() -> RestApi {
         response: ApiResponse::json_type("IntegrationDriverInfo"),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     });
     endpoints.push(Endpoint {
         id: "UploadCustomIrCodeSet".to_string(),
@@ -164,7 +164,7 @@ pub fn define_unfolded_circle_core_rest_api() -> RestApi {
         response: ApiResponse::json_type("CodeSetUploadResult"),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     });
     endpoints.push(Endpoint {
         id: "InstallCustomComponent".to_string(),
@@ -175,7 +175,7 @@ pub fn define_unfolded_circle_core_rest_api() -> RestApi {
         response: ApiResponse::json_type("CustomInstall"),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     });
     endpoints.push(Endpoint {
         id: "QueryLogsText".to_string(),
@@ -186,7 +186,7 @@ pub fn define_unfolded_circle_core_rest_api() -> RestApi {
         response: ApiResponse::Text,
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     });
 
     RestApi {

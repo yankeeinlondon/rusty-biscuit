@@ -11,7 +11,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::Binary,
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "StreamSpeech".to_string(),
@@ -22,7 +22,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::Binary,
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "CreateSpeechWithTimestamps".to_string(),
@@ -33,7 +33,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("SpeechWithTimestampsResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "StreamSpeechWithTimestamps".to_string(),
@@ -44,7 +44,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("SpeechWithTimestampsResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
     ]
 }

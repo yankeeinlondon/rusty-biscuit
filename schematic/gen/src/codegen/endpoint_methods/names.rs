@@ -36,7 +36,6 @@ use schematic_define::{Endpoint, RestApi};
 use crate::codegen::pagination::{PagerForwards, pager_forwards, pager_view};
 use crate::codegen::request_structs::shared::{
     QueryParamInfo, extract_cookie_params, extract_header_params, extract_query_params,
-    param_field_name,
 };
 use crate::output::get_request_suffix;
 
@@ -348,7 +347,7 @@ fn endpoint_names(
     let mut setters = Vec::new();
     for (location, params) in located {
         for param in params {
-            let field = param_field_name(&param.name);
+            let field = param.field_name();
             let setter = if is_call_type_method(&field) {
                 let renamed = format!("{field}_param");
                 rename(RenameTarget::Setter, &field, &renamed, RenameReason::SharedCallMethod);

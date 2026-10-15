@@ -249,6 +249,10 @@ fn endpoint_tokens(endpoint: &Endpoint) -> TokenStream {
         }
         None => quote! { None },
     };
+    let cross_origin = match &endpoint.cross_origin {
+        Some(policy) => { let policy = cross_origin_tokens(policy); quote! { Some(#policy) } }
+        None => quote! { None },
+    };
     let oauth_scopes = match &endpoint.oauth_scopes {
         Some(scopes) => {
             let scopes = string_vec_tokens(scopes);
@@ -268,6 +272,7 @@ fn endpoint_tokens(endpoint: &Endpoint) -> TokenStream {
             headers: #headers,
             params: #params,
             oauth_scopes: #oauth_scopes,
+            cross_origin: #cross_origin,
         }
     }
 }
@@ -394,6 +399,9 @@ fn endpoint_params_tokens(params: &EndpointParams) -> TokenStream {
 fn param_def_tokens(param: &ParamDef) -> TokenStream {
     let name = &param.name;
     let required = param.required;
+    let secret = param.secret;
+    let pager_managed = param.pager_managed;
+    let rust_name = option_string_tokens(param.rust_name.as_deref());
     let description = option_string_tokens(param.description.as_deref());
     let param_type = query_param_type_tokens(&param.param_type);
     let explode = param.explode;
@@ -403,6 +411,9 @@ fn param_def_tokens(param: &ParamDef) -> TokenStream {
         ParamDef {
             name: #name.to_string(),
             required: #required,
+            secret: #secret,
+            rust_name: #rust_name,
+            pager_managed: #pager_managed,
             description: #description,
             param_type: #param_type,
             explode: #explode,
@@ -479,6 +490,7 @@ fn option_string_tokens(value: Option<&str>) -> TokenStream {
 fn cross_origin_tokens(policy: &CrossOrigin) -> TokenStream {
     match policy {
         CrossOrigin::SameOrigin => quote! { CrossOrigin::same_origin() },
+        CrossOrigin::AllowOrigins(origins) if origins.is_empty() => quote! { CrossOrigin::allow_origins(Vec::<String>::new()) },
         CrossOrigin::AllowOrigins(origins) => {
             let origins = origins.iter();
             quote! { CrossOrigin::allow_origins([#(#origins),*]) }
@@ -561,6 +573,27 @@ mod tests {
         assert!(code.contains(r#"CrossOrigin::allow_origins(["https://uploads.example.com"])"#));
         assert!(code.contains(r#"request_id_header: Some("x-request-id".to_string())"#));
         assert!(code.contains(r#"secret_names: vec!["X-Pin".to_string()]"#));
+    }
+
+    #[test]
+    fn emits_endpoint_policy_and_serializable_parameter_markers() {
+        let mut api = sample_api();
+        api.endpoints[0].cross_origin = Some(CrossOrigin::allow_origins(["https://uploads.example.com"]));
+        api.endpoints[0].params = Some(EndpointParams {
+            query: vec![ParamDef {
+                name: "ref".into(), rust_name: Some("git_ref".into()), secret: true,
+                pager_managed: true, required: false, description: None,
+                param_type: QueryParamType::String, explode: false, style: ParamStyle::Form,
+            }],
+            ..Default::default()
+        });
+        let tokens = assemble_definition_module(&api, "sample", &["ListItemsResponse".to_string()], None);
+        let code = format_code(&validate_code(&tokens).unwrap());
+        assert!(code.split_whitespace().collect::<String>().contains("cross_origin:Some(CrossOrigin::allow_origins(["), "{code}");
+        let compact = code.split_whitespace().collect::<String>();
+        assert!(compact.contains("rust_name:Some(\"git_ref\".to_string())"), "{code}");
+        assert!(compact.contains("secret:true"), "{code}");
+        assert!(compact.contains("pager_managed:true"), "{code}");
     }
 
     #[test]

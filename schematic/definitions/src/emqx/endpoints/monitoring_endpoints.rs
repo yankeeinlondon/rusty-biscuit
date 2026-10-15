@@ -13,7 +13,7 @@ pub fn monitoring_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListNodesResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "GetNode".to_string(),
@@ -24,7 +24,7 @@ pub fn monitoring_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("NodeInfo"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "GetCluster".to_string(),
@@ -35,7 +35,7 @@ pub fn monitoring_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ClusterStatus"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         // Listeners
         Endpoint {
@@ -47,7 +47,7 @@ pub fn monitoring_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListListenersResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "GetListener".to_string(),
@@ -58,7 +58,7 @@ pub fn monitoring_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListenerInfo"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         // Metrics & Stats
         Endpoint {
@@ -70,7 +70,7 @@ pub fn monitoring_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListMetricsResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "ListStats".to_string(),
@@ -81,7 +81,7 @@ pub fn monitoring_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListStatsResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "GetPrometheus".to_string(),
@@ -92,7 +92,7 @@ pub fn monitoring_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Text,
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         // Alarms
         Endpoint {
@@ -104,7 +104,7 @@ pub fn monitoring_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListAlarmsResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
     ]
 }

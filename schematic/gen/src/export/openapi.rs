@@ -1059,7 +1059,7 @@ mod tests {
                     response: ApiResponse::Empty,
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None,
+                    oauth_scopes: None, cross_origin: None,
                 })
                 .collect(),
             module_path: Some(module.to_string()),

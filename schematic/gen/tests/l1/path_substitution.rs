@@ -30,7 +30,7 @@ fn single_path_param_struct_has_field() {
         response: ApiResponse::json_type("User"),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -59,7 +59,7 @@ fn single_path_param_into_parts_format_string() {
         response: ApiResponse::json_type("User"),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -98,7 +98,7 @@ fn multiple_path_params_struct_has_all_fields() {
         response: ApiResponse::json_type("Message"),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -126,7 +126,7 @@ fn multiple_path_params_into_parts_format_string() {
         response: ApiResponse::json_type("Message"),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -157,7 +157,7 @@ fn three_path_params_into_parts_format_string() {
         response: ApiResponse::json_type("Comments"),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -199,7 +199,7 @@ fn no_path_params_no_fields() {
         response: ApiResponse::json_type("ListResponse"),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -234,7 +234,7 @@ fn path_param_with_body_has_both_fields() {
         response: ApiResponse::json_type("Thread"),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -286,7 +286,7 @@ fn multiple_path_params_with_body() {
         response: ApiResponse::json_type("Comment"),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -345,7 +345,7 @@ fn all_http_methods_generate_correct_method_constant() {
             response: ApiResponse::json_type("Response"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         };
 
         let tokens = generate_request_struct(&endpoint);
@@ -378,7 +378,7 @@ fn consecutive_path_params() {
         response: ApiResponse::json_type("Response"),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -410,7 +410,7 @@ fn path_param_at_start() {
         response: ApiResponse::json_type("Response"),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -443,7 +443,7 @@ fn underscore_in_param_name() {
         response: ApiResponse::json_type("Profile"),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -471,7 +471,7 @@ fn get_endpoint(id: &str, path: &str) -> Endpoint {
         response: ApiResponse::json_type("TestResponse"),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     }
 }
 

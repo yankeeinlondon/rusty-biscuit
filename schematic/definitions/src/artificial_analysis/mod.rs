@@ -102,7 +102,7 @@ pub fn define_artificial_analysis_data_api() -> RestApi {
                 response: ApiResponse::json_type("LlmModelsResponse"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             Endpoint {
                 id: "ListTextToImageModels".to_string(),
@@ -118,7 +118,7 @@ pub fn define_artificial_analysis_data_api() -> RestApi {
                     false,
                     Some("Include a breakdown of Elo scores by category."),
                 )),
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             Endpoint {
                 id: "ListImageEditingModels".to_string(),
@@ -129,7 +129,7 @@ pub fn define_artificial_analysis_data_api() -> RestApi {
                 response: ApiResponse::json_type("MediaModelsResponse"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             Endpoint {
                 id: "ListTextToSpeechModels".to_string(),
@@ -140,7 +140,7 @@ pub fn define_artificial_analysis_data_api() -> RestApi {
                 response: ApiResponse::json_type("MediaModelsResponse"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             Endpoint {
                 id: "ListTextToVideoModels".to_string(),
@@ -156,7 +156,7 @@ pub fn define_artificial_analysis_data_api() -> RestApi {
                     false,
                     Some("Include a breakdown of Elo scores by category."),
                 )),
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             Endpoint {
                 id: "ListImageToVideoModels".to_string(),
@@ -172,7 +172,7 @@ pub fn define_artificial_analysis_data_api() -> RestApi {
                     false,
                     Some("Include a breakdown of Elo scores by category."),
                 )),
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
         ],
         module_path: Some("artificial_analysis".to_string()),
@@ -222,7 +222,7 @@ pub fn define_artificial_analysis_critpt_api() -> RestApi {
             response: ApiResponse::json_type("CritPtEvaluateResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         }],
         module_path: Some("artificial_analysis".to_string()),
         request_suffix: None,

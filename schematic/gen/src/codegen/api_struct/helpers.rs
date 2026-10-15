@@ -10,12 +10,27 @@ use super::auth::{auth_config, auth_config_tokens};
 ///
 /// Settings equal to the runtime's defaults (no authentication, the
 /// same-origin policy, no extra secret names, no request-id header) are left
-/// out, so the expression lists only what the definition chose.
+/// out. Endpoint replacements are always emitted, including same-origin,
+/// because their API default may differ.
 pub(super) fn generate_definition(api: &RestApi) -> TokenStream {
     let auth = auth_config_tokens(&auth_config(api)).map(|auth| quote! { .auth(#auth) });
     let cross_origin = origin_policy_tokens(&api.cross_origin).map(|policy| quote! { .cross_origin(#policy) });
-    let secret_names = (!api.secret_names.is_empty()).then(|| {
-        let names = &api.secret_names;
+    let endpoint_policies = api.endpoints.iter().filter_map(|endpoint| {
+        endpoint.cross_origin.as_ref().map(|policy| {
+            let id = &endpoint.id;
+            let policy = origin_policy_tokens(policy).unwrap_or_else(|| quote! { schematic_runtime::OriginPolicy::same_origin() });
+            quote! { .endpoint_cross_origin(#id, #policy) }
+        })
+    });
+    let mut names = api.secret_names.clone();
+    for params in api.endpoints.iter().filter_map(|endpoint| endpoint.params.as_ref()) {
+        for param in params.query.iter().chain(&params.header).chain(&params.cookie).filter(|param| param.secret) {
+            if !names.contains(&param.name) {
+                names.push(param.name.clone());
+            }
+        }
+    }
+    let secret_names = (!names.is_empty()).then(|| {
         quote! { .secret_names([#(#names),*]) }
     });
     let request_id_header = api
@@ -27,6 +42,7 @@ pub(super) fn generate_definition(api: &RestApi) -> TokenStream {
         schematic_runtime::ApiDefinition::new(Self::BASE_URL)
             #auth
             #cross_origin
+            #(#endpoint_policies)*
             #secret_names
             #request_id_header
     }
@@ -39,6 +55,9 @@ pub(super) fn generate_definition(api: &RestApi) -> TokenStream {
 fn origin_policy_tokens(policy: &CrossOrigin) -> Option<TokenStream> {
     Some(match policy {
         CrossOrigin::SameOrigin => return None,
+        CrossOrigin::AllowOrigins(origins) if origins.is_empty() => {
+            quote! { schematic_runtime::OriginPolicy::allow_origins(Vec::<String>::new()) }
+        }
         CrossOrigin::AllowOrigins(origins) => {
             quote! { schematic_runtime::OriginPolicy::allow_origins([#(#origins),*]) }
         }

@@ -4,7 +4,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 use crate::codegen::request_structs::shared::{
-    QueryParamInfo, param_field_name, param_serde_rename, query_param_type_to_rust_type,
+    QueryParamInfo, query_param_type_to_rust_type,
 };
 
 /// Generates field declarations for query parameters.
@@ -13,8 +13,8 @@ use crate::codegen::request_structs::shared::{
 /// have default values on the server side.
 pub(super) fn generate_query_param_fields(query_params: &[QueryParamInfo]) -> TokenStream {
     let fields = query_params.iter().map(|qp| {
-        let field_name = format_ident!("{}", param_field_name(&qp.name));
-        let rename = param_serde_rename(&qp.name);
+        let field_name = format_ident!("{}", qp.field_name());
+        let rename = qp.serde_rename();
         let rust_type = query_param_type_to_rust_type(&qp.param_type);
         let doc = qp
             .description
@@ -44,7 +44,7 @@ pub(super) fn generate_query_param_fields(query_params: &[QueryParamInfo]) -> To
 /// for method chaining.
 pub(super) fn generate_query_builder_methods(query_params: &[QueryParamInfo]) -> TokenStream {
     let methods = query_params.iter().map(|qp| {
-        let field = param_field_name(&qp.name);
+        let field = qp.field_name();
         let method_name = format_ident!("with_{}", field);
         let field_name = format_ident!("{}", field);
         let rust_type = query_param_type_to_rust_type(&qp.param_type);

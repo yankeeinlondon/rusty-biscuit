@@ -24,6 +24,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateTranscription".to_string(),
@@ -65,6 +66,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateTranslation".to_string(),
@@ -89,6 +91,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListVoiceConsents".to_string(),
@@ -100,12 +103,13 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "after".to_string(), required : false, description
-                    :
+                    ParamDef { name : "after".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }
@@ -116,6 +120,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateVoiceConsent".to_string(),
@@ -136,6 +141,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "GetVoiceConsent".to_string(),
@@ -147,6 +153,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UpdateVoiceConsent".to_string(),
@@ -159,6 +166,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteVoiceConsent".to_string(),
@@ -170,6 +178,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateVoice".to_string(),
@@ -190,6 +199,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListBatches".to_string(),
@@ -201,12 +211,13 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "after".to_string(), required : false, description
-                    :
+                    ParamDef { name : "after".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }
@@ -217,6 +228,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateBatch".to_string(),
@@ -229,6 +241,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveBatch".to_string(),
@@ -240,6 +253,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CancelBatch".to_string(),
@@ -252,6 +266,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListChatCompletions".to_string(),
@@ -264,23 +279,27 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "model".to_string(), required : false, description
-                    : Some("The model used to generate the Chat Completions."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "metadata"
-                    .to_string(), required : false, description :
+                    ParamDef { name : "model".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
+                    Some("The model used to generate the Chat Completions.".to_string()),
+                    param_type : QueryParamType::String, explode : false, style :
+                    ParamStyle::Form, }, ParamDef { name : "metadata".to_string(),
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A list of metadata keys to filter the Chat Completions by. Example:\n\n`metadata[key1]=value1&metadata[key2]=value2`\n"
                     .to_string()), param_type : QueryParamType::Json, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Identifier for the last chat completion from the previous pagination request."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description :
-                    Some("Number of Chat Completions to retrieve.".to_string()),
-                    param_type : QueryParamType::Integer, explode : false, style :
-                    ParamStyle::Form, }, ParamDef { name : "order".to_string(), required
-                    : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description : Some("Number of Chat Completions to retrieve."
+                    .to_string()), param_type : QueryParamType::Integer, explode : false,
+                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Sort order for Chat Completions by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`."
                     .to_string()), param_type : QueryParamType::Enum(vec!["asc"
                     .to_string(), "desc".to_string()]), explode : false, style :
@@ -292,6 +311,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateChatCompletion".to_string(),
@@ -304,6 +324,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "GetChatCompletion".to_string(),
@@ -316,6 +337,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UpdateChatCompletion".to_string(),
@@ -328,6 +350,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteChatCompletion".to_string(),
@@ -340,6 +363,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "GetChatCompletionMessages".to_string(),
@@ -352,16 +376,17 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "after".to_string(), required : false, description
-                    :
+                    ParamDef { name : "after".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Identifier for the last message from the previous pagination request."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description :
-                    Some("Number of messages to retrieve.".to_string()), param_type :
-                    QueryParamType::Integer, explode : false, style : ParamStyle::Form,
-                    }, ParamDef { name : "order".to_string(), required : false,
-                    description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description : Some("Number of messages to retrieve."
+                    .to_string()), param_type : QueryParamType::Integer, explode : false,
+                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Sort order for messages by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`."
                     .to_string()), param_type : QueryParamType::Enum(vec!["asc"
                     .to_string(), "desc".to_string()]), explode : false, style :
@@ -373,6 +398,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateCompletion".to_string(),
@@ -385,6 +411,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListContainers".to_string(),
@@ -396,23 +423,26 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
                     .to_string()), param_type : QueryParamType::Enum(vec!["asc"
                     .to_string(), "desc".to_string()]), explode : false, style :
                     ParamStyle::Form, }, ParamDef { name : "after".to_string(), required
-                    : false, description :
+                    : false, secret : false, rust_name : None, pager_managed : false,
+                    description :
                     Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "name".to_string(),
-                    required : false, description :
-                    Some("Filter results by container name.".to_string()), param_type :
-                    QueryParamType::String, explode : false, style : ParamStyle::Form, }
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description : Some("Filter results by container name."
+                    .to_string()), param_type : QueryParamType::String, explode : false,
+                    style : ParamStyle::Form, }
                 ],
                 header: vec![],
                 cookie: vec![],
@@ -420,6 +450,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateContainer".to_string(),
@@ -431,6 +462,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveContainer".to_string(),
@@ -442,6 +474,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteContainer".to_string(),
@@ -453,6 +486,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListContainerFiles".to_string(),
@@ -464,17 +498,19 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
                     .to_string()), param_type : QueryParamType::Enum(vec!["asc"
                     .to_string(), "desc".to_string()]), explode : false, style :
                     ParamStyle::Form, }, ParamDef { name : "after".to_string(), required
-                    : false, description :
+                    : false, secret : false, rust_name : None, pager_managed : false,
+                    description :
                     Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -485,6 +521,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateContainerFile".to_string(),
@@ -497,6 +534,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveContainerFile".to_string(),
@@ -508,6 +546,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteContainerFile".to_string(),
@@ -519,6 +558,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveContainerFileContent".to_string(),
@@ -530,6 +570,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListConversationItems".to_string(),
@@ -542,21 +583,24 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of objects to be returned. Limit can range between\n1 and 100, and the default is 20.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("The order to return the input items in. Default is `desc`.\n- `asc`: Return the input items in ascending order.\n- `desc`: Return the input items in descending order.\n"
                     .to_string()), param_type : QueryParamType::Enum(vec!["asc"
                     .to_string(), "desc".to_string()]), explode : false, style :
                     ParamStyle::Form, }, ParamDef { name : "after".to_string(), required
-                    : false, description :
+                    : false, secret : false, rust_name : None, pager_managed : false,
+                    description :
                     Some("An item ID to list items after, used in pagination.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "include".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Specify additional output data to include in the model response. Currently supported values are:\n- `web_search_call.action.sources`: Include the sources of the web search tool call.\n- `code_interpreter_call.outputs`: Includes the outputs of python code execution in code interpreter tool call items.\n- `computer_call_output.output.image_url`: Include image urls from the computer call output.\n- `file_search_call.results`: Include the search results of the file search tool call.\n- `message.input_image.image_url`: Include image urls from the input message.\n- `message.output_text.logprobs`: Include logprobs with assistant messages.\n- `reasoning.encrypted_content`: Includes an encrypted version of reasoning tokens in reasoning item outputs. This enables reasoning items to be used in multi-turn conversations when using the Responses API statelessly (like when the `store` parameter is set to `false`, or when an organization is enrolled in the zero data retention program)."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Json)), explode :
@@ -568,6 +612,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateConversationItems".to_string(),
@@ -579,8 +624,8 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "include".to_string(), required : false,
-                    description :
+                    ParamDef { name : "include".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Additional fields to include in the response. See the `include`\nparameter for [listing Conversation items above](/docs/api-reference/conversations/list-items#conversations_list_items-include) for more information.\n"
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Json)), explode :
@@ -592,6 +637,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "GetConversationItem".to_string(),
@@ -604,8 +650,8 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "include".to_string(), required : false,
-                    description :
+                    ParamDef { name : "include".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Additional fields to include in the response. See the `include`\nparameter for [listing Conversation items above](/docs/api-reference/conversations/list-items#conversations_list_items-include) for more information.\n"
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Json)), explode :
@@ -617,6 +663,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteConversationItem".to_string(),
@@ -629,6 +676,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateEmbedding".to_string(),
@@ -641,6 +689,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListEvals".to_string(),
@@ -652,20 +701,23 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "after".to_string(), required : false, description
-                    :
+                    ParamDef { name : "after".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Identifier for the last eval from the previous pagination request."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description : Some("Number of evals to retrieve."
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description : Some("Number of evals to retrieve."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Sort order for evals by timestamp. Use `asc` for ascending order or `desc` for descending order."
                     .to_string()), param_type : QueryParamType::Enum(vec!["asc"
                     .to_string(), "desc".to_string()]), explode : false, style :
                     ParamStyle::Form, }, ParamDef { name : "order_by".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Evals can be ordered by creation time or last updated time. Use\n`created_at` for creation time or `updated_at` for last updated time.\n"
                     .to_string()), param_type : QueryParamType::Enum(vec!["created_at"
                     .to_string(), "updated_at".to_string()]), explode : false, style :
@@ -677,6 +729,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateEval".to_string(),
@@ -689,6 +742,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "GetEval".to_string(),
@@ -700,6 +754,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UpdateEval".to_string(),
@@ -711,6 +766,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteEval".to_string(),
@@ -722,6 +778,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "GetEvalRuns".to_string(),
@@ -733,20 +790,23 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "after".to_string(), required : false, description
-                    :
+                    ParamDef { name : "after".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Identifier for the last run from the previous pagination request."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description : Some("Number of runs to retrieve."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description : Some("Number of runs to retrieve.".to_string()),
+                    param_type : QueryParamType::Integer, explode : false, style :
+                    ParamStyle::Form, }, ParamDef { name : "order".to_string(), required
+                    : false, secret : false, rust_name : None, pager_managed : false,
+                    description :
                     Some("Sort order for runs by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`."
                     .to_string()), param_type : QueryParamType::Enum(vec!["asc"
                     .to_string(), "desc".to_string()]), explode : false, style :
                     ParamStyle::Form, }, ParamDef { name : "status".to_string(), required
-                    : false, description :
+                    : false, secret : false, rust_name : None, pager_managed : false,
+                    description :
                     Some("Filter runs by status. One of `queued` | `in_progress` | `failed` | `completed` | `canceled`."
                     .to_string()), param_type : QueryParamType::Enum(vec!["queued"
                     .to_string(), "in_progress".to_string(), "completed".to_string(),
@@ -759,6 +819,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateEvalRun".to_string(),
@@ -771,6 +832,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "GetEvalRun".to_string(),
@@ -782,6 +844,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CancelEvalRun".to_string(),
@@ -793,6 +856,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteEvalRun".to_string(),
@@ -804,6 +868,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "GetEvalRunOutputItems".to_string(),
@@ -816,21 +881,23 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "after".to_string(), required : false, description
-                    :
+                    ParamDef { name : "after".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Identifier for the last output item from the previous pagination request."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description :
-                    Some("Number of output items to retrieve.".to_string()), param_type :
-                    QueryParamType::Integer, explode : false, style : ParamStyle::Form,
-                    }, ParamDef { name : "status".to_string(), required : false,
-                    description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description : Some("Number of output items to retrieve."
+                    .to_string()), param_type : QueryParamType::Integer, explode : false,
+                    style : ParamStyle::Form, }, ParamDef { name : "status".to_string(),
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Filter output items by status. Use `failed` to filter by failed output\nitems or `pass` to filter by passed output items.\n"
                     .to_string()), param_type : QueryParamType::Enum(vec!["fail"
                     .to_string(), "pass".to_string()]), explode : false, style :
                     ParamStyle::Form, }, ParamDef { name : "order".to_string(), required
-                    : false, description :
+                    : false, secret : false, rust_name : None, pager_managed : false,
+                    description :
                     Some("Sort order for output items by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`."
                     .to_string()), param_type : QueryParamType::Enum(vec!["asc"
                     .to_string(), "desc".to_string()]), explode : false, style :
@@ -842,6 +909,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "GetEvalRunOutputItem".to_string(),
@@ -854,6 +922,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListFiles".to_string(),
@@ -865,20 +934,24 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "purpose".to_string(), required : false,
-                    description : Some("Only return files with the given purpose."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description :
+                    ParamDef { name : "purpose".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
+                    Some("Only return files with the given purpose.".to_string()),
+                    param_type : QueryParamType::String, explode : false, style :
+                    ParamStyle::Form, }, ParamDef { name : "limit".to_string(), required
+                    : false, secret : false, rust_name : None, pager_managed : false,
+                    description :
                     Some("A limit on the number of objects to be returned. Limit can range between 1 and 10,000, and the default is 10,000.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
                     .to_string()), param_type : QueryParamType::Enum(vec!["asc"
                     .to_string(), "desc".to_string()]), explode : false, style :
                     ParamStyle::Form, }, ParamDef { name : "after".to_string(), required
-                    : false, description :
+                    : false, secret : false, rust_name : None, pager_managed : false,
+                    description :
                     Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -889,6 +962,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateFile".to_string(),
@@ -910,6 +984,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveFile".to_string(),
@@ -921,6 +996,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteFile".to_string(),
@@ -933,6 +1009,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DownloadFile".to_string(),
@@ -944,6 +1021,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RunGrader".to_string(),
@@ -955,6 +1033,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ValidateGrader".to_string(),
@@ -966,6 +1045,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListFineTuningCheckpointPermissions".to_string(),
@@ -981,21 +1061,25 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "project_id".to_string(), required : false,
-                    description : Some("The ID of the project to get permissions for."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    ParamDef { name : "project_id".to_string(), required : false, secret
+                    : false, rust_name : None, pager_managed : false, description :
+                    Some("The ID of the project to get permissions for.".to_string()),
+                    param_type : QueryParamType::String, explode : false, style :
+                    ParamStyle::Form, }, ParamDef { name : "after".to_string(), required
+                    : false, secret : false, rust_name : None, pager_managed : false,
+                    description :
                     Some("Identifier for the last permission ID from the previous pagination request."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description :
-                    Some("Number of permissions to retrieve.".to_string()), param_type :
-                    QueryParamType::Integer, explode : false, style : ParamStyle::Form,
-                    }, ParamDef { name : "order".to_string(), required : false,
-                    description : Some("The order in which to retrieve permissions."
-                    .to_string()), param_type : QueryParamType::Enum(vec!["ascending"
-                    .to_string(), "descending".to_string()]), explode : false, style :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description : Some("Number of permissions to retrieve."
+                    .to_string()), param_type : QueryParamType::Integer, explode : false,
+                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
+                    Some("The order in which to retrieve permissions.".to_string()),
+                    param_type : QueryParamType::Enum(vec!["ascending".to_string(),
+                    "descending".to_string()]), explode : false, style :
                     ParamStyle::Form, }
                 ],
                 header: vec![],
@@ -1004,6 +1088,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateFineTuningCheckpointPermission".to_string(),
@@ -1023,6 +1108,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteFineTuningCheckpointPermission".to_string(),
@@ -1038,6 +1124,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListPaginatedFineTuningJobs".to_string(),
@@ -1051,16 +1138,17 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "after".to_string(), required : false, description
-                    :
+                    ParamDef { name : "after".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Identifier for the last job from the previous pagination request."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description :
-                    Some("Number of fine-tuning jobs to retrieve.".to_string()),
-                    param_type : QueryParamType::Integer, explode : false, style :
-                    ParamStyle::Form, }, ParamDef { name : "metadata".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description : Some("Number of fine-tuning jobs to retrieve."
+                    .to_string()), param_type : QueryParamType::Integer, explode : false,
+                    style : ParamStyle::Form, }, ParamDef { name : "metadata"
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Optional metadata filter. To filter, use the syntax `metadata[k]=v`. Alternatively, set `metadata=null` to indicate no metadata.\n"
                     .to_string()), param_type : QueryParamType::Json, explode : true,
                     style : ParamStyle::DeepObject, }
@@ -1071,6 +1159,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateFineTuningJob".to_string(),
@@ -1083,6 +1172,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveFineTuningJob".to_string(),
@@ -1095,6 +1185,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CancelFineTuningJob".to_string(),
@@ -1106,6 +1197,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListFineTuningJobCheckpoints".to_string(),
@@ -1119,14 +1211,15 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "after".to_string(), required : false, description
-                    :
+                    ParamDef { name : "after".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Identifier for the last checkpoint ID from the previous pagination request."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description :
-                    Some("Number of checkpoints to retrieve.".to_string()), param_type :
-                    QueryParamType::Integer, explode : false, style : ParamStyle::Form, }
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description : Some("Number of checkpoints to retrieve."
+                    .to_string()), param_type : QueryParamType::Integer, explode : false,
+                    style : ParamStyle::Form, }
                 ],
                 header: vec![],
                 cookie: vec![],
@@ -1134,6 +1227,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListFineTuningEvents".to_string(),
@@ -1145,12 +1239,13 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "after".to_string(), required : false, description
-                    :
+                    ParamDef { name : "after".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Identifier for the last event from the previous pagination request."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description : Some("Number of events to retrieve."
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description : Some("Number of events to retrieve."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }
                 ],
@@ -1160,6 +1255,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "PauseFineTuningJob".to_string(),
@@ -1171,6 +1267,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ResumeFineTuningJob".to_string(),
@@ -1182,6 +1279,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateImageEdit".to_string(),
@@ -1194,6 +1292,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateImage".to_string(),
@@ -1206,6 +1305,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateImageVariation".to_string(),
@@ -1233,6 +1333,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListModels".to_string(),
@@ -1245,6 +1346,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveModel".to_string(),
@@ -1257,6 +1359,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteModel".to_string(),
@@ -1269,6 +1372,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateModeration".to_string(),
@@ -1281,6 +1385,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "AdminApiKeysList".to_string(),
@@ -1292,15 +1397,17 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "after".to_string(), required : false, description
-                    : None, param_type : QueryParamType::String, explode : false, style :
+                    ParamDef { name : "after".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description : None,
+                    param_type : QueryParamType::String, explode : false, style :
                     ParamStyle::Form, }, ParamDef { name : "order".to_string(), required
-                    : false, description : None, param_type :
-                    QueryParamType::Enum(vec!["asc".to_string(), "desc".to_string()]),
-                    explode : false, style : ParamStyle::Form, }, ParamDef { name :
-                    "limit".to_string(), required : false, description : None, param_type
-                    : QueryParamType::Integer, explode : false, style : ParamStyle::Form,
-                    }
+                    : false, secret : false, rust_name : None, pager_managed : false,
+                    description : None, param_type : QueryParamType::Enum(vec!["asc"
+                    .to_string(), "desc".to_string()]), explode : false, style :
+                    ParamStyle::Form, }, ParamDef { name : "limit".to_string(), required
+                    : false, secret : false, rust_name : None, pager_managed : false,
+                    description : None, param_type : QueryParamType::Integer, explode :
+                    false, style : ParamStyle::Form, }
                 ],
                 header: vec![],
                 cookie: vec![],
@@ -1308,6 +1415,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "AdminApiKeysCreate".to_string(),
@@ -1319,6 +1427,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "AdminApiKeysGet".to_string(),
@@ -1330,6 +1439,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "AdminApiKeysDelete".to_string(),
@@ -1341,6 +1451,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListAuditLogs".to_string(),
@@ -1354,47 +1465,57 @@ pub fn define_openai_api() -> RestApi {
             params: Some(EndpointParams {
                 query: vec![
                     ParamDef { name : "effective_at".to_string(), required : false,
-                    description :
+                    secret : false, rust_name : None, pager_managed : false, description
+                    :
                     Some("Return only events whose `effective_at` (Unix seconds) is in this range."
                     .to_string()), param_type : QueryParamType::Json, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "project_ids[]"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only events for these projects.".to_string()),
                     param_type : QueryParamType::Array(Box::new(QueryParamType::String)),
                     explode : false, style : ParamStyle::Form, }, ParamDef { name :
-                    "event_types[]".to_string(), required : false, description :
+                    "event_types[]".to_string(), required : false, secret : false,
+                    rust_name : None, pager_managed : false, description :
                     Some("Return only events with a `type` in one of these values. For example, `project.created`. For all options, see the documentation for the [audit log object](/docs/api-reference/audit-logs/object)."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Json)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "actor_ids[]"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only events performed by these actors. Can be a user ID, a service account ID, or an api key tracking ID."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name :
-                    "actor_emails[]".to_string(), required : false, description :
+                    "actor_emails[]".to_string(), required : false, secret : false,
+                    rust_name : None, pager_managed : false, description :
                     Some("Return only events performed by users with these emails."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name :
-                    "resource_ids[]".to_string(), required : false, description :
+                    "resource_ids[]".to_string(), required : false, secret : false,
+                    rust_name : None, pager_managed : false, description :
                     Some("Return only events performed on these targets. For example, a project ID updated. For ChatGPT connector role events, use the workspace connector resource ID shown in `details.id`, such as `<workspace_id>__<connector_id>`."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "tenant_only"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only tenant-scoped events associated with this organization. Required for tenant-scoped events such as `role.bound_to_resource` and `role.unbound_from_resource`. When `true`, all supplied event types must be tenant-scoped."
                     .to_string()), param_type : QueryParamType::Boolean, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "before".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -1405,6 +1526,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListOrganizationCertificates".to_string(),
@@ -1416,16 +1538,18 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
                     .to_string()), param_type : QueryParamType::Enum(vec!["asc"
                     .to_string(), "desc".to_string()]), explode : false, style :
@@ -1437,6 +1561,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UploadCertificate".to_string(),
@@ -1449,6 +1574,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ActivateOrganizationCertificates".to_string(),
@@ -1463,6 +1589,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeactivateOrganizationCertificates".to_string(),
@@ -1477,6 +1604,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "GetCertificate".to_string(),
@@ -1489,8 +1617,8 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "include".to_string(), required : false,
-                    description :
+                    ParamDef { name : "include".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A list of additional fields to include in the response. Currently the only supported value is `content` to fetch the PEM content of the certificate."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["content"
@@ -1502,6 +1630,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ModifyCertificate".to_string(),
@@ -1514,6 +1643,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteCertificate".to_string(),
@@ -1526,6 +1656,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UsageCosts".to_string(),
@@ -1537,39 +1668,45 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "start_time".to_string(), required : true,
-                    description :
+                    ParamDef { name : "start_time".to_string(), required : true, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Start time (Unix seconds) of the query time range, inclusive."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "end_time"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("End time (Unix seconds) of the query time range, exclusive."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "bucket_width"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Width of each time bucket in response. Currently only `1d` is supported, default to `1d`."
                     .to_string()), param_type : QueryParamType::Enum(vec!["1d"
                     .to_string()]), explode : false, style : ParamStyle::Form, },
-                    ParamDef { name : "project_ids".to_string(), required : false,
-                    description : Some("Return only costs for these projects."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::String)), explode :
+                    ParamDef { name : "project_ids".to_string(), required : false, secret
+                    : false, rust_name : None, pager_managed : false, description :
+                    Some("Return only costs for these projects.".to_string()), param_type
+                    : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "api_key_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only costs for these API keys.".to_string()), param_type
                     : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "group_by"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Group the costs by the specified fields. Support fields include `project_id`, `line_item`, `api_key_id` and any combination of them."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["project_id"
                     .to_string(), "line_item".to_string(), "api_key_id".to_string()]))),
                     explode : false, style : ParamStyle::Form, }, ParamDef { name :
-                    "limit".to_string(), required : false, description :
+                    "limit".to_string(), required : false, secret : false, rust_name :
+                    None, pager_managed : false, description :
                     Some("A limit on the number of buckets to be returned. Limit can range between 1 and 180, and the default is 7.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "page".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -1580,6 +1717,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveOrganizationDataRetention".to_string(),
@@ -1591,6 +1729,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UpdateOrganizationDataRetention".to_string(),
@@ -1604,6 +1743,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListGroups".to_string(),
@@ -1615,16 +1755,18 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of groups to be returned. Limit can range between 0 and 1000, and the default is 100.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. `after` is a group ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with group_abc, your subsequent call can include `after=group_abc` in order to fetch the next page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Specifies the sort order of the returned groups.".to_string()),
                     param_type : QueryParamType::Enum(vec!["asc".to_string(), "desc"
                     .to_string()]), explode : false, style : ParamStyle::Form, }
@@ -1635,6 +1777,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateGroup".to_string(),
@@ -1646,6 +1789,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveGroup".to_string(),
@@ -1657,6 +1801,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UpdateGroup".to_string(),
@@ -1668,6 +1813,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteGroup".to_string(),
@@ -1679,6 +1825,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListGroupRoleAssignments".to_string(),
@@ -1691,16 +1838,18 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of organization role assignments to return."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Cursor for pagination. Provide the value from the previous response's `next` field to continue listing organization roles."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Sort order for the returned organization roles.".to_string()),
                     param_type : QueryParamType::Enum(vec!["asc".to_string(), "desc"
                     .to_string()]), explode : false, style : ParamStyle::Form, }
@@ -1711,6 +1860,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "AssignGroupRole".to_string(),
@@ -1725,6 +1875,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveGroupRole".to_string(),
@@ -1737,6 +1888,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UnassignGroupRole".to_string(),
@@ -1749,6 +1901,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListGroupUsers".to_string(),
@@ -1760,16 +1913,18 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of users to be returned. Limit can range between 0 and 1000, and the default is 100.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. Provide the ID of the last user from the previous list response to retrieve the next page.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Specifies the sort order of users in the list.".to_string()),
                     param_type : QueryParamType::Enum(vec!["asc".to_string(), "desc"
                     .to_string()]), explode : false, style : ParamStyle::Form, }
@@ -1780,6 +1935,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "AddGroupUser".to_string(),
@@ -1791,6 +1947,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveGroupUser".to_string(),
@@ -1802,6 +1959,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RemoveGroupUser".to_string(),
@@ -1813,6 +1971,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListInvites".to_string(),
@@ -1824,12 +1983,13 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -1840,6 +2000,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "InviteUser".to_string(),
@@ -1852,6 +2013,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveInvite".to_string(),
@@ -1863,6 +2025,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteInvite".to_string(),
@@ -1875,6 +2038,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListProjects".to_string(),
@@ -1886,16 +2050,18 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "include_archived"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("If `true` returns all projects including those that have been `archived`. Archived projects are not included by default."
                     .to_string()), param_type : QueryParamType::Boolean, explode : false,
                     style : ParamStyle::Form, }
@@ -1906,6 +2072,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateProject".to_string(),
@@ -1918,6 +2085,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveProject".to_string(),
@@ -1929,6 +2097,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ModifyProject".to_string(),
@@ -1940,6 +2109,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListProjectApiKeys".to_string(),
@@ -1951,16 +2121,18 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "owner_project_access"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Filter API keys by whether the owner currently has effective access to the project. Use `active` for owners with access, `inactive` for owners without access, or `any` for all enabled project API keys. If omitted, the endpoint applies its existing membership-based visibility rules, which may exclude some enabled keys.\n"
                     .to_string()), param_type : QueryParamType::Enum(vec!["active"
                     .to_string(), "inactive".to_string(), "any".to_string()]), explode :
@@ -1972,6 +2144,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveProjectApiKey".to_string(),
@@ -1984,6 +2157,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteProjectApiKey".to_string(),
@@ -1997,6 +2171,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ArchiveProject".to_string(),
@@ -2009,6 +2184,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListProjectCertificates".to_string(),
@@ -2020,16 +2196,18 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
                     .to_string()), param_type : QueryParamType::Enum(vec!["asc"
                     .to_string(), "desc".to_string()]), explode : false, style :
@@ -2041,6 +2219,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ActivateProjectCertificates".to_string(),
@@ -2056,6 +2235,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeactivateProjectCertificates".to_string(),
@@ -2071,6 +2251,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveProjectDataRetention".to_string(),
@@ -2082,6 +2263,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UpdateProjectDataRetention".to_string(),
@@ -2095,6 +2277,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListProjectGroups".to_string(),
@@ -2106,19 +2289,21 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of project groups to return. Defaults to 20."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Cursor for pagination. Provide the ID of the last group from the previous response to fetch the next page."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order for the returned groups.".to_string()), param_type :
-                    QueryParamType::Enum(vec!["asc".to_string(), "desc".to_string()]),
-                    explode : false, style : ParamStyle::Form, }
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description : Some("Sort order for the returned groups."
+                    .to_string()), param_type : QueryParamType::Enum(vec!["asc"
+                    .to_string(), "desc".to_string()]), explode : false, style :
+                    ParamStyle::Form, }
                 ],
                 header: vec![],
                 cookie: vec![],
@@ -2126,6 +2311,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "AddProjectGroup".to_string(),
@@ -2137,6 +2323,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveProjectGroup".to_string(),
@@ -2148,11 +2335,11 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "group_type".to_string(), required : false,
-                    description : Some("The type of group to retrieve.".to_string()),
-                    param_type : QueryParamType::Enum(vec!["group".to_string(),
-                    "tenant_group".to_string()]), explode : false, style :
-                    ParamStyle::Form, }
+                    ParamDef { name : "group_type".to_string(), required : false, secret
+                    : false, rust_name : None, pager_managed : false, description :
+                    Some("The type of group to retrieve.".to_string()), param_type :
+                    QueryParamType::Enum(vec!["group".to_string(), "tenant_group"
+                    .to_string()]), explode : false, style : ParamStyle::Form, }
                 ],
                 header: vec![],
                 cookie: vec![],
@@ -2160,6 +2347,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RemoveProjectGroup".to_string(),
@@ -2171,6 +2359,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveProjectHostedToolPermissions".to_string(),
@@ -2183,6 +2372,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UpdateProjectHostedToolPermissions".to_string(),
@@ -2199,6 +2389,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveProjectModelPermissions".to_string(),
@@ -2210,6 +2401,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UpdateProjectModelPermissions".to_string(),
@@ -2223,6 +2415,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteProjectModelPermissions".to_string(),
@@ -2236,6 +2429,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListProjectRateLimits".to_string(),
@@ -2247,16 +2441,18 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of objects to be returned. The default is 100.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "before".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, beginning with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -2267,6 +2463,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UpdateProjectRateLimits".to_string(),
@@ -2281,6 +2478,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListProjectServiceAccounts".to_string(),
@@ -2295,12 +2493,13 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -2311,6 +2510,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateProjectServiceAccount".to_string(),
@@ -2327,6 +2527,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveProjectServiceAccount".to_string(),
@@ -2339,6 +2540,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UpdateProjectServiceAccount".to_string(),
@@ -2353,6 +2555,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteProjectServiceAccount".to_string(),
@@ -2368,6 +2571,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListProjectSpendAlerts".to_string(),
@@ -2379,21 +2583,23 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of spend alerts to return. Defaults to 20."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order for the returned spend alerts.".to_string()),
-                    param_type : QueryParamType::Enum(vec!["asc".to_string(), "desc"
-                    .to_string()]), explode : false, style : ParamStyle::Form, },
-                    ParamDef { name : "after".to_string(), required : false, description
-                    :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description : Some("Sort order for the returned spend alerts."
+                    .to_string()), param_type : QueryParamType::Enum(vec!["asc"
+                    .to_string(), "desc".to_string()]), explode : false, style :
+                    ParamStyle::Form, }, ParamDef { name : "after".to_string(), required
+                    : false, secret : false, rust_name : None, pager_managed : false,
+                    description :
                     Some("Cursor for pagination. Provide the ID of the last spend alert from the previous response to fetch the next page."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "before".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Cursor for pagination. Provide the ID of the first spend alert from the previous response to fetch the previous page."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -2404,6 +2610,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateProjectSpendAlert".to_string(),
@@ -2415,6 +2622,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveProjectSpendAlert".to_string(),
@@ -2427,6 +2635,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UpdateProjectSpendAlert".to_string(),
@@ -2439,6 +2648,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteProjectSpendAlert".to_string(),
@@ -2451,6 +2661,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListProjectUsers".to_string(),
@@ -2462,12 +2673,13 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -2478,6 +2690,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateProjectUser".to_string(),
@@ -2490,6 +2703,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveProjectUser".to_string(),
@@ -2501,6 +2715,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ModifyProjectUser".to_string(),
@@ -2512,6 +2727,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteProjectUser".to_string(),
@@ -2524,6 +2740,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListRoles".to_string(),
@@ -2535,18 +2752,21 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    : Some("A limit on the number of roles to return. Defaults to 1000."
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
+                    Some("A limit on the number of roles to return. Defaults to 1000."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Cursor for pagination. Provide the value from the previous response's `next` field to continue listing roles."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order for the returned roles.".to_string()), param_type :
-                    QueryParamType::Enum(vec!["asc".to_string(), "desc".to_string()]),
-                    explode : false, style : ParamStyle::Form, }
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description : Some("Sort order for the returned roles."
+                    .to_string()), param_type : QueryParamType::Enum(vec!["asc"
+                    .to_string(), "desc".to_string()]), explode : false, style :
+                    ParamStyle::Form, }
                 ],
                 header: vec![],
                 cookie: vec![],
@@ -2554,6 +2774,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateRole".to_string(),
@@ -2567,6 +2788,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveRole".to_string(),
@@ -2578,6 +2800,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UpdateRole".to_string(),
@@ -2591,6 +2814,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteRole".to_string(),
@@ -2602,6 +2826,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListOrganizationSpendAlerts".to_string(),
@@ -2615,21 +2840,23 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of spend alerts to return. Defaults to 20."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order for the returned spend alerts.".to_string()),
-                    param_type : QueryParamType::Enum(vec!["asc".to_string(), "desc"
-                    .to_string()]), explode : false, style : ParamStyle::Form, },
-                    ParamDef { name : "after".to_string(), required : false, description
-                    :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description : Some("Sort order for the returned spend alerts."
+                    .to_string()), param_type : QueryParamType::Enum(vec!["asc"
+                    .to_string(), "desc".to_string()]), explode : false, style :
+                    ParamStyle::Form, }, ParamDef { name : "after".to_string(), required
+                    : false, secret : false, rust_name : None, pager_managed : false,
+                    description :
                     Some("Cursor for pagination. Provide the ID of the last spend alert from the previous response to fetch the next page."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "before".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Cursor for pagination. Provide the ID of the first spend alert from the previous response to fetch the previous page."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -2640,6 +2867,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateOrganizationSpendAlert".to_string(),
@@ -2651,6 +2879,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveOrganizationSpendAlert".to_string(),
@@ -2662,6 +2891,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UpdateOrganizationSpendAlert".to_string(),
@@ -2673,6 +2903,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteOrganizationSpendAlert".to_string(),
@@ -2686,6 +2917,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UsageAudioSpeeches".to_string(),
@@ -2698,48 +2930,56 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "start_time".to_string(), required : true,
-                    description :
+                    ParamDef { name : "start_time".to_string(), required : true, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Start time (Unix seconds) of the query time range, inclusive."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "end_time"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("End time (Unix seconds) of the query time range, exclusive."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "bucket_width"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
                     .to_string()), param_type : QueryParamType::Enum(vec!["1m"
                     .to_string(), "1h".to_string(), "1d".to_string()]), explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "project_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these projects.".to_string()), param_type
                     : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "user_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these users.".to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "api_key_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these API keys.".to_string()), param_type
                     : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "models"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these models.".to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "group_by"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["project_id"
                     .to_string(), "user_id".to_string(), "api_key_id".to_string(),
                     "model".to_string()]))), explode : false, style : ParamStyle::Form,
-                    }, ParamDef { name : "limit".to_string(), required : false,
-                    description :
+                    }, ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "page".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -2750,6 +2990,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UsageAudioTranscriptions".to_string(),
@@ -2762,48 +3003,56 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "start_time".to_string(), required : true,
-                    description :
+                    ParamDef { name : "start_time".to_string(), required : true, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Start time (Unix seconds) of the query time range, inclusive."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "end_time"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("End time (Unix seconds) of the query time range, exclusive."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "bucket_width"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
                     .to_string()), param_type : QueryParamType::Enum(vec!["1m"
                     .to_string(), "1h".to_string(), "1d".to_string()]), explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "project_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these projects.".to_string()), param_type
                     : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "user_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these users.".to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "api_key_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these API keys.".to_string()), param_type
                     : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "models"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these models.".to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "group_by"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["project_id"
                     .to_string(), "user_id".to_string(), "api_key_id".to_string(),
                     "model".to_string()]))), explode : false, style : ParamStyle::Form,
-                    }, ParamDef { name : "limit".to_string(), required : false,
-                    description :
+                    }, ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "page".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -2814,6 +3063,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UsageCodeInterpreterSessions".to_string(),
@@ -2826,35 +3076,40 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "start_time".to_string(), required : true,
-                    description :
+                    ParamDef { name : "start_time".to_string(), required : true, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Start time (Unix seconds) of the query time range, inclusive."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "end_time"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("End time (Unix seconds) of the query time range, exclusive."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "bucket_width"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
                     .to_string()), param_type : QueryParamType::Enum(vec!["1m"
                     .to_string(), "1h".to_string(), "1d".to_string()]), explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "project_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these projects.".to_string()), param_type
                     : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "group_by"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Group the usage data by the specified fields. Support fields include `project_id`."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["project_id"
                     .to_string()]))), explode : false, style : ParamStyle::Form, },
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "page".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -2865,6 +3120,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UsageCompletions".to_string(),
@@ -2877,53 +3133,62 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "start_time".to_string(), required : true,
-                    description :
+                    ParamDef { name : "start_time".to_string(), required : true, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Start time (Unix seconds) of the query time range, inclusive."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "end_time"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("End time (Unix seconds) of the query time range, exclusive."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "bucket_width"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
                     .to_string()), param_type : QueryParamType::Enum(vec!["1m"
                     .to_string(), "1h".to_string(), "1d".to_string()]), explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "project_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these projects.".to_string()), param_type
                     : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "user_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these users.".to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "api_key_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these API keys.".to_string()), param_type
                     : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "models"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these models.".to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "batch"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("If `true`, return batch jobs only. If `false`, return non-batch jobs only. By default, return both.\n"
                     .to_string()), param_type : QueryParamType::Boolean, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "group_by"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `batch`, `service_tier` or any combination of them."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["project_id"
                     .to_string(), "user_id".to_string(), "api_key_id".to_string(),
                     "model".to_string(), "batch".to_string(), "service_tier"
                     .to_string()]))), explode : false, style : ParamStyle::Form, },
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "page".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -2934,6 +3199,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UsageEmbeddings".to_string(),
@@ -2946,48 +3212,56 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "start_time".to_string(), required : true,
-                    description :
+                    ParamDef { name : "start_time".to_string(), required : true, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Start time (Unix seconds) of the query time range, inclusive."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "end_time"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("End time (Unix seconds) of the query time range, exclusive."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "bucket_width"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
                     .to_string()), param_type : QueryParamType::Enum(vec!["1m"
                     .to_string(), "1h".to_string(), "1d".to_string()]), explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "project_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these projects.".to_string()), param_type
                     : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "user_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these users.".to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "api_key_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these API keys.".to_string()), param_type
                     : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "models"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these models.".to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "group_by"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["project_id"
                     .to_string(), "user_id".to_string(), "api_key_id".to_string(),
                     "model".to_string()]))), explode : false, style : ParamStyle::Form,
-                    }, ParamDef { name : "limit".to_string(), required : false,
-                    description :
+                    }, ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "page".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -2998,6 +3272,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UsageFileSearchCalls".to_string(),
@@ -3010,48 +3285,57 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "start_time".to_string(), required : true,
-                    description :
+                    ParamDef { name : "start_time".to_string(), required : true, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Start time (Unix seconds) of the query time range, inclusive."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "end_time"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("End time (Unix seconds) of the query time range, exclusive."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "bucket_width"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
                     .to_string()), param_type : QueryParamType::Enum(vec!["1m"
                     .to_string(), "1h".to_string(), "1d".to_string()]), explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "project_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these projects.".to_string()), param_type
                     : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "user_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these users.".to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "api_key_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these API keys.".to_string()), param_type
                     : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name :
-                    "vector_store_ids".to_string(), required : false, description :
+                    "vector_store_ids".to_string(), required : false, secret : false,
+                    rust_name : None, pager_managed : false, description :
                     Some("Return only usage for these vector stores.".to_string()),
                     param_type : QueryParamType::Array(Box::new(QueryParamType::String)),
                     explode : false, style : ParamStyle::Form, }, ParamDef { name :
-                    "group_by".to_string(), required : false, description :
+                    "group_by".to_string(), required : false, secret : false, rust_name :
+                    None, pager_managed : false, description :
                     Some("Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `vector_store_id` or any combination of them."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["project_id"
                     .to_string(), "user_id".to_string(), "api_key_id".to_string(),
                     "vector_store_id".to_string()]))), explode : false, style :
                     ParamStyle::Form, }, ParamDef { name : "limit".to_string(), required
-                    : false, description :
+                    : false, secret : false, rust_name : None, pager_managed : false,
+                    description :
                     Some("Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "page".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -3062,6 +3346,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UsageImages".to_string(),
@@ -3073,62 +3358,72 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "start_time".to_string(), required : true,
-                    description :
+                    ParamDef { name : "start_time".to_string(), required : true, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Start time (Unix seconds) of the query time range, inclusive."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "end_time"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("End time (Unix seconds) of the query time range, exclusive."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "bucket_width"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
                     .to_string()), param_type : QueryParamType::Enum(vec!["1m"
                     .to_string(), "1h".to_string(), "1d".to_string()]), explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "sources".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Return only usages for these sources. Possible values are `image.generation`, `image.edit`, `image.variation` or any combination of them."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["image.generation"
                     .to_string(), "image.edit".to_string(), "image.variation"
                     .to_string()]))), explode : false, style : ParamStyle::Form, },
-                    ParamDef { name : "sizes".to_string(), required : false, description
-                    :
+                    ParamDef { name : "sizes".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Return only usages for these image sizes. Possible values are `256x256`, `512x512`, `1024x1024`, `1792x1792`, `1024x1792` or any combination of them."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["256x256"
                     .to_string(), "512x512".to_string(), "1024x1024".to_string(),
                     "1792x1792".to_string(), "1024x1792".to_string()]))), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "project_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these projects.".to_string()), param_type
                     : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "user_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these users.".to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "api_key_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these API keys.".to_string()), param_type
                     : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "models"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these models.".to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "group_by"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `size`, `source` or any combination of them."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["project_id"
                     .to_string(), "user_id".to_string(), "api_key_id".to_string(),
                     "model".to_string(), "size".to_string(), "source".to_string()]))),
                     explode : false, style : ParamStyle::Form, }, ParamDef { name :
-                    "limit".to_string(), required : false, description :
+                    "limit".to_string(), required : false, secret : false, rust_name :
+                    None, pager_managed : false, description :
                     Some("Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "page".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -3139,6 +3434,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UsageModerations".to_string(),
@@ -3151,48 +3447,56 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "start_time".to_string(), required : true,
-                    description :
+                    ParamDef { name : "start_time".to_string(), required : true, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Start time (Unix seconds) of the query time range, inclusive."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "end_time"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("End time (Unix seconds) of the query time range, exclusive."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "bucket_width"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
                     .to_string()), param_type : QueryParamType::Enum(vec!["1m"
                     .to_string(), "1h".to_string(), "1d".to_string()]), explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "project_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these projects.".to_string()), param_type
                     : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "user_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these users.".to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "api_key_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these API keys.".to_string()), param_type
                     : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "models"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these models.".to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "group_by"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["project_id"
                     .to_string(), "user_id".to_string(), "api_key_id".to_string(),
                     "model".to_string()]))), explode : false, style : ParamStyle::Form,
-                    }, ParamDef { name : "limit".to_string(), required : false,
-                    description :
+                    }, ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "page".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -3203,6 +3507,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UsageVectorStores".to_string(),
@@ -3215,35 +3520,40 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "start_time".to_string(), required : true,
-                    description :
+                    ParamDef { name : "start_time".to_string(), required : true, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Start time (Unix seconds) of the query time range, inclusive."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "end_time"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("End time (Unix seconds) of the query time range, exclusive."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "bucket_width"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
                     .to_string()), param_type : QueryParamType::Enum(vec!["1m"
                     .to_string(), "1h".to_string(), "1d".to_string()]), explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "project_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these projects.".to_string()), param_type
                     : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "group_by"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Group the usage data by the specified fields. Support fields include `project_id`."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["project_id"
                     .to_string()]))), explode : false, style : ParamStyle::Form, },
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "page".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -3254,6 +3564,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UsageWebSearchCalls".to_string(),
@@ -3266,54 +3577,64 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "start_time".to_string(), required : true,
-                    description :
+                    ParamDef { name : "start_time".to_string(), required : true, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Start time (Unix seconds) of the query time range, inclusive."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "end_time"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("End time (Unix seconds) of the query time range, exclusive."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "bucket_width"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
                     .to_string()), param_type : QueryParamType::Enum(vec!["1m"
                     .to_string(), "1h".to_string(), "1d".to_string()]), explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "project_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these projects.".to_string()), param_type
                     : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "user_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these users.".to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "api_key_ids"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these API keys.".to_string()), param_type
                     : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "models"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Return only usage for these models.".to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name :
-                    "context_levels".to_string(), required : false, description :
+                    "context_levels".to_string(), required : false, secret : false,
+                    rust_name : None, pager_managed : false, description :
                     Some("Return only web search usage for these context levels."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["low"
                     .to_string(), "medium".to_string(), "high".to_string()]))), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "group_by"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `context_level` or any combination of them."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["project_id"
                     .to_string(), "user_id".to_string(), "api_key_id".to_string(),
                     "model".to_string(), "context_level".to_string()]))), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "limit"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "page".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -3324,6 +3645,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListUsers".to_string(),
@@ -3335,18 +3657,20 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "emails".to_string(),
-                    required : false, description :
-                    Some("Filter by the email address of users.".to_string()), param_type
-                    : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description : Some("Filter by the email address of users."
+                    .to_string()), param_type :
+                    QueryParamType::Array(Box::new(QueryParamType::String)), explode :
                     false, style : ParamStyle::Form, }
                 ],
                 header: vec![],
@@ -3355,6 +3679,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveUser".to_string(),
@@ -3366,6 +3691,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ModifyUser".to_string(),
@@ -3377,6 +3703,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteUser".to_string(),
@@ -3388,6 +3715,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListUserRoleAssignments".to_string(),
@@ -3400,16 +3728,18 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of organization role assignments to return."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Cursor for pagination. Provide the value from the previous response's `next` field to continue listing organization roles."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Sort order for the returned organization roles.".to_string()),
                     param_type : QueryParamType::Enum(vec!["asc".to_string(), "desc"
                     .to_string()]), explode : false, style : ParamStyle::Form, }
@@ -3420,6 +3750,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "AssignUserRole".to_string(),
@@ -3434,6 +3765,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveUserRole".to_string(),
@@ -3446,6 +3778,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UnassignUserRole".to_string(),
@@ -3458,6 +3791,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListProjectGroupRoleAssignments".to_string(),
@@ -3470,15 +3804,18 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    : Some("A limit on the number of project role assignments to return."
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
+                    Some("A limit on the number of project role assignments to return."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Cursor for pagination. Provide the value from the previous response's `next` field to continue listing project roles."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Sort order for the returned project roles.".to_string()),
                     param_type : QueryParamType::Enum(vec!["asc".to_string(), "desc"
                     .to_string()]), explode : false, style : ParamStyle::Form, }
@@ -3489,6 +3826,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "AssignProjectGroupRole".to_string(),
@@ -3503,6 +3841,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveProjectGroupRole".to_string(),
@@ -3514,6 +3853,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UnassignProjectGroupRole".to_string(),
@@ -3526,6 +3866,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListProjectRoles".to_string(),
@@ -3537,18 +3878,21 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    : Some("A limit on the number of roles to return. Defaults to 1000."
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
+                    Some("A limit on the number of roles to return. Defaults to 1000."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Cursor for pagination. Provide the value from the previous response's `next` field to continue listing roles."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order for the returned roles.".to_string()), param_type :
-                    QueryParamType::Enum(vec!["asc".to_string(), "desc".to_string()]),
-                    explode : false, style : ParamStyle::Form, }
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description : Some("Sort order for the returned roles."
+                    .to_string()), param_type : QueryParamType::Enum(vec!["asc"
+                    .to_string(), "desc".to_string()]), explode : false, style :
+                    ParamStyle::Form, }
                 ],
                 header: vec![],
                 cookie: vec![],
@@ -3556,6 +3900,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateProjectRole".to_string(),
@@ -3569,6 +3914,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveProjectRole".to_string(),
@@ -3580,6 +3926,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UpdateProjectRole".to_string(),
@@ -3593,6 +3940,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteProjectRole".to_string(),
@@ -3604,6 +3952,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListProjectUserRoleAssignments".to_string(),
@@ -3616,15 +3965,18 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    : Some("A limit on the number of project role assignments to return."
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
+                    Some("A limit on the number of project role assignments to return."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Cursor for pagination. Provide the value from the previous response's `next` field to continue listing project roles."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Sort order for the returned project roles.".to_string()),
                     param_type : QueryParamType::Enum(vec!["asc".to_string(), "desc"
                     .to_string()]), explode : false, style : ParamStyle::Form, }
@@ -3635,6 +3987,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "AssignProjectUserRole".to_string(),
@@ -3649,6 +4002,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveProjectUserRole".to_string(),
@@ -3660,6 +4014,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UnassignProjectUserRole".to_string(),
@@ -3672,6 +4027,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateRealtimeCall".to_string(),
@@ -3691,6 +4047,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "AcceptRealtimeCall".to_string(),
@@ -3705,6 +4062,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "HangupRealtimeCall".to_string(),
@@ -3717,6 +4075,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ReferRealtimeCall".to_string(),
@@ -3729,6 +4088,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RejectRealtimeCall".to_string(),
@@ -3741,6 +4101,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateRealtimeClientSecret".to_string(),
@@ -3757,6 +4118,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateRealtimeSession".to_string(),
@@ -3769,6 +4131,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateRealtimeTranscriptionSession".to_string(),
@@ -3787,6 +4150,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateRealtimeTranslationClientSecret".to_string(),
@@ -3805,6 +4169,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateResponse".to_string(),
@@ -3817,6 +4182,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "GetResponse".to_string(),
@@ -3828,21 +4194,24 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "include".to_string(), required : false,
-                    description :
+                    ParamDef { name : "include".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Additional fields to include in the response. See the `include`\nparameter for Response creation above for more information.\n"
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Json)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "stream"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("If set to true, the model response data will be streamed to the client\nas it is generated using [server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#Event_stream_format).\nSee the [Streaming section below](/docs/api-reference/responses-streaming)\nfor more information.\n"
                     .to_string()), param_type : QueryParamType::Boolean, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "starting_after"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("The sequence number of the event after which to start streaming.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "include_obfuscation"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("When true, stream obfuscation will be enabled. Stream obfuscation adds\nrandom characters to an `obfuscation` field on streaming delta events\nto normalize payload sizes as a mitigation to certain side-channel\nattacks. These obfuscation fields are included by default, but add a\nsmall amount of overhead to the data stream. You can set\n`include_obfuscation` to false to optimize for bandwidth if you trust\nthe network links between your application and the OpenAI API.\n"
                     .to_string()), param_type : QueryParamType::Boolean, explode : false,
                     style : ParamStyle::Form, }
@@ -3853,6 +4222,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteResponse".to_string(),
@@ -3864,6 +4234,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CancelResponse".to_string(),
@@ -3876,6 +4247,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListInputItems".to_string(),
@@ -3888,21 +4260,24 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of objects to be returned. Limit can range between\n1 and 100, and the default is 20.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("The order to return the input items in. Default is `desc`.\n- `asc`: Return the input items in ascending order.\n- `desc`: Return the input items in descending order.\n"
                     .to_string()), param_type : QueryParamType::Enum(vec!["asc"
                     .to_string(), "desc".to_string()]), explode : false, style :
                     ParamStyle::Form, }, ParamDef { name : "after".to_string(), required
-                    : false, description :
+                    : false, secret : false, rust_name : None, pager_managed : false,
+                    description :
                     Some("An item ID to list items after, used in pagination.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "include".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Additional fields to include in the response. See the `include`\nparameter for Response creation above for more information.\n"
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Json)), explode :
@@ -3914,6 +4289,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateUpload".to_string(),
@@ -3926,6 +4302,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CancelUpload".to_string(),
@@ -3938,6 +4315,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CompleteUpload".to_string(),
@@ -3950,6 +4328,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "AddUploadPart".to_string(),
@@ -3967,6 +4346,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListVectorStores".to_string(),
@@ -3978,21 +4358,24 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
                     .to_string()), param_type : QueryParamType::Enum(vec!["asc"
                     .to_string(), "desc".to_string()]), explode : false, style :
                     ParamStyle::Form, }, ParamDef { name : "after".to_string(), required
-                    : false, description :
+                    : false, secret : false, rust_name : None, pager_managed : false,
+                    description :
                     Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "before".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -4003,6 +4386,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateVectorStore".to_string(),
@@ -4014,6 +4398,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "GetVectorStore".to_string(),
@@ -4025,6 +4410,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ModifyVectorStore".to_string(),
@@ -4036,6 +4422,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteVectorStore".to_string(),
@@ -4047,6 +4434,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateVectorStoreFileBatch".to_string(),
@@ -4060,6 +4448,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "GetVectorStoreFileBatch".to_string(),
@@ -4071,6 +4460,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CancelVectorStoreFileBatch".to_string(),
@@ -4084,6 +4474,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListFilesInVectorStoreBatch".to_string(),
@@ -4096,25 +4487,29 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
                     .to_string()), param_type : QueryParamType::Enum(vec!["asc"
                     .to_string(), "desc".to_string()]), explode : false, style :
                     ParamStyle::Form, }, ParamDef { name : "after".to_string(), required
-                    : false, description :
+                    : false, secret : false, rust_name : None, pager_managed : false,
+                    description :
                     Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "before".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "filter".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`."
                     .to_string()), param_type : QueryParamType::Enum(vec!["in_progress"
                     .to_string(), "completed".to_string(), "failed".to_string(),
@@ -4127,6 +4522,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListVectorStoreFiles".to_string(),
@@ -4138,25 +4534,29 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
                     .to_string()), param_type : QueryParamType::Enum(vec!["asc"
                     .to_string(), "desc".to_string()]), explode : false, style :
                     ParamStyle::Form, }, ParamDef { name : "after".to_string(), required
-                    : false, description :
+                    : false, secret : false, rust_name : None, pager_managed : false,
+                    description :
                     Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "before".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "filter".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`."
                     .to_string()), param_type : QueryParamType::Enum(vec!["in_progress"
                     .to_string(), "completed".to_string(), "failed".to_string(),
@@ -4169,6 +4569,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateVectorStoreFile".to_string(),
@@ -4183,6 +4584,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "GetVectorStoreFile".to_string(),
@@ -4194,6 +4596,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UpdateVectorStoreFileAttributes".to_string(),
@@ -4207,6 +4610,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteVectorStoreFile".to_string(),
@@ -4219,6 +4623,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveVectorStoreFileContent".to_string(),
@@ -4231,6 +4636,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "SearchVectorStore".to_string(),
@@ -4243,6 +4649,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateConversation".to_string(),
@@ -4254,6 +4661,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "GetConversation".to_string(),
@@ -4265,6 +4673,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UpdateConversation".to_string(),
@@ -4276,6 +4685,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteConversation".to_string(),
@@ -4288,6 +4698,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "Getorganizationspendlimit".to_string(),
@@ -4299,6 +4710,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "Updateorganizationspendlimit".to_string(),
@@ -4313,6 +4725,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "Deleteorganizationspendlimit".to_string(),
@@ -4326,6 +4739,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "Getprojectspendlimit".to_string(),
@@ -4337,6 +4751,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "Updateprojectspendlimit".to_string(),
@@ -4348,6 +4763,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "Deleteprojectspendlimit".to_string(),
@@ -4359,6 +4775,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateanAPIkeyforaserviceaccount".to_string(),
@@ -4374,6 +4791,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "Createcontentprovenancecheck".to_string(),
@@ -4391,6 +4809,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListVideos".to_string(),
@@ -4403,15 +4822,17 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    : Some("Number of items to retrieve".to_string()), param_type :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
+                    Some("Number of items to retrieve".to_string()), param_type :
                     QueryParamType::Integer, explode : false, style : ParamStyle::Form,
-                    }, ParamDef { name : "order".to_string(), required : false,
-                    description :
+                    }, ParamDef { name : "order".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Sort order of results by timestamp. Use `asc` for ascending order or `desc` for descending order."
                     .to_string()), param_type : QueryParamType::Json, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Identifier for the last item from the previous pagination request"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -4422,6 +4843,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateVideo".to_string(),
@@ -4434,6 +4856,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateVideoCharacter".to_string(),
@@ -4452,6 +4875,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "GetVideoCharacter".to_string(),
@@ -4463,6 +4887,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateVideoEdit".to_string(),
@@ -4475,6 +4900,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateVideoExtend".to_string(),
@@ -4486,6 +4912,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "GetVideo".to_string(),
@@ -4497,6 +4924,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteVideo".to_string(),
@@ -4509,6 +4937,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "RetrieveVideoContent".to_string(),
@@ -4521,8 +4950,8 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "variant".to_string(), required : false,
-                    description :
+                    ParamDef { name : "variant".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Which downloadable asset to return. Defaults to the MP4 video."
                     .to_string()), param_type : QueryParamType::Json, explode : false,
                     style : ParamStyle::Form, }
@@ -4533,6 +4962,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateVideoRemix".to_string(),
@@ -4545,6 +4975,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "Getinputtokencounts".to_string(),
@@ -4557,6 +4988,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "Compactconversation".to_string(),
@@ -4571,6 +5003,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListSkills".to_string(),
@@ -4582,15 +5015,17 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    : Some("Number of items to retrieve".to_string()), param_type :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
+                    Some("Number of items to retrieve".to_string()), param_type :
                     QueryParamType::Integer, explode : false, style : ParamStyle::Form,
-                    }, ParamDef { name : "order".to_string(), required : false,
-                    description :
+                    }, ParamDef { name : "order".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Sort order of results by timestamp. Use `asc` for ascending order or `desc` for descending order."
                     .to_string()), param_type : QueryParamType::Json, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Identifier for the last item from the previous pagination request"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -4601,6 +5036,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateSkill".to_string(),
@@ -4612,6 +5048,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "GetSkill".to_string(),
@@ -4623,6 +5060,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "UpdateSkillDefaultVersion".to_string(),
@@ -4634,6 +5072,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteSkill".to_string(),
@@ -4645,6 +5084,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "GetSkillContent".to_string(),
@@ -4656,6 +5096,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListSkillVersions".to_string(),
@@ -4667,17 +5108,19 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    : Some("Number of versions to retrieve.".to_string()), param_type :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
+                    Some("Number of versions to retrieve.".to_string()), param_type :
                     QueryParamType::Integer, explode : false, style : ParamStyle::Form,
-                    }, ParamDef { name : "order".to_string(), required : false,
-                    description : Some("Sort order of results by version number."
-                    .to_string()), param_type : QueryParamType::Json, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("The skill version ID to start after.".to_string()), param_type
-                    : QueryParamType::String, explode : false, style : ParamStyle::Form,
-                    }
+                    }, ParamDef { name : "order".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
+                    Some("Sort order of results by version number.".to_string()),
+                    param_type : QueryParamType::Json, explode : false, style :
+                    ParamStyle::Form, }, ParamDef { name : "after".to_string(), required
+                    : false, secret : false, rust_name : None, pager_managed : false,
+                    description : Some("The skill version ID to start after."
+                    .to_string()), param_type : QueryParamType::String, explode : false,
+                    style : ParamStyle::Form, }
                 ],
                 header: vec![],
                 cookie: vec![],
@@ -4685,6 +5128,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateSkillVersion".to_string(),
@@ -4696,6 +5140,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "GetSkillVersion".to_string(),
@@ -4707,6 +5152,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteSkillVersion".to_string(),
@@ -4718,6 +5164,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "GetSkillVersionContent".to_string(),
@@ -4729,6 +5176,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CancelChatSessionMethod".to_string(),
@@ -4741,6 +5189,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "CreateChatSessionMethod".to_string(),
@@ -4752,6 +5201,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListThreadItemsMethod".to_string(),
@@ -4763,19 +5213,23 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    : Some("Maximum number of thread items to return. Defaults to 20."
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
+                    Some("Maximum number of thread items to return. Defaults to 20."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Sort order for results by creation time. Defaults to `desc`."
                     .to_string()), param_type : QueryParamType::Json, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("List items created after this thread item ID. Defaults to null for the first page."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "before".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("List items created before this thread item ID. Defaults to null for the newest results."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -4786,6 +5240,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "GetThreadMethod".to_string(),
@@ -4797,6 +5252,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "DeleteThreadMethod".to_string(),
@@ -4809,6 +5265,7 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: None,
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "ListThreadsMethod".to_string(),
@@ -4821,23 +5278,28 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    : Some("Maximum number of thread items to return. Defaults to 20."
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
+                    Some("Maximum number of thread items to return. Defaults to 20."
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Sort order for results by creation time. Defaults to `desc`."
                     .to_string()), param_type : QueryParamType::Json, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("List items created after this thread item ID. Defaults to null for the first page."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "before".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("List items created before this thread item ID. Defaults to null for the newest results."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "user".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Filter threads that belong to this user identifier. Defaults to null to return all users."
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }
@@ -4848,6 +5310,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "BetaCreateResponse".to_string(),
@@ -4861,8 +5324,8 @@ pub fn define_openai_api() -> RestApi {
             params: Some(EndpointParams {
                 query: vec![],
                 header: vec![
-                    ParamDef { name : "openai-beta".to_string(), required : false,
-                    description :
+                    ParamDef { name : "openai-beta".to_string(), required : false, secret
+                    : false, rust_name : None, pager_managed : false, description :
                     Some("Optional beta features to enable for this request."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["responses_multi_agent=v1"
@@ -4873,6 +5336,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "BetaGetResponse".to_string(),
@@ -4884,28 +5348,31 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "include".to_string(), required : false,
-                    description :
+                    ParamDef { name : "include".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("Additional fields to include in the response. See the `include`\nparameter for Response creation above for more information.\n"
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Json)), explode :
                     false, style : ParamStyle::Form, }, ParamDef { name : "stream"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("If set to true, the model response data will be streamed to the client\nas it is generated using [server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#Event_stream_format).\nSee the [Streaming section below](/docs/api-reference/responses-streaming)\nfor more information.\n"
                     .to_string()), param_type : QueryParamType::Boolean, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "starting_after"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("The sequence number of the event after which to start streaming.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "include_obfuscation"
-                    .to_string(), required : false, description :
+                    .to_string(), required : false, secret : false, rust_name : None,
+                    pager_managed : false, description :
                     Some("When true, stream obfuscation will be enabled. Stream obfuscation adds\nrandom characters to an `obfuscation` field on streaming delta events\nto normalize payload sizes as a mitigation to certain side-channel\nattacks. These obfuscation fields are included by default, but add a\nsmall amount of overhead to the data stream. You can set\n`include_obfuscation` to false to optimize for bandwidth if you trust\nthe network links between your application and the OpenAI API.\n"
                     .to_string()), param_type : QueryParamType::Boolean, explode : false,
                     style : ParamStyle::Form, }
                 ],
                 header: vec![
-                    ParamDef { name : "openai-beta".to_string(), required : false,
-                    description :
+                    ParamDef { name : "openai-beta".to_string(), required : false, secret
+                    : false, rust_name : None, pager_managed : false, description :
                     Some("Optional beta features to enable for this request."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["responses_multi_agent=v1"
@@ -4916,6 +5383,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "BetaDeleteResponse".to_string(),
@@ -4928,8 +5396,8 @@ pub fn define_openai_api() -> RestApi {
             params: Some(EndpointParams {
                 query: vec![],
                 header: vec![
-                    ParamDef { name : "openai-beta".to_string(), required : false,
-                    description :
+                    ParamDef { name : "openai-beta".to_string(), required : false, secret
+                    : false, rust_name : None, pager_managed : false, description :
                     Some("Optional beta features to enable for this request."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["responses_multi_agent=v1"
@@ -4940,6 +5408,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "BetaCancelResponse".to_string(),
@@ -4953,8 +5422,8 @@ pub fn define_openai_api() -> RestApi {
             params: Some(EndpointParams {
                 query: vec![],
                 header: vec![
-                    ParamDef { name : "openai-beta".to_string(), required : false,
-                    description :
+                    ParamDef { name : "openai-beta".to_string(), required : false, secret
+                    : false, rust_name : None, pager_managed : false, description :
                     Some("Optional beta features to enable for this request."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["responses_multi_agent=v1"
@@ -4965,6 +5434,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "BetaCompactconversation".to_string(),
@@ -4980,8 +5450,8 @@ pub fn define_openai_api() -> RestApi {
             params: Some(EndpointParams {
                 query: vec![],
                 header: vec![
-                    ParamDef { name : "openai-beta".to_string(), required : false,
-                    description :
+                    ParamDef { name : "openai-beta".to_string(), required : false, secret
+                    : false, rust_name : None, pager_managed : false, description :
                     Some("Optional beta features to enable for this request."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["responses_multi_agent=v1"
@@ -4992,6 +5462,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "BetaListInputItems".to_string(),
@@ -5004,29 +5475,32 @@ pub fn define_openai_api() -> RestApi {
             headers: vec![],
             params: Some(EndpointParams {
                 query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
+                    ParamDef { name : "limit".to_string(), required : false, secret :
+                    false, rust_name : None, pager_managed : false, description :
                     Some("A limit on the number of objects to be returned. Limit can range between\n1 and 100, and the default is 20.\n"
                     .to_string()), param_type : QueryParamType::Integer, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("The order to return the input items in. Default is `desc`.\n- `asc`: Return the input items in ascending order.\n- `desc`: Return the input items in descending order.\n"
                     .to_string()), param_type : QueryParamType::Enum(vec!["asc"
                     .to_string(), "desc".to_string()]), explode : false, style :
                     ParamStyle::Form, }, ParamDef { name : "after".to_string(), required
-                    : false, description :
+                    : false, secret : false, rust_name : None, pager_managed : false,
+                    description :
                     Some("An item ID to list items after, used in pagination.\n"
                     .to_string()), param_type : QueryParamType::String, explode : false,
                     style : ParamStyle::Form, }, ParamDef { name : "include".to_string(),
-                    required : false, description :
+                    required : false, secret : false, rust_name : None, pager_managed :
+                    false, description :
                     Some("Additional fields to include in the response. See the `include`\nparameter for Response creation above for more information.\n"
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Json)), explode :
                     false, style : ParamStyle::Form, }
                 ],
                 header: vec![
-                    ParamDef { name : "openai-beta".to_string(), required : false,
-                    description :
+                    ParamDef { name : "openai-beta".to_string(), required : false, secret
+                    : false, rust_name : None, pager_managed : false, description :
                     Some("Optional beta features to enable for this request."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["responses_multi_agent=v1"
@@ -5037,6 +5511,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
         Endpoint {
             id: "BetaGetinputtokencounts".to_string(),
@@ -5050,8 +5525,8 @@ pub fn define_openai_api() -> RestApi {
             params: Some(EndpointParams {
                 query: vec![],
                 header: vec![
-                    ParamDef { name : "openai-beta".to_string(), required : false,
-                    description :
+                    ParamDef { name : "openai-beta".to_string(), required : false, secret
+                    : false, rust_name : None, pager_managed : false, description :
                     Some("Optional beta features to enable for this request."
                     .to_string()), param_type :
                     QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["responses_multi_agent=v1"
@@ -5062,6 +5537,7 @@ pub fn define_openai_api() -> RestApi {
                 response_pagination: None,
             }),
             oauth_scopes: None,
+            cross_origin: None,
         },
     ]);
     let api = RestApi {

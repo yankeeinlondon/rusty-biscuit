@@ -13,6 +13,6 @@ pub fn all() -> Vec<Endpoint> {
         response: ApiResponse::json_type("Branch"),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     }]
 }

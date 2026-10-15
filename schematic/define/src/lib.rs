@@ -91,7 +91,7 @@
 //!             response: ApiResponse::json_type("ListModelsResponse"),
 //!             headers: vec![],
 //!             params: None,
-//!             oauth_scopes: None,
+//!             oauth_scopes: None, cross_origin: None,
 //!         },
 //!     ],
 //!     module_path: None,

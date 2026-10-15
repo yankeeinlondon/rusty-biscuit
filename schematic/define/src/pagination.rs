@@ -13,7 +13,7 @@
 //! A strategy is one of four kinds ([`PageStrategy`]: page number, offset,
 //! cursor, next link) plus shared dimensions: constants, totals, terminal
 //! values, the follow-up request shape, a server-side [`Session`], and
-//! [`Partition`]s. Followed links obey the API's
+//! [`Partition`]s. Followed links obey the endpoint's effective
 //! [`CrossOrigin`](crate::CrossOrigin) policy.
 //!
 //! [`PaginationStyle`] and [`PaginationResponse`] are superseded by this model.
@@ -229,7 +229,7 @@ impl PaginationStyle {
                 max_per_page,
             } => {
                 vec![
-                    ParamDef {
+                    ParamDef { rust_name: None, secret: false, pager_managed: false,
                         name: page_param.clone(),
                         required: false,
                         description: Some("Page number (1-indexed, default: 1)".to_string()),
@@ -237,7 +237,7 @@ impl PaginationStyle {
                         explode: false,
                         style: ParamStyle::Form,
                     },
-                    ParamDef {
+                    ParamDef { rust_name: None, secret: false, pager_managed: false,
                         name: per_page_param.clone(),
                         required: false,
                         description: Some(format!(
@@ -257,7 +257,7 @@ impl PaginationStyle {
                 max_limit,
             } => {
                 vec![
-                    ParamDef {
+                    ParamDef { rust_name: None, secret: false, pager_managed: false,
                         name: offset_param.clone(),
                         required: false,
                         description: Some("Number of items to skip".to_string()),
@@ -265,7 +265,7 @@ impl PaginationStyle {
                         explode: false,
                         style: ParamStyle::Form,
                     },
-                    ParamDef {
+                    ParamDef { rust_name: None, secret: false, pager_managed: false,
                         name: limit_param.clone(),
                         required: false,
                         description: Some(format!(
@@ -283,7 +283,7 @@ impl PaginationStyle {
                 limit_param,
                 default_limit,
             } => {
-                let mut params = vec![ParamDef {
+                let mut params = vec![ParamDef { rust_name: None, secret: false, pager_managed: false,
                     name: cursor_param.clone(),
                     required: false,
                     description: Some("Pagination cursor from previous response".to_string()),
@@ -293,7 +293,7 @@ impl PaginationStyle {
                 }];
 
                 if let Some(limit_name) = limit_param {
-                    params.push(ParamDef {
+                    params.push(ParamDef { rust_name: None, secret: false, pager_managed: false,
                         name: limit_name.clone(),
                         required: false,
                         description: Some(format!(

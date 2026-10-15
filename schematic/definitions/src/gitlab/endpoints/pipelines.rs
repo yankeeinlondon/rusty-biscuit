@@ -53,6 +53,6 @@ pub fn all() -> Vec<Endpoint> {
                     Some("Filter by commit SHA"),
                 ),
         ),
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     }]
 }

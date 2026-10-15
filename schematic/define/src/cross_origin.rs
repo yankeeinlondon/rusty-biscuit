@@ -1,4 +1,4 @@
-//! API-level cross-origin policy for redirects and followed next-page links.
+//! API and endpoint cross-origin policy for redirects and followed next-page links.
 
 /// Which origins a client may follow a redirect or next-page link to, and
 /// whether credentials go with it.

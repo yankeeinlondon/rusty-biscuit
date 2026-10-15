@@ -10,7 +10,7 @@
 /// ```
 /// use schematic_define::params::{ParamDef, QueryParamType, ParamStyle};
 ///
-/// let param = ParamDef {
+/// let param = ParamDef { rust_name: None, secret: false, pager_managed: false,
 ///     name: "tags".to_string(),
 ///     required: false,
 ///     description: Some("Filter by tags".to_string()),
@@ -26,6 +26,15 @@
 pub struct ParamDef {
     /// Parameter name as used in the API.
     pub name: String,
+    /// Optional Rust identifier; the wire name remains `name`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rust_name: Option<String>,
+    /// Adds the wire name to the runtime redaction metadata.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub secret: bool,
+    /// Requires adoption by a resolved pagination strategy at this location.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pager_managed: bool,
     /// Whether this parameter is required.
     pub required: bool,
     /// Human-readable description.
@@ -135,13 +144,27 @@ pub enum ParamStyle {
     DeepObject,
 }
 
+
+#[allow(missing_docs)]
+impl ParamDef {
+    pub fn new(name: impl Into<String>, param_type: QueryParamType) -> Self {
+        Self { name: name.into(), param_type, required: false, description: None,
+            explode: false, style: ParamStyle::Form, rust_name: None, secret: false, pager_managed: false }
+    }
+    pub fn required(mut self) -> Self { self.required = true; self }
+    pub fn describes(mut self, description: impl Into<String>) -> Self { self.description = Some(description.into()); self }
+    pub fn rust_name(mut self, name: impl Into<String>) -> Self { self.rust_name = Some(name.into()); self }
+    pub fn secret(mut self) -> Self { self.secret = true; self }
+    pub fn pager_managed(mut self) -> Self { self.pager_managed = true; self }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn param_def_debug_clone_eq() {
-        let param = ParamDef {
+        let param = ParamDef { rust_name: None, secret: false, pager_managed: false,
             name: "limit".to_string(),
             required: false,
             description: Some("Max results".to_string()),
@@ -156,7 +179,7 @@ mod tests {
 
     #[test]
     fn param_def_required() {
-        let param = ParamDef {
+        let param = ParamDef { rust_name: None, secret: false, pager_managed: false,
             name: "id".to_string(),
             required: true,
             description: None,
@@ -169,7 +192,7 @@ mod tests {
 
     #[test]
     fn param_def_with_explode() {
-        let param = ParamDef {
+        let param = ParamDef { rust_name: None, secret: false, pager_managed: false,
             name: "tags".to_string(),
             required: false,
             description: None,

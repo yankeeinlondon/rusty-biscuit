@@ -734,7 +734,7 @@ mod tests {
                     response: ApiResponse::json_type("Folder"),
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None,
+                    oauth_scopes: None, cross_origin: None,
                 },
                 // FormData endpoint with file upload
                 Endpoint {
@@ -752,7 +752,7 @@ mod tests {
                     response: ApiResponse::json_type("File"),
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None,
+                    oauth_scopes: None, cross_origin: None,
                 },
                 // GET endpoint with no request body
                 Endpoint {
@@ -764,7 +764,7 @@ mod tests {
                     response: ApiResponse::json_type("ListFilesResponse"),
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None,
+                    oauth_scopes: None, cross_origin: None,
                 },
                 // Binary download
                 Endpoint {
@@ -776,7 +776,7 @@ mod tests {
                     response: ApiResponse::Binary,
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None,
+                    oauth_scopes: None, cross_origin: None,
                 },
             ],
             module_path: None,

@@ -25,7 +25,7 @@ fn make_api(name: &str, auth: AuthStrategy, env_auth: Vec<String>) -> RestApi {
             response: ApiResponse::json_type("ListItemsResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         }],
         module_path: None,
         request_suffix: None,
@@ -84,7 +84,7 @@ fn make_basic_auth_api(name: &str, username_env: &str, password_env: &str) -> Re
             response: ApiResponse::json_type("ListItemsResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         }],
         module_path: None,
         request_suffix: None,
@@ -358,7 +358,7 @@ fn generate_request_method_binary_endpoint() {
             response: ApiResponse::Binary,
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         }],
     );
     let tokens = generate_request_method(&api);
@@ -404,7 +404,7 @@ fn generate_request_method_text_endpoint() {
             response: ApiResponse::Text,
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         }],
     );
     let tokens = generate_request_method(&api);
@@ -444,7 +444,7 @@ fn generate_request_method_empty_endpoint() {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         }],
     );
     let tokens = generate_request_method(&api);
@@ -481,7 +481,7 @@ fn generate_request_method_mixed_endpoints() {
                 response: ApiResponse::json_type("ListItemsResponse"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             Endpoint {
                 id: "CreateSpeech".to_string(),
@@ -492,7 +492,7 @@ fn generate_request_method_mixed_endpoints() {
                 response: ApiResponse::Binary,
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
         ],
     );
@@ -537,7 +537,7 @@ fn generate_request_method_has_must_use() {
                 response: ApiResponse::json_type("ListItemsResponse"),
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             Endpoint {
                 id: "CreateSpeech".to_string(),
@@ -548,7 +548,7 @@ fn generate_request_method_has_must_use() {
                 response: ApiResponse::Binary,
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             Endpoint {
                 id: "GetText".to_string(),
@@ -559,7 +559,7 @@ fn generate_request_method_has_must_use() {
                 response: ApiResponse::Text,
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             Endpoint {
                 id: "DeleteItem".to_string(),
@@ -570,7 +570,7 @@ fn generate_request_method_has_must_use() {
                 response: ApiResponse::Empty,
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
         ],
     );
@@ -634,7 +634,7 @@ fn generate_convenience_methods_snake_case() {
                 response: ApiResponse::Binary,
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
             Endpoint {
                 id: "GetVoiceSampleAudio".to_string(),
@@ -645,7 +645,7 @@ fn generate_convenience_methods_snake_case() {
                 response: ApiResponse::Binary,
                 headers: vec![],
                 params: None,
-                oauth_scopes: None,
+                oauth_scopes: None, cross_origin: None,
             },
         ],
     );

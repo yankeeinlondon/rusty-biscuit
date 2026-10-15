@@ -27,7 +27,6 @@ use crate::parser::extract_path_params;
 use named_params::ParamLocation;
 use shared::{
     QueryParamInfo, extract_cookie_params, extract_header_params, extract_query_params,
-    param_field_name,
 };
 
 // Re-export for sibling codegen modules and tests
@@ -338,7 +337,7 @@ fn generate_doc_comment_with_example(
 
         // Add query param builder calls
         for qp in query_params {
-            let snake_name = param_field_name(&qp.name);
+            let snake_name = qp.field_name();
             lines.push(format!("     .with_{}(/* value */)", snake_name));
         }
         lines.push(";".to_string());
@@ -358,7 +357,7 @@ fn generate_doc_comment_with_example(
         for qp in query_params {
             lines.push(format!(
                 "     .with_{}(/* value */)",
-                param_field_name(&qp.name)
+                qp.field_name()
             ));
         }
         lines.push(";".to_string());
@@ -372,7 +371,7 @@ fn generate_doc_comment_with_example(
         for qp in query_params {
             lines.push(format!(
                 "     .with_{}(/* value */)",
-                param_field_name(&qp.name)
+                qp.field_name()
             ));
         }
         lines.push(";".to_string());

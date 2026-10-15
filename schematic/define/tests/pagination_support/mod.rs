@@ -45,7 +45,7 @@ pub fn endpoint(id: &str, method: RestMethod, path: &str, response: &str) -> End
         response: ApiResponse::json_type(response),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     }
 }
 

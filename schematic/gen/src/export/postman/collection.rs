@@ -41,7 +41,7 @@ use super::variables::merge_variables;
 ///             response: ApiResponse::json_type("User"),
 ///             headers: vec![],
 ///             params: None,
-///             oauth_scopes: None,
+///             oauth_scopes: None, cross_origin: None,
 ///         },
 ///     ],
 ///     module_path: None,

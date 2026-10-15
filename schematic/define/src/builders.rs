@@ -92,7 +92,7 @@ impl Endpoint {
     pub fn new(id: impl Into<String>, method: RestMethod, path: impl Into<String>) -> EndpointBuilder {
         EndpointBuilder { endpoint: Endpoint { id: id.into(), method, path: path.into(),
             description: String::new(), request: None, response: ApiResponse::Empty,
-            headers: vec![], params: None, oauth_scopes: None }, successes: 0, error: None, state: PhantomData }
+            headers: vec![], params: None, oauth_scopes: None, cross_origin: None }, successes: 0, error: None, state: PhantomData }
     }
     pub fn get(id: impl Into<String>, path: impl Into<String>) -> EndpointBuilder { Self::new(id, RestMethod::Get, path) }
     pub fn post(id: impl Into<String>, path: impl Into<String>) -> EndpointBuilder { Self::new(id, RestMethod::Post, path) }
@@ -136,6 +136,9 @@ impl<D, S> EndpointBuilder<D, S> {
     pub fn request_text_with_content_type(mut self, content_type: impl Into<String>) -> Self { self.endpoint.request = Some(ApiRequest::Text { content_type: content_type.into() }); self }
     pub fn request_binary_with_content_type(mut self, content_type: impl Into<String>) -> Self { self.endpoint.request = Some(ApiRequest::Binary { content_type: content_type.into() }); self }
     pub fn request_binary(mut self) -> Self { self.endpoint.request = Some(ApiRequest::Binary { content_type: "application/octet-stream".into() }); self }
+    pub fn cross_origin(mut self, policy: CrossOrigin) -> Self { self.endpoint.cross_origin = Some(policy); self }
+    pub fn header_param(mut self, param: ParamDef) -> Self { self.endpoint.params.get_or_insert_with(EndpointParams::new).header.push(param); self }
+    pub fn cookie(mut self, param: ParamDef) -> Self { self.endpoint.params.get_or_insert_with(EndpointParams::new).cookie.push(param); self }
     pub fn params(mut self, params: EndpointParams) -> Self { self.endpoint.params = Some(params); self }
     pub fn query(mut self, param: ParamDef) -> Self { self.endpoint.params.get_or_insert_with(EndpointParams::new).query.push(param); self }
     pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self { self.endpoint.headers.push((name.into(), value.into())); self }
@@ -148,6 +151,9 @@ impl EndpointBuilder<Present, Present> {
         if self.successes > 1 { return Err(invalid("<endpoint>", &ep.id, "several success shapes arrive with response model v2")); }
         if ep.id.trim().is_empty() || ep.description.trim().is_empty() || !ep.path.starts_with('/') {
             return Err(invalid("<endpoint>", &ep.id, "id and description must be nonempty and path must start with /"));
+        }
+        if ep.method == RestMethod::Get && ep.request.is_some() {
+            return Err(invalid("<endpoint>", &ep.id, "GET endpoint cannot declare a request body"));
         }
         Ok(ep)
     }
@@ -205,6 +211,9 @@ impl<'a, D, A> RestApiBuilder<'a, D, A> {
     pub fn module_path(mut self, path: impl Into<String>) -> Self { self.api.module_path = Some(path.into()); self }
     pub fn request_suffix(mut self, suffix: impl Into<String>) -> Self { self.api.request_suffix = Some(suffix.into()); self }
     pub fn cross_origin(mut self, policy: CrossOrigin) -> Self { self.api.cross_origin = policy; self }
+    pub fn request_id_header(mut self, name: impl Into<String>) -> Self { self.api.request_id_header = Some(name.into().to_ascii_lowercase()); self }
+    pub fn secret_header(mut self, name: impl Into<String>) -> Self { self.api.secret_names.push(name.into().to_ascii_lowercase()); self }
+    pub fn default_pagination(mut self, strategy: crate::pagination::Strategy) -> Self { self.api.default_pagination = Some(strategy); self }
     pub fn default_errors(self, _: ErrorSet) -> Self { self }
 }
 impl RestApiBuilder<'_, Present, Present> {
@@ -214,7 +223,7 @@ impl RestApiBuilder<'_, Present, Present> {
         self.ctx.finish()?;
         if let Some(error) = self.error { return Err(error); }
         let api = self.api;
-        let fail = |message| invalid(&api.name, "<api>", message);
+        let fail = |message: &str| invalid(&api.name, "<api>", message);
         if self.auth_choices != 1 { return Err(fail("authentication must be declared exactly once")); }
         let url = url::Url::parse(&api.base_url).map_err(|_| fail("invalid base URL"))?;
         if api.name.trim().is_empty() || api.description.trim().is_empty() || !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
@@ -229,7 +238,29 @@ impl RestApiBuilder<'_, Present, Present> {
                 return Err(fail("explicit environment mapping conflicts with authentication declaration"));
             }
         }
+        validate_origin(&api.cross_origin).map_err(|message| fail(&message))?;
+        if let Some(name) = &api.request_id_header
+            && !valid_header_name(name) { return Err(fail("invalid request-id header name")); }
+        for name in &api.secret_names {
+            if !valid_header_name(name) { return Err(fail("invalid secret header name")); }
+        }
+        if let Some(diagnostic) = crate::pagination::validate_pagination(&api).into_iter().next() {
+            return Err(invalid(&api.name, diagnostic.endpoint.as_deref().unwrap_or("<api>"),
+                format!("{}: {}", diagnostic.error.rule(), diagnostic.error)));
+        }
         for ep in &api.endpoints {
+            if ep.method == RestMethod::Get && ep.request.is_some() {
+                return Err(invalid(&api.name, &ep.id, "GET endpoint cannot declare a request body"));
+            }
+            if let Some(policy) = &ep.cross_origin {
+                validate_origin(policy).map_err(|message| invalid(&api.name, &ep.id, message))?;
+            }
+            if let Some(params) = &ep.params {
+                for param in params.query.iter().chain(&params.header).chain(&params.cookie) {
+                    if let Some(name) = &param.rust_name
+                        && !valid_rust_name(name) { return Err(invalid(&api.name, &ep.id, "invalid Rust parameter name")); }
+                }
+            }
             let mut schemas = vec![];
             if let ApiResponse::Json(schema) = &ep.response { schemas.push(schema); }
             if let Some(request) = &ep.request {
@@ -255,4 +286,27 @@ impl RestApiBuilder<'_, Present, Present> {
         }
         Ok(api)
     }
+}
+
+fn valid_header_name(name: &str) -> bool {
+    !name.is_empty() && name.bytes().all(|c| c.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&c))
+}
+fn valid_rust_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars.next().is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
+        && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
+        && name != "_" && !["as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe", "use", "where", "while", "async", "await", "dyn", "abstract", "become", "box", "do", "final", "macro", "override", "priv", "typeof", "unsized", "virtual", "yield", "try", "gen"].contains(&name)
+}
+fn validate_origin(policy: &CrossOrigin) -> Result<(), String> {
+    if let CrossOrigin::AllowOrigins(origins) = policy {
+        for text in origins {
+            let url = url::Url::parse(text).map_err(|_| format!("invalid exact origin `{text}`"))?;
+            if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none()
+                || !url.username().is_empty() || url.password().is_some()
+                || !matches!(url.path(), "" | "/") || url.query().is_some() || url.fragment().is_some() {
+                return Err(format!("invalid exact origin `{text}`"));
+            }
+        }
+    }
+    Ok(())
 }

@@ -11,7 +11,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::Binary,
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "ListModels".to_string(),
@@ -22,7 +22,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_vec_type("ModelInfo"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "CreateSingleUseToken".to_string(),
@@ -33,7 +33,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("SingleUseTokenResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
     ]
 }

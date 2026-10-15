@@ -76,7 +76,7 @@ const FIXTURE_COVERAGE: &[(&str, &[&str])] = &[
         "FixtureSettings",
         &["request-id-header", "secret-names", "deny-cross-origin", "query-and-header-secrets"],
     ),
-    ("FixtureNames", &["endpoint-method-renames", "keyword-setter"]),
+    ("FixtureNames", &["endpoint-method-renames", "keyword-setter", "query-wire-name", "endpoint-cross-origin"]),
     (
         "FixturePages",
         &[
@@ -168,7 +168,7 @@ fn endpoint(id: &str, method: RestMethod, path: &str, response: ApiResponse) -> 
         response,
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     }
 }
 
@@ -197,7 +197,7 @@ fn fixture_api(name: &str, module: &str, auth: AuthStrategy, endpoints: Vec<Endp
 }
 
 fn named_param(name: &str, param_type: QueryParamType) -> ParamDef {
-    ParamDef {
+    ParamDef { rust_name: None, secret: false, pager_managed: false,
         name: name.to_string(),
         required: false,
         description: None,
@@ -230,7 +230,10 @@ fn pages_fixture() -> RestApi {
     list_cursor.params = Some(located_params(vec![named_param("after", QueryParamType::String)], vec![], vec![]));
     let list_linked =
         endpoint("ListLinked", RestMethod::Get, "/linked", ApiResponse::json_type("EntryLinkPage"));
-    let required = |name| ParamDef { required: true, ..int(name) };
+    let mut allowed_linked = list_linked.clone();
+    allowed_linked.id = "ListAllowedLinked".to_string();
+    allowed_linked.path = "/allowed-linked".to_string();
+    let required = |name| ParamDef { rust_name: None, secret: false, pager_managed: false, required: true, ..int(name) };
     let mut list_required =
         endpoint("ListRequired", RestMethod::Get, "/required", ApiResponse::json_type("Vec<Entry>"));
     list_required.params = Some(located_params(vec![required("page"), required("limit")], vec![], vec![]));
@@ -240,7 +243,7 @@ fn pages_fixture() -> RestApi {
         "FixturePages",
         "fixture_pages",
         AuthStrategy::None,
-        vec![list_entries, list_cursor, list_linked, list_required, scan_entries],
+        vec![list_entries, list_cursor, list_linked, allowed_linked, list_required, scan_entries],
     );
     api.default_pagination = Some(
         Strategy::page_number("page", MoreSignal::link_rel("next"))
@@ -258,6 +261,12 @@ fn pages_fixture() -> RestApi {
         ),
         PaginationException::new(
             "ListLinked",
+            Collection::at("values")
+                .item_type("Entry")
+                .paginate(Strategy::next_link(LinkSource::body("next"))),
+        ),
+        PaginationException::new(
+            "ListAllowedLinked",
             Collection::at("values")
                 .item_type("Entry")
                 .paginate(Strategy::next_link(LinkSource::body("next"))),
@@ -417,8 +426,8 @@ fn fixture_apis() -> Vec<RestApi> {
     // all from the definition. Neither secret name is a built-in one.
     let mut echo = endpoint("Echo", RestMethod::Get, "/echo", ApiResponse::json_type("Echo"));
     echo.params = Some(located_params(
-        vec![named_param("pin_code", QueryParamType::String), named_param("page", QueryParamType::String)],
-        vec![named_param("X-Pin", QueryParamType::String)],
+        vec![ParamDef { secret: true, ..named_param("pin_code", QueryParamType::String) }, named_param("page", QueryParamType::String)],
+        vec![ParamDef { secret: true, ..named_param("X-Pin", QueryParamType::String) }],
         vec![],
     ));
     let mut settings = fixture_api(
@@ -427,7 +436,6 @@ fn fixture_apis() -> Vec<RestApi> {
         AuthStrategy::None,
         vec![echo, endpoint("Moved", RestMethod::Get, "/moved", ApiResponse::Empty)],
     );
-    settings.secret_names = vec!["X-Pin".to_string(), "pin_code".to_string()];
     settings.request_id_header = Some("x-request-id".to_string());
     settings.cross_origin = CrossOrigin::deny();
 
@@ -443,11 +451,25 @@ fn fixture_apis() -> Vec<RestApi> {
         vec![],
         vec![],
     ));
+    let mut tree = endpoint("GetTree", RestMethod::Get, "/tree", ApiResponse::Empty);
+    tree.params = Some(located_params(
+        vec![
+            ParamDef { rust_name: Some("git_ref".to_string()), ..named_param("ref", QueryParamType::String) },
+            named_param("beta", QueryParamType::Boolean),
+            named_param("recursive", QueryParamType::Boolean),
+        ],
+        vec![],
+        vec![],
+    ));
     let names = fixture_api(
         "FixtureNames",
         "fixture_names",
         AuthStrategy::None,
-        vec![endpoint("New", RestMethod::Post, "/new", ApiResponse::Empty), list_items],
+        vec![
+            endpoint("New", RestMethod::Post, "/new", ApiResponse::Empty), list_items, tree,
+            endpoint("AllowedMove", RestMethod::Get, "/allowed-move", ApiResponse::Empty),
+            endpoint("SiblingMove", RestMethod::Get, "/sibling-move", ApiResponse::Empty),
+        ],
     );
 
     vec![
@@ -1060,6 +1082,81 @@ async fn renamed_endpoint_methods_and_setters_send_under_their_wire_names() {
     assert!(received.iter().all(|request| request.method.as_str() == "POST" && request.url.path() == "/new"));
 }
 
+#[tokio::test]
+async fn optional_query_alias_and_booleans_encode_once_under_wire_names() {
+    let server = start_server().await;
+    let client = FixtureNames::new().base_url(server.uri());
+    client.get_tree().await.unwrap();
+    assert_eq!(query(&only_request(&server).await), "", "unset optional inputs stay absent");
+    server.reset().await;
+    Mock::given(any()).respond_with(ResponseTemplate::new(204)).mount(&server).await;
+    client.get_tree().git_ref("feature/a b%&=ü".to_string()).beta(false).recursive(true).await.unwrap();
+    let request = only_request(&server).await;
+    assert_eq!(query(&request), "ref=feature%2Fa%20b%25%26%3D%C3%BC&beta=false&recursive=true");
+    assert_eq!(request.url.query_pairs().collect::<Vec<_>>(), [
+        ("ref".into(), "feature/a b%&=ü".into()),
+        ("beta".into(), "false".into()),
+        ("recursive".into(), "true".into()),
+    ]);
+    server.reset().await;
+    Mock::given(any()).respond_with(ResponseTemplate::new(204)).mount(&server).await;
+    client.get_tree().git_ref("feature/x y+z".to_string()).beta(true).recursive(false).await.unwrap();
+    assert_eq!(query(&only_request(&server).await), "ref=feature%2Fx%20y%2Bz&beta=true&recursive=false");
+}
+
+#[tokio::test]
+async fn endpoint_origin_override_allows_redirects_and_caller_can_tighten_it() {
+    use schematic_schema::schematic_runtime::OriginPolicy;
+    let server = MockServer::start().await;
+    let other = std::env::var("FIXTURE_SECOND_ORIGIN").unwrap();
+    for (source, target) in [("/allowed-move", "/redirect-allowed"), ("/sibling-move", "/redirect-sibling")] {
+        Mock::given(path(source))
+            .respond_with(ResponseTemplate::new(302).insert_header("location", format!("{other}{target}")))
+            .mount(&server).await;
+    }
+    let client = FixtureNames::new().base_url(server.uri()).build().unwrap();
+    client.allowed_move().await.unwrap();
+    let sibling = client.sibling_move().full().await.unwrap();
+    assert!(matches!(sibling.outcome, Outcome::Failure(ref error)
+        if matches!(error.kind, ErrorKind::RedirectRefused { reason: RedirectRefusal::CrossOrigin })));
+    let tightened = FixtureNames::new().base_url(server.uri())
+        .cross_origin(OriginPolicy::same_origin()).build().unwrap();
+    let response = tightened.allowed_move().full().await.unwrap();
+    assert!(matches!(response.outcome, Outcome::Failure(ref error)
+        if matches!(error.kind, ErrorKind::RedirectRefused { reason: RedirectRefusal::CrossOrigin })));
+    assert_eq!(server.received_requests().await.unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn endpoint_origin_override_governs_followed_pagination_links() {
+    use schematic_schema::schematic_runtime::{OriginPolicy, pager::PagerError};
+    let server = MockServer::start().await;
+    let other = std::env::var("FIXTURE_SECOND_ORIGIN").unwrap();
+    for (source, target) in [("/allowed-linked", "/page-allowed"), ("/linked", "/page-sibling")] {
+        Mock::given(path(source))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "values": [{"id": "first"}], "next": format!("{other}{target}")
+            })))
+            .mount(&server).await;
+    }
+    let client = FixturePages::new().base_url(server.uri()).build().unwrap();
+    let mut pages = client.list_allowed_linked().pages();
+    assert_eq!(pages.next().await.unwrap().unwrap().items[0].id, "first");
+    assert_eq!(pages.next().await.unwrap().unwrap().items[0].id, "second");
+    assert!(pages.next().await.unwrap().is_none());
+    let mut sibling = client.list_linked().pages();
+    assert_eq!(sibling.next().await.unwrap().unwrap().items[0].id, "first");
+    assert!(matches!(sibling.next().await, Err(PagerError::Transport(ref error))
+        if matches!(error.kind, TransportErrorKind::CrossOriginRejected { .. })));
+    let tightened = FixturePages::new().base_url(server.uri())
+        .cross_origin(OriginPolicy::same_origin()).build().unwrap();
+    let mut pages = tightened.list_allowed_linked().pages();
+    assert_eq!(pages.next().await.unwrap().unwrap().items[0].id, "first");
+    assert!(matches!(pages.next().await, Err(PagerError::Transport(ref error))
+        if matches!(error.kind, TransportErrorKind::CrossOriginRejected { .. })));
+    assert_eq!(server.received_requests().await.unwrap().len(), 3);
+}
+
 // ---- definition settings reach the runtime ----
 
 #[tokio::test]
@@ -1333,6 +1430,9 @@ const REQUEST_SIDE_TESTS: &[&str] = &[
     "a_mutator_registered_for_a_generated_request_runs_only_for_that_endpoint",
     "an_endpoint_method_sends_its_values_and_awaits_to_the_data",
     "renamed_endpoint_methods_and_setters_send_under_their_wire_names",
+    "optional_query_alias_and_booleans_encode_once_under_wire_names",
+    "endpoint_origin_override_allows_redirects_and_caller_can_tighten_it",
+    "endpoint_origin_override_governs_followed_pagination_links",
     "request_id_secret_names_and_cross_origin_policy_come_from_the_definition",
     "generated_paging_runs_only_the_global_hook_before_items_and_continuations",
     "generated_pager_retains_api_evidence_and_explicitly_retries",
@@ -1352,13 +1452,72 @@ fn request_side_test_list_names_every_child_test() {
     assert_eq!(declared, REQUEST_SIDE_TESTS);
 }
 
+struct SecondOrigin {
+    url: String,
+    requests: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    stopping: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl SecondOrigin {
+    fn start() -> Self {
+        use std::io::{Read, Write};
+        use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let recorded = requests.clone();
+        let stopping = Arc::new(AtomicBool::new(false));
+        let stop = stopping.clone();
+        let thread = std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = stream.unwrap();
+                if stop.load(Ordering::Acquire) { break; }
+                stream.set_read_timeout(Some(std::time::Duration::from_secs(3))).unwrap();
+                let mut bytes = Vec::new();
+                let mut buffer = [0; 1024];
+                while !bytes.windows(4).any(|part| part == b"\r\n\r\n") {
+                    let count = stream.read(&mut buffer).unwrap();
+                    assert_ne!(count, 0, "HTTP request ended before its headers");
+                    bytes.extend_from_slice(&buffer[..count]);
+                }
+                let request = String::from_utf8(bytes).unwrap();
+                let path = request.split_whitespace().nth(1).unwrap().to_string();
+                recorded.lock().unwrap().push(path.clone());
+                let (status, body) = if path.starts_with("/page") {
+                    ("200 OK", r#"{"values":[{"id":"second"}],"next":null}"#)
+                } else { ("204 No Content", "") };
+                let response = format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                stream.write_all(response.as_bytes()).unwrap();
+            }
+        });
+        Self { url: format!("http://{address}"), requests, stopping, thread: Some(thread) }
+    }
+}
+
+impl Drop for SecondOrigin {
+    fn drop(&mut self) {
+        self.stopping.store(true, std::sync::atomic::Ordering::Release);
+        let _ = std::net::TcpStream::connect(self.url.trim_start_matches("http://"));
+        if let Some(thread) = self.thread.take() { thread.join().unwrap(); }
+    }
+}
+
 #[test]
 fn slow_fixture_apis_compile_and_send_offline() {
     let lockfile = biscuit_test_harness::manifest_dir!().join("../schema/Cargo.lock");
     let area = schematic_root();
     let before = CheckoutWitness::capture(&area);
 
-    let apis = fixture_apis();
+    let second_origin = SecondOrigin::start();
+    let mut apis = fixture_apis();
+    for api in &mut apis {
+        for endpoint in &mut api.endpoints {
+            if matches!(endpoint.id.as_str(), "AllowedMove" | "ListAllowedLinked") {
+                endpoint.cross_origin = Some(CrossOrigin::allow_origins([second_origin.url.clone()]));
+            }
+        }
+    }
     let api_refs: Vec<&RestApi> = apis.iter().collect();
     let fresh = FreshCrate::generate(&api_refs, Definitions::Fixture(FIXTURE_TYPES), &lockfile);
     assert!(
@@ -1371,13 +1530,19 @@ fn slow_fixture_apis_compile_and_send_offline() {
     fresh.cargo_check().assert_success();
 
     fresh.add_test_file("request_side", REQUEST_SIDE_TEST);
-    let run = fresh.nextest_run(FIXTURE_ENV);
+    let mut env = FIXTURE_ENV.to_vec();
+    env.push(("FIXTURE_SECOND_ORIGIN", second_origin.url.as_str()));
+    let run = fresh.nextest_run(&env);
     run.assert_success();
     let report = format!("{}{}", run.stdout, run.stderr);
     for test in REQUEST_SIDE_TESTS {
         assert!(report.contains(test), "the child run did not report {test}:\n{report}");
     }
 
+    let mut downstream = second_origin.requests.lock().unwrap().clone();
+    downstream.sort();
+    assert_eq!(downstream, ["/page-allowed", "/redirect-allowed"],
+        "only endpoint overrides reach the second origin; siblings and caller-tightened calls send nothing there");
     before.assert_unchanged(&CheckoutWitness::capture(&area));
     eprintln!("compiled and exercised fixture APIs: {FIXTURE_COVERAGE:?}");
 }

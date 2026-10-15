@@ -397,3 +397,25 @@ fn every_cross_origin_policy_and_the_redaction_settings_reach_the_definition() {
     assert!(code.contains(".secret_names([\"X-Pin\", \"sig\"])"), "{code}");
     assert!(code.contains(".request_id_header(\"x-request-id\")"), "{code}");
 }
+
+#[test]
+fn endpoint_origin_replacement_and_parameter_secrets_use_runtime_metadata() {
+    let mut api = make_api("Fixture", AuthStrategy::None, &[]);
+    let mut endpoint = schematic_define::Endpoint::get("List", "/list")
+        .describes("List entries").returns_empty()
+        .build().unwrap();
+    endpoint.cross_origin = Some(CrossOrigin::same_origin());
+    let secret = schematic_define::ParamDef {
+        name: "X-Pin".into(), rust_name: None, secret: true, pager_managed: false,
+        required: false, description: None, param_type: schematic_define::QueryParamType::String,
+        explode: false, style: schematic_define::ParamStyle::Simple,
+    };
+    endpoint.params = Some(schematic_define::EndpointParams { header: vec![secret], ..Default::default() });
+    api.endpoints.push(endpoint);
+    let generated = code(&api);
+    assert!(squash(&generated).contains(".endpoint_cross_origin(\"List\",schematic_runtime::OriginPolicy::same_origin())"), "{generated}");
+    assert!(generated.contains(".secret_names([\"X-Pin\"])"), "{generated}");
+    api.endpoints[0].cross_origin = Some(CrossOrigin::allow_origins(Vec::<String>::new()));
+    let generated = code(&api);
+    assert!(squash(&generated).contains(".endpoint_cross_origin(\"List\",schematic_runtime::OriginPolicy::allow_origins(Vec::<String>::new()))"), "empty origins keep concrete type: {generated}");
+}

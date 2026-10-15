@@ -16,7 +16,7 @@ fn make_endpoint(
         response: ApiResponse::json_type("TestResponse"),
         headers: vec![],
         params: None,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     }
 }
 
@@ -792,7 +792,7 @@ fn make_endpoint_with_query(
         Some(EndpointParams {
             query: query_params
                 .into_iter()
-                .map(|(name, required, desc, param_type)| ParamDef {
+                .map(|(name, required, desc, param_type)| ParamDef { rust_name: None, secret: false, pager_managed: false,
                     name: name.to_string(),
                     required,
                     description: desc.map(|s| s.to_string()),
@@ -817,7 +817,7 @@ fn make_endpoint_with_query(
         response: ApiResponse::json_type("TestResponse"),
         headers: vec![],
         params,
-        oauth_scopes: None,
+        oauth_scopes: None, cross_origin: None,
     }
 }
 
@@ -1068,7 +1068,7 @@ mod pagination_doc_tests {
             response: ApiResponse::json_type("TestResponse"),
             headers: vec![],
             params: Some(params),
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         }
     }
 
@@ -1253,7 +1253,7 @@ fn squash(code: &str) -> String {
 }
 
 fn named_param(name: &str, param_type: QueryParamType) -> schematic_define::ParamDef {
-    schematic_define::ParamDef {
+    schematic_define::ParamDef { rust_name: None, secret: false, pager_managed: false,
         name: name.to_string(),
         required: true,
         description: None,
@@ -1369,4 +1369,28 @@ fn endpoints_without_named_parameters_keep_their_inline_headers() {
 
     assert!(code.contains("let headers: Vec<(String, String)> = vec![];"), "{code}");
     assert!(!code.contains("let mut headers"), "{code}");
+}
+
+#[test]
+fn explicit_rust_parameter_name_preserves_wire_query_and_ordinary_setters() {
+    let mut endpoint = make_endpoint("ListTree", RestMethod::Get, "/tree", None);
+    let mut reference = named_param("ref", QueryParamType::String);
+    reference.rust_name = Some("git_ref".into());
+    endpoint.params = Some(schematic_define::EndpointParams {
+        query: vec![reference, named_param("recursive", QueryParamType::Boolean), named_param("beta", QueryParamType::Boolean)],
+        ..Default::default()
+    });
+    let code = format_generated_code(&generate_request_struct(&endpoint)).unwrap();
+    assert!(code.contains("pub git_ref: Option<String>"), "{code}");
+    assert!(code.contains("#[serde(rename = \"ref\")]"), "{code}");
+    assert!(code.contains("fn with_git_ref("), "{code}");
+    assert!(code.contains("self.git_ref"), "{code}");
+    assert!(code.contains("query.push((\"ref\".to_string(), value.to_string()))"), "{code}");
+    assert!(code.contains("fn with_recursive("), "{code}");
+    assert!(code.contains("fn with_beta("), "{code}");
+    assert!(!code.contains("query.push((\"git_ref\""), "{code}");
+    endpoint.params.as_mut().unwrap().query[0].rust_name = Some("GitRef".into());
+    let code = format_generated_code(&generate_request_struct(&endpoint)).unwrap();
+    assert!(code.contains("pub GitRef: Option<String>"), "explicit identifiers keep their spelling: {code}");
+    assert!(code.contains("self.GitRef"), "{code}");
 }

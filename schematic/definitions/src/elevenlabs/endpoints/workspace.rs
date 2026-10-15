@@ -11,7 +11,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("UsageStatsResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "GetUser".to_string(),
@@ -22,7 +22,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("UserResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "GetUserSubscription".to_string(),
@@ -33,7 +33,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("SubscriptionModel"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "GetResource".to_string(),
@@ -44,7 +44,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ResourceResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "ShareResource".to_string(),
@@ -55,7 +55,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("StatusResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "UnshareResource".to_string(),
@@ -66,7 +66,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("StatusResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "CopyResourceToWorkspace".to_string(),
@@ -77,7 +77,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("StatusResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "ListServiceAccounts".to_string(),
@@ -88,7 +88,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListServiceAccountsResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "ListServiceAccountApiKeys".to_string(),
@@ -99,7 +99,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListApiKeysResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "CreateApiKey".to_string(),
@@ -110,7 +110,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("CreateApiKeyResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "UpdateApiKey".to_string(),
@@ -122,7 +122,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("StatusResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "DeleteApiKey".to_string(),
@@ -134,7 +134,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("StatusResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "ListWebhooks".to_string(),
@@ -145,7 +145,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListWebhooksResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "CreateWebhook".to_string(),
@@ -156,7 +156,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("CreateWebhookResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "UpdateWebhook".to_string(),
@@ -167,7 +167,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("StatusResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "DeleteWebhook".to_string(),
@@ -178,7 +178,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("StatusResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
     ]
 }

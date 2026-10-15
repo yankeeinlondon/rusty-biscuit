@@ -48,7 +48,7 @@ fn fixture_api(name: &str, module: &str, response_type: &str) -> RestApi {
             response: ApiResponse::json_type(response_type),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         }],
         module_path: Some(module.to_string()),
         request_suffix: None,
@@ -320,7 +320,7 @@ fn same_api_duplicate_route_blocks_every_output() {
 }
 
 fn located_param(name: &str, required: bool) -> ParamDef {
-    ParamDef {
+    ParamDef { rust_name: None, secret: false, pager_managed: false,
         name: name.to_string(),
         required,
         description: Some(format!("{name} input")),
@@ -477,7 +477,7 @@ fn api_with_located_type(
     param_type: QueryParamType,
 ) -> RestApi {
     let mut api = fixture_api("Located", "located", "serde_json::Value");
-    api.endpoints[0].params = Some(place(ParamDef {
+    api.endpoints[0].params = Some(place(ParamDef { rust_name: None, secret: false, pager_managed: false,
         param_type,
         ..located_param("flags", false)
     }));

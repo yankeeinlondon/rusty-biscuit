@@ -12,7 +12,7 @@ pub fn auth_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListAuthenticatorsResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "GetAuthenticator".to_string(),
@@ -23,7 +23,7 @@ pub fn auth_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("AuthenticatorInfo"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "ListAuthUsers".to_string(),
@@ -34,7 +34,7 @@ pub fn auth_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_vec_type("AuthUser"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "CreateAuthUser".to_string(),
@@ -45,7 +45,7 @@ pub fn auth_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("AuthUser"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "DeleteAuthUser".to_string(),
@@ -56,7 +56,7 @@ pub fn auth_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::Empty,
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         // Authorization
         Endpoint {
@@ -68,7 +68,7 @@ pub fn auth_endpoints() -> Vec<Endpoint> {
             response: ApiResponse::json_type("ListAuthzSourcesResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
     ]
 }

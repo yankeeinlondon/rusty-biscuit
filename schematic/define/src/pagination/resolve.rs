@@ -116,7 +116,7 @@ impl Resolution {
 ///     response: ApiResponse::json_type("Vec<Release>"),
 ///     headers: vec![],
 ///     params: None,
-///     oauth_scopes: None,
+///     oauth_scopes: None, cross_origin: None,
 /// };
 ///
 /// let resolution = resolve(&api, &releases);

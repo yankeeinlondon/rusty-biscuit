@@ -11,7 +11,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("GetHistoryResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "GetHistoryItem".to_string(),
@@ -22,7 +22,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("SpeechHistoryItemResponseModel"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "DeleteHistoryItem".to_string(),
@@ -33,7 +33,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::json_type("StatusResponse"),
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "GetHistoryItemAudio".to_string(),
@@ -44,7 +44,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::Binary,
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
         Endpoint {
             id: "DownloadHistoryItems".to_string(),
@@ -55,7 +55,7 @@ pub fn all() -> Vec<Endpoint> {
             response: ApiResponse::Binary,
             headers: vec![],
             params: None,
-            oauth_scopes: None,
+            oauth_scopes: None, cross_origin: None,
         },
     ]
 }
