@@ -237,6 +237,23 @@ fn approve_commands(
     candidates: &[ShellCandidate],
     approval_options: &ShellApprovalOptions,
 ) -> Result<PreFlightResult, CompositionError> {
+    if let Some(approved) = &approval_options.closed_approvals {
+        let uncovered = candidates.iter().find(|candidate| !candidate.authorized_by(approved))
+            .map(|candidate| candidate.display_command())
+            .or_else(|| all_commands.iter().find(|(command, _, _)| {
+                !approved.contains_exact(command) && !candidates.iter().any(|candidate| {
+                    candidate.authorized_by(approved) && candidate.resolved.as_ref().is_some_and(|keys| keys.contains(command))
+                })
+            }).map(|(command, _, _)| command.clone()));
+        if let Some(command) = uncovered {
+            return Err(CompositionError::SequenceShellResolution {
+                command, task: "sequence descendant".into(),
+                message: "introduced an unapproved command after sequence approval closed".into(), source: None,
+            });
+        }
+        return Ok(PreFlightResult { approved_commands: approved.clone(),
+            total_discovered: all_commands.len() + candidates.len(), already_whitelisted: all_commands.len(), user_approved: 0 });
+    }
     let mut templates = ShellPreApprovals::new();
     let mut by_shape: HashSet<String> = HashSet::new();
     let mut by_bytes: HashSet<String> = HashSet::new();

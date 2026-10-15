@@ -293,3 +293,145 @@ fn body_preparation_failure_runs_enclosing_failure_and_finalize() {
     assert_eq!(recorder.events(), ["info:failure", "info:finalize"]);
     assert_eq!(runtime.outputs_value(), json!([]));
 }
+
+#[test]
+fn sibling_failure_cancels_opted_container_descendants_and_preserves_other_legs() {
+    struct CoordinatedShell {
+        ready: Mutex<usize>,
+        changed: std::sync::Condvar,
+        commands: Mutex<Vec<String>>,
+    }
+    impl TaskShellRunner for CoordinatedShell {
+        fn run(&self, command: &str, _timeout: Duration, _interrupt: Option<&AtomicBool>,
+            _live: Option<&Arc<TaskLiveOutput>>) -> Result<ShellCommandOutput, TaskShellError>
+        {
+            self.commands.lock().unwrap().push(command.into());
+            let mut ready = self.ready.lock().unwrap();
+            *ready += 1;
+            self.changed.notify_all();
+            let (ready, wait) = self.changed.wait_timeout_while(ready,
+                Duration::from_secs(2), |ready| *ready < 4).unwrap();
+            assert!(*ready >= 4 && !wait.timed_out(), "all four running leaves must be admitted");
+            drop(ready);
+            let mut interrupted = false;
+            if command.starts_with("wait-") {
+                let deadline = std::time::Instant::now() + Duration::from_secs(2);
+                while !crate::composition::lifecycle::cancellation::requested() {
+                    assert!(std::time::Instant::now() < deadline, "descendant never received cancellation");
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                let cause = crate::composition::lifecycle::cancellation::cause().unwrap();
+                assert!(matches!(cause, crate::composition::lifecycle::cancellation::CancellationCause::SiblingFailure {
+                    ref group, ref leg, .. } if group == "atomic" && leg == "bad"));
+                interrupted = true;
+                *self.ready.lock().unwrap() += 1;
+                self.changed.notify_all();
+            } else if command == "complete" {
+                let ready = self.ready.lock().unwrap();
+                let (ready, wait) = self.changed.wait_timeout_while(ready,
+                    Duration::from_secs(2), |ready| *ready < 5).unwrap();
+                assert!(*ready >= 5 && !wait.timed_out(), "failure must stop admission before plain finishes");
+            }
+            Ok(ShellCommandOutput { stdout:command.into(), exit_code:if command == "fail" { 1 } else { 0 },
+                timed_out:false, interrupted, runaway:None })
+        }
+    }
+    let dir = TempDir::new().unwrap();
+    let source = one_step_source(dir.path(), json!({"name":"root", "group":{"name":"atomic", "max_parallel":3, "tasks":[
+        {"name":"opted", "sequence":[{"name":"nested-group", "group":{"name":"descendants", "tasks":[
+            {"name":"a", "sequence":[{"name":"a-work", "shell":"wait-a"}], "finalize":[{"info":"a-finalize"}]},
+            {"name":"b", "sequence":[{"name":"b-work", "shell":"wait-b"}], "cancelled":[], "finalize":[{"info":"b-finalize"}]}
+        ], "finalize":[{"info":"descendants-finalize"}]}}],
+            "cancelled":[{"info":"opted-cancelled"}], "finalize":[{"info":"opted-finalize"}]},
+        {"name":"plain", "sequence":[{"name":"plain-work", "shell":"complete"}],
+            "success":[{"info":"plain-success"}], "finalize":[{"info":"plain-finalize"}]},
+        {"name":"bad", "shell":"fail"},
+        {"name":"unadmitted", "sequence":[], "cancelled":[], "finalize":[{"info":"never"}]}
+    ], "failure":[{"info":"failed={{ as_csv(group.failed) }};cancelled={{ as_csv(group.cancelled) }}"}],
+       "finalize":[{"info":"atomic-finalize"}]}}));
+    let fixture = Fixture::build(dir, &source).unwrap();
+    let recorder = Recorder::default();
+    let fake = FakeTaskShell::default();
+    let shell = CoordinatedShell { ready:Mutex::new(0), changed:std::sync::Condvar::new(), commands:Mutex::new(Vec::new()) };
+    let runtime = Arc::new(RuntimeState::new());
+    let mut wiring = Wiring::new(&recorder, &fake);
+    wiring.shell = &shell; wiring.runtime = Some(&runtime);
+    let outcome = fixture.execute(&wiring);
+    assert_eq!(outcome.status, TaskStatus::Failed, "{}", failure_message(&outcome));
+    assert_eq!(runtime.outputs_value(), json!([]));
+    let events = recorder.events();
+    for marker in ["info:a-finalize", "info:b-finalize", "info:plain-success", "info:plain-finalize"] {
+        assert_eq!(events.iter().filter(|event| event.as_str() == marker).count(), 1, "{events:?}");
+    }
+    let position = |event: &str| events.iter().position(|item| item == event).unwrap();
+    assert!(position("info:a-finalize") < position("info:descendants-finalize"));
+    assert!(position("info:b-finalize") < position("info:descendants-finalize"));
+    assert!(position("info:descendants-finalize") < position("info:opted-cancelled"));
+    assert!(position("info:opted-cancelled") < position("info:opted-finalize"));
+    assert!(position("info:opted-finalize") < position("info:atomic-finalize"));
+    assert!(events.contains(&"info:failed=bad;cancelled=opted, unadmitted".into()), "{events:?}");
+    assert!(!events.iter().any(|event| event == "info:never"));
+}
+
+#[test]
+fn interrupted_sequence_keeps_cleanup_errors_secondary_and_never_retries() {
+    let dir = TempDir::new().unwrap();
+    let source = one_step_source(dir.path(), json!({"name":"outer", "sequence":[
+        {"name":"inner", "sequence":[{"name":"work", "shell":"interrupt"}],
+         "cancelled":[{"shell":"cleanup"}],
+         "finalize":[{"info":"inner-finalize"},{"retry":{"max_attempts":1,"with":{"retried":true}}}]},
+        {"name":"later", "shell":"never"}
+    ], "failure":[{"info":"never-failure"}], "cancelled":[{"info":"outer-cancelled"}],
+       "finalize":[{"info":"outer-finalize"}]}));
+    let fixture = Fixture::build(dir, &source).unwrap();
+    let recorder = Recorder::default();
+    recorder.fail_stack_shell();
+    let shell = FakeTaskShell::with_results(vec![ShellCommandOutput {
+        stdout:"partial".into(), exit_code:130, timed_out:false, interrupted:true, runaway:None,
+    }]);
+    let runtime = Arc::new(RuntimeState::new());
+    let outcome = fixture.execute(&Wiring {runtime:Some(&runtime), ..Wiring::new(&recorder, &shell)});
+    assert_eq!(outcome.status, TaskStatus::Interrupted);
+    assert_eq!(outcome.stdout, "partial");
+    assert!(outcome.error.is_none());
+    assert_eq!(shell.commands(), ["interrupt"]);
+    assert_eq!(outcome.secondary_errors.len(), 2, "{:?}", outcome.secondary_errors);
+    assert!(outcome.secondary_errors.iter().any(|error| error.info.msg.contains("cannot recover a cancelled")));
+    assert!(!runtime.snapshot().mutations.contains_key("retried"));
+    assert_eq!(runtime.outputs_value(), json!([]));
+    let events = recorder.events();
+    assert_eq!(events, ["stack-shell:cleanup", "info:inner-finalize", "info:outer-cancelled", "info:outer-finalize"]);
+}
+
+#[test]
+fn cleanup_shell_timeout_stays_secondary_to_cancellation() {
+    struct TimeoutShell;
+    impl ShellRunner for TimeoutShell {
+        fn run(&self, command: &str) -> Result<i32, ShellRunError> {
+            Err(ShellRunError::Spawn { command: command.into(),
+                source:std::io::Error::new(std::io::ErrorKind::TimedOut, "cleanup deadline exceeded") })
+        }
+        fn run_structured(&self, _chain: &darkmatter::markdown::compose::shell_expansion::template::FilledChain)
+            -> Result<i32, ShellRunError>
+        { self.run("cleanup") }
+    }
+    let dir = TempDir::new().unwrap();
+    let source = one_step_source(dir.path(), json!({"name":"container", "sequence":[
+        {"name":"child", "shell":"interrupt"}
+    ], "cancelled":[{"shell":"cleanup"}], "failure":[{"info":"never"}],
+       "finalize":[{"info":"finalized"}]}));
+    let fixture = Fixture::build(dir, &source).unwrap();
+    let recorder = Recorder::default();
+    let shell = FakeTaskShell::with_results(vec![ShellCommandOutput {
+        stdout:String::new(), exit_code:130, interrupted:true, timed_out:false, runaway:None,
+    }]);
+    let runtime = Arc::new(RuntimeState::new());
+    let outcome = fixture.execute(&Wiring { runtime:Some(&runtime), lifecycle_shell:&TimeoutShell,
+        ..Wiring::new(&recorder, &shell) });
+    assert_eq!(outcome.status, TaskStatus::Interrupted);
+    assert!(outcome.error.is_none());
+    assert_eq!(outcome.secondary_errors.len(), 1);
+    assert!(outcome.secondary_errors[0].info.msg.contains("cleanup deadline exceeded"));
+    assert_eq!(recorder.events(), ["info:finalized"]);
+    assert_eq!(runtime.outputs_value(), json!([]));
+}

@@ -120,6 +120,7 @@ impl ActiveDocumentOutcome {
 /// command's own setters.
 #[derive(Clone)]
 pub(crate) struct StepScope {
+    pub(crate) shell_approvals: Option<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals>,
     /// The step's caller layers, origin kept: only the user's setters are
     /// authored, every run-produced value is data.
     pub(crate) caller_overrides: claudine::composition::LayeredOverrides,
@@ -719,6 +720,12 @@ pub(crate) fn prepare_and_run_active_document(
         shared.dry_run,
         shared.yolo,
     );
+
+    let mut approval_options = approval_options;
+    if let Some(approved) = step_scope.and_then(|scope| scope.shell_approvals.clone()) {
+        approval_options.closed_approvals = Some(approved);
+        approval_options.approval_handler = None;
+    }
 
     let boot = if staged {
         DocumentBoot::Staged(approval_options)
@@ -1417,6 +1424,7 @@ fn build_execution_request(
         silent: shared.silent,
         env_overrides: env_overrides.clone(),
         shared_approval_cache,
+        closed_shell_approvals: step_scope.and_then(|scope| scope.shell_approvals.clone()),
         // Inside a step the sequence owns preflight messaging and the header.
         sequence: step_scope.is_some(),
         installed_snapshot: Some(prep_context.installed_snapshot.clone()),
@@ -1947,6 +1955,9 @@ fn run_staged_single(
         &handoff_ledger,
     )? {
         staged_boot::StagedInitialize::Skipped => return Ok(ActiveDocumentOutcome::done(0)),
+        staged_boot::StagedInitialize::Cancelled => {
+            return Ok(ActiveDocumentOutcome::done(USER_INTERRUPT_EXIT_CODE));
+        }
         staged_boot::StagedInitialize::Handoff(handoff) => {
             return Ok(ActiveDocumentOutcome::Handoff(handoff));
         }
@@ -1977,8 +1988,12 @@ fn run_staged_single(
                 prep_context,
             )
         })
-        .map_err(|error| staged_boot::route_stabilized_failure(&mut guard, &document, error))?
     };
+    if staged_boot::cancel_staged_before_start(&mut guard, &document) {
+        return Ok(ActiveDocumentOutcome::done(USER_INTERRUPT_EXIT_CODE));
+    }
+    let prepared = prepared
+        .map_err(|error| staged_boot::route_stabilized_failure(&mut guard, &document, error))?;
     emit_dropped_optional_warnings(&prepared.dropped_optionals);
     emit_compose_warnings(&prepared.warnings, shared.silent);
     guard.set_config(prepared.lifecycle.clone());

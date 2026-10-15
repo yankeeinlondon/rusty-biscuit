@@ -50,7 +50,8 @@ const PAUSE_RESET_MARGIN: std::time::Duration = std::time::Duration::from_secs(5
 /// just finished. Loop concerns run on every gate pass, including the terminal
 /// pass that exits. Under `fail_fast: true`, iterations ending in `blocked` or `failure`
 /// emit `finalize` through the executor and then exit before the loop gate.
-/// Under `fail_fast: false`, failed iterations reach the loop gate.
+/// Under `fail_fast: false`, failed iterations reach the loop gate. Cancellation
+/// always ends the loop before its gate, mutation, or another iteration.
 ///
 /// `initialize_frontmatter` is the full bootstrap namespace, separate from
 /// iteration-control state. Its live mutations remain visible to catch
@@ -131,6 +132,9 @@ where
     init_ctx.live_frontmatter = Some(&initialize_live);
     init_ctx.runtime_state = runtime_state;
     let init_outcome = guard.execute_event(LifecycleSignal::Initialize, &init_ctx);
+    if guard.cancel_if_requested(&init_ctx) {
+        return Ok(LoopExecutionResult::success(initial_frontmatter, 0, String::new(), 130));
+    }
     let init_result = execute_loop_catch_protocol(
         &mut guard,
         &init_ctx,
@@ -321,6 +325,9 @@ where
         let mut output = match executor(context, &mut guard) {
             Ok(output) => output,
             Err(error) => {
+                if guard.cancel_if_requested(&init_ctx) {
+                    return Ok(LoopExecutionResult::success(frontmatter, iteration_count + 1, last_output, 130));
+                }
                 last_output.clear();
                 last_exit_code = 1;
                 iteration_count += 1;
@@ -337,6 +344,12 @@ where
                 continue;
             }
         };
+
+        if output.terminal_signal == Some(LifecycleSignal::Cancelled)
+            || guard.cancel_if_requested(&init_ctx)
+        {
+            return Ok(LoopExecutionResult::success(frontmatter, iteration_count + 1, output.output, 130));
+        }
 
         // A proxy surfaced by the iteration's own lifecycle ends the source
         // document *now*: the target is not an extra iteration of this loop

@@ -80,13 +80,7 @@ pub(super) fn execute_terminal_event(
                 err,
                 Some(&timing),
             );
-            let mut ctx = ctx;
-            // `start` follows successful preflight; a catch event reached
-            // before that boundary must not inherit a shell runner.
-            if !guard.start_emitted() {
-                ctx.shell_runner = &claudine::composition::lifecycle_executor::DisabledShellRunner;
-            }
-            ctx.execute_stack_for_signal(guard.config())
+            guard.run_event_stack(signal, &ctx)
         };
         if let Some(StackControl::Error { reason }) = outcome.control.as_ref() {
             // The stack downgraded the run. Re-designate the already-recorded

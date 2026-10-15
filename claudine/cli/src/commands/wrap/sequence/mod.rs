@@ -77,12 +77,13 @@ fn approve_preflight_graph(
     launch_area: Option<&std::path::Path>,
     invocation: &claudine::invocation_context::InvocationContext,
     graph_context: &darkmatter::markdown::compose::ComposeContext,
+    closed: Option<&darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals>,
 ) -> Result<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals> {
     if graph.shell_commands.is_empty()
         && graph.template_candidates.is_empty()
         && graph.prompt_documents.is_empty()
     {
-        return Ok(Default::default());
+        return Ok(closed.cloned().unwrap_or_default());
     }
 
     let approval_options = super::apply_composition_shell_overrides(
@@ -94,6 +95,12 @@ fn approve_preflight_graph(
         shared.dry_run,
         shared.yolo,
     );
+
+    let mut approval_options = approval_options;
+    if let Some(approved) = closed {
+        approval_options.closed_approvals = Some(approved.clone());
+        approval_options.approval_handler = None;
+    }
 
     // The document the graph walk is composing, so a failure can name it.
     let composing = std::cell::RefCell::new(None::<std::path::PathBuf>);
@@ -285,8 +292,8 @@ pub(crate) fn execute_sequence(
         match root.event(LifecycleSignal::Initialize, None)? {
             ContainerEventDecision::Continue => {},
             ContainerEventDecision::Skip => return Ok(0),
-            ContainerEventDecision::Proxy { target, overlay } => return container::run_proxy(source, shared, &invocation, &source_context, &file_resolution_context, user_set_overrides.as_ref(), &caller_input_records, &runtime, root.proxy_location.take().expect("proxy decision carries its authored location"), target, overlay, verbose),
-            ContainerEventDecision::Finished { failed } => return Ok(i32::from(failed)),
+            ContainerEventDecision::Proxy { target, overlay } => return container::run_proxy(source, shared, &invocation, &source_context, &file_resolution_context, user_set_overrides.as_ref(), &caller_input_records, &runtime, root.proxy_location.take().expect("proxy decision carries its authored location"), target, overlay, verbose, root.approved.as_ref()),
+            ContainerEventDecision::Finished { failed } => return Ok(if root.runner.is_cancelled() { 130 } else { i32::from(failed) }),
             other => return Err(color_eyre::eyre::eyre!("invalid initialize transition: {other:?}")),
         }
     }
@@ -295,7 +302,10 @@ pub(crate) fn execute_sequence(
         let outcome = execute_sequence_inner(source, plan.clone(), shared, user_set_overrides.clone(), caller_input_records.clone(), execution_options.clone(), verbose, perf_enabled, startup_timings.take(), invocation.clone(), source_context.clone(), file_resolution_context.clone(), &mut root);
         if shared.dry_run { return outcome; }
         let (signal, error) = match &outcome {
-            Ok(130) => return outcome,
+            Ok(130) => {
+                root.runner.cancel(claudine::composition::lifecycle::cancellation::CancellationCause::Interrupt);
+                (LifecycleSignal::Cancelled, root.runner.primary_error().cloned())
+            },
             Ok(0) => (LifecycleSignal::Success, None),
             Ok(_) => (LifecycleSignal::Failure, root.child_error.take().or_else(|| Some(LifecycleErrorInfo::from_action_failure("sequence", "a sequence child failed")))),
             Err(error) => (if root.started { LifecycleSignal::Failure } else { LifecycleSignal::Blocked }, Some(LifecycleErrorInfo::from_error_or_action("sequence", error.as_ref()))),
@@ -304,8 +314,8 @@ pub(crate) fn execute_sequence(
         let decision = root.pending.take().map(Ok).unwrap_or_else(|| root.event(signal, error));
         match decision? {
             ContainerEventDecision::Retry { delay, overlay } => root.retry(delay, &overlay)?,
-            ContainerEventDecision::Proxy { target, overlay } => return container::run_proxy(source, shared, &invocation, &source_context, &file_resolution_context, user_set_overrides.as_ref(), &caller_input_records, &runtime, root.proxy_location.take().expect("proxy decision carries its authored location"), target, overlay, verbose),
-            ContainerEventDecision::Finished { failed } => return if failed { outcome.and(Ok(1)) } else { Ok(0) },
+            ContainerEventDecision::Proxy { target, overlay } => return container::run_proxy(source, shared, &invocation, &source_context, &file_resolution_context, user_set_overrides.as_ref(), &caller_input_records, &runtime, root.proxy_location.take().expect("proxy decision carries its authored location"), target, overlay, verbose, root.approved.as_ref()),
+            ContainerEventDecision::Finished { failed } => return if root.runner.is_cancelled() { Ok(130) } else if failed { outcome.and(Ok(1)) } else { Ok(0) },
             ContainerEventDecision::Skip => return Ok(0),
             other => return Err(color_eyre::eyre::eyre!("invalid terminal transition: {other:?}")),
         }
@@ -486,7 +496,10 @@ fn execute_sequence_inner(
         Some(prep_context.launch_workspace.launch_cwd.as_path()),
         &prep_context.invocation,
         &graph_context,
+        root.approved.as_ref(),
     )?;
+    root.approved = Some(preflight_approved.clone());
+    if let Some(lifecycle) = &graph.root_lifecycle { root.runner.guard_mut().set_config(lifecycle.clone()); }
     let catalog = match prep_context.selection_config.as_ref() {
         Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(
             cfg.model_overrides.clone(),

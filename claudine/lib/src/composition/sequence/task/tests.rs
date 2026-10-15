@@ -6521,6 +6521,12 @@ mod group_preparation_contract {
     refused_preparation!(new_child_template_is_refused,
         json!({"tasks":[{"name":"leg","shell":"echo {{ seq.index }}"}]}),
         "introduced a template after sequence approval closed");
+    refused_preparation!(new_container_event_command_is_refused,
+        json!({"success":[{"shell":"unapproved-cleanup"}]}),
+        "introduced a command after sequence approval closed");
+    refused_preparation!(new_container_event_template_is_refused,
+        json!({"success":[{"shell":"echo {{ seq.outputs }}"}]}),
+        "introduced a template after sequence approval closed");
     refused_preparation!(new_prompt_target_is_refused,
         json!({"tasks":[{"name":"leg","prompt":"target.md"}]}), "unapproved prompt document");
     refused_preparation!(malformed_reread_runs_cleanup_without_start_or_publication,

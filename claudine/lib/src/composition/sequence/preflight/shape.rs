@@ -96,8 +96,8 @@ impl PreflightTask {
 
 /// Where a task sits in its sequence.
 ///
-/// Only the root sequence's first task is [`TaskPosition::First`]: every
-/// container above it must place it first. A first task's commands may be
+/// A task is [`TaskPosition::First`] only along an all-first-step ancestry.
+/// Every leg of a first group shares that position. A first task's commands may be
 /// approved as resolved bytes; every other task's commands with placeholders
 /// are approved only as templates, because earlier tasks may change the values
 /// they read.
@@ -265,7 +265,7 @@ pub struct TaskDiagnosticProvenance {
     pub task_property: String,
 }
 
-/// The five executable shapes, resolved.
+/// The executable shapes, resolved.
 #[derive(Debug, Clone)]
 pub enum PreflightAction {
     /// Compose and execute a referenced document.

@@ -57,6 +57,7 @@ pub(super) struct ValidatedGroup {
 
 impl TaskExecution<'_> {
     pub(super) fn run_group_container(&self, group: &PreflightGroup) -> PrimaryOutcome {
+        if self.interrupted() { return PrimaryOutcome::interrupted(String::new()); }
         use crate::composition::lifecycle::{LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal};
         use crate::composition::lifecycle::executor::DisabledShellRunner;
         use crate::composition::lifecycle::runtime::{ContainerEventDecision as Decision, ContainerRunner};
@@ -82,6 +83,14 @@ impl TaskExecution<'_> {
         let mut prepared = None;
         let mut current_group = None;
         loop {
+            if !matches!(signal, LifecycleSignal::Cancelled | LifecycleSignal::Finalize)
+                && self.interrupted()
+            {
+                runner.cancel(crate::composition::lifecycle::cancellation::cause()
+                    .unwrap_or(crate::composition::lifecycle::cancellation::CancellationCause::Interrupt));
+                error = runner.primary_error().cloned();
+                signal = LifecycleSignal::Cancelled;
+            }
             if signal == LifecycleSignal::Start {
                 shell_enabled = false;
                 let preparation = execution.member_state().and_then(|state| {
@@ -113,6 +122,12 @@ impl TaskExecution<'_> {
                         result = PrimaryOutcome::failed(diagnostic); signal = LifecycleSignal::Blocked;
                     }
                 }
+            }
+            if signal == LifecycleSignal::Start && self.interrupted() {
+                runner.cancel(crate::composition::lifecycle::cancellation::cause()
+                    .unwrap_or(crate::composition::lifecycle::cancellation::CancellationCause::Interrupt));
+                error = runner.primary_error().cloned();
+                signal = LifecycleSignal::Cancelled;
             }
             let group = current_group.as_ref().unwrap_or(group);
             live.lock().expect(SLOT_POISONED).extend(runtime.snapshot().mutations);
@@ -154,8 +169,10 @@ impl TaskExecution<'_> {
                                     error = Some(diagnostic.info.clone()); signal = LifecycleSignal::Failure;
                                 }
                                 super::PrimaryResult::Interrupted => {
-                                    runner.guard_mut().defuse();
-                                    return result;
+                                    runner.cancel(crate::composition::lifecycle::cancellation::cause()
+                                        .unwrap_or(crate::composition::lifecycle::cancellation::CancellationCause::Interrupt));
+                                    error = runner.primary_error().cloned();
+                                    signal = LifecycleSignal::Cancelled;
                                 }
                             }
                         }
@@ -171,6 +188,12 @@ impl TaskExecution<'_> {
                 }
                 Decision::Finalize { error: raised, .. } => {
                     error = raised.or(error); signal = LifecycleSignal::Finalize;
+                }
+                Decision::Finished { .. } if runner.is_cancelled() => {
+                    result.secondary.extend(runner.secondary_errors().iter().cloned().map(|info|
+                        TaskDiagnostic { stage: TaskStage::Primary, info }));
+                    result.result = super::PrimaryResult::Interrupted;
+                    return result;
                 }
                 Decision::Finished { failed } => {
                     if failed {
@@ -376,6 +399,16 @@ impl TaskExecution<'_> {
             .unwrap_or(group.tasks.len())
             .clamp(1, group.tasks.len().max(1));
         let admission = Mutex::new((0usize, false, None));
+        let parent_cancellation = crate::composition::lifecycle::cancellation::current();
+        let cancellations: Vec<_> = group.tasks.iter().map(|_| parent_cancellation.child()).collect();
+        let cancellable: Vec<_> = group.tasks.iter().map(|task| match &task.action {
+            super::super::preflight::PreflightAction::Sequence(sequence) => sequence.lifecycle.cancelled_declared,
+            super::super::preflight::PreflightAction::Group(group) => group.lifecycle.cancelled_declared,
+            super::super::preflight::PreflightAction::Prompt { path, .. } => self.graph.prompt_documents.iter()
+                .find(|document| &document.path == path)
+                .is_some_and(|document| document.markdown.frontmatter().as_map().contains_key("cancelled")),
+            _ => false,
+        }).collect();
 
         std::thread::scope(|scope| {
             for _ in 0..workers {
@@ -385,13 +418,14 @@ impl TaskExecution<'_> {
                     loop {
                         let index = {
                             let mut admission = admission.lock().expect(SLOT_POISONED);
-                            if admission.0 >= group.tasks.len() || (group.fail_fast && admission.1) {
+                            if self.interrupted() || admission.0 >= group.tasks.len() || (group.fail_fast && admission.1) {
                                 break;
                             }
                             let index = admission.0;
                             admission.0 += 1;
                             index
                         };
+                        let _cancellation_scope = cancellations[index].enter();
                         let task = &group.tasks[index];
                         let started = Instant::now();
                         // Each concurrent task takes its own palette entry, so
@@ -429,9 +463,6 @@ impl TaskExecution<'_> {
                                 .or(self.document),
                             ..*self
                         };
-                        // A sibling's failure never cancels in-flight work:
-                        // discarding a half-finished agent run costs more than
-                        // letting it land in its slot.
                         let outcome = member.run_validated(Some(&validated.members[index]));
                         let duration = started.elapsed();
                         if let Some(stream) = &stream {
@@ -440,8 +471,19 @@ impl TaskExecution<'_> {
                         if outcome.status != TaskStatus::Succeeded {
                             let mut admission = admission.lock().expect(SLOT_POISONED);
                             admission.1 = true;
-                            if admission.2.is_none() {
+                            if admission.2.is_none() && outcome.status == TaskStatus::Failed {
                                 admission.2 = outcome.error.as_ref().map(|error| error.info.clone());
+                                if group.fail_fast {
+                                    let cause = crate::composition::lifecycle::cancellation::CancellationCause::SiblingFailure {
+                                        group: group.name.clone(), leg: task.name.clone().unwrap_or_else(|| task.label.clone()),
+                                        error: outcome.error.as_ref().expect("failed task has a diagnostic").info.clone(),
+                                    };
+                                    for sibling in 0..admission.0 {
+                                        if sibling != index && cancellable[sibling] {
+                                            cancellations[sibling].cancel(cause.clone());
+                                        }
+                                    }
+                                }
                             }
                         }
                         *slots[index].lock().expect(SLOT_POISONED) =
@@ -474,7 +516,11 @@ impl TaskExecution<'_> {
         let mut failure: Option<TaskDiagnostic> = None;
         let mut interrupted = false;
         let mut binding = GroupBinding { variables: Map::new(), legs: Vec::new() };
-        let cancelled_error = triggering_failure.as_ref().map_or(Value::Null, LifecycleErrorInfo::to_value);
+        let cancellation_error = triggering_failure.or_else(||
+            crate::composition::lifecycle::cancellation::cause().map(|cause| cause.error()))
+            .or_else(|| self.interrupted().then(||
+                crate::composition::lifecycle::cancellation::CancellationCause::Interrupt.error()));
+        let cancelled_error = cancellation_error.as_ref().map_or(Value::Null, LifecycleErrorInfo::to_value);
 
         for (task, run) in group.tasks.iter().zip(&runs) {
             let name = task.name.clone().unwrap_or_else(|| task.label.clone());
@@ -492,7 +538,8 @@ impl TaskExecution<'_> {
                     TaskStatus::Interrupted => LegOutcome::Cancelled,
                 },
                 output: run.outcome.result.clone(),
-                err: run.outcome.error.as_ref().map_or(Value::Null,
+                err: run.outcome.error.as_ref().map_or_else(
+                    || if run.outcome.status == TaskStatus::Interrupted { cancelled_error.clone() } else { Value::Null },
                     |error| error.info.to_value()),
             });
             results.push(GroupTaskResult {
@@ -521,7 +568,7 @@ impl TaskExecution<'_> {
 
         // An interrupted group commits nothing: the run is being torn down, and a
         // half-scheduled group's state is not a state any later step should read.
-        let outcome = if interrupted {
+        let outcome = if interrupted && (self.interrupted() || failure.is_none()) {
             PrimaryOutcome::interrupted(stdout)
         } else if group.fail_fast && failure.is_some() {
             PrimaryOutcome::failed_with(stdout, failure.expect("failed leg has a diagnostic"))

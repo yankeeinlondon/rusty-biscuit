@@ -3,7 +3,7 @@
 //! The contract is the lifecycle `shell` runner's, with only argument
 //! construction changed: children inherit this process's standard streams and
 //! working directory, start from the same environment the system-shell route
-//! gives them, and get no deadline and no process group of their own. Each
+//! gives them, and share task shells' process-tree ownership and cancellation. Each
 //! program is resolved to a native executable before the first segment
 //! starts; a target an interpreter would re-parse is refused, and nothing
 //! falls back to a shell. `&&` and `||` short-circuit here, as a shell would.
@@ -70,7 +70,9 @@ pub(super) fn run_filled_chain(
         .map_err(|error| spawn_failed(std::io::Error::other(error)))?;
         command.args(&segment.args);
         apply_redirection(&mut command, &segment.redirection);
-        status = command.status().map_err(spawn_failed)?.code().unwrap_or(-1);
+        status = super::super::sequence::task::run_owned_lifecycle_command(&mut command)
+            .map_err(spawn_failed)?;
+        if super::cancellation::requested() { break; }
     }
     Ok(status)
 }

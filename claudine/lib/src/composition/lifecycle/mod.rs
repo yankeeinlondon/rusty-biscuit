@@ -38,6 +38,7 @@ mod action_shape;
 pub mod actions;
 mod audio;
 pub mod bindings;
+pub mod cancellation;
 pub mod context;
 pub mod control;
 pub mod executor;
@@ -524,6 +525,9 @@ pub struct LifecycleRunGuard<'a> {
 }
 
 impl<'a> LifecycleRunGuard<'a> {
+    /// Source owning this lifecycle, retained for typed runtime diagnostics.
+    pub fn source_path(&self) -> &Path { self.ctx.source_path }
+
     /// Create a new guard.
     pub fn new(
         config: &'a LifecycleConfig,
@@ -687,6 +691,9 @@ impl<'a> LifecycleRunGuard<'a> {
                 | LifecycleSignal::Finalize
         )
         .then(crate::interrupt::TerminalLifecycleScope::enter);
+        let _cleanup = matches!(signal, LifecycleSignal::Success | LifecycleSignal::Blocked
+            | LifecycleSignal::Failure | LifecycleSignal::Cancelled | LifecycleSignal::Finalize)
+            .then(cancellation::CleanupScope::enter);
         let mut context = stack_ctx.with_signal(signal);
         // `start` follows successful preflight; proxy adoption resets it. Catch
         // events reached before that boundary must not inherit a shell runner.

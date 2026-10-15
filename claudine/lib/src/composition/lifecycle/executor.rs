@@ -523,11 +523,8 @@ fn run_system_shell(command: &str, environment: Option<&EnvBaseline>) -> Result<
         command: command.to_string(),
         source: std::io::Error::other(error),
     })?;
-    let status = cmd.status().map_err(|source| ShellRunError::Spawn {
-        command: command.to_string(),
-        source,
-    })?;
-    Ok(status.code().unwrap_or(-1))
+    super::super::sequence::task::run_owned_lifecycle_command(&mut cmd)
+        .map_err(|source| ShellRunError::Spawn { command: command.to_string(), source })
 }
 
 /// `program` as a child starting from `environment`, or inheriting this
@@ -1840,7 +1837,7 @@ impl StackExecutionContext<'_> {
             run(None)
         };
         match outcome {
-            Ok(results) if !crate::interrupt::interrupted() => Ok(results),
+            Ok(results) if !super::cancellation::requested() => Ok(results),
             Ok(_) => Err(ActionFailure::Evaluation(
                 LifecycleErrorInfo::from_action_failure(
                     "set",
@@ -1858,7 +1855,7 @@ impl StackExecutionContext<'_> {
                 let command = source.command().unwrap_or_default().to_string();
                 Err(self.template_refusal(property, &command, source))
             }
-            Err(error) if crate::interrupt::interrupted() => Err(ActionFailure::Evaluation(
+            Err(error) if super::cancellation::requested() => Err(ActionFailure::Evaluation(
                 LifecycleErrorInfo::from_error_or_action("set", &error).at_property(property.to_string()),
             )),
             Err(error) => Err(ActionFailure::Dispatch(

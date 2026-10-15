@@ -144,7 +144,7 @@ exit 0
 }
 
 /// Ctrl+C while the wrapper tears down an agent's orphaned descendants still
-/// runs the document's `failure` and `finalize` events, promptly.
+/// runs the document's `cancelled` and `finalize` events, promptly.
 ///
 /// The shape is an OpenCode run that exits but leaves a process holding its
 /// stdout/stderr pipes. The fake's orphan survives `SIGTERM` (its trap touches
@@ -159,7 +159,7 @@ exit 0
 #[cfg(unix)]
 #[test]
 #[serial_test::serial]
-fn compose_sigint_during_orphan_teardown_runs_failure_lifecycle() {
+fn compose_sigint_during_orphan_teardown_runs_cancelled_lifecycle() {
     let fixture = CliProcessFixture::named("wrap-sigint-orphan");
     let orphan = OrphanTeardownFixture::new(&fixture, OrphanOnTerm::Survive);
     let mut run = orphan.spawn();
@@ -187,7 +187,7 @@ fn compose_sigint_during_orphan_teardown_runs_failure_lifecycle() {
     );
     assert_eq!(
         orphan.events(),
-        vec!["failure", "finalize"],
+        vec!["cancelled", "finalize"],
         "the interrupted run must still fire its terminal lifecycle; stderr:\n{plain}"
     );
 }
@@ -247,7 +247,7 @@ enum OrphanOnTerm {
 }
 
 /// A compose whose fake OpenCode fails and leaves a descendant holding its
-/// output pipes, and whose `failure` and `finalize` stacks append to
+/// output pipes, and whose terminal and `finalize` stacks append to
 /// `events.log`.
 ///
 /// The provider exits only once the descendant has installed its trap (the
@@ -280,6 +280,8 @@ title: orphan teardown
 model: llamacpp/test-model
 failure:
   - {append_line: ["events.log", "failure"]}
+cancelled:
+  - {append_line: ["events.log", "cancelled"]}
 finalize:
   - {append_line: ["events.log", "finalize"]}
 ---
@@ -879,4 +881,53 @@ fn read_lines(path: &std::path::Path) -> Vec<String> {
         .lines()
         .map(str::to_string)
         .collect()
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_cancelled_start_runs_cancelled_finalize_without_failure_retry() {
+    cancelled_prompt_start(false);
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_cancelled_loop_start_never_runs_another_iteration() {
+    cancelled_prompt_start(true);
+}
+
+#[cfg(unix)]
+fn cancelled_prompt_start(looping: bool) {
+    let fixture = CliProcessFixture::named("cancelled-prompt-start");
+    let barrier = ShellBarrier::new(fixture.workspace_path(), "prompt-start");
+    write_executable(
+        &fixture.bin_dir().join("goose"),
+        "#!/bin/sh\nprintf launched > provider-launched\n",
+    );
+    let prompt = fixture.cwd().join("prompt.md");
+    let start = serde_json::to_string(&barrier.block_snippet()).unwrap();
+    let loop_config = if looping { "loop: { while: 'true', fail_fast: false }\n" } else { "" };
+    write(&prompt, &format!(r#"---
+{loop_config}start: [{{ shell: {start} }}]
+failure:
+  - stdout: forbidden-failure
+  - retry: {{ max_attempts: 1 }}
+cancelled:
+  - stdout: "cancelled {{{{ err.variant }}}}"
+  - shell: "echo cancelled > cancelled-cleanup"
+finalize: [{{ stdout: finalized }}]
+---
+Prompt body.
+"#));
+    let mut command = fixture.command_std();
+    command.args(["compose", "--goose", "--yolo", "--silent"]).arg(&prompt);
+    if looping { command.args(["--max-iterations", "2"]); }
+    let mut run = SignalledRun::spawn(command, fixture.workspace_path());
+    barrier.wait_reached(&mut run, READY_TIMEOUT);
+    run.interrupt();
+    let exit = run.wait_for_exit(EXIT_TIMEOUT);
+    assert_eq!(exit.status.code(), Some(130), "{}\n{}", run.stdout(), exit.stderr);
+    let stdout = run.stdout();
+    assert_eq!(stdout.lines().collect::<Vec<_>>(), ["cancelled provider.interrupted", "finalized"], "{}", exit.stderr);
+    assert_eq!(std::fs::read_to_string(fixture.cwd().join("cancelled-cleanup")).unwrap().trim(), "cancelled");
+    assert!(!fixture.cwd().join("provider-launched").exists());
 }

@@ -419,7 +419,8 @@ impl TaskShellRunner for SystemTaskShell {
         let mut captured_bytes = 0u64;
         let mut captured_lines = 0u64;
         for (segment, target) in chain.segments.iter().zip(targets) {
-            if interrupt.is_some_and(|flag| flag.load(Ordering::SeqCst)) {
+            if interrupt.is_some_and(|flag| flag.load(Ordering::SeqCst))
+                || crate::composition::lifecycle::cancellation::requested() {
                 output.interrupted = true;
                 break;
             }
@@ -569,7 +570,8 @@ impl SystemTaskShell {
                 Ok(None) => {}
                 Err(error) => break Err(error),
             }
-            if interrupt.is_some_and(|flag| flag.load(Ordering::SeqCst)) {
+            if interrupt.is_some_and(|flag| flag.load(Ordering::SeqCst))
+                || crate::composition::lifecycle::cancellation::requested() {
                 interrupted = true;
             } else if observed_trip(&runaway).is_some() {
                 // Terminate rather than merely stopping the capture: a command
@@ -1092,3 +1094,37 @@ mod tests;
 
 #[cfg(test)]
 mod structured_tests;
+
+/// Lifecycle commands retain inherited streams while sharing task shells' tree
+/// ownership. Cancellation is worker-local; cleanup suspends the original stop
+/// request so its commands can finish under their own contract.
+pub(crate) fn run_owned_lifecycle_command(command: &mut Command) -> Result<i32, std::io::Error> {
+    if crate::composition::lifecycle::cancellation::requested() { return Ok(130); }
+    isolate_process_tree(command);
+    let mut child = command.spawn()?;
+    let tree = match ProcessTree::own(&child) {
+        Ok(tree) => tree,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+    };
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status.code().unwrap_or(-1)),
+            Ok(None) => {},
+            Err(error) => {
+                tree.terminate(&mut child);
+                let _ = child.wait();
+                return Err(error);
+            }
+        }
+        if crate::composition::lifecycle::cancellation::requested() {
+            tree.terminate(&mut child);
+            let _ = child.wait();
+            return Ok(130);
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    }
+}

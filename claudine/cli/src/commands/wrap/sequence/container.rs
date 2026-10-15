@@ -13,6 +13,7 @@ pub(super) struct RootRun<'a> {
     pub(super) stack: StackExecutionContext<'a>,
     pub(super) runtime: Arc<RuntimeState>,
     pub(super) started: bool,
+    pub(super) approved: Option<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals>,
     pub(super) pending: Option<ContainerEventDecision>,
     pub(super) child_error: Option<LifecycleErrorInfo>,
     pub(super) proxy_location: Option<claudine::composition::ActionLocation>,
@@ -26,10 +27,18 @@ impl<'a> RootRun<'a> {
         runtime: Arc<RuntimeState>,
     ) -> Self {
         Self { runner: ContainerRunner::new(LifecycleRunGuard::new(config, context, stack.emitter)),
-            stack, runtime, started: false, pending: None, child_error: None, proxy_location: None }
+            stack, runtime, started: false, approved: None, pending: None, child_error: None, proxy_location: None }
     }
 
     pub(super) fn event(&mut self, mut signal: LifecycleSignal, mut error: Option<LifecycleErrorInfo>) -> Result<ContainerEventDecision> {
+        if !matches!(signal, LifecycleSignal::Cancelled | LifecycleSignal::Finalize)
+            && claudine::composition::lifecycle::cancellation::requested()
+        {
+            self.runner.cancel(claudine::composition::lifecycle::cancellation::cause()
+                .unwrap_or(claudine::composition::lifecycle::cancellation::CancellationCause::Interrupt));
+            signal = LifecycleSignal::Cancelled;
+            error = self.runner.primary_error().cloned();
+        }
         if let Some(error) = &error { self.runner.set_error(error.clone()); }
         loop {
             if let Some(live) = self.stack.live_frontmatter {
@@ -73,7 +82,14 @@ impl<'a> RootRun<'a> {
                     self.runner.execute_event(LifecycleSignal::Finalize, &stack.with_signal(LifecycleSignal::Finalize));
                     return Err(typed.into());
                 }
-                decision => return Ok(decision),
+                decision => {
+                    if matches!(decision, ContainerEventDecision::Finished { .. }) && self.runner.is_cancelled() {
+                        for error in self.runner.secondary_errors() {
+                            self.stack.emitter.emit_warn(&error.msg, self.stack.term);
+                        }
+                    }
+                    return Ok(decision);
+                },
             }
         }
     }
@@ -114,6 +130,7 @@ pub(super) fn run_proxy(
     target: String,
     overlay: indexmap::IndexMap<String, serde_json::Value>,
     verbose: u8,
+    approved: Option<&darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals>,
 ) -> Result<i32> {
     use claudine::composition::{self, SurfacedHandoff};
     use crate::commands::compose::prep::{ActiveDocumentOutcome, StepScope, prepare_and_run_active_document, resolve_composition_source};
@@ -124,7 +141,7 @@ pub(super) fn run_proxy(
         location, vec![source.resolved_path.clone()]);
     let mut handoff = SurfacedHandoff::Request(composition::EvaluatedProxyRequest::new(target, overlay, provenance));
     let overrides = composition::layered_set_overrides(composition::LayeredOverrides::authored(setters), Some(&runtime.snapshot()), None);
-    let scope = StepScope { caller_overrides: overrides.clone(), lifecycle_group: None, runtime_state: Arc::clone(runtime), suppress_output_commit: false,
+    let scope = StepScope { shell_approvals: approved.cloned(), caller_overrides: overrides.clone(), lifecycle_group: None, runtime_state: Arc::clone(runtime), suppress_output_commit: false,
         task_frame_writer: None, env_overrides: Default::default(), operation: shared.operation.clone() };
     let mut caller_overrides = Some(overrides.to_value());
     let mut records = caller_input_records.clone();

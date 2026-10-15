@@ -12,6 +12,7 @@
 
 mod group;
 mod shell;
+pub(crate) use shell::run_owned_lifecycle_command;
 mod sequence;
 mod templates;
 
@@ -1351,6 +1352,7 @@ impl TaskExecution<'_> {
     fn interrupted(&self) -> bool {
         self.interrupt
             .is_some_and(|flag| flag.load(Ordering::SeqCst))
+            || crate::composition::lifecycle::cancellation::requested()
     }
 
     /// The task's authored `name:`, falling back to its generated label.

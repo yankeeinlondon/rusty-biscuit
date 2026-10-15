@@ -451,6 +451,7 @@ fn run_one_step(
     );
     // The step's own scope, kept by any document a handoff adopts within it.
     let step_scope = StepScope {
+        shell_approvals: Some(run.approved.clone()),
         lifecycle_group: None,
         caller_overrides: set_overrides,
         runtime_state: Arc::clone(runtime_state),
@@ -630,6 +631,7 @@ fn build_body_request(
         silent: shared.silent,
         env_overrides,
         shared_approval_cache: Some(Arc::clone(&run.compose.approval_cache)),
+        closed_shell_approvals: Some(run.approved.clone()),
         installed_snapshot: Some(run.prep_context.installed_snapshot.clone()),
         invocation_context: Some(run.prep_context.invocation.clone()),
         source_context: Some(run.prep_context.source_context.clone()),

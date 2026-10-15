@@ -207,7 +207,7 @@ pub(crate) fn run_harness_loop(
         env_context,
         initial_materialized,
         term,
-        lifecycle_guard,
+        lifecycle_guard: &mut *lifecycle_guard,
         initial_transition,
         handoff_ledger,
         adopted_handoff,
@@ -215,7 +215,15 @@ pub(crate) fn run_harness_loop(
         emit_prompt_timing,
         task_frame_writer,
     };
-    match run_harness_loop_inner(ctx)? {
+    let result = match run_harness_loop_inner(ctx) {
+        Err(error) if claudine::composition::lifecycle::cancellation::requested() => {
+            let info = LifecycleErrorInfo::from_error_or_action("cancelled_setup", error.as_ref());
+            lifecycle_guard.emitter().emit_warn(&info.msg, term);
+            return Ok((130, None, None, None));
+        }
+        result => result?,
+    };
+    match result {
         LoopStep::Return(result) => Ok(result),
         LoopStep::Abort { reason, code } => Err(eyre!("{reason} (exit code {code})")),
         LoopStep::NextAttempt => unreachable!("the harness loop owns attempt re-entry"),
@@ -631,6 +639,13 @@ fn start_lifecycle_phase(
     let effect_engine = lifecycle.effect_engine;
     let term = lifecycle.term;
     let loop_start = lifecycle.loop_start;
+    if claudine::composition::lifecycle::cancellation::requested() {
+        run_cancelled_prompt_cleanup(
+            lifecycle_guard, materialized, &prompt_state.source_path,
+            repo_root, term, effect_engine, loop_start,
+        );
+        return Ok(Some(LoopStep::Return((130, None, None, None))));
+    }
     let start_outcome = run_start_lifecycle_event(
         prompt_state,
         lifecycle_guard,
@@ -642,6 +657,13 @@ fn start_lifecycle_phase(
         None,
         loop_start,
     );
+    if claudine::composition::lifecycle::cancellation::requested() {
+        run_cancelled_prompt_cleanup(
+            lifecycle_guard, materialized, &prompt_state.source_path,
+            repo_root, term, effect_engine, loop_start,
+        );
+        return Ok(Some(LoopStep::Return((130, None, None, None))));
+    }
     let start_early = start_outcome.evaluation_error.as_ref().map(|info| {
         crate::output::error_walker::emit_lifecycle_evaluation_error_early(
             &prompt_state.source_path,
@@ -861,9 +883,16 @@ fn run_initialize_stages(
         materialized,
     );
 
+    if claudine::composition::lifecycle::cancellation::requested() {
+        run_cancelled_prompt_cleanup(
+            lifecycle.guard, materialized, &prompt.prompt_state.source_path,
+            prompt.repo_root, lifecycle.term, lifecycle.effect_engine, lifecycle.loop_start,
+        );
+        return Ok(Some(LoopStep::Return((130, None, None, None))));
+    }
     // Stage 3 — `initialize`, through the normal evaluator.
     let chain = control.coordinator.ledger().chain().to_vec();
-    match run_target_initialize(
+    let initialize = run_target_initialize(
         lifecycle.guard,
         materialized,
         &prompt.prompt_state.source_path,
@@ -872,7 +901,15 @@ fn run_initialize_stages(
         lifecycle.term,
         lifecycle.effect_engine,
         lifecycle.loop_start,
-    ) {
+    );
+    if claudine::composition::lifecycle::cancellation::requested() {
+        run_cancelled_prompt_cleanup(
+            lifecycle.guard, materialized, &prompt.prompt_state.source_path,
+            prompt.repo_root, lifecycle.term, lifecycle.effect_engine, lifecycle.loop_start,
+        );
+        return Ok(Some(LoopStep::Return((130, None, None, None))));
+    }
+    match initialize {
         TargetInitializeAction::Proceed => {}
         TargetInitializeAction::ExitCleanly => {
             return Ok(Some(LoopStep::Return((0, None, None, None))));
@@ -2099,76 +2136,23 @@ fn classify_attempt_phase(
         native_exit,
         provider_tail,
     } = executed;
-    if outcome.termination == claudine::harness::ProcessTermination::Interrupted {
-        // Surface the interrupt to the user before we let the guard
-        // close: without this the wrapper would silently return 130
-        // and the operator has no feedback that Claudine noticed.
-        crate::log::message(&crate::output::format_user_interrupt_status());
+    if outcome.termination == claudine::harness::ProcessTermination::Interrupted
+        || claudine::composition::lifecycle::cancellation::requested()
+    {
+        if !matches!(claudine::composition::lifecycle::cancellation::cause(),
+            Some(claudine::composition::lifecycle::cancellation::CancellationCause::SiblingFailure { .. }))
+        {
+            crate::log::message(&crate::output::format_user_interrupt_status());
+        }
         // An interrupted agent may have left half a document behind, so the
         // baseline goes back before any terminal event observes the file.
         rollback_inline_document(inline.as_mut(), term);
-        let err_info = LifecycleErrorInfo::from_action_failure(
-            "interrupted",
-            "user interrupted the run",
+        run_cancelled_prompt_cleanup(
+            lifecycle_guard, &materialized, &prompt_state.source_path,
+            repo_root, term, effect_engine, loop_start,
         );
-        let failure_outcome = execute_terminal_event(
-            lifecycle_guard,
-            LifecycleSignal::Failure,
-            &materialized,
-            &prompt_state.source_path,
-            repo_root,
-            term,
-            effect_engine,
-            Some(&err_info),
-            loop_start,
-        )
-        .outcome;
-        // A late-binding evaluation error raised *by the failure stack*
-        // halts the run: the helper runs `finalize` once with the
-        // evaluation error as `err` and returns the typed catch error, so
-        // do not also run a separate finalize when it returns `Some`.
-        if let Some(err) = handle_terminal_evaluation_error(
-            &failure_outcome,
-            "failure",
-            lifecycle_guard,
-            &materialized,
-            &prompt_state.source_path,
-            repo_root,
-            term,
-            effect_engine,
-            loop_start,
-        ) {
-            return Err(err);
-        }
-        // `failure` did not raise: run `finalize` once, but a raise inside
-        // `finalize` itself still halts the run non-zero rather than being
-        // swallowed by the interrupt's `Ok` return.
-        let finalize_outcome = run_lifecycle_event(
-            lifecycle_guard,
-            LifecycleSignal::Finalize,
-            &materialized,
-            &prompt_state.source_path,
-            repo_root,
-            term,
-            effect_engine,
-            Some(&err_info),
-            loop_start,
-        );
-        if let Some(eval_info) = finalize_outcome.evaluation_error.as_ref() {
-            return Err(
-                crate::output::error_walker::emit_lifecycle_evaluation_error_block(
-                    CompositionError::lifecycle_evaluation(
-                        "finalize",
-                        &prompt_state.source_path,
-                        eval_info,
-                    ),
-                    term,
-                )
-                .into(),
-            );
-        }
         return Ok(LoopStep::Return((
-            outcome.exit_code,
+            130,
             harness_perf.take(),
             iteration_signals,
             None,

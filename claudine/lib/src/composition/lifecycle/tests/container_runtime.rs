@@ -95,3 +95,106 @@ fn container_preflight_retry_is_refused_and_initialize_proxy_skips_cleanup() {
         assert!(!runner.guard_mut().finalize_emitted());
     });
 }
+
+#[test]
+fn cancellation_keeps_first_cause_and_refuses_finalize_recovery() {
+    use crate::composition::lifecycle::cancellation::CancellationCause;
+    exercise(json!({"initialize":{"stderr":"initialize"}, "start":{"stderr":"start"},
+        "cancelled":[{"stderr":"cancelled"}],
+        "finalize":[{"stderr":"finalize"},{"retry":{"max_attempts":1}}]}), |runner, stack, emitter| {
+        runner.execute_event(LifecycleSignal::Initialize, stack);
+        runner.execute_event(LifecycleSignal::Start, stack);
+        assert!(runner.cancel(CancellationCause::Interrupt));
+        assert!(!runner.cancel(CancellationCause::SiblingFailure {
+            group:"later".into(), leg:"later".into(), error:LifecycleErrorInfo::from_action_failure("shell", "later failure"),
+        }));
+        let original = runner.primary_error().unwrap().clone();
+        assert!(matches!(runner.execute_event(LifecycleSignal::Cancelled, stack).decision, Decision::Finalize { .. }));
+        assert_eq!(runner.execute_event(LifecycleSignal::Finalize, stack).decision, Decision::Finished { failed:false });
+        assert!(runner.is_cancelled());
+        assert_eq!(runner.primary_error(), Some(&original));
+        assert_eq!(runner.secondary_errors().len(), 1);
+        assert!(runner.secondary_errors()[0].msg.contains("cannot recover a cancelled"));
+        assert_eq!(runner.attempt(), 1);
+        assert_eq!(emitter.signals(), [LifecycleSignal::Initialize, LifecycleSignal::Start,
+            LifecycleSignal::Cancelled, LifecycleSignal::Finalize]);
+        assert!(!runner.cancel(CancellationCause::Interrupt));
+    });
+}
+
+#[test]
+fn cancellation_before_start_runs_cleanup_with_shells_disabled() {
+    exercise(json!({"cancelled":[{"shell":"must-not-run"}],
+        "finalize":[{"stderr":"finalized"}]}), |runner, stack, emitter| {
+        runner.execute_event(LifecycleSignal::Initialize, stack);
+        runner.cancel(crate::composition::lifecycle::cancellation::CancellationCause::Interrupt);
+        runner.execute_event(LifecycleSignal::Cancelled, stack);
+        runner.execute_event(LifecycleSignal::Finalize, stack);
+        assert!(runner.is_cancelled());
+        assert_eq!(runner.secondary_errors().len(), 1);
+        assert_eq!(emitter.signals(), [LifecycleSignal::Finalize]);
+    });
+}
+
+#[test]
+fn cancellation_refuses_every_recovery_and_retains_cleanup_timeout() {
+    use crate::composition::lifecycle::cancellation::CancellationCause;
+    let controls = [
+        StackControl::Retry { max_attempts:1, backoff:crate::composition::lifecycle::actions::RetryBackoff::Fixed,
+            delay:"0s".into(), overlay:Default::default() },
+        StackControl::Resume {message:"again".into(), max_attempts:1},
+        StackControl::Proxy {target:"must-not-load.md".into(), overlay:Default::default(),
+            location:crate::composition::ActionLocation::new(LifecycleSignal::Finalize,
+                crate::composition::lifecycle::actions::LifecyclePath::root("finalize"))},
+        StackControl::Defer {delay:"1s".into(), reason:None},
+    ];
+    for control in controls {
+        exercise(json!({}), |runner, stack, _| {
+            runner.execute_event(LifecycleSignal::Initialize, stack);
+            runner.cancel(CancellationCause::Interrupt);
+            let original = runner.primary_error().unwrap().clone();
+            let cleanup = LifecycleEventOutcome { action_error:Some(LifecycleErrorInfo::from_action_failure(
+                "shell", "cleanup command timed out")), ..Default::default() };
+            runner.record_outcome(LifecycleSignal::Cancelled, &cleanup);
+            let recovery = LifecycleEventOutcome {control:Some(control), ..Default::default()};
+            assert_eq!(runner.record_outcome(LifecycleSignal::Finalize, &recovery), Decision::Finished {failed:false});
+            assert!(runner.is_cancelled());
+            assert_eq!(runner.primary_error(), Some(&original));
+            assert_eq!(runner.secondary_errors().len(), 2);
+            assert!(runner.secondary_errors()[1].msg.contains("cannot recover a cancelled"));
+            assert_eq!(runner.attempt(), 1);
+        });
+    }
+}
+
+#[test]
+fn cancellation_scope_inherits_first_cause_and_restores_its_caller() {
+    use crate::composition::lifecycle::cancellation::{self, CancellationCause, CancellationToken};
+    let parent = CancellationToken::default();
+    let child = parent.child();
+    let original = CancellationCause::SiblingFailure { group:"checks".into(), leg:"lint".into(),
+        error:LifecycleErrorInfo::from_action_failure("shell", "lint failed") };
+    parent.cancel(original.clone());
+    child.cancel(CancellationCause::Interrupt);
+    {
+        let _scope = child.enter();
+        assert!(cancellation::requested());
+        assert_eq!(cancellation::cause(), Some(original));
+        let err = cancellation::cause().unwrap().error().to_value();
+        assert_eq!(err["code"], "composition.cancelled");
+        let declared: std::collections::BTreeSet<_> = crate::diagnostics::code_spec("composition.cancelled")
+            .unwrap().detail.iter().copied().collect();
+        let actual: std::collections::BTreeSet<_> = err["detail"].as_object().unwrap().keys()
+            .map(String::as_str).collect();
+        assert_eq!(actual, declared);
+        assert_eq!(err["detail"]["group"], "checks");
+        assert_eq!(err["detail"]["leg"], "lint");
+        assert_eq!(err["detail"]["cause"]["msg"], "lint failed");
+        {
+            let _cleanup = cancellation::CleanupScope::enter();
+            assert!(!cancellation::requested());
+        }
+        assert!(cancellation::requested());
+    }
+    assert!(!cancellation::requested());
+}

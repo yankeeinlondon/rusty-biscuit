@@ -1309,6 +1309,12 @@ fn construct_lifecycle_runtime(
             request.yolo,
         );
 
+        let mut shell_options = shell_options;
+        if let Some(approved) = &request.closed_shell_approvals {
+            shell_options.closed_approvals = Some(approved.clone());
+            shell_options.approval_handler = None;
+        }
+
         // --- Lifecycle notification setup ------------------------------------
         // Constructed up here (rather than just before the guard) so the
         // `run_composition_body` call below can capture these by reference and route
@@ -1484,6 +1490,15 @@ fn execute_initialize_catch(
     )
 }
 
+/// Once initialization has entered, cancellation owns both terminal events.
+/// The guard keeps these events shell-free until `start` has been emitted.
+pub(super) fn cancel_before_start(
+    guard: &mut LifecycleRunGuard<'_>,
+    context: &StackExecutionContext<'_>,
+) -> bool {
+    guard.cancel_if_requested(context)
+}
+
 /// Run the launched document's `initialize` event and translate its control
 /// into the transition the harness loop's coordinator will consume.
 ///
@@ -1499,6 +1514,17 @@ pub(super) fn route_initialize(
 ) -> CompositionPhaseResult<DocumentTransition> {
     let routed = (|| -> Result<CompositionPhaseResult<DocumentTransition>> {
         let init_outcome = guard.execute_event(LifecycleSignal::Initialize, init_ctx);
+        if cancel_before_start(guard, init_ctx) {
+            return Ok(CompositionPhaseResult::Completed(Box::new(SingleCompositionOutcome {
+                exit_code: 130,
+                provider,
+                agent_perf: None,
+                iteration_signals: None,
+                terminal_signal: Some(LifecycleSignal::Cancelled),
+                final_output: None,
+                handoff: None,
+            })));
+        }
         let init_result =
             execute_initialize_catch(guard, init_ctx, source_path, term, init_outcome.clone())?;
         if let Some(setup_error) = init_result.setup_error.as_ref() {

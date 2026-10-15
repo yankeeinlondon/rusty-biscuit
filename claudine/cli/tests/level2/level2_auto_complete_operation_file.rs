@@ -144,14 +144,14 @@ fn stage_yaml_sequence_workspace(single_match: bool) -> TestWorkspace {
     fs::create_dir_all(&prompts).unwrap();
     fs::write(
         prompts.join("steps.yaml"),
-        "kind: sequence\nname: 'Build Pipeline'\ndescription: 'CI steps'\nprompt: 'Process {{ state.name }}'\n$schema:\n  env: 'enum(dev, prod)'\nsequence:\n  - one\n",
+        "kind: sequence\nname: 'Build Pipeline'\ndescription: 'CI steps'\nprompt: 'Process {{ seq.name }}'\n$schema:\n  env: 'enum(dev, prod)'\nsequence:\n  - one\n",
     )
     .unwrap();
 
     if !single_match {
         fs::write(
             prompts.join("extra_steps.yaml"),
-            "kind: sequence\nname: 'Deploy Flow'\ndescription: 'Release steps'\nprompt: 'Process {{ state.name }}'\n$schema:\n  region: 'enum(us, eu)'\nsequence:\n  - two\n",
+            "kind: sequence\nname: 'Deploy Flow'\ndescription: 'Release steps'\nprompt: 'Process {{ seq.name }}'\n$schema:\n  region: 'enum(us, eu)'\nsequence:\n  - two\n",
         )
         .unwrap();
     }

@@ -20,7 +20,7 @@
 //!   are resolved once here against an early-binding-only lookup and may be
 //!   approved as those bytes or by their typed shape. Every other command with a
 //!   placeholder — any in a later task, and any reading a late value
-//!   (`outputs`, `loop`, `group`) — is approved only by its typed shape and
+//!   (`seq.outputs`, `loop`, `group`) — is approved only by its typed shape and
 //!   filled when it runs ([`PreparedShellSite`]).
 //!
 //! Every failure raised here is abort-all: `fail_fast` governs *execution*
@@ -54,6 +54,7 @@ use crate::invocation_context::{InvocationContext, SourceContext};
 
 mod reapproval;
 mod shape;
+mod containers;
 
 pub use reapproval::PreflightApproval;
 pub use shape::{
@@ -125,6 +126,9 @@ type GraphShellAuthorization = Option<(darkmatter::markdown::compose::shell_expa
 #[derive(Debug, Clone, Default)]
 pub struct PreflightGraph {
     authored_sources: HashMap<PathBuf, Option<Vec<u8>>>,
+    container_lifecycles: Vec<crate::composition::LifecycleConfig>,
+    /// Audited root container events, installed after approval succeeds.
+    pub root_lifecycle: Option<crate::composition::LifecycleConfig>,
     /// Authorization granted by the graph audit, separate from discovery.
     shell_authorization: std::sync::Arc<std::sync::Mutex<GraphShellAuthorization>>,
     /// One node per step, in sequence order.
@@ -258,14 +262,29 @@ impl PreflightGraph {
         })
     }
 
+    pub(crate) fn settle_container_events(
+        &self, approved: &darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
+        policy_root: Option<&Path>,
+    ) {
+        for lifecycle in &self.container_lifecycles {
+            super::super::preflight::settle_lifecycle_shell_modes(lifecycle,
+                &crate::composition::LifecycleSignal::ALL, approved, policy_root);
+        }
+    }
+
     pub(crate) fn record_shell_authorization(
         &self,
         approved: darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals,
         policy_root: Option<PathBuf>,
     ) {
+        self.settle_container_events(&approved, policy_root.as_deref());
         if let Ok(mut authorization) = self.shell_authorization.lock() {
             *authorization = Some((approved, policy_root));
         }
+    }
+
+    pub(crate) fn shell_authorization(&self) -> Option<(darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals, Option<PathBuf>)> {
+        self.shell_authorization.lock().ok()?.clone()
     }
 
     pub(crate) fn template_authorization(&self, template: &CommandTemplate) -> Option<Option<PathBuf>> {
@@ -479,7 +498,7 @@ pub(crate) fn prepare_nested_sequence(
     ))?;
     let mut loader = Loader::new(&source, context, resolution.clone());
     loader.step_frontmatter = Arc::new(state.data().clone());
-    loader.ancestry.push(canonical(&task.origin_path));
+    loader.ancestry.push((canonical(&task.origin_path), None));
     let sequence = loader.load_sequence(
         value, raw_task, &task.origin_path, &task.label, &task.diagnostic.task_property,
         &task.authored, state,
@@ -502,7 +521,7 @@ pub(crate) fn prepare_nested_group(
     ))?;
     let mut loader = Loader::new(&source, context, resolution.clone());
     loader.step_frontmatter = Arc::new(state.data().clone());
-    loader.ancestry.push(canonical(&task.origin_path));
+    loader.ancestry.push((canonical(&task.origin_path), None));
     let group = loader.load_group(
         value, &task.origin_path, &task.label, &property_child(&task.diagnostic.task_property, "group"),
         &task.authored.child("group"), state, task.position,
@@ -514,8 +533,8 @@ pub(crate) fn prepare_nested_group(
 /// parsed-document cache shared by independent branches.
 struct Loader<'a> {
     graph: PreflightGraph,
-    /// Canonical paths currently being expanded, innermost last.
-    ancestry: Vec<PathBuf>,
+    /// Active canonical paths and selected catalog entries, innermost last.
+    ancestry: Vec<(PathBuf, Option<String>)>,
     /// Immutable parsed data files and their authored key order, reusable
     /// across independent branches (spec → *Task Resolution*: sharing parsed
     /// data is allowed; effective parameters and runtime state stay
@@ -618,7 +637,14 @@ impl<'a> Loader<'a> {
         // The invoking document roots the ancestry, so a task or prompt that
         // references the sequence source itself closes a cycle rather than
         // recursing forever.
-        self.ancestry.push(self.source_path.clone());
+        self.ancestry.push((self.source_path.clone(), None));
+        self.step_frontmatter = Arc::new(authored.as_object().into_iter().flat_map(|map| map.iter()).map(|(key,value)| (key.clone(),value.clone())).collect());
+        self.step_derived = derived_deferred_keys(self.step_frontmatter.iter(), &sequence_deferred_roots(), &HashSet::new());
+        let state = reapproval::early_binding_state(&self.step_frontmatter, self.context.clone())?;
+        let mut lifecycle = parse_lifecycle_config(&authored, &source_path)?;
+        self.prepare_container_events(&mut lifecycle, &source_path, "root sequence", &state,
+            Placement { position: TaskPosition::First, in_group: false })?;
+        self.graph.root_lifecycle = Some(lifecycle);
         for (index, step) in plan.steps.iter().enumerate() {
             let label = format!("step {} (`{}`)", index + 1, step.state.id);
             let property = format!("tasks[{index}]");
@@ -892,7 +918,8 @@ impl<'a> Loader<'a> {
         for key in super::grammar::CONTAINER_EVENT_KEYS {
             if let Some(value) = events.get(*key) { event_root.insert((*key).into(), value.clone()); }
         }
-        let lifecycle = parse_lifecycle_config(&Value::Object(event_root), &child_origin)?;
+        let mut lifecycle = parse_lifecycle_config(&Value::Object(event_root), &child_origin)?;
+        self.prepare_container_events(&mut lifecycle, &child_origin, label, state, placement)?;
         let mut steps = Vec::with_capacity(plan.steps.len());
         for (index, step) in plan.steps.iter().enumerate() {
             let child_label = format!("{label} → step {} (`{}`)", index + 1, step.state.id);
@@ -975,6 +1002,7 @@ impl<'a> Loader<'a> {
 
                 // A catalog selects one named entry, so the group's authored
                 // root is that entry's pointer, not the file root.
+                let selected_entry = name.clone();
                 let (group_map, group_authored) = match name {
                     Some(name) => {
                         let (index, map) = select_catalog_group(&root, &name, &path)?;
@@ -990,7 +1018,7 @@ impl<'a> Loader<'a> {
                     "{label} → group `{}`",
                     biscuit_file::to_portable_string(&path)
                 );
-                self.enter(&path)?;
+                self.enter_reference(&path, selected_entry)?;
                 let result = self.build_group(
                     &group_map,
                     &path,
@@ -1059,7 +1087,8 @@ impl<'a> Loader<'a> {
         for key in super::grammar::CONTAINER_EVENT_KEYS {
             if let Some(value) = map.get(*key) { event_root.insert((*key).into(), value.clone()); }
         }
-        let lifecycle = parse_lifecycle_config(&Value::Object(event_root), origin)?;
+        let mut lifecycle = parse_lifecycle_config(&Value::Object(event_root), origin)?;
+        self.prepare_container_events(&mut lifecycle, origin, label, state, Placement { position, in_group: true })?;
         let owner = self.documents.get(origin).map(|(value, _)| value.clone())
             .unwrap_or_else(|| crate::composition::prepare::frontmatter_to_value(self.source.markdown.frontmatter()));
         crate::composition::lifecycle::bindings::reject_removed_sequence_reads(
@@ -1897,25 +1926,28 @@ impl<'a> Loader<'a> {
         Ok((loaded.value, AuthoredOrder::at_root(orders)))
     }
 
-    /// Reject a reference back to a document already being expanded, reporting
-    /// the whole chain rather than only the repeated file.
     fn check_cycle(&self, path: &Path) -> Result<(), CompositionError> {
-        if self.ancestry.iter().any(|p| p == path) {
-            let mut chain = self.ancestry.clone();
-            chain.push(path.to_path_buf());
+        self.check_reference_cycle(path, None)
+    }
+
+    fn check_reference_cycle(&self, path: &Path, entry: Option<&str>) -> Result<(), CompositionError> {
+        if self.ancestry.iter().any(|(active, selected)| active == path && selected.as_deref() == entry) {
+            let mut chain: Vec<PathBuf> = self.ancestry.iter().map(|(path, entry)| {
+                entry.as_ref().map_or_else(|| path.clone(), |entry| PathBuf::from(format!("{}#{entry}", path.display())))
+            }).collect();
+            chain.push(entry.map_or_else(|| path.to_path_buf(), |entry| PathBuf::from(format!("{}#{entry}", path.display()))));
             return Err(CompositionError::SequenceReferenceCycle { chain });
         }
         Ok(())
     }
 
-    /// Push `path` onto the ancestry stack after a cycle check.
     fn enter(&mut self, path: &Path) -> Result<(), CompositionError> {
-        if self.ancestry.iter().any(|p| p == path) {
-            let mut chain = self.ancestry.clone();
-            chain.push(path.to_path_buf());
-            return Err(CompositionError::SequenceReferenceCycle { chain });
-        }
-        self.ancestry.push(path.to_path_buf());
+        self.enter_reference(path, None)
+    }
+
+    fn enter_reference(&mut self, path: &Path, entry: Option<String>) -> Result<(), CompositionError> {
+        self.check_reference_cycle(path, entry.as_deref())?;
+        self.ancestry.push((path.to_path_buf(), entry));
         Ok(())
     }
 

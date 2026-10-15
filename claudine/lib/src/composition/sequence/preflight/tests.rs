@@ -2515,3 +2515,106 @@ mod nesting {
         assert_eq!(chain.iter().map(|path| path.file_name().unwrap().to_str().unwrap()).collect::<Vec<_>>(), ["root.md", "a.json", "b.json", "a.json"]);
     }
 }
+
+mod phase7 {
+    use super::*;
+
+    #[test]
+    fn distinct_groups_in_one_active_catalog_are_legal() {
+        let dir = TempDir::new().unwrap();
+        write_yaml(dir.path(), "catalog.json", &json!({"kind":"group-catalog", "groups":[
+            {"name":"outer","tasks":[{"name":"inner","group":"inner@catalog.json"}]},
+            {"name":"inner","tasks":[{"name":"leaf","shell":"echo safe"}]}
+        ]}));
+        let path = write_source(dir.path(), "root.md", &[("sequence", json!([{ "name":"root", "group":"outer@catalog.json" }]))], "");
+        let graph = graph_for(&path).unwrap();
+        assert_eq!(graph.shell_commands[0].command, "echo safe");
+    }
+
+    #[test]
+    fn mixed_reference_cycle_names_every_active_reference() {
+        let dir = TempDir::new().unwrap();
+        write_yaml(dir.path(), "inner.json", &json!({"sequence":[{"name":"task","task":"task.json"}]}));
+        write_yaml(dir.path(), "task.json", &json!({"kind":"task","group":"checks@catalog.json"}));
+        write_yaml(dir.path(), "catalog.json", &json!({"kind":"group-catalog","groups":[
+            {"name":"checks","tasks":[{"name":"back","sequence":"inner.json"}]}
+        ]}));
+        let path = write_source(dir.path(), "root.md", &[("sequence", json!([{ "name":"inner", "sequence":"inner.json" }]))], "");
+        let CompositionError::SequenceReferenceCycle { chain } = err_for(&path) else { panic!("cycle diagnostic") };
+        assert_eq!(chain.iter().map(|path| path.file_name().unwrap().to_str().unwrap()).collect::<Vec<_>>(),
+            ["root.md", "inner.json", "task.json", "catalog.json#checks", "inner.json"]);
+    }
+
+    #[test]
+    fn sequence_reuse_is_legal_and_only_all_first_descendants_offer_bytes() {
+        let dir = TempDir::new().unwrap();
+        write_yaml(dir.path(), "inner.json", &json!({"sequence":[
+            {"name":"first","sequence":[{"name":"leaf","shell":"echo {{ value }}"}]},
+            {"name":"second","shell":"echo {{ value }}"}
+        ]}));
+        let path = write_source(dir.path(), "root.md", &[("value", json!("early")), ("sequence", json!([
+            {"name":"one","sequence":"inner.json"}, {"name":"two","sequence":"inner.json"}
+        ]))], "");
+        let graph = graph_for(&path).unwrap();
+        assert_eq!(graph.template_candidates.iter().map(|candidate| candidate.resolved.is_some()).collect::<Vec<_>>(),
+            [true, false, false, false]);
+        assert_eq!(graph.steps.len(), 2);
+    }
+
+    #[test]
+    fn nested_inline_write_back_collision_is_rejected() {
+        let dir = TempDir::new().unwrap();
+        write_source(dir.path(), "write.md", &[("prompt", json!("write"))], "body");
+        let path = write_source(dir.path(), "root.md", &[("sequence", json!([
+            {"name":"parallel","group":{"tasks":[
+                {"name":"a","sequence":[{"name":"write","prompt":"write.md"}]},
+                {"name":"b","sequence":[{"name":"nested","sequence":[{"name":"write","prompt":"write.md"}]}]}
+            ]}}
+        ]))], "");
+        let CompositionError::SequenceWriteBackCollision { first, second, target, .. } = err_for(&path) else { panic!("collision diagnostic") };
+        assert_eq!((first.as_str(), second.as_str()), ("a", "b"));
+        assert_eq!(target.file_name().unwrap(), "write.md");
+    }
+
+    #[test]
+    fn container_shell_discovery_walks_both_branches_and_shell_values() {
+        let dir = TempDir::new().unwrap();
+        let path = write_source(dir.path(), "root.md", &[("sequence", json!([
+            {"name":"nested","sequence":[], "success":[
+                {"when":"false","then":[{"shell":{"command":"echo then","on_error":"warning"}}],"else":[{"shell":"echo else"}]},
+                {"set":{"captured":"$(echo captured)"}}
+            ]}
+        ]))], "");
+        let graph = graph_for(&path).unwrap();
+        let commands: Vec<_> = graph.shell_commands.iter().map(|command| command.command.as_str()).collect();
+        assert_eq!(commands, ["echo then", "echo else", "echo captured"]);
+    }
+
+    #[test]
+    fn container_shells_refuse_unavailable_roots_even_beside_late_values() {
+        let dir = TempDir::new().unwrap();
+        for root in ["err.msg", "timing.total", "current.model"] {
+            let path = write_source(dir.path(), "root.md", &[("sequence", json!([
+                {"name":"nested","sequence":[],"finalize":[{"shell":format!("echo {{{{ {root} }}}} {{{{ seq.outputs }}}}")}]}
+            ]))], "");
+            assert!(matches!(err_for(&path), CompositionError::SequenceShellLateBinding {..}), "{root}");
+        }
+    }
+
+    #[test]
+    fn container_events_are_discovered_and_terminal_commands_require_templates() {
+        let dir = TempDir::new().unwrap();
+        let path = write_source(dir.path(), "root.md", &[("value", json!("early")), ("sequence", json!([
+            {"name":"group","group":{"name":"checks", "finalize":[{"shell":"echo {{ value }}"}],
+                "tasks":[{"name":"a","shell":"echo {{ value }}"},{"name":"b","shell":"echo {{ group.label }}"}],
+                "variables":{"label":"label"}}}
+        ]))], "");
+        let graph = graph_for(&path).unwrap();
+        let candidates = &graph.template_candidates;
+        assert_eq!(candidates.len(), 3);
+        let terminal = candidates.iter().find(|candidate| format!("{:?}", candidate.site.origin).contains("finalize")).unwrap();
+        assert_eq!(terminal.requirement, ModeRequirement::TemplateRequired);
+        assert!(candidates.iter().any(|candidate| candidate.authored() == Some("echo {{ value }}") && candidate.resolved.is_some()));
+        assert!(candidates.iter().any(|candidate| candidate.authored() == Some("echo {{ group.label }}") && candidate.resolved.is_none()));
+    }
+}

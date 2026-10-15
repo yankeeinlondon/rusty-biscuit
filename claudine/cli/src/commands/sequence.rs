@@ -244,6 +244,7 @@ fn run_sequence_inner(
     let file = super::compose::parse_composition_positionals(&args)?.file_ref.ok_or_else(|| {
         eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
     })?;
+    let _interrupt_guard = super::compose::interrupt::install_user_interrupt_guard(&file);
     let stderr_is_tty = std::io::stderr().is_terminal()
         || std::env::var_os("FORCE_COLOR").is_some();
 

@@ -530,6 +530,9 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
                 Some(Arc::clone(&context.approval_cache)),
             ), context.shared.dry_run, context.shared.yolo,
         );
+        let mut approval_options = approval_options;
+        approval_options.closed_approvals = Some(self.run.approved.clone());
+        approval_options.approval_handler = None;
         composition::resolve_shell_approvals(None, None, &approval_options, Some(&lifecycle), Some(&source.resolved_path))?;
         *request.document_epoch.lock().expect("prompt document epoch poisoned") = options.document_epoch.clone();
         *request.prepared_context.lock().expect("prompt document context poisoned") = options.prepared_context.clone();
@@ -740,6 +743,7 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             quiet: shared.quiet,
             silent: shared.silent,
             env_overrides,
+            closed_shell_approvals: Some(self.run.approved.clone()),
             shared_approval_cache: Some(Arc::clone(&self.run.compose.approval_cache)),
             installed_snapshot: Some(self.run.prep_context.installed_snapshot.clone()),
             prep_env_context: Some(document.environment_context()),
@@ -774,6 +778,7 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         // is the task's. Setup, teardown, and output publication belong to the
         // task executor around this call, so each still happens once.
         let task_scope = StepScope {
+            shell_approvals: Some(self.run.approved.clone()),
             lifecycle_group: request.lifecycle_group.clone(),
             caller_overrides: request.set_overrides.clone(),
             runtime_state,

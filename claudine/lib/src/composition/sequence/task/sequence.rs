@@ -17,6 +17,7 @@ use crate::composition::sequence::preflight::{PreflightAction, PreflightSequence
 
 impl TaskExecution<'_> {
     pub(super) fn run_sequence(&self, sequence: &PreflightSequence) -> PrimaryOutcome {
+        if self.interrupted() { return PrimaryOutcome::interrupted(String::new()); }
         let owned_runtime = Arc::new(RuntimeState::new());
         let runtime = self.runtime.unwrap_or(&owned_runtime);
         let outer = runtime.snapshot();
@@ -40,10 +41,20 @@ impl TaskExecution<'_> {
         runner: &mut ContainerRunner<'_>,
     ) -> PrimaryOutcome {
         let mut signal = LifecycleSignal::Initialize;
+        let mut shell_enabled = false;
         let mut error = None;
         let mut secondary_errors = Vec::new();
+        let mut interrupted_stdout = String::new();
         let mut prepared = None;
         loop {
+            if !matches!(signal, LifecycleSignal::Cancelled | LifecycleSignal::Finalize)
+                && self.interrupted()
+            {
+                runner.cancel(crate::composition::lifecycle::cancellation::cause()
+                    .unwrap_or(crate::composition::lifecycle::cancellation::CancellationCause::Interrupt));
+                error = runner.primary_error().cloned();
+                signal = LifecycleSignal::Cancelled;
+            }
             if signal == LifecycleSignal::Start {
                 let context = self.stack.prepared_context.cloned().unwrap_or_else(|| self.state.context().clone());
                 match crate::composition::sequence::preflight::prepare_nested_sequence(
@@ -55,6 +66,7 @@ impl TaskExecution<'_> {
                     Ok(fresh) => {
                         runner.guard_mut().set_config((*fresh.lifecycle).clone());
                         prepared = Some(fresh);
+                        shell_enabled = true;
                     }
                     Err(cause) => {
                         let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary, &cause);
@@ -64,6 +76,12 @@ impl TaskExecution<'_> {
                     }
                 }
             }
+            if signal == LifecycleSignal::Start && self.interrupted() {
+                runner.cancel(crate::composition::lifecycle::cancellation::cause()
+                    .unwrap_or(crate::composition::lifecycle::cancellation::CancellationCause::Interrupt));
+                error = runner.primary_error().cloned();
+                signal = LifecycleSignal::Cancelled;
+            }
             let sequence = prepared.as_ref().unwrap_or(sequence);
             let seq = SequenceBinding::container(run_id, runtime.snapshot().outputs).to_value();
             let mut event_frontmatter = self.stack.frontmatter.clone();
@@ -71,7 +89,9 @@ impl TaskExecution<'_> {
             if let Some(live) = self.stack.live_frontmatter {
                 live.lock().expect("sequence live frontmatter poisoned").extend(runtime.snapshot().mutations);
             }
+            let disabled = crate::composition::lifecycle::executor::DisabledShellRunner;
             let stack = StackExecutionContext {
+                shell_runner: if shell_enabled { self.stack.shell_runner } else { &disabled },
                 seq: Some(&seq), runtime_state: Some(runtime.as_ref()), frontmatter: &event_frontmatter,
                 source_path: &sequence.origin_path, err: error.as_ref(),
                 ..self.stack.with_signal(signal)
@@ -95,7 +115,8 @@ impl TaskExecution<'_> {
                     error = None;
                     for (index, step) in sequence.steps.iter().enumerate() {
                         if self.interrupted() {
-                            return PrimaryOutcome::interrupted(String::new());
+                            signal = LifecycleSignal::Cancelled;
+                            break;
                         }
                         let overlay = crate::composition::sequence::build_step_overlay(&plan, index);
                         let seq = SequenceBinding::step(&overlay, runtime.snapshot().outputs).to_value();
@@ -170,7 +191,7 @@ impl TaskExecution<'_> {
                                             runner.set_error(error.as_ref().unwrap().clone());
                                             break;
                                         }
-                                        super::PrimaryResult::Interrupted => return PrimaryOutcome::interrupted(primary.stdout),
+                                        super::PrimaryResult::Interrupted => { interrupted_stdout = primary.stdout; signal = LifecycleSignal::Cancelled; break; },
                                     }
                                 }
                                 Err(failure) => {
@@ -181,7 +202,10 @@ impl TaskExecution<'_> {
                             }
                         } else { child.run() };
                         if outcome.status == TaskStatus::Interrupted {
-                            return PrimaryOutcome::interrupted(outcome.stdout);
+                            interrupted_stdout = outcome.stdout;
+                            secondary_errors.extend(outcome.secondary_errors);
+                            signal = LifecycleSignal::Cancelled;
+                            break;
                         }
                         secondary_errors.extend(outcome.secondary_errors);
                         if outcome.status == TaskStatus::Failed {
@@ -191,7 +215,13 @@ impl TaskExecution<'_> {
                         }
                     }
                     runtime.set_sequence_binding(SequenceBinding::container(run_id, Vec::new()).to_value());
-                    signal = if error.is_some() { LifecycleSignal::Failure } else { LifecycleSignal::Success };
+                    if signal == LifecycleSignal::Cancelled {
+                        runner.cancel(crate::composition::lifecycle::cancellation::cause()
+                            .unwrap_or(crate::composition::lifecycle::cancellation::CancellationCause::Interrupt));
+                        error = runner.primary_error().cloned();
+                    } else {
+                        signal = if error.is_some() { LifecycleSignal::Failure } else { LifecycleSignal::Success };
+                    }
                 }
                 ContainerEventDecision::Skip => {
                     return PrimaryOutcome::succeeded(String::new());
@@ -201,6 +231,11 @@ impl TaskExecution<'_> {
                 }
                 ContainerEventDecision::Finalize { error: raised, .. } => {
                     error = raised.or(error); signal = LifecycleSignal::Finalize;
+                }
+                ContainerEventDecision::Finished { .. } if runner.is_cancelled() => {
+                    secondary_errors.extend(runner.secondary_errors().iter().cloned().map(|info|
+                        TaskDiagnostic { stage: TaskStage::Primary, info }));
+                    return PrimaryOutcome::interrupted(interrupted_stdout).with_secondary(secondary_errors);
                 }
                 ContainerEventDecision::Finished { failed: false } => {
                     return PrimaryOutcome::succeeded(String::new())
@@ -274,7 +309,8 @@ impl TaskExecution<'_> {
             });
         }
         for candidate in &fresh.template_candidates {
-            if !self.graph.template_candidates.iter().any(|approved| approved.authored() == candidate.authored()) {
+            if !self.graph.template_candidates.iter().any(|approved| approved.authored() == candidate.authored())
+                || self.graph.shell_authorization().is_some_and(|(approved, _)| !candidate.authorized_by(&approved)) {
                 return Err(CompositionError::SequenceShellResolution {
                     command: candidate.authored().unwrap_or("").into(), task: self.label(),
                     message: "nested source introduced a template after sequence approval closed".into(), source: None,
@@ -285,6 +321,9 @@ impl TaskExecution<'_> {
             if self.graph.prompt_document(&document.path).is_none() {
                 return Err(CompositionError::SequenceInvalid("nested source introduced an unapproved prompt document".into()));
             }
+        }
+        if let Some(authorization) = self.graph.shell_authorization() {
+            fresh.settle_container_events(&authorization.0, authorization.1.as_deref());
         }
         Ok(())
     }

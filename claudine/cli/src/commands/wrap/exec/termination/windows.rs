@@ -551,17 +551,27 @@ fn windows_wait_loop(
     let mut completion_requested = false;
     let poll_interval = Duration::from_millis(75);
     let grace_period = kill_grace;
+    let mut cancelled = false;
 
     loop {
         let presses = registration.presses();
 
+        if claudine::composition::lifecycle::cancellation::requested()
+            && matches!(claudine::composition::lifecycle::cancellation::cause(),
+                Some(claudine::composition::lifecycle::cancellation::CancellationCause::SiblingFailure { .. }))
+        {
+            terminate_tree(&job, job_assigned, child, 130);
+            cancelled = true;
+        }
         if let Some(status) = child.try_wait()? {
-            let code = if completion_requested {
+            let code = if cancelled {
+                130
+            } else if completion_requested {
                 0
             } else {
                 exit_code_from_status(status)
             };
-            let termination = if presses > 0 {
+            let termination = if cancelled || presses > 0 {
                 claudine::harness::ProcessTermination::Interrupted
             } else if completion_requested {
                 claudine::harness::ProcessTermination::Completed

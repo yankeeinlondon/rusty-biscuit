@@ -1243,6 +1243,15 @@ pub enum CompositionError {
         source: Box<MarkdownError>,
     },
 
+    /// Cancellation cleanup cannot start a new attempt or transfer ownership.
+    #[error("lifecycle `{action}` cannot recover a cancelled primitive ({source_path})", source_path = biscuit_file::to_portable_string(source_path))]
+    LifecycleCancellationRecovery {
+        /// Document whose cleanup requested recovery.
+        source_path: PathBuf,
+        /// Refused recovery directive.
+        action: String,
+    },
+
     /// A `failure` stack requested `resume(...)` but the agentic loop did
     /// not surface a provider session id, so there is nothing to resume.
     ///

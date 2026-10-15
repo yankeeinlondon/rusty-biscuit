@@ -911,6 +911,8 @@ pub struct CompositionExecutionRequest {
     /// cache instead of prompting again. Used by sequence execution to
     /// honour "allow once" for the whole run, not just one step.
     pub shared_approval_cache: Option<SharedApprovalCache>,
+    /// Sequence invocation approvals; descendants may reuse membership but never extend it.
+    pub closed_shell_approvals: Option<darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals>,
     /// Whether this request is part of a sequence run. When `true`, the
     /// execution header shows a `Sequence` badge.
     pub sequence: bool,
