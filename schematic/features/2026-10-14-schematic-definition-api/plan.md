@@ -1,7 +1,7 @@
 ---
 total_phases: 8
 created: 2026-10-11
-phase: 1
+phase: 3
 agent: codex/gpt-6.1-sol
 yolo: "true"
 source_files_during_phase_1:
@@ -65,6 +65,65 @@ skills_files_updated_during_phase_1:
 packages:
   - schematic-define
   - schematic-gen
+  - schematic-definitions
+source_files_during_phase_2:
+  - Cargo.lock
+  - schematic/define/Cargo.toml
+  - schematic/define/src/lib.rs
+  - schematic/define/src/models/type_ref.rs
+  - schematic/define/src/registration.rs
+  - schematic/define/tests/typed_registration.rs
+  - schematic/definitions/src/registry/mod.rs
+  - schematic/definitions/src/registry/typed.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+docs_updated_during_phase_2:
+  - docs/dependencies.md
+  - schematic/define/README.md
+  - schematic/docs/dependencies.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+docs_created_during_phase_2:
+  - schematic/docs/typed-registration.md
+skills_files_updated_during_phase_2:
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+source_files_during_phase_3:
+  - Cargo.lock
+  - schematic/define/Cargo.toml
+  - schematic/define/src/builders.rs
+  - schematic/define/src/lib.rs
+  - schematic/define/src/prelude.rs
+  - schematic/define/src/schema.rs
+  - schematic/define/src/registration.rs
+  - schematic/define/src/params/mod.rs
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/paths.rs
+  - schematic/define/src/openapi/export/request_body.rs
+  - schematic/define/src/openapi/export/responses.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/endpoint_literal_surface.rs
+  - schematic/gen/src/output/mod.rs
+  - schematic/gen/src/codegen/api_struct/tests.rs
+  - schematic/gen/src/codegen/module_docs.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/tests/l1/http_client.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+docs_updated_during_phase_3:
+  - docs/dependencies.md
+  - schematic/define/README.md
+  - schematic/docs/dependencies.md
+  - schematic/docs/typed-registration.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+docs_created_during_phase_3:
+  - schematic/docs/definition-builders.md
+skills_files_updated_during_phase_3:
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
 ---
 
 # Schematic definition API implementation plan
@@ -157,7 +216,7 @@ Phase gate: serde round-trips, snapshot mutation control, original pagination re
 
 ### Wave 4 — Context and Descriptor Core (Sequential)
 
-- [ ] **Build Context**
+- [x] **Build Context**
   - Implement the spike-selected dispatcher, DefinitionContext, private TypeDesc, fallible registration, rust_path!, and DefinitionError (R1–R5, R7). One module group owns insertion order and collisions; repeated canonical registration does not reorder entries.
   - Use existing OpenAPI-compatible schema settings. Preserve explicit registrations of types not mentioned by endpoints and existing nested-def extraction; omit only container components and primitives/free-form JSON components.
   - Implement register_as and schema_name without merging distinct conflicting types. Test HuggingFace Commit/CommitInfo and Ollama progress alias behavior in small fixtures without converting those APIs yet.
@@ -165,10 +224,10 @@ Phase gate: serde round-trips, snapshot mutation control, original pagination re
 
 ### Wave 5 — Adapter and Boundary Coverage (Parallel)
 
-- [ ] **Adapt Registry**
+- [x] **Adapt Registry**
   - In schematic-definitions, adapt ordered neutral registrations to SchemaRegistry without a reverse crate dependency. Add a module-group assembly seam alongside current literal-based lookup.
   - Test shared Ollama/EMQX groups versus isolated groups, identical registration order, nested schema extraction, and explicit unreachable-from-endpoint registrations. Avoid introducing a second manually maintained registry or API inventory.
-- [ ] **Test Registration**
+- [x] **Test Registration**
   - In schematic-define, implement compile-fail coverage for string construction, the structural setter, misspelled rust_path, and mismatched typed paths according to the spike ruling.
   - Cover all container/primitive/Value combinations, nullable wire shape, map key rejection, aliases, renamed schema names, collision aggregation, descriptor serde, and matching/forged destination-context data. Execute the input matrix below through the public validation result.
 
@@ -178,21 +237,21 @@ Phase gate: R1–R7 have focused passing coverage; old definitions still generat
 
 ### Wave 6 — Builder Implementation (Sequential)
 
-- [ ] **Build Endpoints**
+- [x] **Build Endpoints**
   - Implement constructors for every authored verb and typestate for description/success. Fallible build handles invalid facts and repeated success calls with API/endpoint diagnostics (R8–R10, R13).
   - Add non-exhaustive Success/ErrorSet placeholders and exactly the R13 forms: four success constructors, matching shorthands, ErrorSet::none, and API default_errors. Lower to existing ApiResponse in one place; no definition names that storage type.
   - Cover JSON, multipart, URL-encoded, text, and binary request authoring. Preserve present text/binary runtime gaps and output-specific diagnostics; do not claim new builder syntax fixes body transport.
-- [ ] **Build APIs**
+- [x] **Build APIs**
   - Add API typestate and coherent auth calls, with no Default on values/builders. Auth choice cannot silently overwrite a prior choice; conflicting explicit env mappings fail in either setter order. Keep explicit AuthPolicy authoritative for supported multi-method cases.
   - Support existing headers, version, params, module_path, request_suffix, and inheritance precedence. Build endpoints before borrowing the context for the API builder; validate references and aggregate collisions at API build.
   - Audit the exact Default allow-list; add EndpointParams::new. Keep external literals temporarily legal until the emitter and providers migrate.
 
 ### Wave 7 — Fixture Migration and Compile Contracts (Parallel)
 
-- [ ] **Migrate Fixtures**
+- [x] **Migrate Fixtures**
   - Convert external literal-based generator tests/helpers to builders in output, api_struct, module_docs, validation, definition_gen, and HTTP-client tests. Split file ownership before delegation; provider definitions remain unchanged.
   - Update the relevant R27 literal-surface test to required-fact coverage; keep pagination-table/legacy-presence tests until actual removal. Migrate crate-internal exporter examples only where needed for the public authoring contract.
-- [ ] **Prove Typestate**
+- [x] **Prove Typestate**
   - Add compile-fail cases for Endpoint/RestApi Default, missing endpoint description/success, missing API description/auth, and unavailable non-none ErrorSet construction.
   - Test every accepted success/request form, second-success error, auth order/conflicts, intentional multi-method policy, parameter/header precedence, and literal-equivalent fixture output.
 

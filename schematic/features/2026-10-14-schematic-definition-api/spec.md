@@ -34,22 +34,27 @@ related: []
 next_spec: 2026-10-15-schematic-definition-vocabulary
 human_review: false
 message_to_agent: |-
-  Phase 1 is complete: see implementation-log.md, inventory.md, prerequisite-interfaces.md,
-  reproduction.md, and spike/README.md in this feature directory. All 18 historical fixtures
-  live in schematic/gen/tests/fixtures/definition-baseline; just migration-check is non-mutating.
-  Raw snapshots were 8,449,975 bytes, so ordered registry schemas use biscuit-hash BLAKE3;
-  readable definitions/pagination plus API/endpoint fingerprints total 1,270,391 bytes.
-  Historical comparisons use JSON Values before typed deserialization; exact leaf exceptions
-  need a cause and current artifact comparisons never accept exemptions.
-  Implement the spike's disjoint Registration trait (JsonSchema + 'static), emitted beside
-  nominal declarations, with typed rust_path tokens and separate private wrapper metadata.
-  Foreign leaf adapters must live in the trait-owning crate because of Rust's orphan rules.
-  Production reserved structure must be Option<TypeRef>, not the isolated spike's Option<Value>.
-  Complete primitive and integer-map-key coverage in Phase 2; first canonical registration
-  fixes name/path/order, so exceptional naming must precede implicit discovery.
-  Preserve ABI 4, 94 pagers, 32 verification endpoints, manual retry, global-only paging hooks,
-  separately opened partition sessions, overlay reproduction, and the no-GraphQL frozen assertion.
-  Schema::full_path has a live WebSocket reader; retiring REST module_path must preserve that use.
+  Phase 3 adds required-fact builders in schematic/define/src/builders.rs; read
+  schematic/docs/definition-builders.md. Endpoint JSON methods take &mut context;
+  construct endpoints before RestApi::builder borrows &context. Errors remain fallible.
+  Typed Schema now carries optional descriptor evidence, omitted from legacy JSON.
+  API build validates complete destination wrapper/name/path identity, including JSON
+  form fields, missing descriptor evidence, and lowered-path agreement. The destination must register the complete
+  wrapper, not only the leaf; no process-local identity is serialized. Typed OpenAPI
+  export uses descriptor wire schemas; legacy paths are unchanged. Root typed Vec
+  keeps GET list inference; Option/nominal/non-GET boundaries remain unchanged.
+  Auth is exactly one declaration, with coherent env names; conflicting env_mapping
+  fails in either order. Explicit AuthPolicy stays authoritative. All 20 meaningful
+  public Defaults were retained in an audited allow-list; Endpoint/RestApi/builders
+  have none. ErrorSet only supports none. FormField::json_desc authors typed metadata.
+  Named generator fixtures use builders plus explicit stored-field mutations for
+  intentionally invalid/legacy schema cases; no public string builder escape hatch.
+  Providers, production importer emitter and external literal legality remain for
+  later phases. Phase 4 should add definition-side runtime/query forms without losing
+  optional schema descriptor evidence. Keep ABI 4, pagination contracts, committed
+  artifact baselines and import reproduction. Ollama progress models still need their
+  JsonSchema derive at provider migration. Existing isolated compiler guards cover
+  required-fact failures with exact diagnostic codes; no new slow suite was introduced.
 ---
 
 # Schematic definition API: builders and typed registration
