@@ -64,6 +64,7 @@ pub struct ApiDefinition {
     secret_names: Vec<String>,
     request_id_header: Option<String>,
     cross_origin: OriginPolicy,
+    endpoint_cross_origin: Vec<(String, OriginPolicy)>,
 }
 
 impl ApiDefinition {
@@ -75,6 +76,7 @@ impl ApiDefinition {
             secret_names: Vec::new(),
             request_id_header: None,
             cross_origin: OriginPolicy::SameOrigin,
+            endpoint_cross_origin: Vec::new(),
         }
     }
 
@@ -84,6 +86,14 @@ impl ApiDefinition {
     #[must_use]
     pub fn cross_origin(mut self, policy: OriginPolicy) -> Self {
         self.cross_origin = policy;
+        self
+    }
+
+    /// Replaces the API policy for one endpoint. Caller overrides must still
+    /// tighten this endpoint's policy.
+    #[must_use]
+    pub fn endpoint_cross_origin(mut self, endpoint: impl Into<String>, policy: OriginPolicy) -> Self {
+        self.endpoint_cross_origin.push((endpoint.into(), policy));
         self
     }
 
@@ -196,6 +206,7 @@ struct Inner {
     secrets: SecretNames,
     request_id_header: Option<String>,
     origins: OriginRules,
+    endpoint_origins: Vec<(String, OriginRules)>,
     hooks: Hooks,
 }
 
@@ -332,11 +343,11 @@ impl<A: Api> Client<A> {
         self.update(|settings| settings.env_order = Some(vars))
     }
 
-    /// Tightens the API's cross-origin policy for this client.
+    /// Tightens the API's default and every endpoint policy for this client.
     ///
     /// [`OriginPolicy::Deny`] and [`OriginPolicy::SameOrigin`] are accepted,
     /// and so is an [`OriginPolicy::AllowOrigins`] list that is a subset of
-    /// the API's own list. Over a `Deny` API only `Deny` is accepted. Any
+    /// every applicable authored list. Over a `Deny` policy only `Deny` is accepted. Any
     /// other choice fails validation.
     #[must_use]
     pub fn cross_origin(self, policy: OriginPolicy) -> Self {
@@ -424,6 +435,10 @@ fn validate(settings: &Settings) -> Result<Inner, BuildError> {
     let definition = &settings.definition;
     let base_url = parse_base_url(&definition.base_url)?;
     let origins = OriginRules::new(&base_url, &definition.cross_origin, settings.cross_origin.as_ref())?;
+    let endpoint_origins = definition.endpoint_cross_origin.iter().map(|(endpoint, policy)| {
+        OriginRules::new(&base_url, policy, settings.cross_origin.as_ref())
+            .map(|rules| (endpoint.clone(), rules))
+    }).collect::<Result<Vec<_>, _>>()?;
     let mut auth = definition.auth.clone();
     if let Some(vars) = &settings.env_order {
         auth.replace_env_order(vars.clone());
@@ -482,6 +497,7 @@ fn validate(settings: &Settings) -> Result<Inner, BuildError> {
         secrets,
         request_id_header: definition.request_id_header.clone(),
         origins,
+        endpoint_origins,
         hooks: settings.hooks.clone(),
     })
 }
@@ -719,7 +735,7 @@ impl<A: Api> Client<A> {
         R: EndpointSpec<Api = A>,
     {
         let inner = self.validated_for::<R>(Instant::now())?;
-        match inner.origins.link(url) {
+        match inner.origins_for::<R>().link(url) {
             Decision::Follow { .. } => Ok(()),
             Decision::Refuse => {
                 let meta = inner.meta_for::<R>(&R::METHOD, url, &HeaderMap::new(), AuthMethod::Anonymous);
@@ -731,6 +747,13 @@ impl<A: Api> Client<A> {
 }
 
 impl Inner {
+    fn origins_for<R: EndpointSpec>(&self) -> &OriginRules {
+        self.endpoint_origins.iter().rev()
+            .find(|(endpoint, _)| endpoint == R::ENDPOINT_ID)
+            .map(|(_, rules)| rules)
+            .unwrap_or(&self.origins)
+    }
+
     /// The execution core shared by every send: prepares the first hop
     /// ([`prepare`](Self::prepare)), checks the deadline, and follows
     /// redirects under one expiration until a reply that ends the send.
@@ -825,7 +848,7 @@ impl Inner {
                     });
                 }
             };
-            let (next, credentials) = match self.next_hop(&current, status, &headers, followed) {
+            let (next, credentials) = match self.next_hop::<R>(&current, status, &headers, followed) {
                 Ok(next) => next,
                 Err(reason) => {
                     return Ok(Exchange::Stopped {
@@ -875,7 +898,7 @@ impl Inner {
             .assemble(parts)
             .map_err(|kind| pre_send(kind, self.meta_for::<R>(&method, &inner.base_url, &HeaderMap::new(), AuthMethod::Anonymous)))?;
 
-        let Decision::Follow { credentials } = inner.origins.link(&assembled.url) else {
+        let Decision::Follow { credentials } = inner.origins_for::<R>().link(&assembled.url) else {
             let meta = self.meta_for::<R>(&assembled.method, &assembled.url, &assembled.headers, AuthMethod::Anonymous);
             let target = inner.secrets.redact_url(&assembled.url);
             return Err(pre_send(TransportErrorKind::CrossOriginRejected { target }, meta));
@@ -947,7 +970,7 @@ impl Inner {
 
     /// The next hop for a redirect received in reply to `current`, and
     /// whether the credential goes with it.
-    fn next_hop(
+    fn next_hop<R: EndpointSpec>(
         &self,
         current: &Assembled,
         status: StatusCode,
@@ -966,7 +989,7 @@ impl Inner {
             return Err(RedirectRefusal::HopLimit);
         }
         target.set_fragment(None);
-        let Decision::Follow { credentials } = self.origins.redirect(&target) else {
+        let Decision::Follow { credentials } = self.origins_for::<R>().redirect(&target) else {
             return Err(RedirectRefusal::CrossOrigin);
         };
 
