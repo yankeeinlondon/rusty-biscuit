@@ -43,7 +43,8 @@ handling belongs in lifecycle events. No `CLAUDINE_FAIL_FAST` value is
 injected into child sessions. The `cancelled:` lifecycle event accepts an
 empty stack as an explicit cancellation opt-in; null is an error.
 Container recovery uses `retry` or `proxy`; `resume` requires a live provider
-session and is an error on a container. Cancellation dispatch is **planned**.
+session and is an error on a container. See [Cancellation](#cancellation) for
+sibling failure and Ctrl-C cleanup.
 
 ## The two meanings of `prompt`
 
@@ -187,7 +188,7 @@ property presence, including supplied null values, preserves that behavior.
 Explicit `fm.previous`, unrelated members such as `ctx.state`, and quoted
 strings never request a retired runtime global.
 
-**Planned container execution:** each nested sequence, group, or loop
+Each nested sequence or group
 replaces its entire same-kind root and restores the enclosing root on exit.
 A sequence's own events have null step positions and expose its own outputs
 and invocation token. Inner empty outputs never fall back to outer outputs.
@@ -357,8 +358,10 @@ Before anything runs, Claudine walks the **entire task graph**:
 - **Dynamic sources resolve exactly once.** The resulting step list is a
   snapshot; it never re-evaluates mid-run, even if the environment changes.
 - **Every referenced document loads transitively** — `kind: group` files,
-  `kind: group-catalog` entries, `kind: task` files, and every `prompt:`
-  document. Reference cycles are rejected with the complete chain.
+  `kind: group-catalog` entries, `kind: task` files, nested `sequence:` containers, and every `prompt:`
+  document. Reference cycles are rejected with the complete active chain. Reusing a
+  sequence later is legal, as is nesting distinct groups from the same catalog.
+  Catalog entries appear as `catalog.json#group-name` in cycle diagnostics.
 - **Schemas validate and missing properties aggregate** across all steps and all
   referenced prompt documents, with one interactive collection pass.
 - **Every shell command is approved before the first step** — `shell:` tasks,
@@ -368,7 +371,8 @@ Before anything runs, Claudine walks the **entire task graph**:
   with a placeholder is approved depends on its task's position:
 
   - **The first task** (the first step's task, or every leg of a first-step
-    group) resolves each command now, under the launch environment and the
+    group, or the first child recursively through nested first-step sequences)
+    resolves each command now, under the launch environment and the
     caller's values, and approves those bytes. They are what runs.
   - **Every later task** approves each command with a placeholder only by its
     typed shape (`just clean --out {{ string }}/build`), even when its values
@@ -376,11 +380,11 @@ Before anything runs, Claudine walks the **entire task graph**:
     today's bytes does not cover it. Position is static: skipped predecessors,
     retries, and resume never make a task first.
 
-  A placeholder reading a value an earlier step produces — `outputs`, `loop`,
+  A placeholder reading a value an earlier step produces — `seq.outputs`, `loop`,
   or, inside a group, `group` — is a **late value**: it is not read at
   preflight, and its command is approved only by its shape in any task. A step
   value or a prompt task's `param` derived from one is late too. Every other
-  value a command reads (`seq`, template values, caller values, `fm.*`,
+  value a command reads (template values, caller values, `fm.*`,
   `ctx.*`, `env.*`) is read now, and a `null` fails preflight before step 1. A
   lifecycle global that never exists at approval (`err`, `timing`, `current`,
   or `group` outside a group) is a typed preflight error
@@ -403,6 +407,22 @@ Before anything runs, Claudine walks the **entire task graph**:
   in the task output for the next step, while `> /dev/null 2>&1` discards both.
   Lifecycle shells use the same order over the parent process's inherited streams.
 
+  Container lifecycle commands join the same condition-blind audit, including
+  shell-valued `set` operations. Commands with placeholders in terminal events
+  (`success`, `failure`, `cancelled`, `finalize`, and `blocked`) require typed
+  templates, even on the first container. For example, `finalize: [{ shell:
+  'git check-ref-format --branch {{ value }}' }]` reads `value` when cleanup
+  runs (with Git installed). Templates require native executables; shell
+  builtins and aliases are not template targets. A group's own
+  `group.*` values are late in its events as well as in its legs. Use a scalar
+  expression such as `first(group.succeeded)` when passing an outcome to a command.
+
+  Root retries reuse the original approval set. If a nested source changes
+  before preparation, every newly discovered command
+  must already belong to the invocation's approval set. Unapproved commands,
+  templates, and prompt targets fail preparation before children start;
+  concurrent descendants never open another approval prompt.
+
   A first-task `shell:` or prompt lifecycle command whose values are known
   offers exact approval and, for valid placeholders, shape approval. Saved
   exact rules take priority; shape approval fills each containing argument at dispatch. A first
@@ -411,8 +431,8 @@ Before anything runs, Claudine walks the **entire task graph**:
   The group scheduler applies one late-value barrier across the entire group
   before any command runs. Referenced documents
   retain the checked late inputs; ordinary values still read current state at
-  command dispatch. Nested sequences and container lifecycle execution are
-  planned. Use `seq.outputs` for prior results.
+  command dispatch. Nested sources prepare just before execution. Use
+  `seq.outputs` for prior results.
 
   Each step and group leg later captures its own environment. Before any of
   its stages runs, a task resolves the commands preflight resolved to bytes
@@ -616,7 +636,7 @@ sequence:
 | `variables` | Group-scoped values exposed to tasks on the `group.*` global, discarded when the group completes |
 | `tasks` (required, ≥1) | Concurrent legs, each with a unique, nonempty string `name` |
 | `max_parallel` | Cap on simultaneous tasks. Integer ≥ 1. |
-| `fail_fast` | Boolean, default `true`; sibling cancellation is planned |
+| `fail_fast` | Boolean, default `true`; stops admission on failure and cancels running legs that declare `cancelled` |
 | `operation` / `flow` | Defaults for the group's tasks; task-level values override |
 
 A single-task group is legitimate — it is the honest way to get a semantic name
@@ -709,13 +729,13 @@ group:
   completion order. Disjoint keys merge cleanly; when two tasks wrote the same
   key the later-declared task wins and Claudine warns on stderr naming the key
   and both tasks.
-- **Failure policy** — the grammar accepts group `fail_fast` (default `true`).
-  Canceling siblings after a failure and dispatching `cancelled` lifecycle
-  events are **planned**. The current runner lets started legs complete and
-  fails an atomic group if any leg failed, stops new admissions, and withholds
-  its leg mutations and result. With `fail_fast: false`, it succeeds after leg
-  failures and merges failed-leg mutations. Terminal summaries retain partial
-  stdout for failed legs.
+- **Failure policy** — group `fail_fast` defaults to `true`. An unhandled
+  failure stops new admissions and cancels running legs that declare
+  `cancelled`. Other running legs complete and retain their actual outcomes.
+  The failed group withholds all leg mutations and its result. With
+  `fail_fast: false`, it succeeds after leg failures and merges failed-leg
+  mutations. Cancelled legs contribute no state. Terminal summaries retain
+  partial stdout for failed legs. See [Cancellation](#cancellation).
 - **No interactivity** — a late required property becomes a task *failure*
   inside a parallel group, never a TTY prompt: N concurrent tasks cannot share
   one terminal. Serial contexts keep the standard interactive collection.
@@ -809,7 +829,7 @@ switch sets, and a reportable field in Claudine's logs.
 
 ## Remaining planned behavior
 
-Cancellation event dispatch is **planned**. Group `loop` remains rejected.
+Group `loop` remains rejected.
 Persisted checkpoint/resume is not available.
 
 
@@ -864,3 +884,74 @@ flowchart LR
 Dry-run fires no lifecycle events recursively and launches no provider or
 inline write-back. It still executes shell tasks and composition shell
 expansions against initial state: those commands can have real effects.
+
+
+## Cancellation
+
+A group with `fail_fast: true` cancels running legs that opt in by declaring
+`cancelled:`. An empty stack, `cancelled: []` or `cancelled: {}`, opts in too;
+omission does not, and null is invalid. A prompt leg declares the event in its
+referenced document. Wrap a shell or side effect in a sequence to give it a
+lifecycle and opt it in:
+
+```yaml
+sequence:
+  - name: checks
+    group:
+      name: checks
+      tasks:
+        - name: build
+          shell: just build
+        - name: review
+          sequence:
+            - name: review-source
+              shell: just review
+          cancelled: []
+          finalize:
+            - info: Review settled
+```
+
+If `build` fails while `review` runs, Claudine interrupts the review container
+and all its running descendants, including descendants without their own
+`cancelled` stack. It waits for those descendants to finish cleanup before
+running the container's `cancelled` and then `finalize`. A running leg without
+an opt-in runs to completion; its recorded outcome stays succeeded or failed,
+but the failed atomic group publishes none of its state. Legs not yet admitted
+record `cancelled` with null output and the triggering cause, and fire no events.
+The first observed unhandled failure supplies the structured cause, including
+the originating group and leg, through `err` in cancellation cleanup.
+
+Ctrl-C interrupts **every** running primitive regardless of opt-in and prevents
+later steps from starting. Every entered lifecycle runs its declared
+`cancelled` actions followed by `finalize`, with children finishing before
+parents begin cleanup. Sibling cleanup can interleave. A primitive that entered
+initialize but has not started still gets cleanup, with shells disabled;
+a finalized primitive receives no second cleanup. A second Ctrl-C preserves
+the force-exit ladder and may cut cleanup short.
+
+```mermaid
+flowchart TD
+    C[Sibling failure or Ctrl-C] --> A[Stop admission]
+    A --> D[Interrupt selected descendants]
+    D --> S[Wait for descendant cleanup]
+    S --> E[Run owner's cancelled actions]
+    E --> F[Run owner's finalize]
+    F --> T[Keep cancellation outcome]
+```
+
+Cancellation bypasses `failure` recovery. `stop` ends only the cancellation
+stack. Recovery in the following `finalize` raises a typed cancellation-recovery
+error and launches no replacement work. Cleanup errors remain secondary
+diagnostics: they neither change a cancelled leg's outcome nor replace Ctrl-C's
+exit status. A normal execution timeout is a failure, never cancellation;
+a cleanup-shell timeout is a secondary cleanup error.
+
+The caller sees these Ctrl-C exit values after cleanup:
+
+| Platform | Root `claudine sequence` | Interrupted native provider result |
+|---|---|---|
+| macOS, Linux, WSL2 | `130` | Normalized to `130` |
+| Native Windows | `130` | Normalized to `130`, including native `0xC000013A` |
+
+See [Signal Handling](../signal-handling.md) for the escalation ladder and
+platform-specific signal delivery.

@@ -207,6 +207,20 @@ The **local control plane** is platform-native and per stable OS user: a Unix-do
 - For when/why a feature changed → [timeline.md](timeline.md)
 - For a specific subsystem → the deep topic docs under [Reference Documents](#reference-documents)
 
+## Container preflight and approval
+
+`composition/sequence/preflight/` owns the transitive walk (not the CLI).
+`containers.rs` prepares container event shells with the same site policy as
+primitive tasks; terminal event placeholders require templates. The graph's
+`root_lifecycle` is installed on the root guard after the audit. Lifecycle
+clones share settled authorization; a reread graph is settled only against the
+original invocation's approval, never by prompting. Root retries pass the same
+closed membership into graph approval; rebuilding the graph cannot reopen approval. Preserve normalized exact
+command keys, including multiple shell-value commands. Catalog cycle identity
+includes the selected group name, so distinct entries in one catalog are legal;
+diagnostics retain each entry as `catalog#name`. First position propagates to
+all legs of a first group and only the first child of a first sequence.
+
 ## Container grammar boundary
 
 Sequence tasks accept an exclusive `sequence:` list or file reference (source
@@ -218,8 +232,29 @@ unique nonempty leg names, reject reserved variables `legs`, `succeeded`,
 Task `setup:`/`teardown:` and sequence-document `fail_fast:` are removed
 grammar. The CLI rejects `--fail-fast` before source loading, keeps explicit
 provider `--` tails opaque, and no longer injects `CLAUDINE_FAIL_FAST`.
-`cancelled` is a parsed lifecycle event with a cleanup-only action set;
-actual cancellation dispatch is planned. Container events use
+`cancelled` is a cleanup-only lifecycle event. Presence, including `[]` or
+`{}`, opts running group legs into sibling-failure cancellation; null is
+invalid. Ctrl-C interrupts every running primitive regardless of opt-in.
+Cancellation stops admission and settles descendants before owner cleanup;
+an opted-in container cancels all descendants. Entered-but-not-started scopes
+still clean up with shells disabled; unadmitted legs record cancelled without
+events. Run `cancelled` then `finalize` exactly once before lexical restoration,
+never `failure` recovery. `stop` ends only the cancellation stack. Recovery in
+the following finalize raises the typed cancellation-recovery error without
+launching work; cleanup errors stay secondary and preserve cancellation/130.
+Loop initialization checks cancellation before catch controls, and cancelled
+iterations terminate before handoffs, loop gates, or mutations regardless of
+`fail_fast`. Timeouts remain failures; cleanup timeouts remain cleanup errors. Root sequence
+Ctrl-C exits 130 on every OS; native Windows provider status `0xC000013A` is
+normalized to 130. See [Sequences → Cancellation](topics/flow-control/sequences.md#cancellation).
+Sibling cancellation uses `composition.cancelled` with `err.detail.group`,
+`leg`, and the original structured failure under `cause`. Group worker threads
+explicitly inherit `lifecycle::cancellation::CancellationToken` scopes. Keep
+terminal execution on `LifecycleRunGuard::run_event_stack`: its cleanup scope
+allows terminal actions to finish after cancellation while preserving repeat
+interrupt grace. Lifecycle shell exact/template dispatch shares task shells'
+owned process trees.
+Container events use
 `lifecycle::runtime::ContainerRunner` and `LifecycleRunGuard`; root initialize
 precedes static preflight, nested preparation is just in time. Retry preserves
 mutations and clears child results, with no finalize until the final attempt.

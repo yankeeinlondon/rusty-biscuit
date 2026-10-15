@@ -130,7 +130,7 @@ Three canonical commands:
 
 - **`claudine compose <file-ref> [key=value ...]`** — compose a Markdown file and send it as a prompt (no file mutation)
 - **`claudine inline-compose <file-ref> [key=value ...]`** — use the frontmatter `prompt` property to generate content and replace the document body, preserving frontmatter byte-for-byte
-- **`claudine sequence <file-ref> [key=value ...]`** — run a serial sequence of composition steps declared in one document, with a shared shell approval cache, nested sequences, concurrent task groups, and container lifecycle recovery; see [Sequences](docs/topics/flow-control/sequences.md)
+- **`claudine sequence <file-ref> [key=value ...]`** — run a serial sequence of composition steps declared in one document, with a shared shell approval cache, nested sequences, concurrent task groups, container lifecycle recovery, and cancellation cleanup for sibling failures and Ctrl-C; see [Sequences](docs/topics/flow-control/sequences.md)
 
 **Inline Shorthand.** You can override frontmatter values using `key=value` positional arguments. Values are parsed as JSON5 first (supporting numbers, booleans, arrays) and fall back to plain strings. These shorthand overrides win over `--set` JSON blobs.
 

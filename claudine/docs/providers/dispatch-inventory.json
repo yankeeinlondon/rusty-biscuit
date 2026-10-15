@@ -18,10 +18,10 @@
     "reference": "code merely names a provider (fixtures, constructor arguments); nothing to migrate"
   },
   "totals": {
-    "sites": 1853,
-    "provider_refs": 2036,
+    "sites": 1854,
+    "provider_refs": 2037,
     "by_form": {
-      "direct-ref": 1790,
+      "direct-ref": 1791,
       "eq-comparison": 20,
       "match-provider": 8,
       "matches-macro": 14,
@@ -30,7 +30,7 @@
     },
     "by_dispatch_class": {
       "conditional": 63,
-      "reference": 1790
+      "reference": 1791
     }
   },
   "sites": [
@@ -607,6 +607,16 @@
         "Claude"
       ],
       "exempt_candidate": false
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/composition/pipeline/tests.rs",
+      "line": 83,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Claude"
+      ],
+      "exempt_candidate": true
     },
     {
       "path": "claudine/cli/src/commands/wrap/composition/tests.rs",

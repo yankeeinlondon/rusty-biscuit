@@ -42,8 +42,8 @@ loop's configuration, and can carry lifecycle actions of its own (see
 | `success` | The provider session completed without error **and** the composition satisfied its completion verdict |
 | `blocked` | Composition exited before the provider child was spawned (e.g., pre-flight denial, launch schema validation failure) |
 | `failure` | The provider session exited with an error, or the completion verdict failed |
-| `cancelled` | **Planned dispatch:** cleanup after cancellation; the event and its action restrictions are parsed now |
-| `finalize` | Once per iteration, immediately after `success`/`blocked`/`failure` |
+| `cancelled` | Cleanup after a sibling failure cancels an opted-in group leg, or after Ctrl-C interrupts execution |
+| `finalize` | Once per iteration, immediately after `success`/`blocked`/`failure`/`cancelled` |
 | `loop` | The loop's configuration. Its lifecycle actions run at the loop gate, after `finalize`, when the `while`/`until` condition is checked |
 
 `cancelled` accepts communications (`say`/`speak`, `effect`, `message`,
@@ -52,13 +52,26 @@ effects, `set`, `shell`, and `stop`, including conditional branches. It rejects
 `skip`, `error`, `retry`, `resume`, `proxy`, `prep`, `break`, and `defer`,
 even in unreachable
 branches: cancellation cleanup cannot recover or redirect the run. Its `err`
-binding describes the cancellation cause. **Cancellation dispatch and container
-execution are planned**; accepting a handler does not yet make it run.
+binding describes the structured cancellation cause. Declaring `cancelled: []`
+or `cancelled: {}` opts a running leg into sibling-failure cancellation even
+without cleanup actions; omitting the event does not. Ctrl-C interrupts every
+running primitive. Cleanup waits for descendants, then runs `cancelled` and
+`finalize` before restoring the enclosing scope. Shells remain disabled when
+the primitive has not reached `start`.
+
+Cancellation bypasses `failure` recovery. In a looping prompt, it also skips
+the loop gate and mutations and prevents another iteration, even with
+`fail_fast: false` and a true continuation condition. A recovery directive in the following
+`finalize` raises a typed cancellation-recovery error and starts no new work.
+Cleanup errors are secondary diagnostics: cancellation remains terminal and
+Ctrl-C still exits `130`. A timeout during ordinary execution remains a failure;
+a timeout in cleanup is a cleanup error. See
+[Sequences — Cancellation](sequences.md#cancellation) for examples and exit values.
 
 Sequence task `setup:` and `teardown:` are removed grammar. Use a preceding
 sequence task for setup and a group `finalize:` handler for shared cleanup.
-Container lifecycle handlers are accepted on inline `sequence:` containers;
-their execution is planned. See [Sequences](sequences.md).
+Container lifecycle handlers execute on inline `sequence:` containers and
+referenced sequence documents. See [Sequences](sequences.md).
 
 Live staged preparation runs initialization before reading body dependencies.
 An `ensure_file` action can create a file that the stabilized body then includes;
@@ -117,7 +130,10 @@ it always was. See
 ## Writing an Event
 
 An event's value is either a **list** of items or a single **dictionary** of
-verbs. Omitting the event, writing `null`, `[]`, or `{}` all mean "do nothing".
+verbs. For events other than `cancelled`, omitting the event, writing `null`,
+`[]`, or `{}` all mean "do nothing". For `cancelled`, omission does not opt into
+sibling cancellation, an empty list or dictionary opts in without actions,
+and null is invalid.
 
 **A list** runs its items in the order written. Each item is one verb, a
 dictionary of several verbs (a *bundle*), or a guarded `when` item:
@@ -145,7 +161,7 @@ This runs `message`, then `say`, then `shell`. A root dictionary never carries
 
 The same grammar is accepted everywhere Claudine reads lifecycle actions: the
 seven events and a `loop:` block's lifecycle concerns. Inline sequence
-containers also accept lifecycle handlers; their execution is planned.
+containers also execute lifecycle handlers.
 
 ### Guarded items: `when`, `then`, `else`
 
@@ -366,7 +382,7 @@ declaration:
 | --- | --- | --- | --- | --- | --- |
 | `initialize`, `start`, `success`, `loop` | unavailable | available | current sequence, or standalone outputs | inside a group only | inside a loop only |
 | `blocked`, `failure` | the failure | available | current sequence, or standalone outputs | inside a group only | inside a loop only |
-| `cancelled` (dispatch planned) | the cancellation cause | available | current sequence, or standalone outputs | inside a group only | inside a loop only |
+| `cancelled` | the cancellation cause | available | current sequence, or standalone outputs | inside a group only | inside a loop only |
 | `finalize` | the failure, or `null` | available | current sequence, or standalone outputs | inside a group only | inside a loop only |
 | a sequence's own events (dispatch planned) | follows the event above | available | own outputs/run ID; null child position | enclosing group only | enclosing loop only |
 | a group's own events (dispatch planned) | follows the event above | available | enclosing sequence | own variables and event-timed results | enclosing loop only |
@@ -966,7 +982,7 @@ Lifecycle expressions have access to late-binding roots in addition to frontmatt
 
 | Root | Available in | Fields |
 |------|--------------|--------|
-| `err` | `blocked`, `failure`, `finalize`, `cancelled` (dispatch planned) | faceted fields below (`code`, `category`, `disposition`, `origin`, `detail.*`, plus promoted conveniences) |
+| `err` | `blocked`, `failure`, `finalize`, `cancelled` | faceted fields below (`code`, `category`, `disposition`, `origin`, `detail.*`, plus promoted conveniences) |
 | `timing` | every event | `document_ms`, `total_ms`, `step_ms` (all optional) |
 | `loop` | inside a loop: the loop gate and the events of an iteration | `count`, `is_first`, `is_last`, `last_output`, `last_exit_code`; see [Looping — Loop values](looping.md#loop-values) |
 | `current` | every event | `current.<key>` for every `ctx.<key>`, observed once per event: every read in one event's actions agrees |
