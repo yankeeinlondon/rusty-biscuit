@@ -34,7 +34,7 @@ fn endpoint(id: &str, path: &str) -> Endpoint {
         response: ApiResponse::json_type("serde_json::Value"),
         headers: vec![],
         params: None,
-        oauth_scopes: None, cross_origin: None,
+        oauth_scopes: None, cross_origin: None, pagination: None,
     }
 }
 

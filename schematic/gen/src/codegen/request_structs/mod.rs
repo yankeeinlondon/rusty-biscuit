@@ -308,6 +308,11 @@ fn generate_doc_comment_with_example(
                 lines.push(String::new());
                 lines.push(format!(" let body: {body_ty} = Default::default();"));
             }
+            _ if body_ty.starts_with("::") => {
+                lines.push(format!(" use schematic_schema::{mod_path}::{struct_name};"));
+                lines.push(String::new());
+                lines.push(format!(" let body: {body_ty} = Default::default();"));
+            }
             _ => {
                 lines.push(format!(
                     " use schematic_schema::{mod_path}::{{{struct_name}, {body_ty}}};"

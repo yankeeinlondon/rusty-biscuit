@@ -16,7 +16,7 @@ fn make_endpoint(
         response: ApiResponse::json_type("TestResponse"),
         headers: vec![],
         params: None,
-        oauth_scopes: None, cross_origin: None,
+        oauth_scopes: None, cross_origin: None, pagination: None,
     }
 }
 
@@ -817,7 +817,7 @@ fn make_endpoint_with_query(
         response: ApiResponse::json_type("TestResponse"),
         headers: vec![],
         params,
-        oauth_scopes: None, cross_origin: None,
+        oauth_scopes: None, cross_origin: None, pagination: None,
     }
 }
 
@@ -1068,7 +1068,7 @@ mod pagination_doc_tests {
             response: ApiResponse::json_type("TestResponse"),
             headers: vec![],
             params: Some(params),
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         }
     }
 
@@ -1393,4 +1393,16 @@ fn explicit_rust_parameter_name_preserves_wire_query_and_ordinary_setters() {
     let code = format_generated_code(&generate_request_struct(&endpoint)).unwrap();
     assert!(code.contains("pub GitRef: Option<String>"), "explicit identifiers keep their spelling: {code}");
     assert!(code.contains("self.GitRef"), "{code}");
+}
+
+#[test]
+fn qualified_and_container_body_examples_are_valid_rust() {
+    for body in ["::schematic_definitions::openai::BetaCreateResponse", "::serde_json::Value", "::std::vec::Vec<::schematic_definitions::openai::Model>"] {
+        let lines = generate_doc_comment_with_example("CreateResponse", "CreateResponseRequest", &[], &[], true, Some(body), Some("openai"));
+        let start = lines.iter().position(|line| line.trim() == "```text").unwrap();
+        let source = lines[start + 1..].iter().take_while(|line| line.trim() != "```").cloned().collect::<Vec<_>>().join("\n");
+        syn::parse_file(&format!("fn example() {{\n{source}\n}}"))
+            .unwrap_or_else(|error| panic!("invalid example for {body}: {error}\n{source}"));
+        assert!(!source.contains("::{CreateResponseRequest, ::"), "{source}");
+    }
 }

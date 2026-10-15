@@ -39,7 +39,7 @@ fn get(id: &str, path: &str, response: &str, query: Vec<ParamDef>) -> Endpoint {
             query,
             ..Default::default()
         }),
-        oauth_scopes: None, cross_origin: None,
+        oauth_scopes: None, cross_origin: None, pagination: None,
     }
 }
 

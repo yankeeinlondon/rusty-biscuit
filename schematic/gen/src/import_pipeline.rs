@@ -140,6 +140,10 @@ pub fn run_import(options: &ImportOptions) -> Result<ImportResult, GeneratorErro
         }
     }
 
+    if api.endpoints.is_empty() {
+        return Err(GeneratorError::ConfigError(format!("Imported API {} has no usable endpoints", api.name)));
+    }
+
     let api_name = api.name.clone();
     let endpoint_count = api.endpoints.len();
     let model_count = models.types.len();

@@ -19,12 +19,12 @@
 //! use schematic_gen::validation::{validate_postman, validate_rust_client};
 //!
 //! let ctx = DefinitionContext::types_in("fixture");
-//! let mut endpoint = Endpoint::get("ListItems", "/items")
+//! let endpoint = Endpoint::get("ListItems", "/items")
 //!     .describes("List items").returns_empty().build().unwrap();
-//! // Malformed stored data blocks the Rust client, not the exports.
-//! endpoint.response = ApiResponse::json_type("Vec<Item");
-//! let api = RestApi::builder(&ctx, "TestApi", "https://api.test.com")
+//! let mut api = RestApi::builder(&ctx, "TestApi", "https://api.test.com")
 //!     .describes("Test API").no_auth().endpoints([endpoint]).build().unwrap();
+//! // Malformed stored data blocks the Rust client, not the exports.
+//! api.endpoints[0].response = ApiResponse::json_type("Vec<Item");
 //!
 //! let rust = validate_rust_client(&[&api]);
 //! assert_eq!(rust.len(), 1);

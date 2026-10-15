@@ -212,8 +212,12 @@ fn write_fixture_definitions(stub: &Path, real: &Path, modules: &[(&str, &str)])
          publish = false\n\n\
          [dependencies]\n\
          real = {{ package = \"schematic-definitions\", version = \"0.1.0\", path = {} }}\n\
-         serde = {{ version = \"1.0\", features = [\"derive\"] }}\n",
-        toml_path(real)
+         serde = {{ version = \"1.0\", features = [\"derive\"] }}\n\
+         serde_json = \"1\"\n\
+         schemars = \"1\"\n\
+         schematic-define = {{ path = {} }}\n",
+        toml_path(real),
+        toml_path(&real.parent().unwrap().join("define"))
     );
     fs::write(stub.join("Cargo.toml"), manifest).expect("write fixture manifest");
 

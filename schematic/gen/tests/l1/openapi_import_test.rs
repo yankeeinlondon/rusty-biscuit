@@ -235,8 +235,8 @@ fn import_with_module_path_override() {
 #[test]
 fn an_imported_definition_records_the_supplied_request_id_header() {
     for (request_id_header, expected) in [
-        (Some("x-request-id"), r#"request_id_header: Some("x-request-id".to_string())"#),
-        (None, "request_id_header: None"),
+        (Some("x-request-id"), true),
+        (None, false),
     ] {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let definitions = temp_dir.path().join("petstore");
@@ -257,6 +257,6 @@ fn an_imported_definition_records_the_supplied_request_id_header() {
         run_import(&opts).expect("import succeeds");
 
         let module = std::fs::read_to_string(definitions.join("mod.rs")).expect("definition module written");
-        assert!(module.contains(expected), "{request_id_header:?}: {module}");
+        assert_eq!(module.contains(r#".request_id_header("x-request-id")"#), expected, "{request_id_header:?}: {module}");
     }
 }

@@ -73,7 +73,7 @@ fn build_collection_with_endpoints() {
             response: ApiResponse::json_type("User"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "ListUsers".to_string(),
@@ -84,7 +84,7 @@ fn build_collection_with_endpoints() {
             response: ApiResponse::json_type("UserList"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
     ];
 
@@ -414,7 +414,7 @@ fn url_with_path_params() {
         response: ApiResponse::json_type("Model"),
         headers: vec![],
         params: None,
-        oauth_scopes: None, cross_origin: None,
+        oauth_scopes: None, cross_origin: None, pagination: None,
     };
 
     let path_params = extract_path_params(&endpoint.path);
@@ -446,7 +446,7 @@ fn reserved_path_param_strips_marker_in_collection() {
         response: ApiResponse::json_type("Model"),
         headers: vec![],
         params: None,
-        oauth_scopes: None, cross_origin: None,
+        oauth_scopes: None, cross_origin: None, pagination: None,
     }];
 
     let collection = build_postman_collection(&api);
@@ -472,7 +472,7 @@ fn folder_grouping() {
             response: ApiResponse::json_type("ModelList"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "GetModel".to_string(),
@@ -483,7 +483,7 @@ fn folder_grouping() {
             response: ApiResponse::json_type("Model"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "GetHealth".to_string(),
@@ -494,7 +494,7 @@ fn folder_grouping() {
             response: ApiResponse::json_type("Health"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
     ];
 
@@ -575,7 +575,7 @@ fn postman_collection_json_structure() {
             response: ApiResponse::json_type("ModelList"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
         Endpoint {
             id: "CreateCompletion".to_string(),
@@ -588,7 +588,7 @@ fn postman_collection_json_structure() {
             response: ApiResponse::json_type("Completion"),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         },
     ];
 
@@ -768,7 +768,7 @@ fn endpoint(id: &str, path: &str) -> Endpoint {
         response: ApiResponse::json_type("Resp"),
         headers: vec![],
         params: None,
-        oauth_scopes: None, cross_origin: None,
+        oauth_scopes: None, cross_origin: None, pagination: None,
     }
 }
 

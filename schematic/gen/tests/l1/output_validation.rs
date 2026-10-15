@@ -48,7 +48,7 @@ fn fixture_api(name: &str, module: &str, response_type: &str) -> RestApi {
             response: ApiResponse::json_type(response_type),
             headers: vec![],
             params: None,
-            oauth_scopes: None, cross_origin: None,
+            oauth_scopes: None, cross_origin: None, pagination: None,
         }],
         module_path: Some(module.to_string()),
         request_suffix: None,
@@ -650,17 +650,10 @@ fn grouped_document_renames_a_shared_raw_id() {
     );
 }
 
-/// The nine shipped endpoints whose path template embeds a query string.
-const EMBEDDED_QUERY_ENDPOINTS: [(&str, &str); 9] = [
+/// The two providers awaiting migration still embed query strings.
+const EMBEDDED_QUERY_ENDPOINTS: [(&str, &str); 2] = [
     ("Gitea", "GetGitTreeRecursive"),
     ("GitLab", "GetRepositoryFile"),
-    ("OpenAI", "BetaCancelResponse"),
-    ("OpenAI", "BetaCompactconversation"),
-    ("OpenAI", "BetaCreateResponse"),
-    ("OpenAI", "BetaDeleteResponse"),
-    ("OpenAI", "BetaGetResponse"),
-    ("OpenAI", "BetaGetinputtokencounts"),
-    ("OpenAI", "BetaListInputItems"),
 ];
 
 #[test]
@@ -719,15 +712,14 @@ fn live_definitions_warn_once_per_output_for_each_embedded_query() {
                 (d.api.join(","), d.endpoint.clone().unwrap())
             })
             .collect();
-        assert_eq!(warned.len(), 9, "{output}: {warned:#?}");
+        assert_eq!(warned.len(), expected.len(), "{output}: {warned:#?}");
         let warned: BTreeSet<_> = warned.into_iter().collect();
         assert_eq!(warned, expected, "{output}");
-        all_lines += 9;
+        all_lines += warned.len();
         unique.extend(warned);
     }
-    // Nine distinct endpoints, reported once for each of the three outputs.
-    assert_eq!(all_lines, 27);
-    assert_eq!(unique.len(), 9);
+    assert_eq!(all_lines, expected.len() * by_output.len());
+    assert_eq!(unique.len(), expected.len());
 }
 
 #[test]

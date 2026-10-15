@@ -170,7 +170,7 @@ fn endpoint(
         response,
         headers: vec![],
         params,
-        oauth_scopes: None, cross_origin: None,
+        oauth_scopes: None, cross_origin: None, pagination: None,
     }
 }
 

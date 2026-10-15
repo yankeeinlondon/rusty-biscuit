@@ -109,7 +109,73 @@ fn ollama_openai() {
 
 #[test]
 fn openai() {
-    assert_baseline("openai", include_str!("../fixtures/definition-baseline/openai.json"));
+    let mut expected: Value = serde_json::from_str(include_str!("../fixtures/definition-baseline/openai.json")).unwrap();
+    let api = resolve_api("openai").unwrap();
+    let mut actual = snapshot(&api);
+    let historical_endpoints = expected["definition"]["endpoints"].as_array().unwrap().clone();
+    let beta: Vec<_> = historical_endpoints.iter().filter(|e| e["path"].as_str().unwrap().contains('?')).cloned().collect();
+    assert_eq!(beta.len(), 7);
+    let mut endpoints = historical_endpoints.clone();
+    for candidate in &beta {
+        let base = candidate["path"].as_str().unwrap().split_once('?').unwrap().0;
+        let twin = endpoints.iter_mut().find(|e| e["path"] == base && e["method"] == candidate["method"]).unwrap();
+        for field in ["request", "response"] { twin[field] = candidate[field].clone(); }
+        let mut params = twin["params"].clone();
+        if params.is_null() { params = serde_json::to_value(schematic_define::EndpointParams::new()).unwrap(); }
+        for location in ["query", "header", "cookie"] {
+            let mut values = params[location].as_array().cloned().unwrap_or_default();
+            if let Some(imported) = candidate["params"][location].as_array() {
+                for param in imported {
+                    if let Some(existing) = values.iter_mut().find(|p| p["name"] == param["name"]) { *existing = param.clone(); }
+                    else { values.push(param.clone()); }
+                }
+            }
+            if location == "query" { values.push(serde_json::to_value(schematic_define::ParamDef::new("beta", schematic_define::QueryParamType::Boolean)).unwrap()); }
+            params[location] = Value::Array(values);
+        }
+        twin["params"] = params;
+    }
+    endpoints.retain(|e| !e["path"].as_str().unwrap().contains('?'));
+    let rows = expected["definition"]["pagination_exceptions"].as_array().unwrap().clone();
+    for row in rows {
+        if row["endpoint"] == "BetaListInputItems" { continue; }
+        let id = row.get("endpoint_id").or_else(|| row.get("endpoint")).unwrap();
+        let ep = endpoints.iter_mut().find(|e| e["id"] == *id).unwrap();
+        ep["pagination"] = row["collection"].clone();
+        if id == "ListInputItems" { ep["pagination"]["item_type"] = serde_json::json!("BetaItemResource"); }
+    }
+    expected["definition"]["endpoints"] = Value::Array(endpoints);
+    expected["definition"]["pagination_exceptions"] = serde_json::json!([]);
+    expected["pagination"].as_array_mut().unwrap().retain(|row| !beta.iter().any(|endpoint| endpoint["id"] == row["endpoint"]));
+    for row in expected["pagination"].as_array_mut().unwrap() {
+        if row["endpoint"] == "ListInputItems" { row["resolution"]["Paginated"]["list"]["item_type"] = serde_json::json!("BetaItemResource"); }
+    }
+    let aliases: Vec<_> = include_str!("../../../definitions/src/openai/types.rs").lines()
+        .filter_map(|line| line.strip_prefix("pub type ").and_then(|s| s.split_once(" = ")).map(|(name, _)| name)).collect();
+    assert_eq!(aliases, ["ChatCompletionMessageToolCalls", "ChunkingStrategyRequestParam", "ComputerActionList", "CreateEvalItem", "EvalGraderLabelModel", "EvalGraderPython", "EvalGraderScoreModel", "EvalGraderStringCheck", "EvalGraderTextSimilarity", "EvalItemContentArray", "EvalItemContentText", "FineTuneChatCompletionRequestAssistantMessage", "InputMessageContentList", "Item", "ParallelToolCalls", "ToolsArray", "TranscriptionChunkingStrategy", "BetaItem", "BetaComputerActionList", "BetaInputMessageContentList", "BetaToolsArray"], "review each inline alias removal");
+    expected["registry"].as_array_mut().unwrap().retain(|row| !aliases.contains(&row["name"].as_str().unwrap()));
+    for endpoint in actual["definition"]["endpoints"].as_array_mut().unwrap() {
+        for field in ["request", "response"] {
+            if let Some(schema) = endpoint[field].get_mut("Json") {
+                assert_eq!(schema["module_path"], Value::Null);
+                assert!(schema.get("descriptor").is_some());
+                schema.as_object_mut().unwrap().remove("descriptor");
+                schema["type_name"] = serde_json::json!(schema["type_name"].as_str().unwrap()
+                    .replace("::schematic_definitions::openai::", "").replace("::std::vec::", "").trim_start_matches("::"));
+            }
+        }
+    }
+    for value in [&mut expected, &mut actual] {
+        let mut metadata = value["definition"].clone();
+        metadata.as_object_mut().unwrap().remove("endpoints");
+        value["fingerprints"]["api_metadata"] = serde_json::json!(definition_snapshot::fingerprint(&metadata));
+        let fingerprints: Vec<_> = value["definition"]["endpoints"].as_array().unwrap().iter().map(|e|
+            serde_json::json!({"id":e["id"], "blake3":definition_snapshot::fingerprint(e)})).collect();
+        value["fingerprints"]["endpoints"] = Value::Array(fingerprints);
+    }
+    let mut changed = Vec::new();
+    differences(&canonical(expected), &canonical(actual), "openai", &mut changed);
+    assert!(changed.is_empty(), "unexplained historical differences:\n{}", changed.join("\n"));
 }
 
 #[test]

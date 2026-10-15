@@ -24,7 +24,7 @@ fn endpoint(id: &str, method: RestMethod, path: &str, description: &str) -> Endp
         response: ApiResponse::json_type("Widget"),
         headers: vec![],
         params: None,
-        oauth_scopes: None, cross_origin: None,
+        oauth_scopes: None, cross_origin: None, pagination: None,
     }
 }
 

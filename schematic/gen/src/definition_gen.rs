@@ -2,14 +2,14 @@
 //!
 //! The standalone importer output in [`crate::import_pipeline`] writes a
 //! self-contained client. This module writes the other half of the house
-//! layout instead: a `define_{api}_api()` function that reconstructs the
+//! layout instead: a `define_{api}_api()` factory backed by fallible typed builders for the
 //! imported [`RestApi`] as a value, so an imported API sits in the definitions
 //! catalog alongside the hand-authored ones and flows through the normal
 //! `generate` pipeline.
 //!
 //! An imported document carries no pagination, so authored pagination for an
 //! imported API lives in a hand-written overlay function the importer never
-//! writes. When one is configured, the emitted factory passes the imported
+//! writes. When one is configured, the emitted fallible assembly passes the built
 //! value through it, so `define_{api}_api()` returns the augmented definition
 //! to every caller.
 
@@ -18,8 +18,8 @@ use std::path::Path;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EndpointParams, FormField,
-    FormFieldKind, ParamDef, ParamStyle, QueryParamType, RestApi, RestMethod, Schema,
+    ApiKeyLocation, ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, FormField,
+    FormFieldKind, ParamDef, ParamStyle, QueryParamType, RestApi, RestMethod,
 };
 
 use crate::errors::GeneratorError;
@@ -102,66 +102,61 @@ fn assemble_definition_module(
 ) -> TokenStream {
     let fn_name = format_ident!("define_{}_api", module_name);
     let api_expr = rest_api_tokens(api, overlay);
-    let registry = registry_tokens(model_names);
-
-    let module_doc = format!(
-        " {} REST API definition, imported from an OpenAPI specification.",
-        api.name
-    );
-    let overlay_arg = overlay
-        .map(|path| format!(" --overlay {}", path_text(path)))
-        .unwrap_or_default();
-    let regenerate_doc = format!(
-        " Regenerate with `schematic-gen import --input <spec> --api-name {} --definitions-out <dir>{overlay_arg}`.",
-        api.name
-    );
+    // Bound debug-build stack use even for documents with thousands of models.
+    let registrations = model_names.chunks(32).enumerate().map(|(index, names)| {
+        let function = format_ident!("register_types_{}", index);
+        let registrations = names.iter().map(|name| {
+            let ty: syn::Type = syn::parse_str(name).expect("validated model type");
+            quote! { ctx.register::<#ty>()?; }
+        });
+        quote! {
+            fn #function(ctx: &mut DefinitionContext) -> Result<(), DefinitionError> {
+                #(#registrations)*
+                Ok(())
+            }
+            #function(ctx)?;
+        }
+    });
+    let module_path = format!("::schematic_definitions::{module_name}");
+    let module_doc = format!(" {} REST API definition, imported from an OpenAPI specification.", api.name);
+    let overlay_arg = overlay.map(|p| format!(" --overlay {}", path_text(p))).unwrap_or_default();
+    let regenerate_doc = format!(" Regenerate with `schematic-gen import --input <spec> --api-name {} --definitions-out <dir>{overlay_arg}`.", api.name);
     let endpoint_doc = format!(" Endpoints: {}.", api.endpoints.len());
     let fn_doc = format!(" Builds the {} REST API definition.", api.name);
-
     quote! {
         #![doc = #module_doc]
         #![doc = ""]
         #![doc = #endpoint_doc]
         #![doc = ""]
         #![doc = #regenerate_doc]
-
         mod types;
-
         pub use types::*;
-
-        use crate::registry::SchemaRegistry;
+        use crate::registry::{SchemaRegistry, ModuleGroup, assemble_module_group};
         use schematic_define::*;
 
         #[doc = #fn_doc]
         #[must_use]
         pub fn #fn_name() -> RestApi {
+            module_group().expect("valid imported API").apis.remove(0)
+        }
+
+        /// Assemble the API and its ordered schemas from one registration context.
+        pub fn module_group() -> Result<ModuleGroup, DefinitionError> {
+            assemble_module_group(#module_path, |ctx| {
+                #(#registrations)*
+                let api = imported_api(ctx)?;
+                Ok(vec![api])
+            })
+        }
+
+        fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
             #api_expr
         }
 
-        #registry
-    }
-}
-
-/// Emits `openapi_registry()`, registering every generated model type.
-///
-/// The registry is what supplies `components.schemas` on OpenAPI export, so it
-/// has to name every type the endpoints can reference; `validate_completeness`
-/// checks exactly that.
-fn registry_tokens(model_names: &[String]) -> TokenStream {
-    let count = model_names.len();
-    let registrations = model_names.iter().map(|name| {
-        let ident = format_ident!("{}", name);
-        quote! { .register::<#ident>(#name) }
-    });
-
-    let doc = format!(" Builds a schema registry holding all {count} generated model types.");
-
-    quote! {
-        #[doc = #doc]
+        /// Ordered schemas from the same assembly used by the API factory.
         #[must_use]
         pub fn openapi_registry() -> SchemaRegistry {
-            SchemaRegistry::new()
-                #(#registrations)*
+            module_group().expect("valid imported API").registry
         }
     }
 }
@@ -170,61 +165,46 @@ fn rest_api_tokens(api: &RestApi, overlay: Option<&syn::Path>) -> TokenStream {
     let name = &api.name;
     let description = &api.description;
     let base_url = &api.base_url;
-    let docs_url = option_string_tokens(api.docs_url.as_deref());
     let auth = auth_strategy_tokens(&api.auth);
     let env_auth = string_vec_tokens(&api.env_auth);
-    let env_username = option_string_tokens(api.env_username.as_deref());
-    let headers = header_pairs_tokens(&api.headers);
-    let module_path = option_string_tokens(api.module_path.as_deref());
-    let request_suffix = option_string_tokens(api.request_suffix.as_deref());
-    let version = option_string_tokens(api.version.as_deref());
-    let cross_origin = cross_origin_tokens(&api.cross_origin);
-    let request_id_header = option_string_tokens(api.request_id_header.as_deref());
-    let secret_names = string_vec_tokens(&api.secret_names);
-
-    let endpoints = api.endpoints.iter().map(endpoint_tokens);
-
-    // `Vec::from([..])` rather than `vec![..]`: prettyplease does not format
-    // inside a macro invocation, so a `vec!` here would emit the whole endpoint
-    // list as one unformatted token soup.
-    let literal = quote! {
-        RestApi {
-            name: #name.to_string(),
-            description: #description.to_string(),
-            base_url: #base_url.to_string(),
-            docs_url: #docs_url,
-            auth: #auth,
-            auth_policy: None,
-            env_auth: #env_auth,
-            env_username: #env_username,
-            headers: #headers,
-            endpoints,
-            module_path: #module_path,
-            request_suffix: #request_suffix,
-            version: #version,
-            env_mapping: None,
-            cross_origin: #cross_origin,
-            request_id_header: #request_id_header,
-            secret_names: #secret_names,
-            // An imported document yields no pagination. Authored pagination
-            // belongs to the configured overlay, which owns these two fields;
-            // the importer never writes the overlay, so a re-import keeps it.
-            default_pagination: None,
-            pagination_exceptions: vec![],
+    let mut builder = quote! { RestApi::builder(ctx, #name, #base_url).describes(#description).authentication(#auth, #env_auth) };
+    for (value, setter) in [
+        (&api.docs_url, "docs_url"), (&api.env_username, "env_username"),
+        (&api.module_path, "module_path"), (&api.request_suffix, "request_suffix"),
+        (&api.version, "version"), (&api.request_id_header, "request_id_header"),
+    ] {
+        if let Some(value) = value {
+            let setter = format_ident!("{}", setter);
+            builder = quote! { #builder.#setter(#value) };
         }
-    };
-
-    let tail = match overlay {
-        Some(overlay) => quote! {
-            let api = #literal;
-            #overlay(api)
-        },
-        None => literal,
-    };
-
+    }
+    let policy = cross_origin_tokens(&api.cross_origin);
+    builder = quote! { #builder.cross_origin(#policy) };
+    for name in &api.secret_names { builder = quote! { #builder.secret_header(#name) }; }
+    for (key, value) in &api.headers { builder = quote! { #builder.header(#key, #value) }; }
+    let endpoints = api.endpoints.iter().enumerate().map(|(index, endpoint)| {
+        let function = format_ident!("endpoint_{}", index);
+        let expression = endpoint_tokens(endpoint);
+        let typed_request = match &endpoint.request {
+            Some(ApiRequest::Json(_)) => true,
+            Some(ApiRequest::FormData { fields } | ApiRequest::UrlEncoded { fields }) => fields.iter().any(|field| matches!(field.kind, FormFieldKind::Json(_))),
+            _ => false,
+        };
+        let argument = if matches!(endpoint.response, ApiResponse::Json(_)) || typed_request { format_ident!("ctx") } else { format_ident!("_ctx") };
+        quote! {
+            fn #function(#argument: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+                #expression
+            }
+            endpoints.push(#function(ctx)?);
+        }
+    });
+    let count = api.endpoints.len();
+    let tail = overlay.map(|overlay| quote! { #overlay(api) }).unwrap_or_else(|| quote! { api });
     quote! {
-        let endpoints = Vec::from([#(#endpoints),*]);
-        #tail
+        let mut endpoints = Vec::with_capacity(#count);
+        #(#endpoints)*
+        let api = #builder.endpoints(endpoints).build()?;
+        Ok(#tail)
     }
 }
 
@@ -233,48 +213,44 @@ fn endpoint_tokens(endpoint: &Endpoint) -> TokenStream {
     let method = method_tokens(endpoint.method);
     let path = &endpoint.path;
     let description = &endpoint.description;
-    let request = match &endpoint.request {
-        Some(request) => {
-            let request = api_request_tokens(request);
-            quote! { Some(#request) }
+    let mut builder = quote! { Endpoint::new(#id, #method, #path).describes(#description) };
+    builder = match &endpoint.response {
+        ApiResponse::Json(schema) => {
+            let ty: syn::Type = syn::parse_str(&schema.full_path()).expect("validated response type");
+            quote! { #builder.returns_json::<#ty>(ctx) }
         }
-        None => quote! { None },
+        ApiResponse::Text => quote! { #builder.returns_text() },
+        ApiResponse::Binary => quote! { #builder.returns_binary() },
+        _ => quote! { #builder.returns_empty() },
     };
-    let response = api_response_tokens(&endpoint.response);
-    let headers = header_pairs_tokens(&endpoint.headers);
-    let params = match &endpoint.params {
-        Some(params) => {
-            let params = endpoint_params_tokens(params);
-            quote! { Some(#params) }
-        }
-        None => quote! { None },
-    };
-    let cross_origin = match &endpoint.cross_origin {
-        Some(policy) => { let policy = cross_origin_tokens(policy); quote! { Some(#policy) } }
-        None => quote! { None },
-    };
-    let oauth_scopes = match &endpoint.oauth_scopes {
-        Some(scopes) => {
-            let scopes = string_vec_tokens(scopes);
-            quote! { Some(#scopes) }
-        }
-        None => quote! { None },
-    };
-
-    quote! {
-        Endpoint {
-            id: #id.to_string(),
-            method: #method,
-            path: #path.to_string(),
-            description: #description.to_string(),
-            request: #request,
-            response: #response,
-            headers: #headers,
-            params: #params,
-            oauth_scopes: #oauth_scopes,
-            cross_origin: #cross_origin,
+    if let Some(request) = &endpoint.request {
+        builder = match request {
+            ApiRequest::Json(schema) => {
+                let ty: syn::Type = syn::parse_str(&schema.full_path()).expect("validated request type");
+                quote! { #builder.request_json::<#ty>(ctx) }
+            }
+            ApiRequest::FormData { fields } | ApiRequest::UrlEncoded { fields } => {
+                let setter = if matches!(request, ApiRequest::FormData { .. }) { format_ident!("request_form") } else { format_ident!("request_urlencoded") };
+                let fields = fields.iter().map(form_field_tokens);
+                quote! { #builder.#setter(Vec::from([#(#fields),*])) }
+            }
+            ApiRequest::Text { content_type } => quote! { #builder.request_text_with_content_type(#content_type) },
+            ApiRequest::Binary { content_type } => quote! { #builder.request_binary_with_content_type(#content_type) },
+            _ => builder,
+        };
+    }
+    if let Some(policy) = &endpoint.cross_origin {
+        let policy = cross_origin_tokens(policy);
+        builder = quote! { #builder.cross_origin(#policy) };
+    }
+    if let Some(params) = &endpoint.params {
+        for (params, setter) in [(&params.query, "query"), (&params.header, "header_param"), (&params.cookie, "cookie")] {
+            let setter = format_ident!("{}", setter);
+            for param in params { let param = param_def_tokens(param); builder = quote! { #builder.#setter(#param) }; }
         }
     }
+    for (key, value) in &endpoint.headers { builder = quote! { #builder.header(#key, #value) }; }
+    quote! { #builder.build() }
 }
 
 fn method_tokens(method: RestMethod) -> TokenStream {
@@ -294,53 +270,6 @@ fn method_tokens(method: RestMethod) -> TokenStream {
     quote! { RestMethod::#variant }
 }
 
-fn api_request_tokens(request: &ApiRequest) -> TokenStream {
-    match request {
-        ApiRequest::Json(schema) => {
-            let schema = schema_tokens(schema);
-            quote! { ApiRequest::Json(#schema) }
-        }
-        ApiRequest::FormData { fields } => {
-            let fields = fields.iter().map(form_field_tokens);
-            quote! { ApiRequest::FormData { fields: vec![#(#fields),*] } }
-        }
-        ApiRequest::UrlEncoded { fields } => {
-            let fields = fields.iter().map(form_field_tokens);
-            quote! { ApiRequest::UrlEncoded { fields: vec![#(#fields),*] } }
-        }
-        ApiRequest::Text { content_type } => {
-            quote! { ApiRequest::Text { content_type: #content_type.to_string() } }
-        }
-        ApiRequest::Binary { content_type } => {
-            quote! { ApiRequest::Binary { content_type: #content_type.to_string() } }
-        }
-        // `ApiRequest` is `#[non_exhaustive]`; an unmodelled variant degrades to
-        // "no body" rather than emitting source that would not compile.
-        _ => quote! { ApiRequest::Text { content_type: "application/octet-stream".to_string() } },
-    }
-}
-
-fn api_response_tokens(response: &ApiResponse) -> TokenStream {
-    match response {
-        ApiResponse::Json(schema) => {
-            let schema = schema_tokens(schema);
-            quote! { ApiResponse::Json(#schema) }
-        }
-        ApiResponse::Text => quote! { ApiResponse::Text },
-        ApiResponse::Binary => quote! { ApiResponse::Binary },
-        ApiResponse::Empty => quote! { ApiResponse::Empty },
-        _ => quote! { ApiResponse::Empty },
-    }
-}
-
-fn schema_tokens(schema: &Schema) -> TokenStream {
-    let type_name = &schema.type_name;
-    match &schema.module_path {
-        Some(path) => quote! { Schema::with_path(#type_name, #path) },
-        None => quote! { Schema::new(#type_name) },
-    }
-}
-
 fn form_field_tokens(field: &FormField) -> TokenStream {
     let name = &field.name;
 
@@ -353,15 +282,8 @@ fn form_field_tokens(field: &FormField) -> TokenStream {
         }
         FormFieldKind::Files { .. } => quote! { FormField::files(#name) },
         FormFieldKind::Json(schema) => {
-            let schema = schema_tokens(schema);
-            quote! {
-                FormField {
-                    name: #name.to_string(),
-                    kind: FormFieldKind::Json(#schema),
-                    required: true,
-                    description: None,
-                }
-            }
+            let ty: syn::Type = syn::parse_str(&schema.full_path()).expect("validated form type");
+            quote! { FormField::json_desc(#name, ctx.register::<#ty>()?) }
         }
         _ => quote! { FormField::text(#name) },
     };
@@ -375,24 +297,6 @@ fn form_field_tokens(field: &FormField) -> TokenStream {
     match &field.description {
         Some(description) => quote! { #base.with_description(#description) },
         None => base,
-    }
-}
-
-fn endpoint_params_tokens(params: &EndpointParams) -> TokenStream {
-    let query = params.query.iter().map(param_def_tokens);
-    let header = params.header.iter().map(param_def_tokens);
-    let cookie = params.cookie.iter().map(param_def_tokens);
-
-    // `pagination` and `response_pagination` are not recovered from an imported
-    // spec; OpenAPI has no vocabulary for either.
-    quote! {
-        EndpointParams {
-            query: vec![#(#query),*],
-            header: vec![#(#header),*],
-            cookie: vec![#(#cookie),*],
-            pagination: None,
-            response_pagination: None,
-        }
     }
 }
 
@@ -476,6 +380,30 @@ fn auth_strategy_tokens(auth: &AuthStrategy) -> TokenStream {
                 }
             }
         }
+        AuthStrategy::ApiKeyParam { name, location } => {
+            let location = match location {
+                ApiKeyLocation::Query => quote! { ApiKeyLocation::Query },
+                ApiKeyLocation::Cookie => quote! { ApiKeyLocation::Cookie },
+                _ => unreachable!("unsupported imported API-key location"),
+            };
+            quote! { AuthStrategy::ApiKeyParam { name: #name.to_string(), location: #location } }
+        }
+        AuthStrategy::OAuth2(config) => {
+            let grant = format_ident!("{}", format!("{:?}", config.grant_type));
+            let pkce = format_ident!("{}", format!("{:?}", config.pkce));
+            let client_auth = format_ident!("{}", format!("{:?}", config.client_auth));
+            let authorization_url = option_string_tokens(config.authorization_url.as_deref());
+            let revocation_url = option_string_tokens(config.revocation_url.as_deref());
+            let device_authorization_url = option_string_tokens(config.device_authorization_url.as_deref());
+            let token_url = &config.token_url;
+            let scopes = string_vec_tokens(&config.default_scopes);
+            quote! { AuthStrategy::OAuth2(OAuth2Config {
+                grant_type: OAuth2GrantType::#grant, authorization_url: #authorization_url,
+                token_url: #token_url.to_string(), revocation_url: #revocation_url,
+                device_authorization_url: #device_authorization_url, default_scopes: #scopes,
+                pkce: PkceRequirement::#pkce, client_auth: OAuth2ClientAuthMethod::#client_auth,
+            }) }
+        }
         _ => quote! { AuthStrategy::None },
     }
 }
@@ -503,19 +431,13 @@ fn cross_origin_tokens(policy: &CrossOrigin) -> TokenStream {
 
 fn string_vec_tokens(values: &[String]) -> TokenStream {
     let values = values.iter();
-    quote! { vec![#(#values.to_string()),*] }
-}
-
-fn header_pairs_tokens(headers: &[(String, String)]) -> TokenStream {
-    let pairs = headers
-        .iter()
-        .map(|(key, value)| quote! { (#key.to_string(), #value.to_string()) });
-    quote! { vec![#(#pairs),*] }
+    quote! { Vec::<String>::from([#(#values.to_string()),*]) }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use schematic_define::EndpointParams;
 
     fn sample_api() -> RestApi {
         {
@@ -551,143 +473,69 @@ mod tests {
     }
 
     #[test]
-    fn emits_each_endpoint() {
-        let tokens = assemble_definition_module(&sample_api(), "sample", &["ListItemsResponse".to_string()], None);
-        let code = format_code(&validate_code(&tokens).unwrap());
-
-        assert!(code.contains(r#"id: "ListItems".to_string()"#));
-        assert!(code.contains("RestMethod::Get"));
-        assert!(code.contains(r#"path: "/items".to_string()"#));
+    fn emits_typed_builders_and_one_ordered_context() {
+        let code = emit(None);
+        assert!(code.contains(r#"Endpoint::new("ListItems", RestMethod::Get, "/items")"#));
+        assert!(code.contains(".returns_json::<ListItemsResponse>(ctx)"));
+        assert!(code.contains("ctx.register::<ListItemsResponse>()?"));
+        assert!(code.contains("RestApi::builder(ctx,"));
+        assert!(!code.contains("let api = RestApi {"));
+        assert!(!code.contains("Endpoint {"));
+        assert!(!code.contains("Schema::new"));
+        assert!(code.contains("assemble_module_group"));
     }
 
     #[test]
-    fn emits_api_level_policy_fields() {
+    fn emitted_builders_preserve_runtime_and_parameter_forms() {
         let mut api = sample_api();
         api.cross_origin = CrossOrigin::allow_origins(["https://uploads.example.com"]);
-        api.request_id_header = Some("x-request-id".to_string());
-        api.secret_names = vec!["X-Pin".to_string()];
-
-        let tokens = assemble_definition_module(&api, "sample", &["ListItemsResponse".to_string()], None);
-        let code = format_code(&validate_code(&tokens).unwrap());
-
-        assert!(code.contains(r#"CrossOrigin::allow_origins(["https://uploads.example.com"])"#));
-        assert!(code.contains(r#"request_id_header: Some("x-request-id".to_string())"#));
-        assert!(code.contains(r#"secret_names: vec!["X-Pin".to_string()]"#));
-    }
-
-    #[test]
-    fn emits_endpoint_policy_and_serializable_parameter_markers() {
-        let mut api = sample_api();
-        api.endpoints[0].cross_origin = Some(CrossOrigin::allow_origins(["https://uploads.example.com"]));
+        api.request_id_header = Some("x-request-id".into());
+        api.secret_names = vec!["X-Pin".into()];
+        api.endpoints[0].cross_origin = Some(CrossOrigin::deny());
         api.endpoints[0].params = Some(EndpointParams {
-            query: vec![ParamDef {
-                name: "ref".into(), rust_name: Some("git_ref".into()), secret: true,
-                pager_managed: true, required: false, description: None,
-                param_type: QueryParamType::String, explode: false, style: ParamStyle::Form,
-            }],
+            query: vec![ParamDef::new("ref", QueryParamType::String).rust_name("git_ref").secret()],
             ..Default::default()
         });
-        let tokens = assemble_definition_module(&api, "sample", &["ListItemsResponse".to_string()], None);
-        let code = format_code(&validate_code(&tokens).unwrap());
-        assert!(code.split_whitespace().collect::<String>().contains("cross_origin:Some(CrossOrigin::allow_origins(["), "{code}");
-        let compact = code.split_whitespace().collect::<String>();
-        assert!(compact.contains("rust_name:Some(\"git_ref\".to_string())"), "{code}");
-        assert!(compact.contains("secret:true"), "{code}");
-        assert!(compact.contains("pager_managed:true"), "{code}");
-    }
-
-    #[test]
-    fn emits_same_origin_for_the_default_policy() {
-        let tokens =
-            assemble_definition_module(&sample_api(), "sample", &["ListItemsResponse".to_string()], None);
-        let code = format_code(&validate_code(&tokens).unwrap());
-
-        assert!(code.contains("cross_origin: CrossOrigin::same_origin()"));
-        assert!(code.contains("request_id_header: None"));
+        let code = format_code(&validate_code(&assemble_definition_module(&api, "sample", &["ListItemsResponse".into()], None)).unwrap());
+        assert!(code.contains(".cross_origin(CrossOrigin::deny())"));
+        assert!(code.contains(r#".request_id_header("x-request-id")"#));
+        assert!(code.contains(r#".secret_header("X-Pin")"#));
+        assert!(code.contains(r#"rust_name: Some("git_ref".to_string())"#));
+        assert!(code.contains("secret: true"));
     }
 
     fn emit(overlay: Option<&str>) -> String {
         let overlay = overlay.map(|value| parse_overlay_path(value).unwrap());
-        let tokens = assemble_definition_module(
-            &sample_api(),
-            "sample",
-            &["ListItemsResponse".to_string()],
-            overlay.as_ref(),
-        );
-        format_code(&validate_code(&tokens).unwrap())
-    }
-
-    /// The statements of the emitted `define_sample_api()`.
-    fn factory_statements(code: &str) -> Vec<syn::Stmt> {
-        let file = syn::parse_file(code).unwrap();
-        file.items
-            .into_iter()
-            .find_map(|item| match item {
-                syn::Item::Fn(function) if function.sig.ident == "define_sample_api" => {
-                    Some(function.block.stmts)
-                }
-                _ => None,
-            })
-            .expect("define_sample_api is emitted")
+        format_code(&validate_code(&assemble_definition_module(&sample_api(), "sample", &["ListItemsResponse".into()], overlay.as_ref())).unwrap())
     }
 
     #[test]
-    fn an_overlay_is_applied_to_the_constructed_api_as_the_tail_expression() {
+    fn configured_overlay_is_generic_and_runs_after_builder_validation() {
         let code = emit(Some("crate::sample_pagination::apply"));
-        let statements = factory_statements(&code);
+        assert_eq!(code.matches("crate::sample_pagination::apply(api)").count(), 1);
+        assert!(code.contains("Ok(crate::sample_pagination::apply(api))"));
+        assert!(code.contains("--overlay crate::sample_pagination::apply`"));
+        assert!(!emit(None).contains("--overlay"));
+    }
 
-        let [.., syn::Stmt::Local(binding), syn::Stmt::Expr(syn::Expr::Call(call), None)] =
-            statements.as_slice()
-        else {
-            panic!("factory does not end with `let api = ..; overlay(api)`:\n{code}");
+    #[test]
+    fn imported_query_cookie_and_oauth_authentication_are_not_lost() {
+        for location in [ApiKeyLocation::Query, ApiKeyLocation::Cookie] {
+            let code = render_expr(auth_strategy_tokens(&AuthStrategy::ApiKeyParam { name: "key".into(), location }));
+            assert!(code.contains("AuthStrategy::ApiKeyParam"));
+            assert!(code.contains("name: \"key\".to_string()"));
+        }
+        let config = schematic_define::OAuth2Config {
+            grant_type: schematic_define::OAuth2GrantType::ClientCredentials,
+            authorization_url: None, token_url: "https://example.com/token".into(),
+            revocation_url: None, device_authorization_url: None,
+            default_scopes: vec!["read".into()], pkce: schematic_define::PkceRequirement::NotUsed,
+            client_auth: schematic_define::OAuth2ClientAuthMethod::ClientSecretPost,
         };
-        let syn::Pat::Ident(name) = &binding.pat else { panic!("binding is not an ident") };
-        assert_eq!(name.ident, "api");
-        let initializer = &binding.init.as_ref().expect("binding is initialized").expr;
-        assert!(
-            matches!(&**initializer, syn::Expr::Struct(literal) if literal.path.is_ident("RestApi")),
-            "`api` is not bound to the `RestApi` literal"
-        );
-        let syn::Expr::Path(callee) = &*call.func else { panic!("callee is not a path") };
-        assert_eq!(path_text(&callee.path), "crate::sample_pagination::apply");
-        let arguments: Vec<_> = call.args.iter().collect();
-        assert!(
-            matches!(arguments.as_slice(), [syn::Expr::Path(argument)] if argument.path.is_ident("api")),
-            "overlay is not called with `api` alone"
-        );
-        assert_eq!(code.matches("crate::sample_pagination::apply(").count(), 1);
-    }
-
-    #[test]
-    fn without_an_overlay_the_factory_ends_with_the_literal() {
-        let code = emit(None);
-        let statements = factory_statements(&code);
-
-        let [.., syn::Stmt::Expr(syn::Expr::Struct(literal), None)] = statements.as_slice() else {
-            panic!("factory does not end with the `RestApi` literal:\n{code}");
-        };
-        assert!(literal.path.is_ident("RestApi"));
-        assert!(!code.contains("let api"));
-        assert!(!code.contains("--overlay"));
-    }
-
-    #[test]
-    fn an_overlay_changes_only_the_tail_and_the_regeneration_hint() {
-        let plain = emit(None);
-        let overlaid = emit(Some("crate::sample_pagination::apply"));
-
-        let stripped = overlaid
-            .replacen(" --overlay crate::sample_pagination::apply`", "`", 1)
-            .replacen("    let api = RestApi {\n", "    RestApi {\n", 1)
-            .replacen("    };\n    crate::sample_pagination::apply(api)\n", "    }\n", 1);
-        assert_eq!(stripped, plain);
-    }
-
-    #[test]
-    fn the_regeneration_hint_names_the_overlay() {
-        let code = emit(Some("crate::sample_pagination::apply"));
-
-        assert!(code.contains("--definitions-out <dir> --overlay crate::sample_pagination::apply`"));
+        let code = render_expr(auth_strategy_tokens(&AuthStrategy::OAuth2(config)));
+        assert!(code.contains("OAuth2GrantType::ClientCredentials"));
+        assert!(code.contains("https://example.com/token"));
+        assert!(code.contains("ClientSecretPost"));
     }
 
     #[test]

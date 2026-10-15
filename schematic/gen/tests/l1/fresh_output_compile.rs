@@ -168,7 +168,7 @@ fn endpoint(id: &str, method: RestMethod, path: &str, response: ApiResponse) -> 
         response,
         headers: vec![],
         params: None,
-        oauth_scopes: None, cross_origin: None,
+        oauth_scopes: None, cross_origin: None, pagination: None,
     }
 }
 
@@ -2132,7 +2132,7 @@ use std::time::Duration;
 
 use schematic_schema::gitea::{GetGitTreeRecursiveRequest, Gitea, ListPullRequestsRequest};
 use schematic_schema::gitlab::{GetRepositoryFileRequest, GitLab};
-use schematic_schema::openai::{BetaListInputItemsRequest, ListConversationItemsRequest, OpenAI};
+use schematic_schema::openai::{CreateResponseRequest, GetResponseRequest, DeleteResponseRequest, CancelResponseRequest, CompactconversationRequest, GetinputtokencountsRequest, ListInputItemsRequest, ListConversationItemsRequest, OpenAI};
 use schematic_schema::prelude::*;
 use schematic_schema::schematic_runtime::{EndpointSpec, Method, RequestBody};
 
@@ -2219,10 +2219,40 @@ async fn capture_query_request_lines() {
     let _ = openai.send(items).credential(token.clone()).pager().page_size(5).after("x%y").fetch_page().await;
     record("repeated-array-keys");
 
-    let mut beta = BetaListInputItemsRequest::new("resp 1");
+    let mut beta = ListInputItemsRequest::new("resp 1");
+    beta.beta = Some(true);
     beta.include = Some(vec![serde_json::json!("x y")]);
     let _ = openai.send(beta).credential(token.clone()).pager().page_size(3).fetch_page().await;
     record("legacy-embedded-query-plus-declared");
+
+    macro_rules! beta_pair {
+        ($request:expr, $label:literal) => {{
+            let mut request = $request;
+            let ordinary = request.clone().into_parts().unwrap();
+            assert!(!ordinary.path.contains('?'));
+            assert!(!ordinary.query.iter().any(|(name, _)| name == "beta"));
+            let _ = openai.send(request.clone()).anonymous().full().await.unwrap();
+            record(concat!($label, "-ordinary"));
+            request.beta = Some(true);
+            let beta = request.clone().into_parts().unwrap();
+            assert_eq!(beta.path, ordinary.path);
+            assert_eq!(beta.method, ordinary.method);
+            assert_eq!(beta.query, pairs(&[("beta", "true")]));
+            let _ = openai.send(request.clone()).anonymous().full().await.unwrap();
+            record(concat!($label, "-beta"));
+            request.beta = Some(false);
+            assert_eq!(request.clone().into_parts().unwrap().query, pairs(&[("beta", "false")]));
+            let _ = openai.send(request).anonymous().full().await.unwrap();
+            record(concat!($label, "-false"));
+        }};
+    }
+    beta_pair!(CreateResponseRequest::new(Default::default()), "CreateResponse");
+    beta_pair!(GetResponseRequest::new("resp 1"), "GetResponse");
+    beta_pair!(DeleteResponseRequest::new("resp 1"), "DeleteResponse");
+    beta_pair!(CancelResponseRequest::new("resp 1"), "CancelResponse");
+    beta_pair!(CompactconversationRequest::new(Default::default()), "Compactconversation");
+    beta_pair!(ListInputItemsRequest::new("resp 1"), "ListInputItems");
+    beta_pair!(GetinputtokencountsRequest::new(Default::default()), "Getinputtokencounts");
 
     let out = std::env::var("WIRE_BASELINE_OUT").expect("WIRE_BASELINE_OUT");
     std::fs::write(out, lines.join("\n") + "\n").expect("write captured lines");
@@ -2272,11 +2302,12 @@ fn into_parts_returns_unencoded_query_pairs_apart_from_the_path() {
     assert_eq!(parts.path, "/conversations/conv%201/items");
     assert_eq!(parts.query, pairs(&[("include", "\"a b\""), ("include", "\"\"")]));
 
-    let mut beta = BetaListInputItemsRequest::new("resp 1");
+    let mut beta = ListInputItemsRequest::new("resp 1");
+    beta.beta = Some(true);
     beta.include = Some(vec![serde_json::json!("x y")]);
     let parts = beta.into_parts().unwrap();
-    assert_eq!(parts.path, "/responses/resp%201/input_items?beta=true");
-    assert_eq!(parts.query, pairs(&[("include", "\"x y\"")]));
+    assert_eq!(parts.path, "/responses/resp%201/input_items");
+    assert_eq!(parts.query, pairs(&[("include", "\"x y\""), ("beta", "true")]));
 }
 "#;
 

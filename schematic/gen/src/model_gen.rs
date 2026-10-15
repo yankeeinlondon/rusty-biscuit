@@ -73,18 +73,43 @@ pub fn assemble_model_tokens(catalog: &ModelCatalog) -> TokenStream {
 
 /// Assembles token stream for all model definitions.
 ///
-/// `derive_json_schema` adds `schemars::JsonSchema` to every emitted type. The
+/// `derive_json_schema` adds `schemars::JsonSchema` and nominal typed registration. The
 /// definitions crate needs it so `openapi_registry()` can register the types;
 /// the standalone client output does not depend on `schemars`.
 pub fn assemble_model_tokens_with(catalog: &ModelCatalog, derive_json_schema: bool) -> TokenStream {
     let type_defs: Vec<TokenStream> = catalog
         .types
         .iter()
-        .map(|model| match model {
-            ModelDef::Struct(s) => generate_struct_with(s, derive_json_schema),
-            ModelDef::Enum(e) => generate_enum_with(e, derive_json_schema),
-            ModelDef::Alias(a) => generate_alias_with(a, derive_json_schema),
-            _ => TokenStream::new(),
+        .map(|model| {
+            let tokens = match model {
+                ModelDef::Struct(s) => generate_struct_with(s, derive_json_schema),
+                ModelDef::Enum(e) => generate_enum_with(e, derive_json_schema),
+                ModelDef::Alias(a) => generate_alias_with(a, derive_json_schema),
+                _ => TokenStream::new(),
+            };
+            // Only nominal declarations implement Registration: aliases reuse
+            // their underlying implementation and containers stay inline.
+            let nominal = match model {
+                ModelDef::Struct(s) => Some(&s.name),
+                ModelDef::Enum(e) => Some(&e.name),
+                ModelDef::Alias(a) => match &a.target {
+                    TypeRef::OneOf(v) | TypeRef::AnyOf(v) | TypeRef::AllOf(v) if !v.is_empty() => Some(&a.name),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if derive_json_schema && let Some(name) = nominal {
+                let name = format_ident!("{}", name);
+                quote! {
+                    #tokens
+                    impl schematic_define::Registration for #name {
+                        const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(#name));
+                        fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+                            ctx.register_nominal::<Self>()
+                        }
+                    }
+                }
+            } else { tokens }
         })
         .collect();
 
