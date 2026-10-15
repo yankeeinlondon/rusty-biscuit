@@ -670,7 +670,7 @@ This is a Rust workspace with the following modules:
 
 - [schematic-define](./schematic/define) _v0.1.0_
 
-    _REST API definition primitives (RestApi, Endpoint, AuthStrategy)._
+    _REST API definition primitives (RestApi, Endpoint, AuthStrategy), plus provider-neutral typed registration using schemars v1 and unconditional serde_json v1, and url v2 for builder base-URL validation._
 
     _Tags: workspace, library, api, codegen_
 

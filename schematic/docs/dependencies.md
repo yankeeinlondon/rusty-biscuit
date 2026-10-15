@@ -33,6 +33,10 @@
 
 ### Production Dependencies
 
+- `url` v2 validates HTTP(S) base URLs at REST API build.
+- `schemars` v1 generates provider-neutral typed registrations with OpenAPI 3.0 settings.
+- `serde_json` v1 is an unconditional production dependency for descriptor wire schemas and transfer data.
+
 - [serde](https://github.com/serde-rs/serde) _v1.0_ [📄](https://serde.rs)
 
     _Industry-standard serialization framework providing derive macros for automatic trait implementation._
@@ -50,14 +54,6 @@
     _Derive macro for std::error::Error trait._
 
     _Tags: errors, macros_
-
-### Development and Test-Tier Dependencies
-
-- [serde_json](https://github.com/serde-rs/json) _v1.0_
-
-    _Fast JSON serialization/deserialization using serde._
-
-    _Tags: json, serialization_
 
 ---
 
