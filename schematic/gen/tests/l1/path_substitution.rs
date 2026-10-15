@@ -77,7 +77,10 @@ fn single_path_param_into_parts_format_string() {
         code
     );
     // Verify HTTP method is correct
-    assert!(code.contains(r#""GET""#), "Should have GET method");
+    assert!(
+        code.contains("const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;"),
+        "Should have GET method\nGenerated code:\n{code}"
+    );
 }
 
 // =============================================================================
@@ -266,8 +269,8 @@ fn path_param_with_body_has_both_fields() {
         code
     );
     assert!(
-        code.contains("SerializationError"),
-        "Should handle serialization errors\nGenerated code:\n{}",
+        code.contains("schematic_runtime::InvalidArgument::new("),
+        "Should report an unserializable body as an invalid argument\nGenerated code:\n{}",
         code
     );
 }
@@ -321,7 +324,7 @@ fn multiple_path_params_with_body() {
 // =============================================================================
 
 #[test]
-fn all_http_methods_generate_correct_method_string() {
+fn all_http_methods_generate_correct_method_constant() {
     let methods_and_expected = [
         (RestMethod::Get, "GET"),
         (RestMethod::Post, "POST"),
@@ -349,8 +352,10 @@ fn all_http_methods_generate_correct_method_string() {
         let code = format_tokens(&tokens);
 
         assert!(
-            code.contains(&format!(r#""{}""#, expected_str)),
-            "Method {:?} should generate string \"{}\"\nGenerated code:\n{}",
+            code.contains(&format!(
+                "const METHOD: schematic_runtime::Method = schematic_runtime::Method::{expected_str};"
+            )),
+            "Method {:?} should generate Method::{}\nGenerated code:\n{}",
             method,
             expected_str,
             code
@@ -498,6 +503,34 @@ fn special_char_path_params_are_sanitized_with_serde_rename() {
     assert!(
         code.contains(r#""/users/{}/factors/{}""#),
         "format string should keep both placeholders:\n{code}"
+    );
+}
+
+#[test]
+fn path_params_are_substituted_without_declared_query_params() {
+    // Query parameters are returned as separate pairs; the path holds only the
+    // substituted, percent-encoded segments.
+    let mut endpoint = get_endpoint("ListIssues", "/repos/{owner}/{repo}/issues");
+    endpoint.params = Some(schematic_define::EndpointParams::default().with_query_params(vec![(
+        "state",
+        schematic_define::QueryParamType::String,
+        false,
+        None,
+    )]));
+    let tokens = generate_request_struct(&endpoint);
+    let code = format_tokens(&tokens);
+
+    assert!(
+        code.contains(r#""/repos/{}/{}/issues""#),
+        "path format should hold only path placeholders:\n{code}"
+    );
+    assert!(
+        !code.contains("let mut path") && !code.contains("issues?"),
+        "the path must not receive the declared query:\n{code}"
+    );
+    assert!(
+        code.contains(r#"query.push(("state".to_string(), value.to_string()))"#),
+        "the declared query should be a separate pair:\n{code}"
     );
 }
 

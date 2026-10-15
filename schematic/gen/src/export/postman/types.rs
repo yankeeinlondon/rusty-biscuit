@@ -124,6 +124,13 @@ pub struct PostmanHeader {
     pub key: String,
     /// Header value.
     pub value: String,
+    /// Whether Postman leaves the header out of the request until the user
+    /// enables it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub disabled: bool,
+    /// Header description.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// Request body.

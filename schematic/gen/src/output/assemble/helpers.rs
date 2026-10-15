@@ -4,22 +4,6 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::RestApi;
 
-/// Converts a PascalCase string to snake_case.
-pub fn to_snake_case(s: &str) -> String {
-    let mut result = String::new();
-    for (i, c) in s.chars().enumerate() {
-        if c.is_uppercase() {
-            if i > 0 {
-                result.push('_');
-            }
-            result.push(c.to_lowercase().next().unwrap());
-        } else {
-            result.push(c);
-        }
-    }
-    result
-}
-
 /// Returns the module path for the given API.
 ///
 /// Uses `api.module_path` if set, otherwise attempts to infer from the API name.

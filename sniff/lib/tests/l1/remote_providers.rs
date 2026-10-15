@@ -16,8 +16,21 @@ use sniff::remote::{
     BitbucketRemote, DocumentCategory, GitHubRemote, GitLabRemote, GitProvider, GitRemote,
     GiteaRemote, PullRequestState, RemoteRepoProvider,
 };
-use wiremock::matchers::{method, path, path_regex, query_param};
+use test_toolkit::EnvGuard;
+use wiremock::matchers::{header_exists, method, path, path_regex, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+/// Every credential variable the four providers read.
+const PROVIDER_CREDENTIAL_VARIABLES: [&str; 8] = [
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+    "GITLAB_TOKEN",
+    "GITLAB_PRIVATE_TOKEN",
+    "GITEA_TOKEN",
+    "CODEBERG_TOKEN",
+    "BITBUCKET_USERNAME",
+    "BITBUCKET_APP_PASSWORD",
+];
 
 // =============================================================================
 // Test Fixtures
@@ -226,9 +239,10 @@ mod github_tests {
             .mount(&server)
             .await;
 
-        // Mock the tree endpoint
+        // Without `recursive=true` GitHub lists only the top level of the tree.
         Mock::given(method("GET"))
             .and(path_regex(r"/repos/test-owner/test-repo/git/trees/.*"))
+            .and(query_param("recursive", "true"))
             .respond_with(ResponseTemplate::new(200).set_body_json(github_tree_fixture()))
             .mount(&server)
             .await;
@@ -617,6 +631,34 @@ mod github_tests {
         assert_eq!(runs[1].event, Some("pull_request".to_string()));
     }
 
+    /// The page size is pager-managed and bounded to GitHub's 1..=100, so a
+    /// limit outside that range is clamped rather than refused before sending.
+    #[tokio::test]
+    async fn list_workflow_runs_clamps_the_page_size_to_githubs_bounds() {
+        let (server, provider) = setup_github_mock().await;
+
+        for (limit, per_page, expected_runs) in [(150, "100", 2), (0, "1", 0)] {
+            server.reset().await;
+            Mock::given(method("GET"))
+                .and(path("/repos/test-owner/test-repo/actions/runs"))
+                .and(query_param("per_page", per_page))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_json(github_workflow_runs_fixture()),
+                )
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let runs = provider
+                .list_workflow_runs("test-owner", "test-repo", limit)
+                .await
+                .unwrap_or_else(|error| panic!("limit {limit}: {error}"));
+
+            assert_eq!(runs.len(), expected_runs, "limit {limit}");
+            server.verify().await;
+        }
+    }
+
     #[tokio::test]
     async fn list_workflow_runs_caps_results_at_limit() {
         let (server, provider) = setup_github_mock().await;
@@ -786,6 +828,230 @@ mod github_tests {
             }
             other => panic!("Expected RateLimited error, got: {:?}", other),
         }
+    }
+
+    #[tokio::test]
+    async fn get_file_content_returns_the_raw_text() {
+        let (server, provider) = setup_github_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo/contents/docs/guide.md"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/plain; charset=utf-8")
+                    .set_body_string("# Guide\n\nHello.\n"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let content = provider
+            .get_file_content("test-owner", "test-repo", "docs/guide.md")
+            .await
+            .unwrap();
+
+        assert_eq!(content, "# Guide\n\nHello.\n");
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(
+            requests[0].headers.get("accept").unwrap(),
+            "application/vnd.github.raw+json"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_file_content_maps_a_missing_file_to_not_found() {
+        let (server, provider) = setup_github_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo/contents/missing.md"))
+            .respond_with(ResponseTemplate::new(404).set_body_string("Not Found"))
+            .mount(&server)
+            .await;
+
+        let result = provider
+            .get_file_content("test-owner", "test-repo", "missing.md")
+            .await;
+
+        assert!(
+            matches!(result, Err(SniffError::RemoteApi { status: 404, .. })),
+            "{result:?}"
+        );
+    }
+
+    /// `Retry-After` in delta-seconds on a 429 becomes `retry_after`; an absent or
+    /// HTTP-date value is `None`.
+    #[tokio::test]
+    async fn error_429_reads_retry_after_seconds() {
+        let (server, provider) = setup_github_mock().await;
+
+        for (repo, retry_after, expected) in [
+            ("with-seconds", Some("30"), Some(30)),
+            ("without-header", None, None),
+            ("with-date", Some("Wed, 21 Oct 2015 07:28:00 GMT"), None),
+        ] {
+            let mut reply = ResponseTemplate::new(429).set_body_string("slow down");
+            if let Some(value) = retry_after {
+                reply = reply.insert_header("retry-after", value);
+            }
+            Mock::given(method("GET"))
+                .and(path(format!("/repos/test-owner/{repo}")))
+                .respond_with(reply)
+                .mount(&server)
+                .await;
+
+            let result = provider.get_repo_metadata("test-owner", repo).await;
+
+            match result {
+                Err(SniffError::RateLimited { retry_after, .. }) => {
+                    assert_eq!(retry_after, expected, "{repo}");
+                }
+                other => panic!("Expected RateLimited for {repo}, got: {other:?}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn error_403_with_a_spent_quota_is_rate_limited() {
+        let (server, provider) = setup_github_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo"))
+            .respond_with(
+                ResponseTemplate::new(403)
+                    .insert_header("x-ratelimit-remaining", "0")
+                    .insert_header("retry-after", "60")
+                    .set_body_string("Forbidden"),
+            )
+            .mount(&server)
+            .await;
+
+        let result = provider.get_repo_metadata("test-owner", "test-repo").await;
+
+        match result {
+            Err(SniffError::RateLimited { retry_after, .. }) => {
+                assert_eq!(retry_after, Some(60));
+            }
+            other => panic!("Expected RateLimited error, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn error_403_without_rate_limit_evidence_keeps_the_body() {
+        let (server, provider) = setup_github_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo"))
+            .respond_with(
+                ResponseTemplate::new(403)
+                    .insert_header("x-ratelimit-remaining", "4999")
+                    .set_body_string("Resource not accessible by integration"),
+            )
+            .mount(&server)
+            .await;
+
+        let result = provider.get_repo_metadata("test-owner", "test-repo").await;
+
+        match result {
+            Err(SniffError::RemoteApi {
+                status, message, ..
+            }) => {
+                assert_eq!(status, 403);
+                assert_eq!(message, "Resource not accessible by integration");
+            }
+            other => panic!("Expected RemoteApi error, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn error_5xx_keeps_its_status_and_body() {
+        let (server, provider) = setup_github_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo"))
+            .respond_with(ResponseTemplate::new(502).set_body_string("bad gateway"))
+            .mount(&server)
+            .await;
+
+        let result = provider.get_repo_metadata("test-owner", "test-repo").await;
+
+        match result {
+            Err(SniffError::RemoteApi {
+                status, message, ..
+            }) => {
+                assert_eq!(status, 502);
+                assert_eq!(message, "bad gateway");
+            }
+            other => panic!("Expected RemoteApi error, got: {other:?}"),
+        }
+    }
+
+    /// A 2xx body that does not decode and a 2xx body that is cut off are both
+    /// status 0, and their messages tell them apart.
+    #[tokio::test]
+    async fn an_undecodable_body_and_an_interrupted_body_are_reported_distinctly() {
+        let (server, provider) = setup_github_mock().await;
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{not json"))
+            .mount(&server)
+            .await;
+        let interrupted = GitHubRemote::with_base_url(&truncated_body_server()).unwrap();
+
+        let undecodable = provider
+            .get_repo_metadata("test-owner", "test-repo")
+            .await
+            .unwrap_err();
+        let cut_off = interrupted
+            .get_repo_metadata("test-owner", "test-repo")
+            .await
+            .unwrap_err();
+
+        match (&undecodable, &cut_off) {
+            (
+                SniffError::RemoteApi {
+                    status: 0,
+                    message: undecodable,
+                    ..
+                },
+                SniffError::RemoteApi {
+                    status: 0,
+                    message: cut_off,
+                    ..
+                },
+            ) => {
+                assert!(
+                    undecodable.contains("could not be decoded"),
+                    "{undecodable}"
+                );
+                assert!(cut_off.contains("interrupted"), "{cut_off}");
+            }
+            other => panic!("Expected two status-0 RemoteApi errors, got: {other:?}"),
+        }
+    }
+
+    /// Serves one 200 reply that promises more body bytes than it sends, then
+    /// closes the connection.
+    fn truncated_body_server() -> String {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let read = stream.read(&mut buffer).unwrap();
+                if read == 0 {
+                    return;
+                }
+                request.extend_from_slice(&buffer[..read]);
+            }
+            let _ = stream.write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 100\r\n\r\n{\"name\":",
+            );
+        });
+        format!("http://{address}")
     }
 }
 
@@ -1161,6 +1427,40 @@ mod gitlab_tests {
             }
             other => panic!("Expected RateLimited error, got: {:?}", other),
         }
+    }
+
+    /// The project path and the file path are each percent-encoded once, and the
+    /// base64 `content` is decoded to text.
+    #[tokio::test]
+    async fn get_file_content_decodes_the_base64_content() {
+        let (server, provider) = setup_gitlab_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path(
+                "/api/v4/projects/test-owner%2Ftest-repo/repository/files/docs%2Fguide.md",
+            ))
+            .and(query_param("ref", "HEAD"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "file_name": "guide.md",
+                "file_path": "docs/guide.md",
+                "size": 9,
+                "encoding": "base64",
+                "content": "IyBHdWlkZQo=",
+                "ref": "HEAD",
+                "blob_id": "b",
+                "commit_id": "c",
+                "last_commit_id": "c"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let content = provider
+            .get_file_content("test-owner", "test-repo", "docs/guide.md")
+            .await
+            .unwrap();
+
+        assert_eq!(content, "# Guide\n");
     }
 }
 
@@ -1594,6 +1894,78 @@ mod gitea_tests {
             other => panic!("Expected RateLimited error, got: {:?}", other),
         }
     }
+
+    #[tokio::test]
+    async fn get_file_content_returns_the_raw_text() {
+        let (server, provider) = setup_gitea_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/repos/test-owner/test-repo/raw/docs/guide.md"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/plain; charset=utf-8")
+                    .set_body_string("# Guide\n"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let content = provider
+            .get_file_content("test-owner", "test-repo", "docs/guide.md")
+            .await
+            .unwrap();
+
+        assert_eq!(content, "# Guide\n");
+    }
+
+    /// A truncated Gitea tree continues each document/CI prefix with one
+    /// recursive subtree request; a prefix that fails is skipped.
+    #[tokio::test]
+    async fn a_truncated_tree_continues_for_document_and_ci_prefixes() {
+        let (server, provider) = setup_gitea_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/repos/test-owner/test-repo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(gitea_repo_fixture()))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/repos/test-owner/test-repo/git/trees/main"))
+            .and(query_param("recursive", "true"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "sha": "root",
+                "tree": [{"path": "README.md", "type": "blob", "size": 1}],
+                "truncated": true
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(
+                "/api/v1/repos/test-owner/test-repo/git/trees/main%3Adocs",
+            ))
+            .and(query_param("recursive", "true"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "sha": "d",
+                "tree": [{"path": "guide.md", "type": "blob", "size": 2}],
+                "truncated": false
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let documents = provider
+            .list_documents("test-owner", "test-repo")
+            .await
+            .unwrap();
+
+        let paths: Vec<&str> = documents.iter().map(|d| d.path.as_str()).collect();
+        assert!(paths.contains(&"docs/guide.md"), "{paths:?}");
+        assert!(paths.contains(&"README.md"), "{paths:?}");
+    }
 }
 
 // =============================================================================
@@ -1775,6 +2147,60 @@ mod bitbucket_tests {
             .filter(|d| d.category == DocumentCategory::Readme)
             .count();
         assert!(readme_count >= 1, "Should have at least one README");
+    }
+
+    #[tokio::test]
+    async fn a_malformed_directory_listing_leaves_the_tree_unavailable_not_empty() {
+        let (server, provider) = setup_bitbucket_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repositories/test-workspace/test-repo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(bitbucket_repo_fixture()))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path_regex(r"/repositories/test-workspace/test-repo/src/.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("not a listing"))
+            .mount(&server)
+            .await;
+
+        let snapshot = provider
+            .snapshot("test-workspace", "test-repo")
+            .await
+            .expect("metadata succeeded, so the snapshot must not fail");
+
+        // An undecodable listing degrades the tree to unavailable; an observed
+        // empty tree would claim the repository has no documents or CI.
+        assert!(!snapshot.tree.available);
+        assert!(snapshot.tree.files.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_file_content_returns_the_raw_bytes_as_text() {
+        let (server, provider) = setup_bitbucket_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repositories/test-workspace/test-repo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(bitbucket_repo_fixture()))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(
+                "/repositories/test-workspace/test-repo/src/main/README.md",
+            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(b"# Title\n\xFF caf\xC3\xA9\n".to_vec(), "text/plain"),
+            )
+            .mount(&server)
+            .await;
+
+        let content = provider
+            .get_file_content("test-workspace", "test-repo", "README.md")
+            .await
+            .unwrap();
+
+        assert_eq!(content, "# Title\n\u{FFFD} caf\u{E9}\n");
     }
 
     #[tokio::test]
@@ -2096,69 +2522,98 @@ mod bitbucket_tests {
             other => panic!("Expected RateLimited error, got: {:?}", other),
         }
     }
+
+    /// Downloads are optional evidence: a failed listing leaves the releases
+    /// empty without failing the tags.
+    #[tokio::test]
+    async fn get_tags_and_releases_treats_a_failed_downloads_listing_as_empty() {
+        let (server, provider) = setup_bitbucket_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(
+                r"/repositories/test-workspace/test-repo/refs/tags.*",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(bitbucket_tags_fixture()))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path_regex(
+                r"/repositories/test-workspace/test-repo/downloads.*",
+            ))
+            .respond_with(ResponseTemplate::new(500).set_body_string("internal error"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let tags_and_releases = provider
+            .get_tags_and_releases("test-workspace", "test-repo")
+            .await
+            .unwrap();
+
+        assert_eq!(tags_and_releases.tags.len(), 1);
+        assert!(tags_and_releases.releases.is_empty());
+    }
 }
 
 // =============================================================================
-// Unauthenticated Fallback Tests
+// Anonymous Request Tests
 // =============================================================================
 //
-// These tests verify the spec-mandated "Attempt Unauthenticated" strategy for
-// `list_pull_requests` across all four providers.
+// A missing credential sends the request anonymously: the generated client no
+// longer refuses it, so there is nothing to retry. Per provider:
 //
-// Two scenarios per provider:
-//
-// 1. `<provider>_list_pull_requests_falls_back_to_unauthenticated_when_token_missing`
-//    - With NO credentials in the environment, the provider must NOT
-//      short-circuit to `MissingCredentials`. It must retry the request with
-//      an explicitly anonymous client and surface the (successful) result.
+// 1. `<provider>_list_pull_requests_sends_anonymously_when_token_missing`
+//    - With NO credentials in the environment, exactly one request reaches the
+//      server, it carries no `Authorization` header, and its result is
+//      returned.
 //
 // 2. `<provider>_list_pull_requests_returns_*_credentials_when_anonymous_rejected`
-//    - With NO credentials in the environment, when the upstream API rejects
-//      the anonymous request with 401, the provider must surface a credentials
-//      error. GitHub maps 401 → `InvalidCredentials`; the others map 401 →
-//      `MissingCredentials`. (Per Phase 2 design notes.)
+//    - With NO credentials, a 401 is classified after exactly one request.
+//      GitHub maps 401 → `InvalidCredentials`; the others map 401 →
+//      `MissingCredentials`.
 //
-// All tests in this module use `#[serial_test::serial]` because they mutate
-// process-global env vars and would race with the existing tests in this
-// file that *set* credentials via `unsafe { std::env::set_var(...) }`.
+// GitHub `list_workflow_runs` keeps one consumer retry: a 401/403 to a request
+// that carried a credential is resent once with no credential at all.
 //
-// The `setup_*_mock_no_creds` helpers mirror the `setup_*_mock` helpers but
-// skip the env-var setting step. Tests must explicitly remove env vars
-// before constructing the provider so the schematic client cannot pick up
-// credentials from a leaked previous test.
+// Every test clears the host's provider credentials through `EnvGuard` and is
+// `#[serial]`, so a developer's real tokens never reach the mock server.
 
-mod unauth_fallback_tests {
+mod anonymous_request_tests {
     use super::*;
     use serial_test::serial;
+
+    /// Clears every credential variable the four providers read.
+    fn without_credentials() -> Vec<EnvGuard> {
+        PROVIDER_CREDENTIAL_VARIABLES
+            .into_iter()
+            .map(EnvGuard::remove_safe)
+            .collect()
+    }
+
+    /// The requests the server received, asserting that none carried a
+    /// credential.
+    async fn anonymous_requests(server: &MockServer) -> usize {
+        let requests = server.received_requests().await.unwrap();
+        for request in &requests {
+            assert!(
+                request.headers.get("authorization").is_none(),
+                "an anonymous request carried Authorization"
+            );
+        }
+        requests.len()
+    }
 
     // -----------------------------------------------------------------------
     // GitHub
     // -----------------------------------------------------------------------
 
-    async fn setup_github_mock_no_creds() -> (MockServer, GitHubRemote) {
-        let server = MockServer::start().await;
-        // Build the provider WITHOUT setting any credential env vars. Tests
-        // are responsible for removing them before calling this.
-        let provider = GitHubRemote::with_base_url(&server.uri()).unwrap();
-        (server, provider)
-    }
-
-    fn remove_github_env_vars() {
-        // SAFETY: serialized via `#[serial]`; only this test mutates env.
-        unsafe {
-            std::env::remove_var("GITHUB_TOKEN");
-            std::env::remove_var("GH_TOKEN");
-        }
-    }
-
     #[tokio::test]
     #[serial]
-    async fn github_list_pull_requests_falls_back_to_unauthenticated_when_token_missing() {
-        remove_github_env_vars();
-        let (server, provider) = setup_github_mock_no_creds().await;
+    async fn github_list_pull_requests_sends_anonymously_when_token_missing() {
+        let _env = without_credentials();
+        let server = MockServer::start().await;
+        let provider = GitHubRemote::with_base_url(&server.uri()).unwrap();
 
-        // Mock returns 200 with a minimal PR fixture; no Authorization
-        // header matcher, so both authenticated and anonymous requests match.
         Mock::given(method("GET"))
             .and(path_regex(r"/repos/test-owner/test-repo/pulls.*"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
@@ -2185,23 +2640,20 @@ mod unauth_fallback_tests {
         let prs = provider
             .list_pull_requests("test-owner", "test-repo", PullRequestState::Open)
             .await
-            .expect("anonymous fallback should succeed when remote returns 200");
+            .expect("an anonymous request should succeed when the remote returns 200");
 
-        assert!(
-            !prs.is_empty(),
-            "Expected at least one PR after anonymous retry"
-        );
+        assert_eq!(prs.len(), 1);
         assert_eq!(prs[0].number, 42);
+        assert_eq!(anonymous_requests(&server).await, 1);
     }
 
     #[tokio::test]
     #[serial]
     async fn github_list_pull_requests_returns_invalid_credentials_when_anonymous_rejected() {
-        remove_github_env_vars();
-        let (server, provider) = setup_github_mock_no_creds().await;
+        let _env = without_credentials();
+        let server = MockServer::start().await;
+        let provider = GitHubRemote::with_base_url(&server.uri()).unwrap();
 
-        // Mock returns 401 — the anonymous retry must fail and the provider
-        // must surface a credentials error. GitHub maps 401 → InvalidCredentials.
         Mock::given(method("GET"))
             .and(path_regex(r"/repos/test-owner/test-repo/pulls.*"))
             .respond_with(ResponseTemplate::new(401).set_body_string("Bad credentials"))
@@ -2221,17 +2673,16 @@ mod unauth_fallback_tests {
                 other
             ),
         }
+        assert_eq!(anonymous_requests(&server).await, 1);
     }
 
     #[tokio::test]
     #[serial]
-    async fn github_list_workflow_runs_falls_back_to_unauthenticated_when_token_missing() {
-        remove_github_env_vars();
-        let (server, provider) = setup_github_mock_no_creds().await;
+    async fn github_list_workflow_runs_sends_anonymously_when_token_missing() {
+        let _env = without_credentials();
+        let server = MockServer::start().await;
+        let provider = GitHubRemote::with_base_url(&server.uri()).unwrap();
 
-        // With no credentials, the authenticated attempt short-circuits to
-        // MissingCredential; the provider must retry anonymously and surface
-        // the successful result rather than erroring.
         Mock::given(method("GET"))
             .and(path("/repos/test-owner/test-repo/actions/runs"))
             .respond_with(ResponseTemplate::new(200).set_body_json(github_workflow_runs_fixture()))
@@ -2241,35 +2692,102 @@ mod unauth_fallback_tests {
         let runs = provider
             .list_workflow_runs("test-owner", "test-repo", 5)
             .await
-            .expect("anonymous fallback should succeed when remote returns 200");
+            .expect("an anonymous request should succeed when the remote returns 200");
 
         assert_eq!(runs.len(), 2);
         assert_eq!(runs[0].name, "CI");
+        assert_eq!(anonymous_requests(&server).await, 1);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn github_list_workflow_runs_is_not_retried_when_an_anonymous_request_is_rejected() {
+        let _env = without_credentials();
+        let server = MockServer::start().await;
+        let provider = GitHubRemote::with_base_url(&server.uri()).unwrap();
+
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo/actions/runs"))
+            .respond_with(ResponseTemplate::new(401).set_body_string("Bad credentials"))
+            .mount(&server)
+            .await;
+
+        let result = provider
+            .list_workflow_runs("test-owner", "test-repo", 5)
+            .await;
+
+        assert!(
+            matches!(result, Err(SniffError::InvalidCredentials { .. })),
+            "{result:?}"
+        );
+        assert_eq!(anonymous_requests(&server).await, 1);
+    }
+
+    /// A 401/403 to a request carrying `GITHUB_TOKEN` is retried once with no
+    /// credential; the rejected token is not resent.
+    async fn assert_rejected_token_is_retried_anonymously(rejection: u16) {
+        let _env = without_credentials();
+        let _token = EnvGuard::set_safe("GITHUB_TOKEN", "workflow-token-6d2a");
+        let server = MockServer::start().await;
+        let provider = GitHubRemote::with_base_url(&server.uri()).unwrap();
+
+        // Mounted first, so it answers every request that carries a credential.
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo/actions/runs"))
+            .and(header_exists("authorization"))
+            .respond_with(ResponseTemplate::new(rejection).set_body_string("Bad credentials"))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/test-repo/actions/runs"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(github_workflow_runs_fixture()))
+            .mount(&server)
+            .await;
+
+        let runs = provider
+            .list_workflow_runs("test-owner", "test-repo", 5)
+            .await
+            .expect("the anonymous retry should succeed");
+
+        assert_eq!(runs.len(), 2);
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(
+            requests.len(),
+            2,
+            "one rejected request, one anonymous retry"
+        );
+        assert_eq!(
+            requests[0].headers.get("authorization").unwrap(),
+            "Bearer workflow-token-6d2a"
+        );
+        assert!(
+            requests[1].headers.get("authorization").is_none(),
+            "the retry must not resend the rejected credential"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn github_list_workflow_runs_retries_anonymously_when_token_gets_401() {
+        assert_rejected_token_is_retried_anonymously(401).await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn github_list_workflow_runs_retries_anonymously_when_token_gets_403() {
+        assert_rejected_token_is_retried_anonymously(403).await;
     }
 
     // -----------------------------------------------------------------------
     // Gitea
     // -----------------------------------------------------------------------
 
-    async fn setup_gitea_mock_no_creds() -> (MockServer, GiteaRemote) {
-        let server = MockServer::start().await;
-        let provider = GiteaRemote::with_base_url(&server.uri()).unwrap();
-        (server, provider)
-    }
-
-    fn remove_gitea_env_vars() {
-        // SAFETY: serialized via `#[serial]`; only this test mutates env.
-        unsafe {
-            std::env::remove_var("GITEA_TOKEN");
-            std::env::remove_var("CODEBERG_TOKEN");
-        }
-    }
-
     #[tokio::test]
     #[serial]
-    async fn gitea_list_pull_requests_falls_back_to_unauthenticated_when_token_missing() {
-        remove_gitea_env_vars();
-        let (server, provider) = setup_gitea_mock_no_creds().await;
+    async fn gitea_list_pull_requests_sends_anonymously_when_token_missing() {
+        let _env = without_credentials();
+        let server = MockServer::start().await;
+        let provider = GiteaRemote::with_base_url(&server.uri()).unwrap();
 
         Mock::given(method("GET"))
             .and(path_regex(r"/api/v1/repos/test-owner/test-repo/pulls.*"))
@@ -2296,22 +2814,20 @@ mod unauth_fallback_tests {
         let prs = provider
             .list_pull_requests("test-owner", "test-repo", PullRequestState::Open)
             .await
-            .expect("anonymous fallback should succeed when Gitea returns 200");
+            .expect("an anonymous request should succeed when Gitea returns 200");
 
-        assert!(
-            !prs.is_empty(),
-            "Expected at least one PR after anonymous retry"
-        );
+        assert_eq!(prs.len(), 1);
         assert_eq!(prs[0].number, 8);
+        assert_eq!(anonymous_requests(&server).await, 1);
     }
 
     #[tokio::test]
     #[serial]
     async fn gitea_list_pull_requests_returns_missing_credentials_when_anonymous_rejected() {
-        remove_gitea_env_vars();
-        let (server, provider) = setup_gitea_mock_no_creds().await;
+        let _env = without_credentials();
+        let server = MockServer::start().await;
+        let provider = GiteaRemote::with_base_url(&server.uri()).unwrap();
 
-        // Gitea maps 401 → MissingCredentials.
         Mock::given(method("GET"))
             .and(path_regex(r"/api/v1/repos/test-owner/test-repo/pulls.*"))
             .respond_with(ResponseTemplate::new(401).set_body_string("Unauthorized"))
@@ -2331,31 +2847,19 @@ mod unauth_fallback_tests {
                 other
             ),
         }
+        assert_eq!(anonymous_requests(&server).await, 1);
     }
 
     // -----------------------------------------------------------------------
     // GitLab
     // -----------------------------------------------------------------------
 
-    async fn setup_gitlab_mock_no_creds() -> (MockServer, GitLabRemote) {
-        let server = MockServer::start().await;
-        let provider = GitLabRemote::with_base_url(&server.uri()).unwrap();
-        (server, provider)
-    }
-
-    fn remove_gitlab_env_vars() {
-        // SAFETY: serialized via `#[serial]`; only this test mutates env.
-        unsafe {
-            std::env::remove_var("GITLAB_TOKEN");
-            std::env::remove_var("GITLAB_PRIVATE_TOKEN");
-        }
-    }
-
     #[tokio::test]
     #[serial]
-    async fn gitlab_list_pull_requests_falls_back_to_unauthenticated_when_token_missing() {
-        remove_gitlab_env_vars();
-        let (server, provider) = setup_gitlab_mock_no_creds().await;
+    async fn gitlab_list_pull_requests_sends_anonymously_when_token_missing() {
+        let _env = without_credentials();
+        let server = MockServer::start().await;
+        let provider = GitLabRemote::with_base_url(&server.uri()).unwrap();
 
         Mock::given(method("GET"))
             .and(path_regex(r"/api/v4/projects/.*/merge_requests.*"))
@@ -2385,22 +2889,22 @@ mod unauth_fallback_tests {
         let mrs = provider
             .list_pull_requests("test-owner", "test-repo", PullRequestState::Open)
             .await
-            .expect("anonymous fallback should succeed when GitLab returns 200");
+            .expect("an anonymous request should succeed when GitLab returns 200");
 
-        assert!(
-            !mrs.is_empty(),
-            "Expected at least one MR after anonymous retry"
-        );
+        assert_eq!(mrs.len(), 1);
         assert_eq!(mrs[0].number, 15);
+        let requests = server.received_requests().await.unwrap();
+        assert!(requests[0].headers.get("private-token").is_none());
+        assert_eq!(anonymous_requests(&server).await, 1);
     }
 
     #[tokio::test]
     #[serial]
     async fn gitlab_list_pull_requests_returns_missing_credentials_when_anonymous_rejected() {
-        remove_gitlab_env_vars();
-        let (server, provider) = setup_gitlab_mock_no_creds().await;
+        let _env = without_credentials();
+        let server = MockServer::start().await;
+        let provider = GitLabRemote::with_base_url(&server.uri()).unwrap();
 
-        // GitLab maps 401 → MissingCredentials.
         Mock::given(method("GET"))
             .and(path_regex(r"/api/v4/projects/.*/merge_requests.*"))
             .respond_with(ResponseTemplate::new(401).set_body_string("401 Unauthorized"))
@@ -2420,31 +2924,19 @@ mod unauth_fallback_tests {
                 other
             ),
         }
+        assert_eq!(anonymous_requests(&server).await, 1);
     }
 
     // -----------------------------------------------------------------------
     // Bitbucket
     // -----------------------------------------------------------------------
 
-    async fn setup_bitbucket_mock_no_creds() -> (MockServer, BitbucketRemote) {
-        let server = MockServer::start().await;
-        let provider = BitbucketRemote::with_base_url(&server.uri()).unwrap();
-        (server, provider)
-    }
-
-    fn remove_bitbucket_env_vars() {
-        // SAFETY: serialized via `#[serial]`; only this test mutates env.
-        unsafe {
-            std::env::remove_var("BITBUCKET_USERNAME");
-            std::env::remove_var("BITBUCKET_APP_PASSWORD");
-        }
-    }
-
     #[tokio::test]
     #[serial]
-    async fn bitbucket_list_pull_requests_falls_back_to_unauthenticated_when_token_missing() {
-        remove_bitbucket_env_vars();
-        let (server, provider) = setup_bitbucket_mock_no_creds().await;
+    async fn bitbucket_list_pull_requests_sends_anonymously_when_token_missing() {
+        let _env = without_credentials();
+        let server = MockServer::start().await;
+        let provider = BitbucketRemote::with_base_url(&server.uri()).unwrap();
 
         Mock::given(method("GET"))
             .and(path_regex(
@@ -2474,22 +2966,20 @@ mod unauth_fallback_tests {
         let prs = provider
             .list_pull_requests("test-workspace", "test-repo", PullRequestState::Open)
             .await
-            .expect("anonymous fallback should succeed when Bitbucket returns 200");
+            .expect("an anonymous request should succeed when Bitbucket returns 200");
 
-        assert!(
-            !prs.is_empty(),
-            "Expected at least one PR after anonymous retry"
-        );
+        assert_eq!(prs.len(), 1);
         assert_eq!(prs[0].number, 100);
+        assert_eq!(anonymous_requests(&server).await, 1);
     }
 
     #[tokio::test]
     #[serial]
     async fn bitbucket_list_pull_requests_returns_missing_credentials_when_anonymous_rejected() {
-        remove_bitbucket_env_vars();
-        let (server, provider) = setup_bitbucket_mock_no_creds().await;
+        let _env = without_credentials();
+        let server = MockServer::start().await;
+        let provider = BitbucketRemote::with_base_url(&server.uri()).unwrap();
 
-        // Bitbucket maps 401 → MissingCredentials.
         Mock::given(method("GET"))
             .and(path_regex(
                 r"/repositories/test-workspace/test-repo/pullrequests.*",
@@ -2511,6 +3001,95 @@ mod unauth_fallback_tests {
                 other
             ),
         }
+        assert_eq!(anonymous_requests(&server).await, 1);
+    }
+}
+
+// =============================================================================
+// Secret Redaction Tests
+// =============================================================================
+//
+// A credential sent with a request must never appear in the `SniffError` a
+// failure produces, through either `Display` or `Debug`. The provider bodies
+// here do not echo it, so any appearance would be sniff's own doing.
+
+mod secret_redaction_tests {
+    use super::*;
+    use serial_test::serial;
+
+    const SENTINEL: &str = "sniff-sentinel-token-9b7e31";
+
+    fn assert_no_sentinel(error: &SniffError) {
+        let shown = format!("{error} {error:?}");
+        assert!(
+            !shown.contains(SENTINEL),
+            "the credential leaked into the error: {shown}"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn a_sent_token_never_appears_in_a_classified_error() {
+        let _token = EnvGuard::set_safe("GITHUB_TOKEN", SENTINEL);
+        let server = MockServer::start().await;
+        let provider = GitHubRemote::with_base_url(&server.uri()).unwrap();
+
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/broken"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("internal error"))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/repos/test-owner/private"))
+            .respond_with(
+                ResponseTemplate::new(401)
+                    .set_body_json(serde_json::json!({"message": "Bad credentials"})),
+            )
+            .mount(&server)
+            .await;
+
+        let failed = provider
+            .get_repo_metadata("test-owner", "broken")
+            .await
+            .unwrap_err();
+        let rejected = provider
+            .get_repo_metadata("test-owner", "private")
+            .await
+            .unwrap_err();
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(
+            requests[0].headers.get("authorization").unwrap(),
+            &format!("Bearer {SENTINEL}"),
+            "the sentinel must actually be sent for this test to prove anything"
+        );
+        assert!(matches!(failed, SniffError::RemoteApi { status: 500, .. }));
+        assert!(matches!(rejected, SniffError::InvalidCredentials { .. }));
+        assert_no_sentinel(&failed);
+        assert_no_sentinel(&rejected);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn a_sent_token_never_appears_in_a_transport_error() {
+        let _token = EnvGuard::set_safe("GITHUB_TOKEN", SENTINEL);
+        // Bound and released, so nothing listens on the port.
+        let address = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let provider = GitHubRemote::with_base_url(&format!("http://{address}")).unwrap();
+
+        let error = provider
+            .get_repo_metadata("test-owner", "test-repo")
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(error, SniffError::RemoteApi { status: 0, .. }),
+            "{error:?}"
+        );
+        assert_no_sentinel(&error);
     }
 }
 
@@ -2740,6 +3319,7 @@ mod snapshot_reuse_tests {
         // path segment, so the subtree address arrives as `main%3Adocs`.
         Mock::given(method("GET"))
             .and(path("/repos/test-owner/test-repo/git/trees/main%3Adocs"))
+            .and(query_param("recursive", "true"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "sha": "d", "url": "https://api.github.com/x",
                 "tree": [
@@ -2751,6 +3331,7 @@ mod snapshot_reuse_tests {
             .await;
         Mock::given(method("GET"))
             .and(path("/repos/test-owner/test-repo/git/trees/main%3A.github"))
+            .and(query_param("recursive", "true"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "sha": "w", "url": "https://api.github.com/x",
                 "tree": [

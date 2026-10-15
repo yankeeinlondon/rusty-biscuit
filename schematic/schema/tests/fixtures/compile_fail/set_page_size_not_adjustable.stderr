@@ -1,0 +1,16 @@
+error[E0277]: `schematic_schema::bitbucket::ListTagsRequest` has no adjustable page size
+ --> tests/fixtures/compile_fail/set_page_size_not_adjustable.rs
+  |
+  |     pages.set_page_size(5);
+  |           ^^^^^^^^^^^^^ `set_page_size(..)` needs an adjustable `PageSize` in the definition
+  |
+  = help: the trait `AdjustablePageSize` is not implemented for `schematic_schema::bitbucket::ListTagsRequest`
+  = note: the definition for `schematic_schema::bitbucket::ListTagsRequest` does not mark its page size adjustable
+note: required by a bound in `schematic_schema::schematic_runtime::pager::Pages::<'a, A, R>::set_page_size`
+ --> $SCHEMATIC_RUNTIME/src/pager/pages.rs
+  |
+  |     pub fn set_page_size(&mut self, size: u32)
+  |            ------------- required by a bound in this associated function
+  |     where
+  |         R: AdjustablePageSize,
+  |            ^^^^^^^^^^^^^^^^^^ required by this bound in `Pages::<'a, A, R>::set_page_size`

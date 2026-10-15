@@ -1,0 +1,20 @@
+error[E0277]: `ListItems` has no session renew step
+ --> tests/fixtures/compile_fail/pager_session_renew_without_a_renew_step.rs
+  |
+  |             let _ = scope.renew().await;
+  |                           ^^^^^ `renew()` needs a renew step on the session in the definition
+  |
+help: the trait `Renewable` is not implemented for `ListItems`
+ --> tests/fixtures/compile_fail/pager_session_renew_without_a_renew_step.rs
+  |
+  | struct ListItems;
+  | ^^^^^^^^^^^^^^^^
+  = note: the definition for `ListItems` authors no session renew step
+note: required by a bound in `SessionScope::<'a, A, R>::renew`
+ --> src/pager/session.rs
+  |
+  |     pub fn renew(&self) -> CallFuture<'_, Result<bool, PagerError<R::Failure>>>
+  |            ----- required by a bound in this associated function
+  |     where
+  |         R: Renewable,
+  |            ^^^^^^^^^ required by this bound in `SessionScope::<'a, A, R>::renew`

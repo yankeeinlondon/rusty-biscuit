@@ -12,21 +12,158 @@ use quote::quote;
 /// This type alias simplifies the `into_parts()` method signature and avoids
 /// clippy's `type_complexity` lint.
 ///
-/// The tuple contains:
-/// - HTTP method as a static string (e.g., "GET", "POST")
-/// - URL path with parameters substituted
-/// - Optional JSON body
-/// - Headers as key-value pairs
+/// Also emits `append_query_pairs`, the single place declared query pairs are
+/// percent-encoded onto a request URL, and the cookie helpers
+/// `encode_cookie_value` and `combine_cookie_headers`, which keep every
+/// request to one `Cookie` header.
 pub fn generate_request_parts_type() -> TokenStream {
     quote! {
         /// The components of a prepared HTTP request.
         ///
         /// This tuple contains all information needed to execute an API request:
         /// - `0`: HTTP method (e.g., "GET", "POST", "DELETE")
-        /// - `1`: URL path with path parameters substituted
+        /// - `1`: URL path with path parameters substituted. Declared query
+        ///   parameters are not in it; a query written into the endpoint's path
+        ///   template (`/trees/{sha}?recursive=true`) is.
         /// - `2`: Request body, if the endpoint sends one
         /// - `3`: Additional headers as (name, value) pairs
-        pub type RequestParts = (&'static str, String, RequestBody, Vec<(String, String)>);
+        /// - `4`: Declared query parameters as (name, value) pairs, in
+        ///   declaration order, **not** percent-encoded. An array parameter
+        ///   contributes one pair per element under the same name.
+        ///   [`append_query_pairs`] encodes them when the URL is built.
+        pub type RequestParts = (
+            &'static str,
+            String,
+            RequestBody,
+            Vec<(String, String)>,
+            Vec<(String, String)>,
+        );
+
+        /// Appends query pairs to a request URL, percent-encoding each name and
+        /// value exactly once.
+        ///
+        /// `path` is the substituted path that `url` ends with. The separator is
+        /// chosen from `path`, not from `url`: after a query embedded in the path
+        /// template the pairs continue with `&`, while a query inside the base URL
+        /// is not consulted. That reproduces, byte for byte, the request lines of
+        /// clients that appended the query to the path itself.
+        pub fn append_query_pairs(url: &mut String, path: &str, pairs: &[(String, String)]) {
+            if pairs.is_empty() {
+                return;
+            }
+            url.push(if path.contains('?') { '&' } else { '?' });
+            for (index, (name, value)) in pairs.iter().enumerate() {
+                if index > 0 {
+                    url.push('&');
+                }
+                url.push_str(&urlencoding::encode(name));
+                url.push('=');
+                url.push_str(&urlencoding::encode(value));
+            }
+        }
+
+        /// Encodes a value for a `Cookie` header.
+        ///
+        /// Bytes that RFC 6265 allows in a cookie value are kept as they are,
+        /// `%` included; every other UTF-8 byte (space, `"`, `,`, `;`, `\`,
+        /// control characters, non-ASCII) becomes `%XX` with uppercase hex, so
+        /// a space is `%20`. No server is assumed to decode the result: the
+        /// value it receives is exactly this string.
+        pub fn encode_cookie_value(value: &str) -> String {
+            let mut encoded = String::with_capacity(value.len());
+            for byte in value.bytes() {
+                match byte {
+                    0x21 | 0x23..=0x2B | 0x2D..=0x3A | 0x3C..=0x5B | 0x5D..=0x7E => {
+                        encoded.push(char::from(byte));
+                    }
+                    _ => encoded.push_str(&format!("%{byte:02X}")),
+                }
+            }
+            encoded
+        }
+
+        /// Folds every `Cookie` header in `headers`, then `cookies`, into one
+        /// `Cookie` header of `name=value` pairs joined by `; `.
+        ///
+        /// Pairs keep the order their names first appear; a later pair with a
+        /// name already present (compared case-sensitively) replaces that
+        /// value in place, and a new name is appended. `cookies` values must
+        /// already be encoded with [`encode_cookie_value`]. The single header
+        /// takes the place of the first `Cookie` header, or is appended. With
+        /// one `Cookie` header and nothing to add, `headers` is left as it is.
+        ///
+        /// ## Errors
+        ///
+        /// Returns `SchematicError::Header` naming `Cookie`, never its value,
+        /// when an existing `Cookie` header that must be merged is not a list
+        /// of `name=value` pairs with valid cookie names.
+        pub fn combine_cookie_headers(
+            headers: &mut Vec<(String, String)>,
+            cookies: &[(String, String)],
+        ) -> Result<(), SchematicError> {
+            let existing = headers
+                .iter()
+                .filter(|(name, _)| name.eq_ignore_ascii_case("cookie"))
+                .count();
+            if cookies.is_empty() && existing < 2 {
+                return Ok(());
+            }
+
+            let mut pairs: Vec<(String, String)> = Vec::new();
+            let mut position = None;
+            let mut kept = Vec::with_capacity(headers.len());
+            for (name, value) in headers.drain(..) {
+                if !name.eq_ignore_ascii_case("cookie") {
+                    kept.push((name, value));
+                    continue;
+                }
+                position.get_or_insert(kept.len());
+                for piece in value.split(';').map(str::trim).filter(|piece| !piece.is_empty()) {
+                    match piece.split_once('=') {
+                        Some((cookie_name, cookie_value)) if is_cookie_name(cookie_name) => {
+                            set_cookie(&mut pairs, cookie_name, cookie_value);
+                        }
+                        _ => {
+                            return Err(SchematicError::Header(
+                                schematic_define::HeaderError::InvalidHeaderValue(
+                                    "Cookie".to_string(),
+                                ),
+                            ));
+                        }
+                    }
+                }
+            }
+            for (cookie_name, cookie_value) in cookies {
+                set_cookie(&mut pairs, cookie_name, cookie_value);
+            }
+            *headers = kept;
+
+            if !pairs.is_empty() {
+                let rendered = pairs
+                    .iter()
+                    .map(|(name, value)| format!("{name}={value}"))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                let at = position.unwrap_or(headers.len());
+                headers.insert(at, ("Cookie".to_string(), rendered));
+            }
+            Ok(())
+        }
+
+        fn set_cookie(pairs: &mut Vec<(String, String)>, name: &str, value: &str) {
+            match pairs.iter_mut().find(|(existing, _)| existing == name) {
+                Some(slot) => slot.1 = value.to_string(),
+                None => pairs.push((name.to_string(), value.to_string())),
+            }
+        }
+
+        /// An RFC 6265 cookie name: a non-empty HTTP token.
+        fn is_cookie_name(name: &str) -> bool {
+            !name.is_empty()
+                && name.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte)
+                })
+        }
 
         /// A prepared request body.
         ///

@@ -7,6 +7,26 @@
 
 ## Recent Dependency Notes
 
+- Generated REST clients send through `schematic-runtime` (2026-10-12):
+  the regenerated `schematic-schema` depends on `schematic-runtime` and no
+  longer on `reqwest`, and re-exports the runtime, so its dependents need no
+  direct runtime dependency. `homelab`, `eversolo-integration`, and
+  `biscuit-speaks` add `wiremock` 0.6 as a **dev-dependency** for local HTTP
+  mocks of their generated-client paths; it was already in the graph, so the
+  lockfile gains edges and no package. `model-citizen` drops its unused
+  `schematic-schema` dependency (it uses `schematic-definitions` only).
+- `schematic-runtime` joins the workspace at `schematic/runtime/`
+  (2026-10-12): the hand-written request runtime that generated REST clients
+  will share. Its dependencies (`bytes`, `futures-core`, `http`, `tokio` with
+  `time`, `url`) and dev-dependencies (`futures-util`, `trybuild`, and
+  `tokio`'s `test-util`) were already in the graph, so the lockfile gains no
+  package. See `schematic/docs/dependencies.md`.
+- `schematic-runtime` adds managed sends (2026-10-12): production
+  dependencies `reqwest` 0.13 (`rustls` only), `rustls` 0.23 (error type
+  only), `base64` 0.22, `futures-util`, `serde`, and `serde_json`, and
+  dev-dependencies `wiremock`, `rcgen`, and `tokio-rustls` for local HTTP and
+  TLS mocks. All were already in the workspace graph and in
+  `schematic/schema/Cargo.lock`; the lockfile gains no package.
 - `darkmatter` adds `content-policy` as a normal dependency with
   `default-features = false` (2026-10-12). It is a workspace member, so the
   lockfile gains one edge and no package. The runtime baseline imports its
@@ -448,6 +468,7 @@ This is a Rust workspace with the following modules:
 - `schematic/define/Cargo.toml` - REST API definition primitives
 - `schematic/definitions/Cargo.toml` - Pre-built API definitions
 - `schematic/gen/Cargo.toml` - REST API code generator CLI (`schematic-gen`)
+- `schematic/runtime/Cargo.toml` - Request runtime shared by generated REST clients
 - `schematic/schema/Cargo.toml` - Generated REST API clients (auto-generated)
 - `sniff/lib/Cargo.toml` - System discovery (OS, hardware, network, programs)
 - `sniff/cli/Cargo.toml` - System discovery CLI (`sniff`)
@@ -672,6 +693,12 @@ This is a Rust workspace with the following modules:
     _Code generator for REST API client code from schematic definitions._
 
     _Tags: workspace, cli, codegen_
+
+- [schematic-runtime](./schematic/runtime) _v0.1.0_
+
+    _Request runtime shared by generated REST clients: managed client and typed send, response envelope, errors, redaction, credentials, deadline, codecs._
+
+    _Tags: workspace, library, api, http_
 
 - [schematic-schema](./schematic/schema) _v0.1.0_
 

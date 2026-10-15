@@ -6,19 +6,11 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::{AuthStrategy, RestApi, RestMethod};
 
-use super::helpers::{get_module_path, to_snake_case};
+use super::helpers::get_module_path;
 use crate::output::options::OutputOptions;
 use crate::output::ws_modules::ws_definition_modules;
 
 /// Assembles the lib.rs content for the schema crate.
-///
-/// ## Arguments
-///
-/// * `apis` - Slice of API definitions to include
-///
-/// ## Returns
-///
-/// A TokenStream containing the lib.rs code.
 pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
     let mut seen_modules = HashSet::new();
     let mut module_decls: Vec<_> = apis
@@ -83,23 +75,26 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
         .or_else(|| apis.first());
 
     let quick_start_example = build_quick_start_example(example_api);
-    let variant_example = build_variant_example(example_api);
 
     let api_table_tokens: TokenStream = api_table.parse().unwrap_or_default();
     let ws_table_tokens: TokenStream = ws_table.parse().unwrap_or_default();
     let quick_start_tokens: TokenStream = quick_start_example.parse().unwrap_or_default();
-    let variant_tokens: TokenStream = variant_example.parse().unwrap_or_default();
+    let runtime_compatibility = runtime_compatibility();
 
     quote! {
         //! Generated REST API clients and WebSocket API definition helpers.
         //!
-        //! Each API is available as a separate module with its client struct,
-        //! request types, and response types re-exported from definitions.
+        //! Each REST API module holds the API's client struct, named after the
+        //! API and wrapping a [`schematic_runtime::Client`], with one method per
+        //! endpoint; the call type each method returns; its request types; and
+        //! its response types re-exported from the definitions. Sending,
+        //! credentials, redirects, deadlines, and the response envelope belong
+        //! to [`schematic_runtime`].
         //!
         //! ## Available REST APIs
         //!
-        //! | Module | Client | Description | Auth |
-        //! |--------|--------|-------------|------|
+        //! | Module | API | Description | Auth |
+        //! |--------|-----|-------------|------|
         #api_table_tokens
         //!
         //! ## Available WebSocket Definitions
@@ -110,26 +105,19 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
         //!
         //! ## Quick Start
         //!
-        //! Use the prelude for convenient imports:
-        //!
         #quick_start_tokens
         //!
-        //! ## Ergonomic Features
+        //! ## Results
         //!
-        //! Generated clients include several convenience features:
-        //!
-        //! - **`From<&str>` / `From<String>`** on single-param request structs
-        //! - **`From<BodyType>`** on body-only request structs
-        //! - **`#[must_use]`** on all async methods to catch missing `.await`
-        //! - **`DOCS_URL`** constant on each client for programmatic doc access
-        //! - **`variant()`** method for creating alternate configurations
-        //!
-        #variant_tokens
-        //!
-        //! ## Error Handling
-        //!
-        //! All request methods return `Result<T, SchematicError>`. See
-        //! [`shared::SchematicError`] for the full error enum and handling examples.
+        //! Awaiting an endpoint call returns `Ok` with the endpoint's data for a
+        //! 2xx reply that decoded, and otherwise a
+        //! [`schematic_runtime::CallError`]. After `.full()`, it returns `Ok`
+        //! with a [`schematic_runtime::Response`] whenever the server answered,
+        //! whatever the status, and
+        //! `Err(`[`schematic_runtime::TransportError`]`)` only when no response
+        //! arrived.
+
+        #runtime_compatibility
 
         // Shared types and utilities
         pub mod shared;
@@ -140,19 +128,36 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
     }
 }
 
+/// The ABI marker of generated `lib.rs`, the compile-time check that the
+/// `schematic-runtime` being built against has that ABI, and the runtime
+/// re-export.
+///
+/// Partial generation reads the marker back with [`syn`] (see
+/// `crate::output::inventory`), so its form is part of the contract: one
+/// `pub const SCHEMATIC_RUNTIME_ABI: u32 = <integer literal>;` item.
+fn runtime_compatibility() -> TokenStream {
+    let abi = proc_macro2::Literal::u32_unsuffixed(crate::RUNTIME_ABI);
+    let message = format!(
+        "schematic-schema was generated for schematic-runtime ABI {}, but the \
+         schematic-runtime it is built against has another ABI; regenerate the \
+         crate with the schematic-gen of that runtime (`just generate` in schematic/)",
+        crate::RUNTIME_ABI
+    );
+    quote! {
+        /// The `schematic-runtime` ABI this crate was generated against.
+        pub const SCHEMATIC_RUNTIME_ABI: u32 = #abi;
+
+        const _: () = assert!(schematic_runtime::ABI == SCHEMATIC_RUNTIME_ABI, #message);
+
+        /// The runtime that sends this crate's requests.
+        pub use schematic_runtime;
+    }
+}
+
 /// Assembles lib.rs content with configurable options.
 ///
 /// This is similar to `assemble_lib_rs` but supports options like including
 /// a types module for imported APIs.
-///
-/// ## Arguments
-///
-/// * `apis` - Slice of API definitions to include
-/// * `options` - Output generation options
-///
-/// ## Returns
-///
-/// A TokenStream containing the lib.rs code.
 pub fn assemble_lib_rs_with_options(apis: &[&RestApi], options: &OutputOptions) -> TokenStream {
     let mut seen_modules = HashSet::new();
     let module_decls: Vec<_> = apis
@@ -206,6 +211,8 @@ pub fn assemble_lib_rs_with_options(apis: &[&RestApi], options: &OutputOptions) 
     let api_table_tokens: TokenStream = api_table.parse().unwrap_or_default();
     let quick_start_tokens: TokenStream = quick_start_example.parse().unwrap_or_default();
 
+    let runtime_compatibility = runtime_compatibility();
+
     quote! {
         //! Generated REST API clients.
         //!
@@ -214,20 +221,15 @@ pub fn assemble_lib_rs_with_options(apis: &[&RestApi], options: &OutputOptions) 
         //!
         //! ## Available APIs
         //!
-        //! | Module | Client | Description | Auth |
-        //! |--------|--------|-------------|------|
+        //! | Module | API | Description | Auth |
+        //! |--------|-----|-------------|------|
         #api_table_tokens
         //!
         //! ## Quick Start
         //!
-        //! Use the prelude for convenient imports:
-        //!
         #quick_start_tokens
-        //!
-        //! ## Error Handling
-        //!
-        //! All request methods return `Result<T, SchematicError>`. See
-        //! [`shared::SchematicError`] for the full error enum and handling examples.
+
+        #runtime_compatibility
 
         // Shared types and utilities
         pub mod shared;
@@ -241,88 +243,34 @@ pub fn assemble_lib_rs_with_options(apis: &[&RestApi], options: &OutputOptions) 
 }
 
 fn build_quick_start_example(example_api: Option<&&RestApi>) -> String {
-    if let Some(api) = example_api {
-        let api_name = &api.name;
-        let first_get = api.endpoints.iter().find(|ep| ep.method == RestMethod::Get);
-        if let Some(ep) = first_get {
-            let method_name = to_snake_case(&ep.id);
-            let has_path_params = ep.path.contains('{');
-            let call = if has_path_params {
-                format!("let response = client.{}(\"example\").await?;", method_name)
-            } else {
-                format!("let response = client.{}().await?;", method_name)
-            };
-            format!(
-                r#"//! ```text
-//! use schematic_schema::prelude::*;
-//!
-//! #[tokio::main]
-//! async fn main() -> Result<(), SchematicError> {{
-//!     let client = {api_name}::new();
-//!     {call}
-//!     println!("{{:?}}", response);
-//!     Ok(())
-//! }}
-//! ```"#
-            )
-        } else {
-            String::from(
-                r#"//! ```text
-//! use schematic_schema::prelude::*;
-//! ```"#,
-            )
-        }
-    } else {
-        String::from(
+    let Some(api) = example_api else {
+        return String::from(
             r#"//! ```text
 //! use schematic_schema::prelude::*;
 //! ```"#,
-        )
-    }
-}
-
-fn build_variant_example(example_api: Option<&&RestApi>) -> String {
-    if let Some(api) = example_api {
-        let api_name = &api.name;
-        let env_var = api
-            .env_auth
-            .first()
-            .map(|s| s.as_str())
-            .unwrap_or("API_KEY");
-        let staging_var = format!("STAGING_{}", env_var);
-        format!(
-            r#"//! ## Variants
-//!
-//! Create alternate client configurations for staging, testing, or different
-//! environments using the [`variant()`]({module}::{api_name}::variant) builder
-//! or [`variant_with()`]({module}::{api_name}::variant_with) convenience method:
-//!
-//! ```text
+        );
+    };
+    let api_name = &api.name;
+    let Some(endpoint) = api.endpoints.iter().find(|ep| ep.method == RestMethod::Get) else {
+        return format!(
+            r#"//! ```text
 //! use schematic_schema::prelude::*;
-//! use schematic_define::UpdateStrategy;
 //!
 //! let client = {api_name}::new();
+//! ```"#
+        );
+    };
+    let call = crate::codegen::endpoint_methods::example_invocation(api, endpoint, "client");
+    format!(
+        r#"//! ```text
+//! use schematic_schema::prelude::*;
 //!
-//! // Simple environment switch with variant_with()
-//! let staging = client.variant_with(
-//!     "https://staging.example.com/v1",
-//!     vec!["{staging_var}".to_string()],
-//!     UpdateStrategy::NoChange,
-//! );
-//!
-//! // Full builder with response hooks
-//! let custom = client.variant()
-//!     .base_url("http://localhost:8080/v1")
-//!     .env_auth(vec!["LOCAL_KEY".to_string()])
-//!     .auth_update(UpdateStrategy::ChangeTo(schematic_define::AuthStrategy::ApiKey {{
-//!         header: "X-API-Key".to_string(),
-//!     }}))
-//!     .pre_response_json(|_ctx, json| Ok(json))
-//!     .build();
-//! ```"#,
-            module = get_module_path(api),
-        )
-    } else {
-        String::new()
-    }
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {{
+//!     let client = {api_name}::new();
+//!     let data = {call}.await?;
+//!     Ok(())
+//! }}
+//! ```"#
+    )
 }

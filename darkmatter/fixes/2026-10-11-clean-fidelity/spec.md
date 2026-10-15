@@ -1,6 +1,6 @@
 ---
 area: darkmatter
-status: draft-spec
+status: review-findings
 $schema:
     status: |-
         enum(
@@ -24,7 +24,7 @@ $schema:
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
-review_iterations: 0
+review_iterations: 1
 created: 2026-10-11
 owner: Ken Snyder <ken@ken.net>
 packages:

@@ -509,7 +509,7 @@ async fn create_samsung_by_name(state: &AppState, name: &str) -> Result<SamsungT
         .get_samsung_tv(name)
         .await
         .ok_or_else(|| ServerError::DeviceNotFound(name.to_string()))?;
-    Ok(SamsungTv::with_https(host, rest_port, ws_port, use_https))
+    Ok(SamsungTv::with_https(host, rest_port, ws_port, use_https)?)
 }
 
 async fn with_timeout<T, E>(

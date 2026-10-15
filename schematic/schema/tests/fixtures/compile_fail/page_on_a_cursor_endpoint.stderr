@@ -1,0 +1,30 @@
+error[E0277]: `ListBatchesRequest` is not paginated by page number
+ --> tests/fixtures/compile_fail/page_on_a_cursor_endpoint.rs
+  |
+  |     let _ = client.list_batches().pager().page(2);
+  |                                           ^^^^ `.page(n)` exists only for page-number strategies
+  |
+  = help: the trait `StartPage` is not implemented for `ListBatchesRequest`
+  = note: the definition authors a different pagination strategy for `ListBatchesRequest`
+note: required by a bound in `Pager::<'a, A, R>::page`
+ --> $SCHEMATIC_RUNTIME/src/pager/pages.rs
+  |
+  |     pub fn page(mut self, number: u64) -> Self
+  |            ---- required by a bound in this associated function
+  |     where
+  |         R: StartPage,
+  |            ^^^^^^^^^ required by this bound in `Pager::<'a, A, R>::page`
+
+error[E0599]: no method named `page` found for struct `ListBatchesCall<'a>` in the current scope
+ --> tests/fixtures/compile_fail/page_on_a_cursor_endpoint.rs
+  |
+  |     let _ = client.list_batches().page(2);
+  |                                   ^^^^
+  |
+help: there is a method `pager` with a similar name, but with different arguments
+ --> src/openai/requests.rs
+  |
+  | /     pub fn pager(
+  | |         self,
+  | |     ) -> schematic_runtime::pager::Pager<'a, OpenAIApi, ListBatchesRequest> {
+  | |___________________________________________________________________________^

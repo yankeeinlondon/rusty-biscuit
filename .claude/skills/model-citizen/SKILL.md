@@ -103,7 +103,7 @@ cargo test -p model-citizen -p model-citizen-cli
 
 ## Key Dependencies
 
-**Library**: `thiserror`, `tokio`, `async-trait`, `reqwest` (json/stream), `serde`/`serde_json`/`toml`, `gguf-rs-lib`, `schematic-definitions`, `schematic-schema`, `sniff`, `dirs`
+**Library**: `thiserror`, `tokio`, `async-trait`, `reqwest` (json/stream), `serde`/`serde_json`/`toml`, `gguf-rs-lib`, `schematic-definitions`, `sniff`, `dirs`
 
 **CLI**: `clap` (derive) + `clap_complete` (dynamic), `biscuit-terminal`, `serde_json`, `inquire`, `indicatif`, `color-eyre`
 

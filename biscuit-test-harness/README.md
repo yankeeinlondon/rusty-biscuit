@@ -14,8 +14,12 @@ It is a `publish = false` workspace member, consumed as a
 
 ## Testing vocabulary
 
-The whole monorepo uses one Level 1 / 2 / 3 taxonomy. This crate covers
-Levels 2 and 3.
+The monorepo names tests by the resource they need: Level 1 (none), Level 2
+(a real terminal), Level 3 (OS key events), plus browser, real, and slow
+tiers (see the `rust-testing` skill). This crate covers Levels 2 and 3. Tiers
+are separate from fidelity: the F1/F2/F3 rungs (Synthetic, Witnessed, Native)
+say what a passing test proves. For the terminal boundary, Level 1 is F1,
+Level 2 is F2, and Level 3 is F3.
 
 | Level | What it is | Needs this crate? |
 |-------|------------|-------------------|
@@ -27,8 +31,11 @@ Levels 2 and 3.
 *terminal's* encoder or display path, because the test itself produces
 the bytes the binary parses — the terminal is never exercised. A
 requirement of the form "when the user presses X, behaviour Y happens"
-is only truly verified at Level 2 (kitty bytes piped through the
-terminal's CLI) or Level 3 (real key injection).
+is only truly verified at Level 3 (real key injection), because Level 2
+still injects input as bytes. Level 2 does verify what the program renders
+and that it decodes a known byte sequence (for example kitty bytes piped
+through the terminal's CLI), which is enough when the requirement is about
+bytes arriving rather than about the key press itself.
 
 ## Quick start
 
@@ -630,9 +637,10 @@ a flashing taskbar button and the chord lands in the user's real window.
   Zero or several matches is an error rather than a first-match guess:
   injecting Ctrl+C into the wrong window looks identical to a broken
   product.
-- Focus is a shared global resource — gate Level-3 tests behind an env
-  flag (convention: `RUN_LEVEL3=1`) and run them with `--test-threads=1`
-  so parallel windows don't steal focus mid-injection.
+- Focus is a shared global resource. Gate every Level-3 test with
+  `require_level!(Level::L3, …)`, which skips unless `RUN_LEVEL3=1`; `just
+  test-l3` sets it. Run the tier one test at a time (`just test-l3` passes
+  `-j 1` to nextest) so parallel windows don't steal focus mid-injection.
 - **Bare-modifier press** events are structurally unreliable on macOS via
   `cliclick`. *Chord* injection (`Ctrl+R`) works reliably; bare modifiers
   need a Level-2 raw-kitty-bytes test instead.

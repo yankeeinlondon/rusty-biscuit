@@ -4,7 +4,7 @@
 //!
 //! Endpoints: 265.
 //!
-//! Regenerate with `schematic-gen import --input <spec> --api-name OpenAI --definitions-out <dir>`.
+//! Regenerate with `schematic-gen import --input <spec> --api-name OpenAI --definitions-out <dir> --overlay crate::openai_pagination::apply`.
 mod types;
 pub use types::*;
 use crate::registry::SchemaRegistry;
@@ -5064,7 +5064,7 @@ pub fn define_openai_api() -> RestApi {
             oauth_scopes: None,
         },
     ]);
-    RestApi {
+    let api = RestApi {
         name: "OpenAI".to_string(),
         description: "The OpenAI REST API. Please see https://platform.openai.com/docs/api-reference for more details."
             .to_string(),
@@ -5082,7 +5082,13 @@ pub fn define_openai_api() -> RestApi {
         request_suffix: None,
         version: None,
         env_mapping: None,
-    }
+        cross_origin: CrossOrigin::same_origin(),
+        request_id_header: Some("x-request-id".to_string()),
+        secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: vec![],
+    };
+    crate::openai_pagination::apply(api)
 }
 /// Builds a schema registry holding all 1394 generated model types.
 #[must_use]

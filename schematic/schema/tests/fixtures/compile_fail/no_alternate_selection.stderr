@@ -1,0 +1,11 @@
+error[E0599]: no method named `alternate` found for struct `ListRepositoryTreeCall<'a>` in the current scope
+ --> tests/fixtures/compile_fail/no_alternate_selection.rs
+  |
+  |     let _ = client.list_repository_tree("1").alternate("keyset");
+  |                                              ^^^^^^^^^ method not found in `ListRepositoryTreeCall<'_>`
+
+error[E0599]: no method named `keyset` found for struct `Pager<'a, A, R>` in the current scope
+ --> tests/fixtures/compile_fail/no_alternate_selection.rs
+  |
+  |     let _ = client.list_repository_tree("1").pager().keyset();
+  |                                                      ^^^^^^ method not found in `Pager<'_, GitLabApi, ListRepositoryTreeRequest>`

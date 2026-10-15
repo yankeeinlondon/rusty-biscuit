@@ -36,7 +36,10 @@ pub use types::*;
 use crate::registry::SchemaRegistry;
 #[cfg(test)]
 use schematic_define::ApiResponse;
-use schematic_define::{ApiKeyEnv, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi, Schema};
+use schematic_define::{
+    ApiKeyEnv, AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping, RestApi, Schema,
+    pagination::{Collection, CursorSource, MoreSignal, PageSize, PaginationException, Strategy},
+};
 
 /// Creates a schema registry containing all ElevenLabs response types.
 ///
@@ -96,6 +99,43 @@ pub fn openapi_registry() -> SchemaRegistry {
         .register::<CreateApiKeyResponse>("CreateApiKeyResponse")
         .register::<ListWebhooksResponse>("ListWebhooksResponse")
         .register::<CreateWebhookResponse>("CreateWebhookResponse")
+}
+
+/// The REST API's list collections. ElevenLabs has no API-wide default: each
+/// list pages its own way.
+fn elevenlabs_lists() -> Vec<PaginationException> {
+    let history = Strategy::cursor(
+        "start_after_history_item_id",
+        CursorSource::body("last_history_item_id"),
+    )
+    .more_when(MoreSignal::has_more("has_more"))
+    .page_size(PageSize::new("page_size").server_default(100).max(1000))
+    .resumable();
+    let shared_voices = Strategy::page_number("page", MoreSignal::has_more("has_more"))
+        .zero_based()
+        .page_size(PageSize::new("page_size").server_default(30).max(100));
+    vec![
+        PaginationException::new(
+            "GetHistory",
+            Collection::at("history")
+                .item_type("SpeechHistoryItemResponseModel")
+                .paginate(history),
+        ),
+        PaginationException::new(
+            "ListSharedVoices",
+            Collection::at("voices")
+                .item_type("LibraryVoiceResponseModel")
+                .paginate(shared_voices),
+        ),
+        // Definition gap: the definition sends `page_token`, the provider
+        // reference names the input `next_page_token`.
+        PaginationException::new(
+            "ListVoices",
+            Collection::at("voices")
+                .item_type("VoiceResponseModel")
+                .unpaginated(),
+        ),
+    ]
 }
 
 /// Creates the ElevenLabs REST API definition.
@@ -164,6 +204,11 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
             }),
             ..Default::default()
         }),
+        cross_origin: CrossOrigin::same_origin(),
+        request_id_header: None,
+        secret_names: vec![],
+        default_pagination: None,
+        pagination_exceptions: elevenlabs_lists(),
     }
 }
 

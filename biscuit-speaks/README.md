@@ -218,8 +218,8 @@ These providers are often found on hosts and may be added to this library in the
 
 | Variable              | Description                         |
 |-----------------------|-------------------------------------|
-| `ELEVENLABS_API_KEY`  | ElevenLabs API key (preferred)      |
-| `ELEVEN_LABS_API_KEY` | ElevenLabs API key (alternative)    |
+| `ELEVEN_LABS_API_KEY` | ElevenLabs API key (preferred when both are set) |
+| `ELEVENLABS_API_KEY`  | ElevenLabs API key (alternative)    |
 | `TTS_PROVIDER`        | Override default provider selection |
 | `BISCUIT_SPEAKS_CACHE` | Path to the provider capability cache **file**, replacing `~/.biscuit-speaks-cache.json`. Its parent directory must already exist. |
 | `BISCUIT_SPEAKS_ELEVENLABS_ACCOUNT` | Non-secret label, distinct per ElevenLabs account, that enables network-free reuse of a prepared default voice; unset or blank, a fresh detached request resolves the default voice through the API |

@@ -18,7 +18,7 @@ These definitions are consumed by `schematic-gen` to generate strongly-typed Rus
 | Anthropic | `anthropic` | `define_anthropic_api()` | 4 | Anthropic Messages API for Claude AI and agent tool use |
 | Artificial Analysis Data | `artificial_analysis` | `define_artificial_analysis_data_api()` | 6 | Artificial Analysis free data API for LLM and media-model benchmarks |
 | Artificial Analysis CritPt | `artificial_analysis` | `define_artificial_analysis_critpt_api()` | 1 | Artificial Analysis CritPt benchmark evaluation API |
-| Bitbucket | `bitbucket` | `define_bitbucket_api()` | 16 | Bitbucket Cloud REST API for repos, PRs, issues, tags |
+| Bitbucket | `bitbucket` | `define_bitbucket_api()` | 15 | Bitbucket Cloud REST API for repos, PRs, issues, tags |
 | OpenAI | `openai` | `define_openai_api()` | 265 | Full OpenAI platform surface, imported from the vendored spec (see `specs/openai/`) |
 | HuggingFace Hub | `huggingface` | `define_huggingface_hub_api()` | 28+ | Hugging Face Hub API (models, datasets, spaces, repos) |
 | LM Studio | `lmstudio` | `define_lmstudio_api()` | 6 | LM Studio local inference API |
@@ -28,7 +28,7 @@ These definitions are consumed by `schematic-gen` to generate strongly-typed Rus
 | ElevenLabs WebSocket | `elevenlabs` | `define_elevenlabs_websocket_api()` | 2 | ElevenLabs TTS WebSocket streaming API |
 | EMQX Basic | `emqx` | `define_emqx_basic_api()` | 30+ | EMQX MQTT Broker REST API with Basic auth |
 | EMQX Bearer | `emqx` | `define_emqx_bearer_api()` | 30+ | EMQX MQTT Broker REST API with Bearer token auth |
-| GitHub | `github` | `define_github_api()` | 17 | GitHub REST API for repos, PRs, issues, releases |
+| GitHub | `github` | `define_github_api()` | 16 | GitHub REST API for repos, PRs, issues, releases |
 | GitLab | `gitlab` | `define_gitlab_api()` | 19 | GitLab REST API for repos, MRs, issues, releases |
 | Gitea | `gitea` | `define_gitea_api()` | 16 | Gitea REST API for self-hosted Git forge instances |
 | Eversolo | `eversolo` | `define_eversolo_api()` | 24 | Eversolo DMP-A8 local HTTP control API |
@@ -141,6 +141,31 @@ assert_eq!(api.name, "Bitbucket");
 assert_eq!(api.endpoints.len(), 16);
 ```
 
+## Pagination
+
+Each `RestApi` declares how its list endpoints page: a `default_pagination`
+strategy that every GET endpoint with an explicit `Vec<T>` response inherits,
+and a `pagination_exceptions` table keyed by endpoint id that marks wrapper
+lists (`{"values": [...]}`), overrides the default, or opts a list out. The
+generated client exposes a pager with exactly the controls a strategy authors.
+
+| API | Strategy |
+|-----|----------|
+| GitHub | page number `page` from 1, size `per_page` (max 100), ends without a `Link` `rel="next"` |
+| GitLab | page number `page` from 1, size `per_page` (max 100), ends without `X-Next-Page`, total `X-Total` |
+| Gitea | page number `page` from 1, size `limit` (max 50), ends without a `Link` `rel="next"`, total `X-Total-Count` |
+| Bitbucket | follows the body's `next` URL (and `previous`), size `pagelen` (max 100), total `size` |
+| OpenAI | cursors from the reply (`last_id`, `next`, `next_page`) with `has_more`, size `limit` |
+| ElevenLabs | `GetHistory` (cursor) and `ListSharedVoices` (page number from 0) |
+
+Every other list, including those of Anthropic, EMQX, and Hugging Face, is
+unpaginated until its provider's pagination is verified. OpenAI's definition
+is imported, so its pagination lives in the hand-written
+`src/openai_pagination.rs`, which `just import-openai` applies through the
+importer's `--overlay` option and never overwrites. Every list endpoint's
+expected resolution is pinned by `tests/pagination_coverage/`, and the lists
+awaiting verification are tabled in [Pagination](../docs/pagination.md#lists-left-unpaginated).
+
 ## Bitbucket API
 
 The Bitbucket module provides a definition for the Bitbucket Cloud REST API v2.0, optimized for common developer workflows.
@@ -160,7 +185,7 @@ Create App Passwords via Bitbucket Settings: **Personal settings > App passwords
 
 ### Pagination
 
-Bitbucket uses **cursor-based pagination** (not page-based). Responses include a `next` URL field. The generated `PaginatedResponse<T>` type provides:
+Bitbucket uses **cursor-based pagination** (not page-based). Responses include a `next` URL field, which the definition's next-link strategy follows; a `page` query parameter stays an ordinary request field. The generated `PaginatedResponse<T>` type also provides:
 
 ```rust
 if paginated.has_next() {
@@ -174,8 +199,7 @@ if paginated.has_next() {
 | Endpoint | Method | Path | Response Type |
 |----------|--------|------|---------------|
 | GetRepository | GET | `/repositories/{workspace}/{repo_slug}` | `Repository` |
-| ListDirectoryContents | GET | `/repositories/{workspace}/{repo_slug}/src/{commit}/{path}` | `PaginatedResponse<SourceEntry>` |
-| GetFileContentRaw | GET | `/repositories/{workspace}/{repo_slug}/src/{commit}/{path}` | `String` (text) |
+| GetSource | GET | `/repositories/{workspace}/{repo_slug}/src/{commit}/{path}` | `Bytes` (binary): JSON `PaginatedResponse<SourceEntry>` for a directory, raw content for a file |
 | ListPullRequests | GET | `/repositories/{workspace}/{repo_slug}/pullrequests` | `PaginatedResponse<PullRequest>` |
 | GetPullRequest | GET | `/repositories/{workspace}/{repo_slug}/pullrequests/{id}` | `PullRequest` |
 | ListPullRequestComments | GET | `/repositories/{workspace}/{repo_slug}/pullrequests/{id}/comments` | `PaginatedResponse<PullRequestComment>` |
@@ -303,7 +327,7 @@ The default base URL is a placeholder (`https://gitea.example.com/api/v1`). Conf
 |--------|-------|--------|
 | Auth header | `Authorization: token <pat>` | `Authorization: Bearer <token>` |
 | Base URL | Instance-specific | `https://api.github.com` |
-| Pagination | `limit` (default 50) | `per_page` (default 30) |
+| Pagination | `limit` (default 30, max 50) | `per_page` (default 30, max 100) |
 | Issues list | `type=issues` excludes PRs | `pull_request` field filtering |
 | Tag refs | Returns **array** | Returns single object |
 
@@ -359,9 +383,11 @@ let api = define_openai_api();
 // Uses Bearer token auth
 assert!(matches!(api.auth, AuthStrategy::BearerToken { .. }));
 
-// Reads token from OPENAI_API_KEY environment variable
-assert_eq!(api.env_auth, vec!["OPENAI_API_KEY"]);
+// No environment fallback: the generated client sends the credential you give it
+assert!(api.env_auth.is_empty());
 ```
+
+Pass the key to the generated client with `OpenAI::new().api_key(key)`; see [Credentials](../docs/runtime/credentials.md).
 
 ## Critical Configuration Requirements
 
@@ -371,12 +397,14 @@ assert_eq!(api.env_auth, vec!["OPENAI_API_KEY"]);
 
 Choose the correct `ApiResponse` variant for each endpoint:
 
-| Response Type | When to Use | Generated Method |
-|---------------|-------------|------------------|
-| `ApiResponse::Json(Schema)` | JSON responses (most common) | `request<T>()` |
-| `ApiResponse::Binary` | Audio files, images, ZIP archives | `request_bytes()` |
-| `ApiResponse::Text` | Plain text responses | `request_text()` |
-| `ApiResponse::Empty` | 204 No Content, fire-and-forget | `request_empty()` |
+| Response Type | When to Use | Generated Codec | Success Type |
+|---------------|-------------|-----------------|--------------|
+| `ApiResponse::Json(Schema)` | JSON responses (most common) | `Json<T>` | the named schema type `T` |
+| `ApiResponse::Binary` | Audio files, images, ZIP archives | `Binary` | `bytes::Bytes` |
+| `ApiResponse::Text` | Plain text responses | `Text` | `String` |
+| `ApiResponse::Empty` | 204 No Content, fire-and-forget | `Empty` | `()` |
+
+Every endpoint is called the same way, through its endpoint method (`client.list_models().await?`); the response type only selects the codec the generated request struct declares, and so the success type the call returns (inside the `Response` envelope when awaited with `.full()`). See [Calling an API](../docs/runtime/calling-an-api.md) and [Sending and Responses](../docs/runtime/sending-and-responses.md).
 
 **Common Mistakes:**
 
@@ -443,14 +471,11 @@ After adding or modifying an API definition:
 # 1. Generate the code
 cargo run -p schematic-gen -- --api YOUR_API --output schematic/schema/src
 
-# 2. Check for correct response methods
-grep -n "request_bytes\|request_text\|request_empty" schematic/schema/src/YOUR_API.rs
+# 2. Check that each endpoint got the intended codec (Json, Text, Binary, Empty)
+grep -rn "type Decoder" schematic/schema/src/YOUR_API*
 
 # 3. Verify it compiles
 cargo check -p schematic-schema
-
-# 4. For binary endpoints, verify convenience methods exist
-grep -n "pub async fn create_speech\|pub async fn download" schematic/schema/src/YOUR_API.rs
 ```
 
 ## Adding New APIs
@@ -463,6 +488,7 @@ To add a new API definition:
 4. **Choose correct `ApiResponse` for each endpoint** (see above)
 5. **Set `module_path` if API name differs from module name**
 5b. **Set `request_suffix` if sharing a module with another API** (to avoid naming collisions)
+5c. **Author pagination** in `default_pagination` and `pagination_exceptions` (see [Pagination](#pagination)); every GET `Vec<T>` endpoint inherits the default unless a row opts it out
 6. Export from `src/lib.rs`
 7. Add to the prelude in `src/prelude.rs`
 8. **Run verification checklist above**

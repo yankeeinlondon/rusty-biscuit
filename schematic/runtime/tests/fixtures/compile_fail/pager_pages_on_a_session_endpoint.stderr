@@ -1,0 +1,62 @@
+error[E0277]: `ListItems` pages only inside its session scope
+ --> tests/fixtures/compile_fail/pager_pages_on_a_session_endpoint.rs
+  |
+  |     let _ = client.send(ListItems).pager().pages();
+  |                                            ^^^^^ a session endpoint is iterated only through `with_session`
+  |
+help: the trait `Sessionless` is not implemented for `ListItems`
+ --> tests/fixtures/compile_fail/pager_pages_on_a_session_endpoint.rs
+  |
+  | struct ListItems;
+  | ^^^^^^^^^^^^^^^^
+  = note: the definition authors a server-side session for `ListItems`; its pages exist only inside `with_session`, which closes the session
+note: required by a bound in `Pager::<'a, A, R>::pages`
+ --> src/pager/pages.rs
+  |
+  |     pub fn pages(self) -> Pages<'a, A, R>
+  |            ----- required by a bound in this associated function
+  |     where
+  |         R: Sessionless,
+  |            ^^^^^^^^^^^ required by this bound in `Pager::<'a, A, R>::pages`
+
+error[E0277]: `ListItems` pages only inside its session scope
+ --> tests/fixtures/compile_fail/pager_pages_on_a_session_endpoint.rs
+  |
+  |     let _ = client.send(ListItems).pager().fetch_page();
+  |                                            ^^^^^^^^^^ a session endpoint is iterated only through `with_session`
+  |
+help: the trait `Sessionless` is not implemented for `ListItems`
+ --> tests/fixtures/compile_fail/pager_pages_on_a_session_endpoint.rs
+  |
+  | struct ListItems;
+  | ^^^^^^^^^^^^^^^^
+  = note: the definition authors a server-side session for `ListItems`; its pages exist only inside `with_session`, which closes the session
+note: required by a bound in `Pager::<'a, A, R>::fetch_page`
+ --> src/pager/pages.rs
+  |
+  |     pub fn fetch_page(self) -> CallFuture<'a, PageResult<R>>
+  |            ---------- required by a bound in this associated function
+  |     where
+  |         R: Sessionless,
+  |            ^^^^^^^^^^^ required by this bound in `Pager::<'a, A, R>::fetch_page`
+
+error[E0277]: `ListItems` pages only inside its session scope
+ --> tests/fixtures/compile_fail/pager_pages_on_a_session_endpoint.rs
+  |
+  |     let _ = client.send(ListItems).pager().collect_all();
+  |                                            ^^^^^^^^^^^ a session endpoint is iterated only through `with_session`
+  |
+help: the trait `Sessionless` is not implemented for `ListItems`
+ --> tests/fixtures/compile_fail/pager_pages_on_a_session_endpoint.rs
+  |
+  | struct ListItems;
+  | ^^^^^^^^^^^^^^^^
+  = note: the definition authors a server-side session for `ListItems`; its pages exist only inside `with_session`, which closes the session
+note: required by a bound in `Pager::<'a, A, R>::collect_all`
+ --> src/pager/pages.rs
+  |
+  |     pub fn collect_all(self) -> CallFuture<'a, CollectResult<R>>
+  |            ----------- required by a bound in this associated function
+  |     where
+  |         R: Sessionless,
+  |            ^^^^^^^^^^^ required by this bound in `Pager::<'a, A, R>::collect_all`

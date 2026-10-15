@@ -18,7 +18,7 @@ use super::variables::merge_variables;
 /// ## Examples
 ///
 /// ```
-/// use schematic_define::{RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse};
+/// use schematic_define::{RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse, CrossOrigin};
 /// use schematic_gen::export::postman::build_postman_collection;
 ///
 /// let api = RestApi {
@@ -48,6 +48,11 @@ use super::variables::merge_variables;
 ///     request_suffix: None,
 ///     version: None,
 ///     env_mapping: None,
+///     cross_origin: CrossOrigin::default(),
+///     request_id_header: None,
+///     secret_names: vec![],
+///     default_pagination: None,
+///     pagination_exceptions: vec![],
 /// };
 ///
 /// let collection = build_postman_collection(&api);
@@ -131,7 +136,7 @@ pub fn build_postman_collection(api: &RestApi) -> PostmanCollection {
 /// ## Examples
 ///
 /// ```
-/// use schematic_define::{RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse};
+/// use schematic_define::{RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse, CrossOrigin};
 /// use schematic_gen::export::postman::build_postman_collection_grouped;
 ///
 /// let api1 = RestApi {
@@ -149,6 +154,11 @@ pub fn build_postman_collection(api: &RestApi) -> PostmanCollection {
 ///     request_suffix: None,
 ///     version: None,
 ///     env_mapping: None,
+///     cross_origin: CrossOrigin::default(),
+///     request_id_header: None,
+///     secret_names: vec![],
+///     default_pagination: None,
+///     pagination_exceptions: vec![],
 /// };
 ///
 /// let api2 = RestApi {
@@ -166,6 +176,11 @@ pub fn build_postman_collection(api: &RestApi) -> PostmanCollection {
 ///     request_suffix: None,
 ///     version: None,
 ///     env_mapping: None,
+///     cross_origin: CrossOrigin::default(),
+///     request_id_header: None,
+///     secret_names: vec![],
+///     default_pagination: None,
+///     pagination_exceptions: vec![],
 /// };
 ///
 /// let collection = build_postman_collection_grouped(&[&api1, &api2], "ollama");

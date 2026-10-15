@@ -344,8 +344,10 @@ Rules:
 
 - Window must be **focused** — `SpawnVisibility::Foreground` +
   `focus_spawned_pane()`.
-- macOS focus is a global resource — gate behind `RUN_LEVEL3=1` and run
-  with `--test-threads=1`.
+- macOS focus is a global resource — gate with
+  `require_level!(Level::L3, …)` (skips unless `RUN_LEVEL3=1`, which
+  `just test-l3` sets) and run one test at a time (`just test-l3` uses
+  nextest `-j 1`).
 - **Bare-modifier press** is structurally unreliable via `cliclick`.
   Chord injection (`Ctrl+R`) works; bare modifiers need an L2
   raw-kitty-bytes test instead.

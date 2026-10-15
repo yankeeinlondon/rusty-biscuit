@@ -48,6 +48,10 @@ pub struct Link {
 ///
 /// Bitbucket uses cursor-based pagination. Follow the `next` URL to get more results.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+// Without this bound, `#[serde(default)]` on `values` makes the derive require
+// `T: Default`, which the item types do not implement; an absent `values`
+// defaults to an empty `Vec`, which needs nothing of `T`.
+#[serde(bound(deserialize = "T: Deserialize<'de>"))]
 pub struct PaginatedResponse<T> {
     /// The items in this page.
     #[serde(default)]
@@ -179,5 +183,27 @@ mod tests {
         let _tag: Tag = serde_json::from_str("{}").unwrap();
         let _download: Download = serde_json::from_str("{}").unwrap();
         let _source: SourceEntry = serde_json::from_str("{}").unwrap();
+    }
+
+    /// Every item type the API declares a page of decodes, although none of
+    /// them implements `Default`, and an absent `values` is an empty page.
+    #[test]
+    fn pages_of_items_without_default_decode() {
+        use super::super::{IssueChange, IssueComment, PullRequestComment, Repository};
+
+        fn decode<T: serde::de::DeserializeOwned>() -> (usize, usize) {
+            let full: PaginatedResponse<T> =
+                serde_json::from_str(r#"{"values":[{},{}],"next":"https://next"}"#).unwrap();
+            let absent: PaginatedResponse<T> = serde_json::from_str(r#"{"size":0}"#).unwrap();
+            assert_eq!(full.next.as_deref(), Some("https://next"));
+            (full.values.len(), absent.values.len())
+        }
+
+        assert_eq!(decode::<PullRequestComment>(), (2, 0));
+        assert_eq!(decode::<IssueComment>(), (2, 0));
+        assert_eq!(decode::<IssueChange>(), (2, 0));
+        assert_eq!(decode::<Repository>(), (2, 0));
+        let wrong: Result<PaginatedResponse<Repository>, _> = serde_json::from_str(r#"{"values":{}}"#);
+        assert!(wrong.is_err(), "a `values` that is not a list is an error, not an empty page");
     }
 }

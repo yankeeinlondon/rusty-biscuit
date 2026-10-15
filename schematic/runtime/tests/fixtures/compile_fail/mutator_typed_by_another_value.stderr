@@ -1,0 +1,18 @@
+error[E0631]: type mismatch in closure arguments
+ --> tests/fixtures/compile_fail/mutator_typed_by_another_value.rs
+  |
+  |         .mutate_response::<ListIds, _>(|_, ids: &mut String| {
+  |          ^^^^^^^^^^^^^^^               --------------------- found signature defined here
+  |          |
+  |          expected due to this
+  |
+  = note: expected closure signature `for<'a, 'b> fn(&'a ResponseMeta, &'b mut Vec<u64>) -> _`
+             found closure signature `fn(&ResponseMeta, &mut std::string::String) -> _`
+note: required by a bound in `Client::<A>::mutate_response`
+ --> src/client.rs
+  |
+  |     pub fn mutate_response<R, F>(self, hook: F) -> Self
+  |            --------------- required by a bound in this associated function
+...
+  |         F: Fn(&ResponseMeta, &mut R::Success) -> Result<(), HookError> + Send + Sync + 'static,
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `Client::<A>::mutate_response`

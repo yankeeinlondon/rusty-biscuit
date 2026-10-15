@@ -63,7 +63,7 @@ pub(super) fn generate_form_struct(endpoint: &Endpoint) -> TokenStream {
     let conversion = if multipart {
         quote! {
             /// Converts the body into its multipart parts.
-            pub fn into_form_parts(self) -> Vec<crate::shared::FormPart> {
+            pub fn into_form_parts(self) -> Vec<schematic_runtime::FormPart> {
                 let mut parts = Vec::new();
                 #(#parts)*
                 parts
@@ -164,20 +164,20 @@ fn build_part(field: &FormField, multipart: bool) -> TokenStream {
 
     match &field.kind {
         FormFieldKind::File { .. } => push(quote! {
-            parts.push(crate::shared::FormPart::file(#wire_name, value));
+            parts.push(value.into_part(#wire_name));
         }),
         FormFieldKind::Files { .. } => push(quote! {
             for file in value {
-                parts.push(crate::shared::FormPart::file(#wire_name, file));
+                parts.push(file.into_part(#wire_name));
             }
         }),
         FormFieldKind::Json(_) => push(quote! {
             if let Ok(encoded) = serde_json::to_string(&value) {
-                parts.push(crate::shared::FormPart::json(#wire_name, encoded));
+                parts.push(schematic_runtime::FormPart::Json { name: #wire_name.to_string(), value: encoded });
             }
         }),
         _ => push(quote! {
-            parts.push(crate::shared::FormPart::text(#wire_name, value));
+            parts.push(schematic_runtime::FormPart::Text { name: #wire_name.to_string(), value });
         }),
     }
 }

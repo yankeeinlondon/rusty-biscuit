@@ -7167,6 +7167,14 @@
                 }
               ]
             },
+            "header": [
+              {
+                "key": "openai-beta",
+                "value": "<openai-beta>",
+                "disabled": true,
+                "description": "Optional beta features to enable for this request."
+              }
+            ],
             "description": "Retrieves a model response with the given ID.\n"
           }
         },
@@ -7190,6 +7198,14 @@
                 }
               ]
             },
+            "header": [
+              {
+                "key": "openai-beta",
+                "value": "<openai-beta>",
+                "disabled": true,
+                "description": "Optional beta features to enable for this request."
+              }
+            ],
             "description": "Deletes a model response with the given ID.\n"
           }
         },
@@ -7214,6 +7230,14 @@
                 }
               ]
             },
+            "header": [
+              {
+                "key": "openai-beta",
+                "value": "<openai-beta>",
+                "disabled": true,
+                "description": "Optional beta features to enable for this request."
+              }
+            ],
             "description": "Cancels a model response with the given ID. Only responses created with\nthe `background` parameter set to `true` can be cancelled. \n[Learn more](/docs/guides/background).\n"
           }
         },
@@ -7231,6 +7255,14 @@
                 "compact?beta=true"
               ]
             },
+            "header": [
+              {
+                "key": "openai-beta",
+                "value": "<openai-beta>",
+                "disabled": true,
+                "description": "Optional beta features to enable for this request."
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{}",
@@ -7282,6 +7314,14 @@
                 }
               ]
             },
+            "header": [
+              {
+                "key": "openai-beta",
+                "value": "<openai-beta>",
+                "disabled": true,
+                "description": "Optional beta features to enable for this request."
+              }
+            ],
             "description": "Returns a list of input items for a given response."
           }
         },
@@ -7299,6 +7339,14 @@
                 "input_tokens?beta=true"
               ]
             },
+            "header": [
+              {
+                "key": "openai-beta",
+                "value": "<openai-beta>",
+                "disabled": true,
+                "description": "Optional beta features to enable for this request."
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{}",
@@ -7329,6 +7377,14 @@
                 "responses?beta=true"
               ]
             },
+            "header": [
+              {
+                "key": "openai-beta",
+                "value": "<openai-beta>",
+                "disabled": true,
+                "description": "Optional beta features to enable for this request."
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{}",

@@ -699,7 +699,7 @@ Sequencing and packaging are decided (D5). The author has not decided:
 
 *Added 2026-10-11, confirmed by the author (D51).* All seven child specs are drafted now (option B), and each one runs through the same per-spec process: implement every phase of its plan without a human in the loop; "review 1", where the author reviews the decisions made during implementation and any open design questions; refresh the next spec and its plan from the outcomes of review 1; then loop fix and review cycles until the reviewer deems the spec production ready. Specs 2-7 are therefore drafts (`refresh_required: true`), refreshed after the previous spec's review 1; drafting them now serves visibility and dependency checking, not a commitment to their final text. The child specs are `2026-10-11-schematic-generation-integrity`, `-schematic-runtime-envelope`, `-schematic-pagination`, `-schematic-definition-api`, `-schematic-response-model-graphql`, `-schematic-websocket`, and `-schematic-fidelity-polish`, under `schematic/features/`. Details are in D51.
 
-> **Update, 2026-10-11 (D52).** Spec 4 is split in two: 4a `2026-10-11-schematic-definition-api` and 4b `2026-10-11-schematic-definition-vocabulary`. The plan is now **eight** specs: 1 generation-integrity, 2 runtime-envelope, 3 pagination, 4a definition-api, 4b definition-vocabulary, 5 response-model-graphql, 6 websocket, 7 fidelity-polish. Landing 1 = specs 1-3; landing 2 = specs 4a, 4b, 5; landing 3 = spec 6; landing 4 = spec 7. D53 and D54 record related rulings. The "seven" in this subsection and in D50 and D51 is the original count.
+> **Update, 2026-10-11 (D52).** Spec 4 is split in two: 4a `2026-10-14-schematic-definition-api` and 4b `2026-10-15-schematic-definition-vocabulary`. The plan is now **eight** specs: 1 generation-integrity, 2 runtime-envelope, 3 pagination, 4a definition-api, 4b definition-vocabulary, 5 response-model-graphql, 6 websocket, 7 fidelity-polish. Landing 1 = specs 1-3; landing 2 = specs 4a, 4b, 5; landing 3 = spec 6; landing 4 = spec 7. D53 and D54 record related rulings. The "seven" in this subsection and in D50 and D51 is the original count.
 
 The P1-P12 planning-time items in "Remaining planning-time details" (section 15, not the packages P1-P6 above) map onto the specs as follows. Where an item spans several topics, each part is listed.
 
@@ -725,6 +725,20 @@ The P1-P12 planning-time items in "Remaining planning-time details" (section 15,
 > | P1 | 2 (runtime, API-level field); the per-endpoint override scope goes to 4a |
 > | P9 | 5 for D34-D38; 4a for D44 registration; request-id marker and `.secret()` forms (D40, D48) are assigned by D54: semantics in spec 2, builder sugar and per-parameter `.secret()` in spec 4a |
 > | P12 | 4a (assumption by this edit: the `oauth_scopes` field is removed or kept as part of the literal rewrite, which 4a owns; not stated by the author) |
+
+> **Update, 2026-10-11 (D55, D56): mapping changes.**
+>
+> | Item | Change |
+> |---|---|
+> | P1 | Tighten-only is settled (D56 item 2: `deny`, `same_origin`, or a subset of the definition's `allow_origins`; others rejected at client construction). Remaining P1 details stay with spec 2 |
+> | P6 | Deadline arithmetic is settled (D56 item 3: `min(remaining, per-request timeout)`, default 30 s). Spec 2 |
+> | P9 | End-condition forms gain `keep` (D56 item 7) and stream framing gains `Bytes` (D56 item 8). Spec 5 |
+> | P12 | Settled: `auth_policy` kept with a builder form, `oauth_scopes` removed (D56 item 6). Spec 4a performs the removal |
+> | `?` in path templates | Warning in spec 1; hard error and migration of the nine endpoints in spec 4a (D55 item 1) |
+> | Definition snapshot | Serde derives on `RestApi`, `Endpoint`, `EndpointParams`, `ParamDef` and the JSON snapshot are spec 4a; spec 4b keeps the by-name `Schema` contract (D55 item 2) |
+> | Vendor presets | Each API owns its strategy function; spec 7 only verifies none remain in `schematic-define` (D55 item 4) |
+> | Required versus pager | Spec 3 (strategy default) and spec 4a (`new()` exemption and validation) (D55 item 5) |
+> | WebSocket redirects | Spec 6 (D56 item 9) |
 
 ---
 
@@ -881,6 +895,8 @@ Each is phrased so a test could decide it. **NEEDS RULING** marks a criterion th
 - Each item named for landing 4 has a criterion elsewhere in this section or below: schemars-bridge and `x-schematic` (OpenAPI criteria above), Postman example bodies (above), and the three below.
 - README doctests: the `schematic-define` README examples compile as doctests, so a drifted example fails a normal test run.
 - Vendor presets moved: `schematic-define`'s public API has no `github()`, `gitlab()`, `bitbucket()`, or `gitea()` pagination constructor, and `schematic-definitions` provides them (compile-level check).
+
+  *Refined 2026-10-11 (D55 item 4).* Each API owns a small strategy function in `schematic-definitions`; spec 7 moves nothing. The criterion is the verification that no vendor-named pagination constructor remains in `schematic-define`'s public API.
 - Feature flags: building the generated crate with a single API's feature compiles and exports only that API (isolated-crate check). **NEEDS RULING:** the flag granularity (per API or per module group; D9 shows a module can hold two APIs) and the default feature set.
 - Landing 2 contains none of these items, and the vocabulary-changing items (typed path parameters, per-endpoint auth override, `deprecated`, rate limits and retry, `env_auth[0]` retirement, polymorphic `oneOf` bodies, serializable definitions, OAuth2 per-grant payloads, query-parameter `required`/style/enum fidelity) are each covered by the landing 2 criteria or by a new one written when the vocabulary is designed (these items have no criteria today).
 - **NEEDS RULING:** the order of landings 3 and 4; the assignment of the single generated list of APIs. No criterion depends on either answer yet.
@@ -940,6 +956,8 @@ Each is phrased so a test could decide it. **NEEDS RULING** marks a criterion th
 **D24 pre-send failures.**
 
 - Missing credential: the call returns the outer `TransportError` with kind `MissingCredential`, carries request metadata, and the mock records zero requests.
+
+  *Replaced 2026-10-11 (D56 item 1).* The missing-credential criterion is withdrawn. Replacement: with no credential resolvable, the mock receives exactly one request with no credential attached, the envelope reports the auth method `Anonymous`, and a mock 401 arrives in the wrapper with status, headers, and raw body kept; the same holds for a WebSocket upgrade. A test must not expect a `MissingCredential` kind. Sniff's "auth required" branch is verified against the 401 wrapper instead.
 - Page size above the declared maximum, an origin rejected by policy, and an invalid argument each return the outer `TransportError` with its kind and zero requests recorded.
 - sniff's former "auth required" branch compiles and passes against the `TransportError` kind (verified by sniff's own build and tests).
 - **NEEDS RULING:** the full kind list and which kind each pre-send case takes; a test cannot name a kind that is not ruled.
@@ -1030,6 +1048,8 @@ Each is phrased so a test could decide it. Mock servers are local; nothing here 
 **D37 stream end.**
 
 - With the end condition set to each form, a mock stream ends cleanly and the end marker is not delivered as an item: data line equals `[DONE]`; event named `message_stop`; field equal (`done=true`); connection close (the default).
+
+  *Refined 2026-10-11 (D56 item 7).* Default behavior: the matching end-marker line is consumed. With the `keep` modifier the marker line is delivered as the last item, then the stream ends cleanly. Ollama's definition uses `keep`: a mock Ollama stream's final `done=true` line arrives as the last item with its token statistics, and no item follows it. Validation: one mock per form with and without `keep`.
 - A mock that closes the connection before the declared end yields an explicit "ended early" error item, distinct from a clean end and from malformed items.
 
 **D38 error shape mapping.**
@@ -1096,7 +1116,35 @@ Each is phrased so a test could decide it. Mock servers are local; nothing here 
 - **One module-path resolver (landing 4).** A single resolver serves Rust, OpenAPI, and Postman. A test feeds `PagerDutyApi`-style names (an API name with no explicit `module_path`) and asserts that Rust, OpenAPI, and Postman all resolve to the same file name.
 - **Generated docs honesty (landing 4).** Generated documentation code fences are `no_run` and compile as doctests; no doc mentions a method that does not exist (the quick-start's convenience calls are checked against the generated client); no `///;` lines remain. Validation: a doc-compile test over the generated crate, and a grep for `///;`.
 - **`oauth_scopes` and `auth_policy` (landing 2).** The choice is open, so no criterion fixes it. Whichever is chosen, the field is either read by generator or exporter code and covered by a test, or it no longer exists; a field that is neither read nor removed fails the review.
+
+  *Updated 2026-10-11 (D56 item 6).* The choice is ruled: `auth_policy` is kept with a builder form (a test reads it through the builder and the generator or exporter consumes it); `oauth_scopes` is removed (a compile-level check that `Endpoint` has no such field, and a grep finds none in `definitions/src`).
 - **`ResponseKind` guard (landing 1).** Its disposition (kept, changed, or removed) follows the response model; the criterion is that the generated client's behavior on a response of an unexpected kind is covered by a test under the new model, or the guard is gone and the test list says so.
+
+  *Updated 2026-10-11 (D56 item 4).* The guard is removed. Criterion: a mock server answering 2xx with an unexpected content type yields `MalformedSuccess` inside the envelope with status, headers, and raw body kept; no `ResponseKind` symbol remains in the generated client; spec 2 declares no `UnexpectedContentType`.
+
+### Criteria for D55-D56 (added 2026-10-11)
+
+- **Tighten-only subset (spec 2).** Building a client with `deny`, `same_origin`, or an `allow_origins` list that is a subset of the definition's list succeeds. A list containing any origin the definition does not list, `allow_any`, or `allow_without_credentials` (when the definition is narrower) is rejected at client construction with an error, and no request is sent. Validation: a table-driven test over definition policy by caller choice.
+- **Per-request time under a deadline (spec 2).** With a 10 s per-request timeout and a 60 s budget, a request gets at most 10 s; with 5 s of budget left, it gets at most 5 s; with no deadline, the 30 s default applies unchanged. Validation: a mock that delays, with a paused clock or short values.
+- **WebSocket redirects (spec 6).** A mock upgrade endpoint answers 301 with `Location`: the client makes exactly one request, returns an error with the `Location` visible, and does not connect to the target.
+- **Bytes framing (spec 5).** A mock chunked audio response with a declared content type is delivered as multiple byte chunks before the body ends (not buffered into one), and OpenAPI export lists the declared content type. Validation: the mock records the time the first chunk is delivered relative to the end of the body.
+- **`?` in a path (specs 1 and 4a).** Spec 1: validation produces one warning per offending endpoint, naming the endpoint (nine are expected today: Gitea `GetGitTreeRecursive`, GitLab file-by-ref, seven OpenAI `/responses` endpoints), and the build still passes. Spec 4a: the nine are migrated, the GitLab `ref` is a caller-set query parameter on its request type, and a `?` in any path template is a validation error.
+- **JSON snapshot (spec 4a).** `RestApi`, `Endpoint`, `EndpointParams`, and `ParamDef` derive `Serialize` and `Deserialize`; every definition serializes to a committed JSON snapshot taken before the literal rewrite; after the rewrite the JSON is equal, except for the intentional changes listed in the spec (the nine endpoints and removed fields). There is no Debug-text snapshot. Validation: the snapshot test fails on an unintended change.
+- **Required versus pager (specs 3 and 4a).** A pagination-managed parameter never appears in a request's `new()`. A definition whose provider requires such a parameter but whose strategy carries no default fails validation. The pager sends the parameter on every page. Validation: three small tests.
+
+### Criteria for D57 (added 2026-10-11)
+
+- **Compile check placement (spec 1).** The CI build job runs the fresh-output compile tests before archiving, and no hosted archive job runs or silently skips them.
+- **`deny` stays closed (spec 2).** Building a client with `same_origin` over a `deny` definition is a construction error; `same_origin` over `same_origin` or `allow` succeeds.
+- **Failed hop (spec 2).** A mock 302 to a refused port yields `RedirectFailed` with the 302's status and `Location` kept; a policy refusal still yields `RedirectRefused`.
+- **Shared transport (spec 2).** Two clients attached to one `SharedTransport` reuse a connection; attaching and also setting a per-client proxy is a construction error.
+- **Close failure (spec 3).** A mock that fails the session close after a complete fetch yields `SessionError` whose outcome holds every item.
+- **One page (spec 3).** `fetch_page()` sends exactly one request carrying the given cursor and page size.
+- **Aliases (spec 4a).** An alias registration emits the alias's Rust path; a misspelled `rust_path!` fails to compile (trybuild).
+- **`Default` (spec 4b).** A request with a required query field has no `Default` impl (compile-fail); an all-optional request keeps it.
+- **Stream timeouts and limits (spec 5).** A stream producing an item every second outlives a 2 s per-request timeout; one silent for longer than the timeout ends with a timeout error; an unterminated SSE event over the frame limit ends with a limit error.
+- **WebSocket (spec 6).** Overlapping fixtures decode to the variant their selectors name; after a forced redial the setup callback runs again before `Ready`.
+- **Round trip (spec 7).** AsyncAPI export and re-import keep endpoint role and selectors; an OpenAPI round trip keeps an API-key value prefix.
 
 ### Spike notes on the criteria (2026-10-11)
 
@@ -1198,6 +1246,8 @@ D1-D4 were confirmed by the author on 2026-10-09 and D5-D8 the same day. D7 corr
 
 **Decided:** each endpoint declares one or more success shapes and a separate list of error shapes. A success shape is one of: JSON with a type, text, binary, empty, or a stream with SSE or NDJSON framing and an item type, each with an optional content type. The generated success type is a plain type for the common case, or a small generated enum when several success shapes exist. Declared error bodies decode on demand from the error. This replaces the type of `Endpoint::response`. It is breaking for both exporters, the importer, and all 253 definitions.
 
+> **Extended 2026-10-11 (D56 item 8).** The stream framing set (SSE, NDJSON) gains a third member, `Bytes` (byte chunks with a declared content type), on the same `Stream` shape; the set stays non-exhaustive. This fixes ElevenLabs `stream_speech` buffering. Rejected: a streaming flag on `Binary`; leave buffered.
+
 **Rationale:** it is the smallest model that covers the streaming, content-type, per-status, and typed-error gaps in section 5 and still yields one `T` and one `E` for the D7 envelope.
 
 - Pros: the common case stays a plain type; error bodies are typed without losing raw evidence.
@@ -1278,6 +1328,8 @@ The author confirmed these across 2026-10-09 and 2026-10-10. Each has a one-sent
 
 **Decided (ratifies and extends the credential-source contract):** callers can pass credentials programmatically at two levels, (1) client level, set once and used by all later requests, and (2) per call, overriding the client level.
 
+> **Confirmed 2026-10-11 (D56 item 1).** When no credential resolves, the request is sent anonymously and the reported auth method is `Anonymous`, for REST and WebSocket alike; a required-auth API answers 401 and the wrapper carries it.
+
 **Rationale:** the author wants one predictable credential per request and evidence of which one was used.
 
 - **Precedence:** per call, then client level, then environment policy, then anonymous.
@@ -1307,6 +1359,8 @@ The author confirmed these across 2026-10-09 and 2026-10-10. Each has a one-sent
 
 **Decided (ratifies the shared-deadline contract):** opt-in. A caller sets one overall deadline for an operation (all pages and follow-up requests) on a monotonic clock. Each request gets the remaining time. Once the time is spent, no further request is sent and a `DeadlineExceeded` error reports the completed pages and the elapsed time. Dropping the call cancels in-flight work and spawns no detached tasks. The existing 30 s per-request default is unchanged for callers who do not opt in.
 
+> **Amended 2026-10-11 (D56 item 3).** "Each request gets the remaining time" becomes: each request gets `min(remaining budget, the client's per-request timeout)`; the per-request timeout defaults to 30 s and is settable on the managed builder. This answers the "remaining versus min" detail in the spike note below.
+
 **Rationale:** one operation that spans many pages needs one budget (gap A8), and callers who do not ask for it should see no change.
 
 - Rejected: a per-request timeout only; an always-on default operation deadline.
@@ -1317,6 +1371,8 @@ The author confirmed these across 2026-10-09 and 2026-10-10. Each has a one-sent
 #### D14. Pagination
 
 **Decided (ratifies the author's principles; supersedes the earlier vague "pagination helper" text and the old proposal for a complete-list helper).** The author confirmed these eight points:
+
+> **Added 2026-10-11 (D55 item 5).** Parameters managed by a pagination strategy are exempt from "required" fidelity and are never in `new()`. If the provider requires the parameter, the strategy must carry a default and validation rejects a definition that does not; the pager always sends it.
 
 1. **Primitives, authored by the definition.** Pagination is definable entirely with primitives in `schematic-define` and authored in `schematic-definitions`. It describes what the provider actually offers, and the author chooses among the mechanisms the provider offers. Schematic does not choose on the provider's behalf. Example: GitHub offers both a page parameter and a `Link` header, so the author picks.
 2. **Lists are unpaginated by default.** An endpoint returning an array is a list. A response typed `Vec<T>` is recognized as a root-array list automatically (the author chose inference). A list inside a wrapper, for example `{"data": [...]}`, is marked with a `Collection::at(path)`-style marker. An API may declare a default strategy that applies to all its list endpoints, and any endpoint can override it or opt out.
@@ -1602,6 +1658,8 @@ Options offered:
 
 **Decided:** failures that happen **before anything is sent** are the outer `TransportError`, with specific kinds (for example `MissingCredential`, `CrossOriginRejected`, `InvalidArgument`, `Timeout`), and they still carry request metadata. The cases named were: a missing credential, a page size above the declared maximum, a host or origin rejected, and an invalid argument. **Consequence:** sniff's "auth required" case moves to the `TransportError` kind.
 
+> **Amended 2026-10-11 (D56 item 1).** The missing-credential case is withdrawn from this list: with no credential the request is sent anonymously and the auth method is reported as `Anonymous`. `MissingCredential` is not a pre-send kind. The other cases (page size above the maximum, an origin rejected by policy, an invalid argument) stand.
+
 **Rationale (this review's reading):** with no request sent there is no status or response headers to put in an envelope, and the envelope rule (D26) is then simple to state.
 
 Options offered:
@@ -1687,6 +1745,8 @@ The author chose all five values:
 
 - **Default** when the definition says nothing: `same_origin`.
 - **Caller override:** callers can **tighten** the policy (for example to `deny`) but never loosen it beyond what the definition says.
+
+  *Amended 2026-10-11 (D56 item 2):* a caller may choose `deny`, `same_origin`, or an `allow_origins` list that is a subset of the definition's own list; anything else is rejected at client construction. No formal ordering of the five values is needed. This closes the "tighter than" and subset details raised below.
 - Example (names illustrative): GitHub's definition says `allow_origins(["https://uploads.github.com"])`; a caller that does not want that can set `deny` for one client, and cannot set `allow_any`.
 
 **Known cost, stated plainly.** D4 rejected "manual redirect following" as too complex. These values require Schematic's runtime to follow redirects itself, hop by hop: a hop limit; re-checking each hop's origin against the policy; stripping credentials when leaving the origin; and method and body rules for 301, 302, 303, 307, and 308. D4's "redirects disabled in a managed client" therefore becomes **"redirects disabled in the HTTP client, followed by Schematic according to the policy."** This is real added work in the runtime, in the same landing as the transport.
@@ -1842,6 +1902,8 @@ Options offered: two endpoints with a selector (chosen); one endpoint with an en
 #### D37. Stream end (resolves a D6 open detail)
 
 **Decided:** the definition declares the end condition from a small vocabulary: **data line equals X** (OpenAI `[DONE]`), **event named X** (Anthropic `message_stop`), **field equals X** (Ollama `done=true`), or **connection close** (the default). A stream that closes before its declared end yields an explicit "ended early" error item.
+
+> **Refined 2026-10-11 (D56 item 7).** A general modifier `keep` is chosen per stream: the matching end-marker line is consumed by default; with `keep` it is delivered as the last item. Ollama's definition uses `keep` so its final `done=true` line (token statistics) reaches the caller. Rejected: always consume; always deliver.
 
 **Rationale (this review's reading):** the three real providers each end differently, and a vocabulary avoids hard-coding one.
 
@@ -2026,6 +2088,8 @@ D1 and D20 require every ledger row closed or recorded as an accepted gap. That 
 
 **Open details:** the wire-in-or-remove choice for `oauth_scopes` and `auth_policy` (item 4).
 
+*Closed 2026-10-11 (D56 item 6):* `auth_policy` kept, `oauth_scopes` removed.
+
 
 ### Decision D50 (confirmed by the author, 2026-10-11)
 
@@ -2097,8 +2161,8 @@ D1 and D20 require every ledger row closed or recorded as an accepted gap. That 
 
 **Decided:**
 
-1. **Spec 4a keeps the directory `2026-10-11-schematic-definition-api`.** It holds: builders; typed registration; the rewrite of all endpoint literals; pagination exceptions moved onto endpoints; removal of the old pagination types and conversion of the 35 `with_pagination` endpoints (this resolves parent recommendation 14: shrink = remove); the OpenAI importer definition (`definition_gen.rs`) emitting builder source; the disposition of `Schema::module_path`; serde derives on `ParamDef`, `QueryParamType`, and `ParamStyle`; the per-endpoint cross-origin override; and builder sugar for `request_id_header` and `.secret()`.
-2. **Spec 4b is a new directory, `2026-10-11-schematic-definition-vocabulary`.** It holds the vocabulary additions as new builder methods, so no definition is rewritten again: typed path parameters; per-endpoint auth override; `deprecated`; rate-limit and retry vocabulary (metadata only, no runtime retry); `env_auth[0]` retirement (Basic auth carries its own env shape); polymorphic `oneOf` bodies; serializable definitions; OAuth2 per-grant payloads; and query-parameter `required`, `style`, `explode`, and enum fidelity in the Rust generator.
+1. **Spec 4a keeps the directory `2026-10-14-schematic-definition-api`.** It holds: builders; typed registration; the rewrite of all endpoint literals; pagination exceptions moved onto endpoints; removal of the old pagination types and conversion of the 35 `with_pagination` endpoints (this resolves parent recommendation 14: shrink = remove); the OpenAI importer definition (`definition_gen.rs`) emitting builder source; the disposition of `Schema::module_path`; serde derives on `ParamDef`, `QueryParamType`, and `ParamStyle`; the per-endpoint cross-origin override; and builder sugar for `request_id_header` and `.secret()`.
+2. **Spec 4b is a new directory, `2026-10-15-schematic-definition-vocabulary`.** It holds the vocabulary additions as new builder methods, so no definition is rewritten again: typed path parameters; per-endpoint auth override; `deprecated`; rate-limit and retry vocabulary (metadata only, no runtime retry); `env_auth[0]` retirement (Basic auth carries its own env shape); polymorphic `oneOf` bodies; serializable definitions; OAuth2 per-grant payloads; and query-parameter `required`, `style`, `explode`, and enum fidelity in the Rust generator.
 3. **The order is now eight specs:** 1 generation-integrity, 2 runtime-envelope, 3 pagination, 4a definition-api, 4b definition-vocabulary, 5 response-model-graphql, 6 websocket, 7 fidelity-polish. Landing 2 = specs 4a, 4b, 5. D50's list and mapping are updated by dated notes; the original text is kept.
 4. **Constraint on 4a.** Its registration descriptors must be able to carry optional structural type information (needed for `oneOf`) and must derive serde from the start. The author estimated about a 1-in-3 chance that 4b would otherwise force changes to 4a's registration types.
 
@@ -2136,16 +2200,138 @@ D1 and D20 require every ledger row closed or recorded as an accepted gap. That 
 - Credentials, including `ApiKeyParam`: **spec 2**. Spec 1's `with_api_key_param` and local env scan are temporary and are removed by spec 2.
 - `request_id_header` and `secret_names` semantics, and API-level fields: **spec 2**. Builder sugar and the per-parameter `.secret()` marker: **spec 4a**.
 - Hook mechanism, `ResponseKind` guard disposition, and `ErrorKind` additions: **spec 2** owns the mechanism; **spec 5** extends it and declares `UnexpectedContentType`.
+  *Updated 2026-10-11 (D56):* the guard is removed (a mismatch is `MalformedSuccess`); spec 2 adds no `UnexpectedContentType`; spec 5 may add it for multi-shape selection.
 - Diagnostics format and severity: **spec 1** (spec 6 maps onto it).
 - Deletion of the stale `gen/schematic` tree: **spec 1 only**.
 - Adding `schematic-runtime` to the area's `just` recipes, and naming `test-schema` as a gate: **spec 2**.
 - Frozen tests of earlier specs are written as positive tests and retired or updated by the later spec: **spec 4a** retires spec 2 and 3 ones; **spec 5** owns baselines, the allow-list, and serde derives on its new types.
 - A `?` in a path template is a hard error: **spec 1**.
+  *Superseded 2026-10-11 (D55):* spec 1 emits a WARNING naming each endpoint and does not migrate them; the hard error and the migration of all nine endpoints are **spec 4a**.
 - `Schema::module_path` is dead on the REST path: **spec 4a**.
 - Loss of the emqx combined-module docs: **spec 7**.
 - The optional-auth variant (Ollama), legacy-versus-modern auth dual-source cleanup, invented HuggingFace stub shapes, and orphaned types: **accepted-gap entries** recorded in spec 7's final ledger table (D20).
 - The runtime trait that carries `Success`, `Failure`, and `Decode` is named `EndpointSpec`, for continuity with the existing generated trait and to avoid a collision with the `schematic-define` struct `Endpoint`. This is a **default, flagged for review 1**, not a final ruling.
+  *Confirmed 2026-10-11 (D56 item 5).*
 
+
+#### D55. Loose-end rulings (confirmed by the author, 2026-10-11)
+
+**Decided (five rulings):**
+
+1. **`?` in path templates.** Verified: nine endpoints put `?` in the path (Gitea `GetGitTreeRecursive` with `?recursive=true`; GitLab `/projects/{id}/repository/files/{file_path}?ref={git_ref}`; seven OpenAI `/responses` endpoints with `?beta=true`). **Spec 1 makes `?` in a path a validation WARNING naming each endpoint, and does not migrate them** (spec 1 stays generator-only). The hard error, and the migration of all nine, move to **spec 4a**: the GitLab `ref` becomes a caller-set query parameter (this changes a generated request type), and the OpenAI endpoints are migrated through the importer definition (`definition_gen.rs`). This amends D54's "a `?` in a path template is a hard error: spec 1".
+2. **Snapshot format for 4a's safety net.** Spec 4a adds the plain serde derives (`Serialize`, `Deserialize`) to `RestApi`, `Endpoint`, `EndpointParams`, and `ParamDef` (the inner types `ApiResponse`, `ApiRequest`, `Schema`, `AuthStrategy`, `EnvMapping`, and `AuthPolicy` already derive them) and snapshots the definitions to JSON from the start. Spec 4b keeps only the harder "self-contained serialization" work (the by-name `Schema` contract). There is no Debug-text snapshot and no re-baselining.
+3. **Citation pass.** The child specs 4a and 4b cite D52-D54.
+4. **Vendor presets.** Each API owns its own small strategy function in `schematic-definitions`. Spec 7 does not move presets; it only verifies that no vendor-named pagination constructor remains in `schematic-define`.
+5. **Required versus pager.** Parameters managed by a pagination strategy are exempt from "required" fidelity (they are never in `new()`). If the provider requires the parameter, the strategy must carry a default and validation rejects a definition that does not; the pager always sends it.
+
+**Rationale (this review's reading):** (1) keeps spec 1 generator-only while making the problem visible at once; (2) buys a safety net that compares meaning rather than formatting, at the cost of serde derives arriving one spec earlier; (4) avoids a shared helper layer with one user per function; (5) keeps `new()` honest without letting a caller omit what the provider requires.
+
+**Options offered and rejected:**
+
+- (1) Hard error plus migration in spec 1 (rejected); nothing until 4a (rejected).
+- (2) A sorted Debug-text snapshot (rejected); byte-identical generated output only (rejected).
+- (4) A shared helper layer (rejected).
+- (5) A mandatory knob via type-state (rejected); leave unresolved (rejected).
+- (3) No alternatives recorded.
+
+**Consequences:** spec 1 emits a warning (not an error) for the nine endpoints, and its criteria must not expect the error; spec 4a owns the hard error, the nine migrations, the generated-type change for GitLab, the serde derives, and the JSON snapshot; spec 4b's serializable-definitions item shrinks to the by-name `Schema` contract; spec 7's preset item becomes a verification only; spec 3 and the D42 builder surface must express "default required when the provider requires the managed parameter" and validation for it.
+
+**Open details:** none recorded in the confirmation.
+
+#### D56. Rulings on the drafters' deviations (confirmed by the author, 2026-10-11)
+
+These were the "Items for review 1" collected from the child-spec drafts; the author ruled on nine of them now.
+
+**Decided:**
+
+1. **No credential resolves (amends D24 and the drafters' default).** Send anonymously and report the auth method `Anonymous` (D11 literally). For a required-auth API the server's 401 arrives in the wrapper with its evidence. REST and WebSocket both behave this way. The strict "`MissingCredential` before sending" default is **withdrawn**; `TransportError` may keep other pre-send kinds.
+2. **Tighten-only (amends D28).** A caller may choose `deny`, `same_origin`, or an `allow_origins` list that is a **subset** of the definition's own list. Everything else is rejected at client construction.
+3. **Per-request time under a deadline (amends D13).** Each request gets `min(remaining budget, the client's per-request timeout)`; the default per-request timeout is 30 s and is settable on the managed builder.
+4. **`ResponseKind` guard removed.** A server mismatch is `MalformedSuccess` with the status, headers, and raw body kept. Spec 2 adds no `UnexpectedContentType`; spec 5 may add it for multi-shape selection. This amends D54's "spec 5 declares `UnexpectedContentType`" to "may add".
+5. **The runtime trait is named `EndpointSpec`** (confirms the D54 default).
+6. **`auth_policy` is kept with a builder form; `oauth_scopes` is removed** (confirms the proposed default and closes D49 item 4 and P12).
+7. **Stream end marker (refines D37).** The definition chooses per stream with a general modifier, `keep`: the matching end-marker line is consumed by default. Ollama's definition uses `keep`, so its final `done=true` line (token statistics) is delivered as the last item.
+8. **`Bytes` framing (extends D6's closed set).** A third stream framing, `Bytes` (byte chunks with a declared content type), on the same `Stream` shape. The framing set stays non-exhaustive. This fixes ElevenLabs `stream_speech` buffering.
+9. **WebSocket redirects.** The WebSocket client never follows a redirect; a 3xx upgrade response is an error with `Location` visible. Reusing the REST `cross_origin` policy on `WebSocketApi` is a possible follow-up if a real device needs it.
+
+**Rationale (this review's reading):** (1) matches D11's single-attempt contract and keeps the 401 evidence; (2) a subset test is simple to state and check, which a formal partial order was not; (3) a deadline can then never extend a request beyond what a caller without a deadline would get; (4) the guard duplicated what the decoder already reports; (7) the end line carries data (statistics) for Ollama; (8) a streaming flag on `Binary` would have created a second way to say "stream".
+
+**Options offered and rejected:**
+
+- (1) Fail before sending unless explicitly anonymous (rejected); a per-API required/optional auth field (rejected; remains an accepted-gap candidate).
+- (2) A formal partial order (rejected); a fixed ladder (rejected).
+- (3) All remaining time (rejected); remaining unless the caller sets a timeout (rejected).
+- (4) Replace the guard with `UnexpectedContentType` in spec 2 (rejected); keep the guard (rejected).
+- (7) Always consume (rejected); always deliver (rejected).
+- (8) A streaming flag on `Binary` (rejected); leave buffered (rejected).
+- (9) Reuse the REST policy now (rejected).
+- (5), (6) Confirmations; no alternatives recorded.
+
+**Consequences:** the `MissingCredential` kind and its criterion (section 14, D24) are replaced by an anonymous-send criterion; sniff's "auth required" branch now reads the 401 from the wrapper rather than a `TransportError` kind; the section 14 criteria for D13, D28, D37, D6, and D49 change as noted there; the end-condition vocabulary gains `keep`; the stream framing set gains `Bytes`; `ResponseKind` and `oauth_scopes` are gone from the generated client and the definition respectively.
+
+**Open details:** the exact name of the `keep` modifier and of the `Bytes` framing form (planning, spec 5); the WebSocket error kind for a 3xx upgrade response (planning, spec 6).
+
+#### D57. Rulings on the second child-spec review (confirmed by the author, 2026-10-11)
+
+A second inline review of the eight child specs, followed by a per-spec verification pass, surfaced 24 questions the existing decisions did not settle. The author ruled on all of them. Items 1-10 were ruled one by one; for items 11-24 the author adopted the recommended option.
+
+**Decided:**
+
+1. **Fresh-output compile check in CI (spec 1).** The isolated compile check (D49 item 1, spec 1 R16) runs on the CI build job, which already holds the toolchain, before the test archive is produced; archive-only test jobs skip it. This narrow CI change is pre-authorized for spec 1.
+2. **Partitions sharing a rotating session handle (spec 3).** The latest observed handle wins across partitions, as designed (Elasticsearch PIT with slices). The out-of-order risk is logged, not validated against.
+3. **Single-page customization after adoption (spec 3; closes parent agenda item 10).** Adopted fields stay removed from the request (R7). One page is fetched through the pager: `client.pager(req).after(c).page_size(n).fetch_page()` returns a `Page<T>`.
+4. **OpenAI pagination authoring (specs 3 and 4a).** The importer emits a call to a hand-written overlay module (`openai_pagination::apply(api)`), which the importer never writes. The importer gains a generic overlay hook, not an OpenAI-specific branch.
+5. **Failed session close (spec 3; refines D27).** `with_session` returns `Err(SessionError { outcome, close })`: the closure's outcome is kept intact (including a fully fetched `Ok`) and the close failure is attached.
+6. **`same_origin` over a `deny` definition (spec 2; amends D56 item 2).** A caller may choose `same_origin` under any definition **except `deny`**; requesting it over `deny` is rejected at client construction (`BuildError` naming both policies). D28's "never loosen" holds without exception.
+7. **Redirect hop failing before a response (spec 2; extends D26 and D32).** A new `ErrorKind::RedirectFailed { target, category }` carries the earlier 3xx response as evidence. `RedirectRefused` stays a policy refusal. Spec 3 R21 maps `RedirectFailed` as it maps `TransportError`.
+8. **Shared pool versus per-client TLS and proxy (spec 2; amends D31).** Shared connection state is a `SharedTransport` built once with its proxy and TLS settings; clients attach with `.transport(&t)` (replacing `.pool(..)`). A client attached to a shared transport that also sets a conflicting per-client proxy or TLS option is rejected at construction. Clients without a shared transport keep per-client settings.
+9. **Client-global `pre_response_json` (specs 2 and 5).** It runs only on successful JSON bodies and is skipped for every other response, including non-2xx, text, binary, and stream bodies (today's behavior). GraphQL wire bodies are JSON and are seen by it.
+10. **Reading of D6 "decode on demand" (specs 2 and 5).** Declared error bodies are decoded when the response arrives, into `ErrorKind::Declared(E)`; the raw body stays on the envelope. "On demand" means the caller does not perform the decode. Spec 2 R13 is retitled to match.
+11. **Rust names for aliases, re-exports, and external types (spec 4a; settles D44's mechanism).** `ctx.register::<T>()` covers the common case with no names written. Aliases and foreign types use `ctx.register_as::<T>(rust_path!(path::Alias))`, where `rust_path!` fails to compile on an unresolvable path, with an optional `.schema_name("..")` component override.
+12. **Container-named components (specs 4a and 7).** Container registrations such as `Vec<Commit>` are dropped. Containers reuse the element's registration and export inline (`{"type":"array","items":{"$ref":"#/components/schemas/Commit"}}`); the removal is a listed, explained change in spec 4a's R24 JSON comparison.
+13. **`Default` on generated request structs (spec 4b; refines D55 item 5).** A request struct that has a required non-pager query field or a typed path field does not derive `Default`; a struct whose fields are all optional keeps it.
+14. **Per-request timeout on streams (specs 5 and 2; extends D56 item 3).** For stream bodies the per-request timeout bounds time to headers, and after headers it is an idle bound between items: `next()` waiting longer than the timeout since the previous item yields a terminal timeout. A shared `Deadline` still bounds the whole stream.
+15. **GraphQL `Accept` (spec 5).** GraphQL requests send `Accept: application/json` only. Every non-2xx reply takes the REST error path (spec 5 R37 unchanged).
+16. **Success-shape statuses (spec 5).** A success shape may optionally declare exact statuses (`.status(202)`); without them, selection uses media type plus the 204-empty rule.
+17. **Stream frame-size limit (spec 5).** SSE and NDJSON framing enforce a per-frame byte limit, **16 MiB** by default, settable on the managed builder. Exceeding it is a terminal error that keeps only bounded diagnostic bytes. `Bytes` framing assembles no frame and is unaffected.
+18. **Provider error events inside an HTTP 200 stream (spec 5).** They are typed item variants of the stream's item type, not a terminal transport or envelope failure.
+19. **Inbound WebSocket message selection (specs 6 and 7).** Messages declare selectors on existing wire fields (`.matches("kind", "resp").matches("msg", "pong")`), with at most one `.fallback()` message per direction. Untagged declaration-order decoding is not used. Spec 7's AsyncAPI exporter serializes the selectors.
+20. **WebSocket message-based authentication (spec 6).** An endpoint with a challenge flow takes a typed setup callback (`connect_with_setup(opening, |session| async { .. })`) that runs on every dial, including redials, before the client reports `Ready`.
+21. **WebSocket heartbeats (specs 6 and 7).** Caller-managed, with no generation warning. The generated client's rustdoc states each declared heartbeat (interval and expected message) so the caller knows to send it; spec 7 keeps the metadata on export. *Revised the same day by the author:* the first form of this item warned on every declaration, which would have warned permanently for every shipped definition with heartbeat hints.
+22. **Auth details OpenAPI cannot express (spec 7).** Only the details standard OpenAPI cannot express (a bearer header override, an API-key value prefix) are carried in the versioned `x-schematic` extension; `securitySchemes` stays authoritative for everything else.
+23. **GraphQL operation export (specs 7 and 5).** Postman exports each operation as a runnable `POST` with `{query, variables, operationName}`; OpenAPI skips it with a diagnostic. Spec 5 R42's skip-in-both-exporters wording names spec 7 as the owner of the Postman form.
+24. **WebSocket endpoint role on round trip (specs 7 and 6).** The endpoint role (`Client`, `Host`, `Both`) introduced by spec 6 is exported as `x-schematic-role` on the AsyncAPI channel and is part of spec 7 R27's equality.
+
+**Rationale (this review's reading):** (1) the build job is the only CI place that can already answer "does fresh output compile"; (2) Elasticsearch documents "use the most recent PIT id", and rejecting the combination would block the only partitioned session pattern; (3) one place to set pagination inputs whether fetching one page or all; (5) neither loses complete data nor hides a leaked server-side session; (6) `deny` is a security statement by the definition author; (7) a policy refusal and a network failure call for different handling; (8) matches the HTTP library, where pool, proxy, and TLS are one object; (9)-(10) preserve today's behavior and the settled downstream shapes; (11) no strings in the common case and compile-checked paths elsewhere; (12) D44 literally, and `Vec<...>` is not a valid OpenAPI component key; (13) keeps `new()` honest without taking `Default` from all-optional structs; (14) long, healthy LLM streams must not die at 30 s while hung streams stay bounded; (15) the simplest negotiation that keeps request errors typed on legacy-compatible servers; (19) declaration order silently picks the wrong variant for overlapping Core payloads; (20) `Ready` must mean the protocol session is usable after every redial.
+
+**Options offered and rejected:**
+
+- (1) Give test jobs a toolchain (rejected); local only with a recorded gap (rejected).
+- (2) Reject the combination (rejected); serialize partition requests (rejected); one session per partition (rejected).
+- (3) Keep the fields with pager override (rejected); a generated per-endpoint option struct (rejected).
+- (4) Wrap the imported module (rejected); infer pagination at import (rejected).
+- (5) `Ok(SessionOutcome { items, close })` (rejected); the close error replaces the outcome (rejected); `Ok` plus a log line (rejected).
+- (6) The literal D56 item 2 (rejected); silently intersecting policies (rejected).
+- (7) Reuse `RedirectRefused` (rejected); `TransportError` with optional prior evidence (rejected).
+- (8) First client's settings win (rejected); pool as a hint only (rejected).
+- (9) Remove the global hook (rejected); a runtime error on non-JSON sends (rejected).
+- (10) Lazy `err.decode::<E>()` (rejected).
+- (11) A `SchemaIdent` trait (rejected); canonical names plus a compatibility map (rejected).
+- (12) A compatibility registration keeping the components (rejected); deferring removal to spec 7 (rejected).
+- (13) Keep `Default` everywhere (rejected); drop it on all request structs (rejected).
+- (14) Total lifetime from send start (rejected); time to headers only (rejected).
+- (15) No special `Accept` (rejected); prefer `application/graphql-response+json` with a non-2xx exception (rejected).
+- (19) Disjoint payload types (rejected); ambiguity detection as the design (rejected); declaration order with per-fixture assertions (rejected).
+- (20) Declarative auth hints (rejected); a `TransportReady` state with caller re-authentication (rejected); `Ready` meaning transport only (rejected).
+- (21) Automatic control-frame pings (rejected); application heartbeat callbacks (rejected); a generation warning for unscheduled hints (rejected: permanent, unfixable noise); no longer declaring heartbeats (rejected).
+- (22) Exclude the details from definition equality (rejected); wire the whole `AuthExtension` (rejected).
+- (23) An `x-schematic-graphql` OpenAPI extension (rejected); skip in both exporters (rejected).
+- (24) Exclude role from equality as an accepted gap (rejected); export host roles from the server's view (rejected).
+- (16)-(18) The other options listed in spec 5's Open Questions (rejected).
+
+**Consequences:** spec 1's "not pre-authorized" list loses the build-job change; spec 2 gains `RedirectFailed`, `SharedTransport`, and the `deny` exception, and its R13 title changes; spec 3 gains `fetch_page()`, `SessionError`, and the overlay hook, and R21 maps `RedirectFailed`; spec 4a fixes the alias mechanism and lists container-component removal in R24; spec 4b ties `Default` to required fields; spec 5 gains the stream idle bound, the frame limit, typed error-event items, optional success statuses, and `Accept: application/json`, and its open questions close; spec 6 gains selectors, the setup callback, and heartbeat documentation in rustdoc; spec 7 carries selectors, role, and the limited auth extension, and owns the Postman GraphQL export.
+
+**Open details:** none.
 
 ### Spike results (2026-10-11)
 
@@ -2300,6 +2486,8 @@ Each is open. Items marked "raised by this review" were not stated by the author
 - **R3. The landing of D28 and D29.** D28 adds a redirect-following runtime and a `schematic-define` primitive; D29 rides with GraphQL placement. Neither landing is ruled.
   *Closed 2026-10-11 (second round): D30.*
 - **R4. Per-endpoint override scope and the tighten-only comparison (D28).** What an endpoint may override, and (raised by this review) how "tighter than" orders the five values, including whether a caller may narrow an `allow_origins` list.
+
+  *Partly closed 2026-10-11 (D56 item 2):* the comparison is the subset rule; per-endpoint override scope remains.
 - **R5. How the policy appears in the generated client's public API, and its naming (D28).**
 - **R6. `deny` and same-origin next-page links (D28; raised by this review).** The ruling reads "no followed cross-links"; same-origin paging presumably still works, but it is not stated.
 - **R7. `with_session` shape (D27).** How an async closure borrows the pager.
@@ -2378,6 +2566,8 @@ Runtime and envelope (D24, D31, D39, D45, D48):
 - **P4.** Runtime package: final name; versioning against the generator; which items live in it (the `Endpoint` trait and codecs versus generated code); interplay with D9's incompatible shared-runtime rule.
 - **P5.** Whether the erasing request enum remains (S13); `send_raw`'s signature; client-global `pre_response_json` (S14); whether stream responses not being `Clone` or `Sync` is acceptable (S15); `ErrorKind` `#[non_exhaustive]` (S17, unratified); `into_result` versus `into_parts`; `elapsed` for streams; a value-only convenience; whether response headers other than `Set-Cookie` share the redaction; the placeholder error type's name.
 - **P6.** Deadline arithmetic: "remaining" versus "min(remaining, 30 s)", and whether closing a session gets time after the deadline expires (S10); accepting "stream reset" as the HTTP/2 form of "connection close" in the cancel criterion (S16); the shape of `with_session` for an async closure that borrows the pager (R7).
+
+  *Partly closed 2026-10-11 (D56 item 3):* the arithmetic is `min(remaining, per-request timeout)`; the session-after-deadline, HTTP/2 reset, and `with_session` details remain.
 - **P7.** Query parameters separated from the path in the generator (S6): confirmed as a prerequisite for D23 by this review's reading, not separately ruled as a landing item.
 
 Pagination (D14, D41, D42):
@@ -2398,20 +2588,26 @@ Raised by this review (not by the author):
 
 #### Items for review 1 (collected from the child-spec drafts)
 
-These are decisions the child-spec drafters flagged for the author's review 1. **None is decided.** Each default shown is the drafter's default, which an unattended run would adopt and log.
+These are decisions the child-spec drafters flagged for the author's review 1. Each default shown is the drafter's default, which an unattended run would adopt and log.
 
-- Spec 5: the final `done=true` item from Ollama (default: consume it; delivering it is the alternative).
-- `Bytes` framing beyond D6.
-- REST versus WebSocket behavior when no credential resolves (default: fail before sending with `MissingCredential`, unless the client was built anonymous).
-- WebSocket never follows redirects (stricter than `same_origin`).
-- Whether the tighten-only rule is a partial order.
-- `min(remaining, per-request timeout)` versus remaining time under a deadline.
-- Spec 3: the "adopt and hide" hazard.
-- `auth_policy` kept and `oauth_scopes` removed (the `oauth_scopes`/`auth_policy` choice of D49 item 4; see the correction in section 2 on `auth_policy`'s generator consumer).
-- The `ResponseKind` guard removed.
-- The name `EndpointSpec` for the runtime trait (D54).
+> **Update, 2026-10-11 (D56).** The author ruled on items 1-9 below; each is marked RULED. The original wording is kept for history. Still undecided: item 10 only (the Spec 3 "adopt and hide" hazard, which D56 does not cover). No other undecided item was found in this section.
+
+1. RULED (D56 item 7): Spec 5: the final `done=true` item from Ollama (default: consume it; delivering it is the alternative). Ruled: the `keep` modifier; Ollama delivers it.
+2. RULED (D56 item 8): `Bytes` framing beyond D6. Ruled: added as a third framing.
+3. RULED (D56 item 1): REST versus WebSocket behavior when no credential resolves (default: fail before sending with `MissingCredential`, unless the client was built anonymous). Ruled: send anonymously; the default is withdrawn.
+4. RULED (D56 item 9): WebSocket never follows redirects (stricter than `same_origin`). Ruled as proposed.
+5. RULED (D56 item 2): Whether the tighten-only rule is a partial order. Ruled: no; the subset rule.
+6. RULED (D56 item 3): `min(remaining, per-request timeout)` versus remaining time under a deadline. Ruled: `min`.
+7. RULED (D56 item 6): `auth_policy` kept and `oauth_scopes` removed (the `oauth_scopes`/`auth_policy` choice of D49 item 4; see the correction in section 2 on `auth_policy`'s generator consumer). Ruled as proposed, with a builder form.
+8. RULED (D56 item 4): The `ResponseKind` guard removed. Ruled as proposed.
+9. RULED (D56 item 5): The name `EndpointSpec` for the runtime trait (D54). Confirmed.
+10. UNDECIDED: Spec 3: the "adopt and hide" hazard.
+
+*Numbering note:* the original list was a bullet list in a different order (the "adopt and hide" item was seventh). The numbers above were added on 2026-10-11 only so D56 can refer to them; D56's own item numbers (1-9) are its rulings, not these.
 
 - **P12.** Whether `Endpoint::oauth_scopes` and `RestApi::auth_policy` are wired in or removed (D49). The decision is made during landing 2; the landing is fixed, the choice is not.
+
+  *Closed 2026-10-11 (D56 item 6):* `auth_policy` kept with a builder form; `oauth_scopes` removed.
 
 ### Preparation tasks needing author permission
 

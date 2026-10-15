@@ -45,24 +45,23 @@ fn shipped_implement_router_prefers_an_unimplemented_review_over_the_completed_p
         include_str!("../fixtures/shipped_implement_route/_implement/implement-plan.md"),
     );
 
-    let stderr = run_compose(&fixture, &package, &router, &["spec=fixes/case/spec.md"]);
+    run_compose(&fixture, &package, &router, &["spec=fixes/case/spec.md"]);
 
-    assert!(
-        stderr.contains("Implement Review Suggestions"),
-        "an existing unimplemented review must outrank the already-executed plan; stderr:\n{stderr}"
-    );
-    // The stderr panel previews only the first 20 rendered rows, and the
-    // route's leading rule block fills most of them, so the review path is
-    // asserted on the prompt the provider received rather than the preview.
+    // The leading rules can fill the terminal preview; the provider receives
+    // the complete prompt.
     let provider_prompt =
         std::fs::read_to_string(fixture.home().join("provider-prompt")).unwrap();
+    assert!(
+        provider_prompt.contains("Implement Review Suggestions"),
+        "an existing unimplemented review must outrank the already-executed plan; prompt:\n{provider_prompt}"
+    );
     assert!(
         provider_prompt.contains("review-1.md"),
         "the routed prompt must name the unimplemented review; prompt:\n{provider_prompt}"
     );
     assert!(
-        !stderr.contains("Implement Phase 5 of 5"),
-        "the router must not resume the original plan once a review exists; stderr:\n{stderr}"
+        !provider_prompt.contains("Implement Phase 5 of 5"),
+        "the router must not resume the original plan once a review exists; prompt:\n{provider_prompt}"
     );
 }
 

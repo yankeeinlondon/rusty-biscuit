@@ -1,0 +1,20 @@
+error[E0277]: `ListItems` has no adjustable keep-alive
+ --> tests/fixtures/compile_fail/pager_session_keep_alive_not_adjustable.rs
+  |
+  |     let _ = client.send(ListItems).pager().keep_alive("5m");
+  |                                            ^^^^^^^^^^ `.keep_alive(..)` needs an adjustable `KeepAlive` in the definition
+  |
+help: the trait `KeepAliveKnob` is not implemented for `ListItems`
+ --> tests/fixtures/compile_fail/pager_session_keep_alive_not_adjustable.rs
+  |
+  | struct ListItems;
+  | ^^^^^^^^^^^^^^^^
+  = note: the definition for `ListItems` authors no adjustable session keep-alive
+note: required by a bound in `pager::session::<impl Pager<'a, A, R>>::keep_alive`
+ --> src/pager/session.rs
+  |
+  |     pub fn keep_alive(mut self, value: impl Into<String>) -> Self
+  |            ---------- required by a bound in this associated function
+  |     where
+  |         R: KeepAliveKnob,
+  |            ^^^^^^^^^^^^^ required by this bound in `pager::session::<impl Pager<'a, A, R>>::keep_alive`

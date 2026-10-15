@@ -4,18 +4,25 @@
 //! the generation pipeline, independent of CLI argument parsing.
 
 use std::collections::HashSet;
-use std::fs;
 use std::path::Path;
 
 use colored::Colorize;
+use indexmap::IndexMap;
 use schematic_define::RestApi;
 use schematic_define::openapi::{ExportFormat, ExportOptions};
-use schematic_definitions::apis_by_module;
-use schematic_definitions::registry::get_registries_for_module;
+use schematic_definitions::registry::{SchemaRegistry, get_registries_for_module};
 
-use crate::cargo_gen::write_cargo_toml;
+use crate::diagnostics::{Output, ValidationDiagnostic, has_errors};
 use crate::errors::GeneratorError;
-use crate::output::{generate_and_write, generate_and_write_all};
+use crate::export::openapi::{build_openapi_grouped, render_openapi_document};
+use crate::export::postman::render_postman_module;
+use crate::output::{
+    MutationPlan, PublicationReport, RustOutputRequest, Selection, expand_selection,
+    prepare_export_output, prepare_rust_output,
+};
+use crate::validation::{
+    validate_openapi, validate_openapi_registry, validate_postman, validate_rust_client,
+};
 
 /// List of available API names for error messages.
 const AVAILABLE_APIS: &str = "anthropic, artificial-analysis-data, artificial-analysis-critpt, bitbucket, openai, elevenlabs, eversolo, gitea, github, gitlab, huggingface, lmstudio, ollama-native, ollama-openai, emqx-basic, emqx-bearer, samsung-smart-tv, unfolded-circle-core-rest, all";
@@ -116,84 +123,6 @@ pub fn resolve_all_apis() -> Vec<RestApi> {
     ]
 }
 
-/// Runs validation on an API and prints colored results.
-///
-/// ## Returns
-///
-/// `true` if validation passed, `false` if it failed.
-pub fn run_validation(api: &RestApi, verbose: u8) -> bool {
-    use crate::validation::validate_api;
-
-    if verbose > 0 {
-        eprintln!(
-            "{} Validating API: {} ({} endpoints)",
-            "...".dimmed(),
-            api.name,
-            api.endpoints.len()
-        );
-    }
-
-    match validate_api(api) {
-        Ok(()) => {
-            println!("{} Request suffix format", "  [PASS]".green().bold());
-            println!(
-                "{} No naming collisions detected",
-                "  [PASS]".green().bold()
-            );
-            println!();
-            println!(
-                "{} All validation checks passed for '{}'",
-                "[OK]".green().bold(),
-                api.name
-            );
-            true
-        }
-        Err(err) => {
-            match &err {
-                GeneratorError::InvalidRequestSuffix { suffix, reason } => {
-                    println!(
-                        "{} Request suffix '{}': {}",
-                        "  [FAIL]".red().bold(),
-                        suffix,
-                        reason
-                    );
-                }
-                GeneratorError::NamingCollision {
-                    endpoint_id,
-                    body_type,
-                    suggestion,
-                } => {
-                    println!("{} Request suffix format", "  [PASS]".green().bold());
-                    println!(
-                        "{} Naming collision in endpoint '{}'",
-                        "  [FAIL]".red().bold(),
-                        endpoint_id
-                    );
-                    println!(
-                        "         Body type '{}' conflicts with generated request struct",
-                        body_type.yellow()
-                    );
-                    println!(
-                        "         {} Rename to '{}'",
-                        "Suggestion:".cyan(),
-                        suggestion.green()
-                    );
-                }
-                _ => {
-                    println!("{} {}", "  [FAIL]".red().bold(), err);
-                }
-            }
-            println!();
-            println!(
-                "{} Validation failed for '{}'",
-                "[ERROR]".red().bold(),
-                api.name
-            );
-            false
-        }
-    }
-}
-
 /// Resolves default export directories for OpenAPI and Postman.
 ///
 /// If the output path ends with "schema/src" and no explicit output paths are provided,
@@ -217,67 +146,6 @@ pub fn resolve_export_defaults(
     } else {
         (None, None)
     }
-}
-
-/// Builds a `GeneratorError::ConfigError` describing missing JSON response
-/// schemas for an API in a grouped OpenAPI export.
-pub fn missing_schemas_error(
-    module_name: &str,
-    api_name: &str,
-    missing: &[String],
-) -> GeneratorError {
-    let first_missing = missing.first().map(String::as_str).unwrap_or("MissingType");
-    GeneratorError::ConfigError(format!(
-        "OpenAPI registry incomplete for module \"{module}\" (API \"{api}\"): \
-         missing schema(s) {missing:?}. \
-         Add JsonSchema derive + register::<T>(\"{first}\") entries in \
-         schematic-definitions, or skip with --no-openapi.",
-        module = module_name,
-        api = api_name,
-        missing = missing,
-        first = first_missing,
-    ))
-}
-
-/// Cleans up stale artifacts from an output directory.
-///
-/// Removes any files in the directory that are not in the expected files set.
-pub fn cleanup_stale_artifacts(
-    dir: &Path,
-    expected_files: &HashSet<String>,
-    verbose: u8,
-) -> Result<(), GeneratorError> {
-    if !dir.exists() {
-        return Ok(());
-    }
-
-    for entry in fs::read_dir(dir).map_err(|e| GeneratorError::WriteError {
-        path: dir.display().to_string(),
-        source: e,
-    })? {
-        let entry = entry.map_err(|e| GeneratorError::WriteError {
-            path: dir.display().to_string(),
-            source: e,
-        })?;
-
-        let file_name = entry.file_name().to_string_lossy().to_string();
-
-        if !expected_files.contains(&file_name) {
-            if verbose > 0 {
-                println!(
-                    "{} Removing stale artifact: {}",
-                    "[CLEAN]".yellow().bold(),
-                    entry.path().display()
-                );
-            }
-            fs::remove_file(entry.path()).map_err(|e| GeneratorError::WriteError {
-                path: entry.path().display().to_string(),
-                source: e,
-            })?;
-        }
-    }
-
-    Ok(())
 }
 
 /// OpenAPI output format for pipeline use.
@@ -312,19 +180,131 @@ pub struct GenerateOpts<'a> {
     pub no_postman: bool,
 }
 
-/// Runs the generate command for a single API.
+
+/// Which part of the registry a batch regenerates.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BatchScope {
+    /// Every API. Each output root's obsolete generator-owned files are
+    /// removed.
+    Complete,
+    /// These APIs, by name, expanded to their complete module groups. Every
+    /// other module and artifact already in an output root is kept, and
+    /// nothing outside the regenerated groups is deleted.
+    Selection(Vec<String>),
+}
+
+/// The outcome of one requested output.
+#[derive(Debug)]
+pub struct OutputReport {
+    /// Which output this is.
+    pub output: Output,
+    /// Everything its validator reported, warnings included.
+    pub diagnostics: Vec<ValidationDiagnostic>,
+    /// `Err` when validation, preparation, or publication failed.
+    pub result: Result<(), GeneratorError>,
+}
+
+/// The outcome of every output a generate invocation requested.
+#[derive(Debug, Default)]
+pub struct GenerationReport {
+    /// One entry per requested output, in the order they were attempted.
+    pub outputs: Vec<OutputReport>,
+}
+
+impl GenerationReport {
+    /// Outputs that were written (or would be, in a dry run).
+    pub fn succeeded(&self) -> Vec<Output> {
+        self.outputs
+            .iter()
+            .filter(|report| report.result.is_ok())
+            .map(|report| report.output)
+            .collect()
+    }
+
+    /// Outputs that failed validation, preparation, or publication.
+    pub fn failed(&self) -> Vec<Output> {
+        self.outputs
+            .iter()
+            .filter(|report| report.result.is_err())
+            .map(|report| report.output)
+            .collect()
+    }
+
+    /// The report for `output`, if it was requested.
+    pub fn get(&self, output: Output) -> Option<&OutputReport> {
+        self.outputs.iter().find(|report| report.output == output)
+    }
+
+    /// `Ok` when every requested output succeeded; warnings never fail.
+    ///
+    /// ## Errors
+    ///
+    /// [`GeneratorError::OutputsFailed`] naming the failed and the
+    /// succeeded outputs.
+    pub fn into_result(self) -> Result<(), GeneratorError> {
+        let failed = self.failed();
+        if failed.is_empty() {
+            Ok(())
+        } else {
+            Err(GeneratorError::OutputsFailed {
+                succeeded: self.succeeded(),
+                failed,
+            })
+        }
+    }
+}
+
+/// Runs the generate command for one API's module group, or for every API
+/// with `"all"`.
 pub fn run_generate(api_name: &str, opts: &GenerateOpts<'_>) -> Result<(), GeneratorError> {
-    if api_name == "all" {
-        return run_generate_all(opts);
-    }
+    let scope = if api_name == "all" {
+        BatchScope::Complete
+    } else {
+        BatchScope::Selection(vec![resolve_api(api_name)?.name])
+    };
+    generate_batch(&resolve_all_apis(), &scope, opts, &get_registries_for_module).into_result()
+}
 
+/// Generates every requested output for `scope` of the registry `apis`.
+///
+/// `apis` is the registry: every API the output roots may hold, in the order
+/// `lib.rs` and `prelude.rs` list them. A selection expands to complete
+/// module groups separately for each output (Rust module paths for the
+/// client, export module names for OpenAPI and Postman). Each output is
+/// validated over its whole batch, prepared in memory, and published only
+/// when its own validation and ownership checks pass, so one output's
+/// failure never stops another. Diagnostics print to stderr as they are
+/// found, and the report names which outputs succeeded and which failed.
+/// `registry_for` supplies the OpenAPI schema registry of a module.
+pub fn generate_batch(
+    apis: &[RestApi],
+    scope: &BatchScope,
+    opts: &GenerateOpts<'_>,
+    registry_for: &dyn Fn(&str) -> Option<SchemaRegistry>,
+) -> GenerationReport {
     let (openapi_out, postman_out) =
         resolve_export_defaults(opts.output, opts.openapi_out, opts.postman_out);
-
-    let api = resolve_api(api_name)?;
+    let registry: Vec<&RestApi> = apis.iter().collect();
+    let selected: Result<Vec<&RestApi>, String> = match scope {
+        BatchScope::Complete => Ok(registry.clone()),
+        BatchScope::Selection(names) => names
+            .iter()
+            .map(|name| {
+                registry
+                    .iter()
+                    .copied()
+                    .find(|api| &api.name == name)
+                    .ok_or_else(|| format!("API `{name}` is not in the registry"))
+            })
+            .collect(),
+    };
+    let complete = *scope == BatchScope::Complete;
 
     if opts.verbose > 0 {
-        eprintln!("Generating code for API: {}", api_name);
+        match &selected {
+            Ok(selected) => eprintln!("Generating code for {} API(s)", selected.len()),
+            Err(_) => eprintln!("Generating code for an unknown API"),
+        }
         eprintln!("Output directory: {}", opts.output);
         if let Some(ref dir) = openapi_out {
             eprintln!("OpenAPI output: {}", dir);
@@ -336,227 +316,10 @@ pub fn run_generate(api_name: &str, opts: &GenerateOpts<'_>) -> Result<(), Gener
             eprintln!("Dry run mode - no files will be written");
         }
     }
-
-    println!("{}", "Validating API definition...".dimmed());
-    if !run_validation(&api, opts.verbose) {
-        return Err(GeneratorError::ConfigError(
-            "Validation failed. Fix the issues above before generating code.".to_string(),
-        ));
-    }
-    println!();
-
-    if opts.verbose > 1 {
-        eprintln!("API: {} ({} endpoints)", api.name, api.endpoints.len());
-        for endpoint in &api.endpoints {
-            eprintln!("  - {} {} {}", endpoint.id, endpoint.method, endpoint.path);
-        }
-    }
-
-    println!("{}", "Generating code...".dimmed());
-    let output_dir = Path::new(opts.output);
-    generate_and_write(&api, output_dir, opts.dry_run)?;
-
-    let schema_dir = output_dir.parent().unwrap_or(Path::new("schematic/schema"));
-    write_cargo_toml(schema_dir, opts.dry_run, None)?;
-
-    if !opts.dry_run {
-        println!(
-            "{} Generated code to {}/lib.rs",
-            "[OK]".green().bold(),
-            opts.output
-        );
-        println!(
-            "{} Generated {}/Cargo.toml",
-            "[OK]".green().bold(),
-            schema_dir.display()
-        );
-    } else {
-        println!(
-            "{} Dry run complete (no files written)",
-            "[OK]".green().bold()
-        );
-    }
-
-    if !opts.no_openapi
-        && let Some(openapi_dir) = openapi_out.as_deref()
+    if opts.verbose > 1
+        && let Ok(selected) = &selected
     {
-        let module_name = crate::export::resolve_module_name(&api);
-        let registry = get_registries_for_module(&module_name).ok_or_else(|| {
-            GeneratorError::ConfigError(format!(
-                "Missing schema registry for module \"{module_name}\". \
-                 Add openapi_registry() to schematic-definitions or skip with --no-openapi."
-            ))
-        })?;
-
-        registry
-            .validate_completeness(&api)
-            .map_err(|missing| missing_schemas_error(&module_name, &api.name, &missing))?;
-
-        run_openapi_export_grouped(
-            &module_name,
-            &[&api],
-            &registry,
-            openapi_dir,
-            opts.openapi_format,
-            opts.openapi_version,
-            opts.dry_run,
-            opts.verbose,
-        )?;
-    }
-
-    if !opts.no_postman
-        && let Some(postman_dir) = postman_out.as_deref()
-    {
-        run_postman_export(&api, postman_dir, opts.dry_run, opts.verbose)?;
-    }
-
-    Ok(())
-}
-
-/// Exports an API definition to Postman collection format.
-pub fn run_postman_export(
-    api: &RestApi,
-    postman_dir: &str,
-    dry_run: bool,
-    verbose: u8,
-) -> Result<(), GeneratorError> {
-    use crate::export::postman::write_postman;
-
-    if verbose > 0 {
-        println!("{}", "Exporting Postman collection...".dimmed());
-    }
-
-    let postman_path = Path::new(postman_dir);
-
-    if !dry_run && !postman_path.exists() {
-        std::fs::create_dir_all(postman_path).map_err(|e| GeneratorError::WriteError {
-            path: postman_dir.to_string(),
-            source: e,
-        })?;
-    }
-
-    if dry_run {
-        let module_name = crate::export::resolve_module_name(api);
-        println!(
-            "{} Would export Postman collection to {}/{}.postman_collection.json",
-            "[OK]".green().bold(),
-            postman_dir,
-            module_name,
-        );
-    } else {
-        let path = write_postman(api, postman_path, false)?;
-        println!(
-            "{} Exported Postman collection to {}",
-            "[OK]".green().bold(),
-            path.display()
-        );
-    }
-
-    Ok(())
-}
-
-/// Exports a module-grouped OpenAPI document.
-#[allow(clippy::too_many_arguments)]
-pub fn run_openapi_export_grouped(
-    module_name: &str,
-    apis: &[&RestApi],
-    registry: &schematic_definitions::registry::SchemaRegistry,
-    openapi_dir: &str,
-    format: OpenApiFormat,
-    version_override: Option<&str>,
-    dry_run: bool,
-    verbose: u8,
-) -> Result<(), GeneratorError> {
-    use crate::export::openapi::write_openapi_grouped;
-
-    if verbose > 0 {
-        println!(
-            "{} Exporting OpenAPI specification for module '{}' ({} APIs)...",
-            "...".dimmed(),
-            module_name,
-            apis.len(),
-        );
-    }
-
-    let openapi_path = Path::new(openapi_dir);
-
-    if !dry_run && !openapi_path.exists() {
-        std::fs::create_dir_all(openapi_path).map_err(|e| GeneratorError::WriteError {
-            path: openapi_dir.to_string(),
-            source: e,
-        })?;
-    }
-
-    let version = version_override
-        .or_else(|| apis.first().and_then(|api| api.version.as_deref()))
-        .unwrap_or("0.1.0");
-
-    let options = ExportOptions::new()
-        .with_version(version)
-        .with_format(format.into());
-
-    if dry_run {
-        let extension = match format {
-            OpenApiFormat::Json => "json",
-            OpenApiFormat::Yaml => "yaml",
-        };
-        println!(
-            "{} Would export OpenAPI spec to {}/{}.{}",
-            "[OK]".green().bold(),
-            openapi_dir,
-            module_name,
-            extension,
-        );
-    } else {
-        let path = write_openapi_grouped(apis, module_name, registry, &options, openapi_path)?;
-        println!(
-            "{} Exported OpenAPI spec to {}",
-            "[OK]".green().bold(),
-            path.display()
-        );
-    }
-
-    Ok(())
-}
-
-/// Runs the generate command for all APIs at once.
-pub fn run_generate_all(opts: &GenerateOpts<'_>) -> Result<(), GeneratorError> {
-    let (openapi_out, postman_out) =
-        resolve_export_defaults(opts.output, opts.openapi_out, opts.postman_out);
-
-    let apis = resolve_all_apis();
-
-    if opts.verbose > 0 {
-        eprintln!("Generating code for all {} APIs", apis.len());
-        eprintln!("Output directory: {}", opts.output);
-        if let Some(ref dir) = openapi_out {
-            eprintln!("OpenAPI output: {}", dir);
-        }
-        if let Some(ref dir) = postman_out {
-            eprintln!("Postman output: {}", dir);
-        }
-        if opts.dry_run {
-            eprintln!("Dry run mode - no files will be written");
-        }
-    }
-
-    println!("{}", "Validating all API definitions...".dimmed());
-    let mut all_valid = true;
-    for api in &apis {
-        if !run_validation(api, opts.verbose) {
-            all_valid = false;
-        }
-        println!();
-    }
-
-    if !all_valid {
-        return Err(GeneratorError::ConfigError(
-            "Validation failed. Fix the issues above before generating code.".to_string(),
-        ));
-    }
-
-    if opts.verbose > 1 {
-        for api in &apis {
+        for api in selected {
             eprintln!("API: {} ({} endpoints)", api.name, api.endpoints.len());
             for endpoint in &api.endpoints {
                 eprintln!("  - {} {} {}", endpoint.id, endpoint.method, endpoint.path);
@@ -564,149 +327,325 @@ pub fn run_generate_all(opts: &GenerateOpts<'_>) -> Result<(), GeneratorError> {
         }
     }
 
-    println!("{}", "Generating code for all APIs...".dimmed());
-    let output_dir = Path::new(opts.output);
-    let api_refs: Vec<&RestApi> = apis.iter().collect();
-    generate_and_write_all(&api_refs, output_dir, opts.dry_run)?;
-
-    let schema_dir = output_dir.parent().unwrap_or(Path::new("schematic/schema"));
-    write_cargo_toml(schema_dir, opts.dry_run, None)?;
-
-    if !opts.dry_run {
-        println!(
-            "{} Generated code for {} APIs to {}",
-            "[OK]".green().bold(),
-            apis.len(),
-            opts.output
-        );
-        println!(
-            "{} Generated {}/Cargo.toml",
-            "[OK]".green().bold(),
-            schema_dir.display()
-        );
-    } else {
-        println!(
-            "{} Dry run complete (no files written)",
-            "[OK]".green().bold()
-        );
+    let mut requested = vec![Output::Rust];
+    if !opts.no_openapi && openapi_out.is_some() {
+        requested.push(Output::OpenApi);
+    }
+    if !opts.no_postman && postman_out.is_some() {
+        requested.push(Output::Postman);
     }
 
-    let mut openapi_files = HashSet::new();
-    if !opts.no_openapi
-        && let Some(openapi_dir) = openapi_out.as_deref()
-    {
-        let grouped = apis_by_module();
-
-        for (module_name, module_apis) in grouped.iter() {
-            let extension = match opts.openapi_format {
-                OpenApiFormat::Json => "json",
-                OpenApiFormat::Yaml => "yaml",
-            };
-            openapi_files.insert(format!("{}.{}", module_name, extension));
-
-            let registry = get_registries_for_module(module_name).ok_or_else(|| {
-                GeneratorError::ConfigError(format!(
-                    "Missing schema registry for module \"{module_name}\". \
-                     Add openapi_registry() to schematic-definitions or skip with --no-openapi."
-                ))
-            })?;
-
-            for member in module_apis.iter() {
-                registry.validate_completeness(member).map_err(|missing| {
-                    missing_schemas_error(module_name, &member.name, &missing)
-                })?;
+    let mut report = GenerationReport::default();
+    match &selected {
+        Err(message) => {
+            for output in requested {
+                let message = message.clone();
+                report.outputs.push(publish(output, Vec::new(), || {
+                    Err(GeneratorError::ConfigError(message))
+                }));
             }
-
-            let api_refs: Vec<&RestApi> = module_apis.iter().collect();
-
-            run_openapi_export_grouped(
-                module_name,
-                &api_refs,
-                &registry,
-                openapi_dir,
-                opts.openapi_format,
-                opts.openapi_version,
-                opts.dry_run,
-                opts.verbose,
-            )?;
         }
-
-        if !opts.dry_run {
-            cleanup_stale_artifacts(Path::new(openapi_dir), &openapi_files, opts.verbose)?;
-        }
-    }
-
-    let mut postman_files = HashSet::new();
-    if !opts.no_postman
-        && let Some(postman_dir) = postman_out.as_deref()
-    {
-        let grouped = apis_by_module();
-
-        for (module_name, module_apis) in grouped.iter() {
-            if module_apis.len() == 1 {
-                let module_name_resolved = crate::export::resolve_module_name(&module_apis[0]);
-                postman_files.insert(format!("{}.postman_collection.json", module_name_resolved));
-
-                run_postman_export(&module_apis[0], postman_dir, opts.dry_run, opts.verbose)?;
+        Ok(selected) => {
+            let rust_selection = if complete {
+                Selection::All
             } else {
-                use crate::export::postman::write_postman_grouped;
-
-                postman_files.insert(format!("{}.postman_collection.json", module_name));
-
-                if opts.verbose > 0 {
-                    println!(
-                        "{} Exporting grouped Postman collection for module '{}' ({} APIs)...",
-                        "...".dimmed(),
-                        module_name,
-                        module_apis.len()
-                    );
-                }
-
-                let api_refs: Vec<&RestApi> = module_apis.iter().collect();
-                let postman_path = Path::new(postman_dir);
-
-                if !opts.dry_run && !postman_path.exists() {
-                    std::fs::create_dir_all(postman_path).map_err(|e| {
-                        GeneratorError::WriteError {
-                            path: postman_dir.to_string(),
-                            source: e,
-                        }
-                    })?;
-                }
-
-                if opts.dry_run {
-                    println!(
-                        "{} Would export grouped Postman collection to {}/{}.postman_collection.json",
-                        "[OK]".green().bold(),
-                        postman_dir,
-                        module_name,
-                    );
-                } else {
-                    let path = write_postman_grouped(&api_refs, module_name, postman_path, false)?;
-                    println!(
-                        "{} Exported grouped Postman collection to {}",
-                        "[OK]".green().bold(),
-                        path.display()
-                    );
-                }
+                Selection::Apis(selected)
+            };
+            report.outputs.push(publish_rust(&registry, rust_selection, opts));
+            let exports = export_batch(&registry, selected, complete);
+            if let Some(dir) = openapi_out.as_deref().filter(|_| !opts.no_openapi) {
+                report
+                    .outputs
+                    .push(publish_openapi(&exports, complete, dir, opts, registry_for));
             }
-        }
-
-        if !opts.dry_run {
-            cleanup_stale_artifacts(Path::new(postman_dir), &postman_files, opts.verbose)?;
+            if let Some(dir) = postman_out.as_deref().filter(|_| !opts.no_postman) {
+                report
+                    .outputs
+                    .push(publish_postman(&exports, complete, dir, opts));
+            }
         }
     }
 
+    println!();
+    for output in &report.outputs {
+        match &output.result {
+            Ok(()) => println!("{} {} output", "[OK]".green().bold(), output.output),
+            Err(_) => println!("{} {} output", "[FAILED]".red().bold(), output.output),
+        }
+    }
+    report
+}
+
+/// Prints `diagnostics` to stderr, one line each.
+fn print_diagnostics(diagnostics: &[ValidationDiagnostic]) {
+    for diagnostic in diagnostics {
+        let label = if diagnostic.is_error() {
+            "[ERROR]".red().bold()
+        } else {
+            "[WARN]".yellow().bold()
+        };
+        eprintln!("{label} {diagnostic}");
+    }
+}
+
+/// Validates one output's batch, then prepares and publishes it with
+/// `write` if nothing blocks.
+fn publish(
+    output: Output,
+    diagnostics: Vec<ValidationDiagnostic>,
+    write: impl FnOnce() -> Result<(), GeneratorError>,
+) -> OutputReport {
+    print_diagnostics(&diagnostics);
+    let result = if has_errors(&diagnostics) {
+        Err(GeneratorError::Validation {
+            output,
+            diagnostics: diagnostics.clone(),
+        })
+    } else {
+        write()
+    };
+    if let Err(err) = &result {
+        eprintln!("{} {}", "[ERROR]".red().bold(), err);
+    }
+    OutputReport {
+        output,
+        diagnostics,
+        result,
+    }
+}
+
+/// Generates the Rust client crate, including its `Cargo.toml`.
+fn publish_rust(
+    registry: &[&RestApi],
+    selection: Selection<'_>,
+    opts: &GenerateOpts<'_>,
+) -> OutputReport {
+    println!("{}", "Validating the Rust client batch...".dimmed());
+    let batch = match expand_selection(registry, selection) {
+        Ok(batch) => batch,
+        Err(err) => return publish(Output::Rust, Vec::new(), || Err(err)),
+    };
+    publish(Output::Rust, validate_rust_client(&batch), || {
+        println!("{}", "Generating code...".dimmed());
+        let output_dir = Path::new(opts.output);
+        let manifest_dir = output_dir.parent().unwrap_or(Path::new("schematic/schema"));
+        let prepared = prepare_rust_output(&RustOutputRequest {
+            registry,
+            selection,
+            output_dir,
+            manifest_dir: Some(manifest_dir),
+        })?;
+        let retained = if prepared.retained.is_empty() {
+            String::new()
+        } else {
+            format!("; kept {}", prepared.retained.join(", "))
+        };
+        if opts.dry_run {
+            prepared.plan.print_dry_run(true);
+            println!(
+                "{} Dry run complete (no files written): would regenerate {}{retained}",
+                "[OK]".green().bold(),
+                prepared.regenerated.join(", ")
+            );
+            return Ok(());
+        }
+        let published = prepared.plan.publish()?;
+        print_applied(&published, opts.verbose);
+        println!(
+            "{} Generated {} under {} ({} written, {} deleted{retained})",
+            "[OK]".green().bold(),
+            prepared.regenerated.join(", "),
+            opts.output,
+            published.written(),
+            published.deleted(),
+        );
+        Ok(())
+    })
+}
+
+fn print_applied(report: &PublicationReport, verbose: u8) {
+    if verbose > 0 {
+        for mutation in &report.applied {
+            println!("{} {}", "...".dimmed(), mutation);
+        }
+    }
+}
+
+/// The registry APIs whose export module a selected API shares, so a
+/// partial run rewrites complete export modules. A complete run exports all.
+fn export_batch<'a>(
+    registry: &[&'a RestApi],
+    selected: &[&RestApi],
+    complete: bool,
+) -> Vec<&'a RestApi> {
+    if complete {
+        return registry.to_vec();
+    }
+    let modules: HashSet<String> = selected
+        .iter()
+        .map(|api| crate::export::resolve_module_name(api))
+        .collect();
+    registry
+        .iter()
+        .copied()
+        .filter(|api| modules.contains(&crate::export::resolve_module_name(api)))
+        .collect()
+}
+
+/// Groups APIs by their export module name, keeping batch order.
+fn export_groups<'a>(apis: &[&'a RestApi]) -> IndexMap<String, Vec<&'a RestApi>> {
+    let mut groups: IndexMap<String, Vec<&RestApi>> = IndexMap::new();
+    for api in apis {
+        groups
+            .entry(crate::export::resolve_module_name(api))
+            .or_default()
+            .push(api);
+    }
+    groups
+}
+
+/// Validates and publishes one OpenAPI document per module.
+fn publish_openapi(
+    apis: &[&RestApi],
+    complete: bool,
+    openapi_dir: &str,
+    opts: &GenerateOpts<'_>,
+    registry_for: &dyn Fn(&str) -> Option<SchemaRegistry>,
+) -> OutputReport {
+    let groups = export_groups(apis);
+    let mut diagnostics = validate_openapi(apis);
+    let mut registries = Vec::with_capacity(groups.len());
+    for (module_name, members) in &groups {
+        let registry = registry_for(module_name);
+        diagnostics.extend(validate_openapi_registry(
+            module_name,
+            members,
+            registry.as_ref(),
+        ));
+        registries.push(registry);
+    }
+
+    publish(Output::OpenApi, diagnostics, || {
+        let extension = match opts.openapi_format {
+            OpenApiFormat::Json => "json",
+            OpenApiFormat::Yaml => "yaml",
+        };
+        // Build every module's document before writing any, so a merge or
+        // operationId failure in one module leaves the whole root untouched.
+        let mut files = Vec::with_capacity(groups.len());
+        for ((module_name, members), registry) in groups.iter().zip(registries) {
+            // Validation proved every module has a registry.
+            let Some(registry) = registry else {
+                continue;
+            };
+            let options = openapi_export_options(members, opts.openapi_format, opts.openapi_version);
+            let document = build_openapi_grouped(members, module_name, &registry, &options)?;
+            files.push((
+                format!("{module_name}.{extension}"),
+                render_openapi_document(&document, opts.openapi_format.into())?,
+            ));
+        }
+        let plan = prepare_export_output(Path::new(openapi_dir), files, complete, |name| {
+            name.ends_with(".json") || name.ends_with(".yaml")
+        })?;
+        publish_export(&plan, opts)
+    })
+}
+
+/// Validates and publishes one Postman collection per module.
+fn publish_postman(
+    apis: &[&RestApi],
+    complete: bool,
+    postman_dir: &str,
+    opts: &GenerateOpts<'_>,
+) -> OutputReport {
+    publish(Output::Postman, validate_postman(apis), || {
+        let mut files = Vec::new();
+        for (module_name, members) in export_groups(apis) {
+            files.push((
+                format!("{module_name}.postman_collection.json"),
+                render_postman_module(&members, &module_name)?,
+            ));
+        }
+        let plan = prepare_export_output(Path::new(postman_dir), files, complete, |name| {
+            name.ends_with(".postman_collection.json")
+        })?;
+        publish_export(&plan, opts)
+    })
+}
+
+/// Publishes an export root's plan, or prints it in a dry run.
+fn publish_export(plan: &MutationPlan, opts: &GenerateOpts<'_>) -> Result<(), GeneratorError> {
+    if opts.dry_run {
+        for mutation in plan.mutations() {
+            println!("{} Would {}", "[OK]".green().bold(), mutation);
+        }
+        return Ok(());
+    }
+    let published = plan.publish()?;
+    print_applied(&published, opts.verbose);
+    println!(
+        "{} Published {} ({} written, {} deleted)",
+        "[OK]".green().bold(),
+        plan.root().display(),
+        published.written(),
+        published.deleted(),
+    );
     Ok(())
 }
 
-/// Runs the validate command.
+/// Export options for a module document: the CLI version override, else the
+/// first member's version, else `0.1.0`.
+fn openapi_export_options(
+    apis: &[&RestApi],
+    format: OpenApiFormat,
+    version_override: Option<&str>,
+) -> ExportOptions {
+    let version = version_override
+        .or_else(|| apis.first().and_then(|api| api.version.as_deref()))
+        .unwrap_or("0.1.0");
+    ExportOptions::new()
+        .with_version(version)
+        .with_format(format.into())
+}
+
+/// Runs the validate command: every output's validator over one API.
+///
+/// Prints each diagnostic to stderr and one pass/fail line per output.
 pub fn run_validate(api_name: &str, verbose: u8) -> Result<(), GeneratorError> {
     let api = resolve_api(api_name)?;
-
-    if run_validation(&api, verbose) {
-        Ok(())
-    } else {
-        Err(GeneratorError::ConfigError("Validation failed".to_string()))
+    let apis = [&api];
+    if verbose > 0 {
+        eprintln!(
+            "{} Validating API: {} ({} endpoints)",
+            "...".dimmed(),
+            api.name,
+            api.endpoints.len()
+        );
     }
+
+    let module_name = crate::export::resolve_module_name(&api);
+    let mut openapi = validate_openapi(&apis);
+    openapi.extend(validate_openapi_registry(
+        &module_name,
+        &apis,
+        get_registries_for_module(&module_name).as_ref(),
+    ));
+
+    let mut report = GenerationReport::default();
+    for (output, diagnostics) in [
+        (Output::Rust, validate_rust_client(&apis)),
+        (Output::OpenApi, openapi),
+        (Output::Postman, validate_postman(&apis)),
+    ] {
+        report.outputs.push(publish(output, diagnostics, || Ok(())));
+    }
+
+    for output in &report.outputs {
+        match &output.result {
+            Ok(()) => println!("{} {}", "  [PASS]".green().bold(), output.output),
+            Err(_) => println!("{} {}", "  [FAIL]".red().bold(), output.output),
+        }
+    }
+    report.into_result()
 }

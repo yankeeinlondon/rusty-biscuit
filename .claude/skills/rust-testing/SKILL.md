@@ -156,6 +156,7 @@ To narrow a recipe to one module, pass a positional filter:
 | designing or reviewing any test: assertions, boundaries, timing, performance evidence | [test-design.md](test-design.md) |
 | making a test that takes more than 5 s fast, or reviewing one              | [test-speed.md](test-speed.md) |
 | choosing a tier, gating, requiring a backend or real resource, reading env switches | [tiers-and-gating.md](tiers-and-gating.md) |
+| deciding how much a passing test proves (F1/F2/F3 rungs) and which boundary a requirement crosses | [verification-fidelity.md](verification-fidelity.md) |
 | naming a test or module, writing a filterset, narrowing a recipe            | [tier-filters.md](tier-filters.md) |
 | running or writing `level2_*` tests, or making them parallel-safe           | [l2-tests.md](l2-tests.md) |
 | adding a test file to a package with `autotests = false`                    | [consolidated-binaries.md](consolidated-binaries.md) |

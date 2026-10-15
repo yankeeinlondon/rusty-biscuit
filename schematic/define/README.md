@@ -26,7 +26,8 @@ The definition process is intentionally **data-driven**: you describe *what* the
 | `OAuth2GrantType` | OAuth2 grant type (AuthorizationCodePkce, ClientCredentials, DeviceCode) |
 | `PkceRequirement` | PKCE requirement level (Required, Supported, NotUsed) |
 | `OAuth2ClientAuthMethod` | Client credential delivery method (ClientSecretBasic, ClientSecretPost, None) |
-| `UpdateStrategy` | Strategy for updating auth in API variants (NoChange, ChangeTo) |
+| `UpdateStrategy` | Auth-update choice (NoChange, ChangeTo); still exported, but no generated code reads it |
+| `CrossOrigin` | API-level policy for redirects and next-page links to other origins |
 | `ApiRequest` | Request body type (JSON, FormData, UrlEncoded, Text, Binary) |
 | `ApiResponse` | Response type (JSON, Text, Binary, Empty) |
 | `FormField` | Form field definition for multipart/URL-encoded requests |
@@ -38,7 +39,7 @@ The definition process is intentionally **data-driven**: you describe *what* the
 
 | Type | Purpose |
 |------|---------|
-| `Headers` | Fluent builder for HTTP headers with auth support |
+| `Headers` | Fluent builder for HTTP headers with auth support; used by generated WebSocket clients |
 | `SensitiveString` | Secure wrapper for passwords/tokens (redacts Debug output) |
 | `EnvList` | Environment variable fallback chain for credentials |
 | `ApiKeyEnv` | API key header configuration with environment source |
@@ -67,8 +68,8 @@ The definition process is intentionally **data-driven**: you describe *what* the
 | `ParamDef` | Single parameter definition |
 | `QueryParamType` | Parameter value type |
 | `ParamStyle` | Parameter serialization style |
-| `PaginationStyle` | Common pagination request patterns |
-| `PaginationResponse` | How APIs signal pagination state in responses |
+| `PaginationStyle` | Superseded: materializes `page`/`per_page`-style query parameters; drives no pager |
+| `PaginationResponse` | Superseded: read by nothing |
 
 ### WebSocket API Types
 
@@ -114,14 +115,16 @@ Authentication can be modeled in two ways:
 1. `RestApi::auth` with legacy `env_auth` / `env_username` fields for backward-compatible single-strategy auth
 2. `RestApi::auth_policy` plus `EnvMapping` for explicit multi-method auth and authoritative env fallback
 
-Generated clients always apply this precedence:
+The definition only says *where* a credential goes and which environment variables can supply one. The generator translates it into the API's runtime `ApiDefinition`: each accepted method becomes a credential placement (an OAuth2 method is accepted as a bearer access token), and the environment mapping becomes the API's environment fallback. At send time [`schematic-runtime`](../runtime/README.md) resolves one credential per request, first match wins:
 
-1. Explicit auth already attached to `Headers`
-2. Explicit auth injected with generated helpers such as `.api_key(...)`, `.bearer_token(...)`, `.basic_auth(...)`, or `.oauth_token(...)`
-3. Environment-variable fallback from `EnvMapping`
-4. `SchematicError::AuthenticationRequired`
+1. A per-call credential (`.credential(...)` on the call)
+2. A client credential (`{Api}::new().api_key(...)`, `.basic_auth(...)`, or `.credentials(...)`)
+3. The first set, non-empty variable of the environment fallback
+4. None: the request is sent anonymously, and the server's reply (typically a 401) arrives in the response envelope
 
-Legacy `env_auth` and `env_username` are still supported, but the generator normalizes them into `EnvMapping` before runtime auth resolution.
+`.anonymous()` on a call skips every source. See [Credentials](../docs/runtime/credentials.md) for the full rules.
+
+Legacy `env_auth` and `env_username` are still supported, but the generator normalizes them into `EnvMapping` before translating the fallback.
 
 ### Bearer Token (Most Common)
 
@@ -225,7 +228,7 @@ let api = RestApi {
 };
 ```
 
-OAuth2 token lifecycle is managed by the `schematic-oauth` runtime crate. The `OAuth2Config` here is declarative metadata describing the provider. Generated clients surface `SchematicError::AuthenticationRequired` when no acceptable credential is available and, for OAuth-enabled clients, point callers to `schematic-oauth` before injecting the token with `.oauth_token(...)` or an explicit `Headers` builder.
+OAuth2 token lifecycle is managed by the `schematic-oauth` runtime crate. The `OAuth2Config` here is declarative metadata describing the provider. Generated clients do not run OAuth flows: obtain a token with `schematic-oauth` (or any other source) and pass it as `Credential::access_token(token)`, either per client or per call.
 
 ### Multi-Method Auth Policy
 
@@ -272,7 +275,11 @@ let api = RestApi {
     # endpoints: vec![],
     # module_path: None,
     # request_suffix: None,
+    # version: None,
     # env_mapping: None,
+    # cross_origin: schematic_define::CrossOrigin::default(),
+    # request_id_header: None,
+    # secret_names: vec![],
 };
 ```
 
@@ -300,46 +307,29 @@ If `oauth_scopes` is `None`, the API-level `default_scopes` from `OAuth2Config` 
 
 ### Missing Credentials
 
-If neither explicit auth nor environment fallback can satisfy the API requirements, the generated code returns `SchematicError::AuthenticationRequired`:
-
-```rust
-Err(SchematicError::AuthenticationRequired {
-    message: "Authentication required: an explicit API key in `PRIVATE-TOKEN`, an explicit OAuth access token or set one of the fallback env vars `GITLAB_TOKEN`, `GITLAB_PRIVATE_TOKEN`.".to_string(),
-    explicit_methods: vec![
-        "an explicit API key in `PRIVATE-TOKEN`".to_string(),
-        "an explicit OAuth access token".to_string(),
-    ],
-    env_fallback_vars: vec![
-        "GITLAB_TOKEN".to_string(),
-        "GITLAB_PRIVATE_TOKEN".to_string(),
-    ],
-})
-```
+A missing credential is not an error. When neither an explicit credential nor the environment fallback supplies one, the generated client sends the request without one, and the server's reply arrives in the `Response` envelope with the runtime's `AuthMethod::Anonymous` (not this crate's `AuthMethod`) recorded in `response.meta.request.auth`. See [A missing credential is not an error](../docs/runtime/credentials.md#a-missing-credential-is-not-an-error).
 
 ### Programmatic Authentication
 
-To inject tokens programmatically (without environment variables), use the `Headers` builder:
+To inject a credential without environment variables, hand a `Credential` to the generated client, for the whole client or for one call:
 
 ```rust
-use schematic_define::Headers;
+use schematic_schema::prelude::*;
 
-// Token from runtime source (Vault, OAuth, config file, etc.)
+// Token from a runtime source (Vault, OAuth, config file, etc.)
 let token = get_token_from_somewhere();
 
-// Create client with programmatic token - no env vars needed!
-let client = OpenAI::new()
-    .variant()
-    .headers_builder(Headers::default().use_bearer_token(token))
-    .build();
+// Every send of this client carries the token
+let client = OpenAI::new().credentials(Credential::access_token(token));
 
-// Or with basic auth
-let client = SomeApi::new()
-    .variant()
-    .headers_builder(Headers::default().use_basic_auth("user", "pass"))
-    .build();
+// Or one call only, overriding the client credential
+let models = client
+    .list_models()
+    .credential(Credential::access_token(other_token))
+    .await?;
 ```
 
-When `Headers` has explicit auth set via `use_bearer_token()`, `use_basic_auth()`, or `use_api_key()`, env-based auth fallback is automatically skipped. The generated code checks `headers.has_explicit_auth()` so explicit API keys now win over env fallback the same way bearer/basic auth already did.
+A credential's kind must match a placement the definition accepts: `Credential::access_token` for bearer and OAuth2, `Credential::api_key` for key headers, query parameters, and cookies, and `Credential::basic` for Basic. An explicit credential always wins over the environment fallback.
 
 This is useful for:
 
@@ -350,23 +340,11 @@ This is useful for:
 
 ### UpdateStrategy
 
-When creating API variants with the generated `variant()` method, use `UpdateStrategy` to control auth:
-
-```rust
-use schematic_define::{AuthStrategy, UpdateStrategy};
-
-// Keep existing auth strategy
-let strategy = UpdateStrategy::NoChange;
-
-// Change to a different auth strategy
-let strategy = UpdateStrategy::ChangeTo(AuthStrategy::ApiKey {
-    header: "X-API-Key".to_string(),
-});
-```
+`UpdateStrategy` (`NoChange` or `ChangeTo(AuthStrategy)`) is still exported, but no generated code reads it: the generated `variant()` method it served no longer exists. Reconfigure a client through its chained settings (`{Api}::new().base_url(..)`, `.api_key(..)`, …) instead.
 
 ## Headers Builder
 
-The `Headers` type provides a fluent API for building HTTP headers:
+The `Headers` type provides a fluent API for building HTTP headers. Generated WebSocket clients use it for their handshake headers and credentials; generated REST clients do not, since their credentials go through the runtime (see [Programmatic Authentication](#programmatic-authentication)).
 
 ```rust
 use schematic_define::Headers;
@@ -513,6 +491,47 @@ The `EnvMapping` struct also includes OAuth2-specific fields (`oauth_client_id`,
 The `RestApi::default_env_mapping()` method returns an `EnvMapping` built from:
 1. Explicit `env_mapping` if set
 2. Legacy `env_auth` / `env_username` fields otherwise
+
+## Cross-Origin Policy, Request IDs, and Secret Names
+
+Three API-level fields describe how the runtime treats responses and what it
+must never record. Endpoints cannot override them.
+
+| Field | Meaning |
+|-------|---------|
+| `cross_origin` | Which origins a redirect or followed next-page link may reach; defaults to same-origin |
+| `request_id_header` | Response header carrying the provider's request id (case-insensitive); `None` when unknown |
+| `secret_names` | Extra header names (case-insensitive) and query names (exact) whose values are never stored or shown |
+
+`CrossOrigin` has five policies:
+
+| Constructor | Follows |
+|-------------|---------|
+| `CrossOrigin::same_origin()` (default) | Only the base origin (scheme, host, effective port) |
+| `CrossOrigin::allow_origins([...])` | The base plus these exact origins, with credentials; no wildcards |
+| `CrossOrigin::allow_without_credentials()` | Anywhere; credentials are stripped when the origin differs from the base |
+| `CrossOrigin::danger_allow_any()` | Anywhere, with credentials |
+| `CrossOrigin::deny()` | No redirects and no cross-origin links; same-origin next-page links still pass |
+
+A caller may only tighten the definition's policy (to `deny`, `same_origin`,
+or a subset of an `allow_origins` list; over `deny`, only `deny`). The runtime
+enforces the policy.
+
+```rust
+use schematic_define::CrossOrigin;
+
+let api = RestApi {
+    // ...
+    cross_origin: CrossOrigin::same_origin(),
+    request_id_header: Some("x-request-id".to_string()),
+    secret_names: vec![],
+    default_pagination: None,
+    pagination_exceptions: vec![],
+};
+```
+
+`secret_names` adds to the built-in secret names and the API's own
+authentication header or query name, which are always treated as secret.
 
 ## Request Types
 
@@ -728,7 +747,7 @@ WebSocket connections can define special lifecycle messages:
 A basic health-check API with no authentication:
 
 ```rust
-use schematic_define::{RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse};
+use schematic_define::{RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse, CrossOrigin};
 
 let api = RestApi {
     name: "HealthService".to_string(),
@@ -762,6 +781,11 @@ let api = RestApi {
             oauth_scopes: None,
         },
     ],
+    cross_origin: CrossOrigin::default(),
+    request_id_header: None,
+    secret_names: vec![],
+    default_pagination: None,
+    pagination_exceptions: vec![],
 };
 ```
 
@@ -771,7 +795,7 @@ A user management API with CRUD operations:
 
 ```rust
 use schematic_define::{
-    RestApi, Endpoint, RestMethod, AuthStrategy, ApiRequest, ApiResponse
+    RestApi, Endpoint, RestMethod, AuthStrategy, ApiRequest, ApiResponse, CrossOrigin
 };
 
 let api = RestApi {
@@ -845,6 +869,11 @@ let api = RestApi {
             oauth_scopes: None,
         },
     ],
+    cross_origin: CrossOrigin::default(),
+    request_id_header: None,
+    secret_names: vec![],
+    default_pagination: None,
+    pagination_exceptions: vec![],
 };
 ```
 
@@ -854,7 +883,8 @@ A file storage API demonstrating multipart form-data uploads:
 
 ```rust
 use schematic_define::{
-    RestApi, Endpoint, RestMethod, AuthStrategy, ApiRequest, ApiResponse, FormField
+    RestApi, Endpoint, RestMethod, AuthStrategy, ApiRequest, ApiResponse, FormField,
+    CrossOrigin,
 };
 
 let api = RestApi {
@@ -932,6 +962,11 @@ let api = RestApi {
             oauth_scopes: None,
         },
     ],
+    cross_origin: CrossOrigin::default(),
+    request_id_header: None,
+    secret_names: vec![],
+    default_pagination: None,
+    pagination_exceptions: vec![],
 };
 ```
 
@@ -956,49 +991,51 @@ let params = EndpointParams::default()
     .with_query_param("limit", QueryParamType::Integer, false, Some("Max results"));
 ```
 
-### Endpoint with Pagination
-
-```rust
-use schematic_define::{
-    Endpoint, RestMethod, ApiResponse, ApiRequest,
-    params::{EndpointParams, PaginationStyle, PaginationResponse}
-};
-
-Endpoint {
-    id: "ListUsers".to_string(),
-    method: RestMethod::Get,
-    path: "/users".to_string(),
-    description: "List all users with pagination".to_string(),
-    request: None,
-    response: ApiResponse::json_vec_type("User"),
-    headers: vec![],
-    params: Some(EndpointParams::default()
-        .with_pagination(PaginationStyle::github())
-        .with_response_pagination(PaginationResponse::LinkHeader)),
-    oauth_scopes: None,
-}
-```
-
 ### Pagination
 
-`PaginationStyle` provides standardized pagination patterns:
+Pagination is authored once per API, not on endpoints. `RestApi` has a
+default strategy for its lists and one table of exception rows keyed by
+endpoint id; the types live in `schematic_define::pagination`:
 
 ```rust
-use schematic_define::params::{EndpointParams, PaginationStyle, PaginationResponse};
+use schematic_define::pagination::{
+    Collection, MoreSignal, PageSize, PaginationException, Strategy, ValueSource,
+};
 
-// GitHub-style pagination (page + per_page)
-let params = EndpointParams::default()
-    .with_pagination(PaginationStyle::github())
-    .with_response_pagination(PaginationResponse::LinkHeader);
+let default = Strategy::page_number("page", MoreSignal::link_rel("next"))
+    .page_size(PageSize::new("per_page").server_default(30).max(100))
+    .build();
 
-// Cursor-based pagination
-let params = EndpointParams::default()
-    .with_pagination(PaginationStyle::cursor("after", Some("limit"), 20));
-
-// Offset/limit pagination
-let params = EndpointParams::default()
-    .with_pagination(PaginationStyle::offset_limit("offset", "limit", 20, 100));
+// A GET endpoint whose response is `Vec<T>` inherits `default`. Wrapper
+// lists, opt-outs, overrides, and non-GET lists need a row.
+let exceptions = vec![
+    PaginationException::new(
+        "ListWorkflowRuns",
+        Collection::at("workflow_runs")
+            .item_type("WorkflowRun")
+            .paginate(default.clone().total(ValueSource::body("total_count"))),
+    ),
+    PaginationException::new("GetTagReference", Collection::root().unpaginated()),
+];
+// RestApi { default_pagination: Some(default), pagination_exceptions: exceptions, .. }
 ```
+
+A strategy input with the same name and location as a declared parameter
+adopts it (the request struct drops the field) only when the strategy
+authors the knob that replaces it. If the endpoint declares that parameter
+required, the strategy needs a value to send when the caller sets none
+(`ManagedRole::sent_default`: the first page or offset, or the size's
+`sent_default`); ordinary sends of the request send that value too. The rules are checked by
+`pagination::validate_pagination`, which `schematic-gen` runs; see
+[generation validation](../docs/generation/validation.md#pagination-rules).
+
+`PaginationStyle`, `PaginationResponse`, and `EndpointParams::with_pagination`
+are superseded. They remain only because existing definitions still use
+`with_pagination` to add ordinary query parameters; nothing generates a pager
+from them.
+
+[Pagination](../docs/pagination.md) describes resolution, adoption, every
+strategy builder, and what the generated pager does with them.
 
 ### QueryParamType Variants
 

@@ -6,14 +6,20 @@
 //! imported [`RestApi`] as a value, so an imported API sits in the definitions
 //! catalog alongside the hand-authored ones and flows through the normal
 //! `generate` pipeline.
+//!
+//! An imported document carries no pagination, so authored pagination for an
+//! imported API lives in a hand-written overlay function the importer never
+//! writes. When one is configured, the emitted factory passes the imported
+//! value through it, so `define_{api}_api()` returns the augmented definition
+//! to every caller.
 
 use std::path::Path;
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthStrategy, Endpoint, EndpointParams, FormField, FormFieldKind,
-    ParamDef, ParamStyle, QueryParamType, RestApi, RestMethod, Schema,
+    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EndpointParams, FormField,
+    FormFieldKind, ParamDef, ParamStyle, QueryParamType, RestApi, RestMethod, Schema,
 };
 
 use crate::errors::GeneratorError;
@@ -21,18 +27,25 @@ use crate::output::{format_code, validate_code, write_atomic};
 
 /// Writes `mod.rs` for a definitions-crate module describing `api`.
 ///
+/// `overlay`, when given, is the Rust path of a `fn(RestApi) -> RestApi` the
+/// emitted factory applies to the imported value (see the module docs).
+///
 /// ## Errors
 ///
-/// Returns `GeneratorError` if the emitted tokens do not parse as Rust or the
-/// file cannot be written.
+/// Returns `GeneratorError::ConfigError` if `overlay` is not a plain Rust path
+/// (see [`parse_overlay_path`]), and another `GeneratorError` if the emitted
+/// tokens do not parse as Rust or the file cannot be written. Nothing is
+/// written on error.
 pub fn generate_definition_module(
     api: &RestApi,
     module_name: &str,
     model_names: &[String],
+    overlay: Option<&str>,
     output_dir: &Path,
     dry_run: bool,
 ) -> Result<String, GeneratorError> {
-    let tokens = assemble_definition_module(api, module_name, model_names);
+    let overlay = overlay.map(parse_overlay_path).transpose()?;
+    let tokens = assemble_definition_module(api, module_name, model_names, overlay.as_ref());
     let file = validate_code(&tokens)?;
     let formatted = format_code(&file);
 
@@ -45,22 +58,61 @@ pub fn generate_definition_module(
     Ok(formatted)
 }
 
+/// Parses an `--overlay` value as a plain Rust path to a function, such as
+/// `crate::openai_pagination::apply`.
+///
+/// Generic arguments are rejected: the overlay is called with one `RestApi`
+/// argument, so its type parameters, if any, are always inferable.
+///
+/// ## Errors
+///
+/// Returns `GeneratorError::ConfigError` naming the option when `value` is
+/// empty, is not a path, or has generic arguments on any segment.
+pub fn parse_overlay_path(value: &str) -> Result<syn::Path, GeneratorError> {
+    let invalid = |reason: &str| {
+        GeneratorError::ConfigError(format!(
+            "--overlay `{value}` {reason}; expected a Rust path to a `fn(RestApi) -> RestApi`, such as `crate::openai_pagination::apply`"
+        ))
+    };
+
+    if value.trim().is_empty() {
+        return Err(invalid("is empty"));
+    }
+    let path: syn::Path = syn::parse_str(value).map_err(|_| invalid("is not a Rust path"))?;
+    if path.segments.iter().any(|segment| !segment.arguments.is_none()) {
+        return Err(invalid("has generic arguments"));
+    }
+    Ok(path)
+}
+
+/// Renders `path` without the spaces `TokenStream`'s `Display` puts around `::`.
+fn path_text(path: &syn::Path) -> String {
+    let segments: Vec<String> =
+        path.segments.iter().map(|segment| segment.ident.to_string()).collect();
+    let leading = if path.leading_colon.is_some() { "::" } else { "" };
+    format!("{leading}{}", segments.join("::"))
+}
+
 /// Assembles the full module token stream.
 fn assemble_definition_module(
     api: &RestApi,
     module_name: &str,
     model_names: &[String],
+    overlay: Option<&syn::Path>,
 ) -> TokenStream {
     let fn_name = format_ident!("define_{}_api", module_name);
-    let api_expr = rest_api_tokens(api);
+    let api_expr = rest_api_tokens(api, overlay);
     let registry = registry_tokens(model_names);
 
     let module_doc = format!(
         " {} REST API definition, imported from an OpenAPI specification.",
         api.name
     );
+    let overlay_arg = overlay
+        .map(|path| format!(" --overlay {}", path_text(path)))
+        .unwrap_or_default();
     let regenerate_doc = format!(
-        " Regenerate with `schematic-gen import --input <spec> --api-name {} --definitions-out <dir>`.",
+        " Regenerate with `schematic-gen import --input <spec> --api-name {} --definitions-out <dir>{overlay_arg}`.",
         api.name
     );
     let endpoint_doc = format!(" Endpoints: {}.", api.endpoints.len());
@@ -114,7 +166,7 @@ fn registry_tokens(model_names: &[String]) -> TokenStream {
     }
 }
 
-fn rest_api_tokens(api: &RestApi) -> TokenStream {
+fn rest_api_tokens(api: &RestApi, overlay: Option<&syn::Path>) -> TokenStream {
     let name = &api.name;
     let description = &api.description;
     let base_url = &api.base_url;
@@ -126,15 +178,16 @@ fn rest_api_tokens(api: &RestApi) -> TokenStream {
     let module_path = option_string_tokens(api.module_path.as_deref());
     let request_suffix = option_string_tokens(api.request_suffix.as_deref());
     let version = option_string_tokens(api.version.as_deref());
+    let cross_origin = cross_origin_tokens(&api.cross_origin);
+    let request_id_header = option_string_tokens(api.request_id_header.as_deref());
+    let secret_names = string_vec_tokens(&api.secret_names);
 
     let endpoints = api.endpoints.iter().map(endpoint_tokens);
 
     // `Vec::from([..])` rather than `vec![..]`: prettyplease does not format
     // inside a macro invocation, so a `vec!` here would emit the whole endpoint
     // list as one unformatted token soup.
-    quote! {
-        let endpoints = Vec::from([#(#endpoints),*]);
-
+    let literal = quote! {
         RestApi {
             name: #name.to_string(),
             description: #description.to_string(),
@@ -150,7 +203,28 @@ fn rest_api_tokens(api: &RestApi) -> TokenStream {
             request_suffix: #request_suffix,
             version: #version,
             env_mapping: None,
+            cross_origin: #cross_origin,
+            request_id_header: #request_id_header,
+            secret_names: #secret_names,
+            // An imported document yields no pagination. Authored pagination
+            // belongs to the configured overlay, which owns these two fields;
+            // the importer never writes the overlay, so a re-import keeps it.
+            default_pagination: None,
+            pagination_exceptions: vec![],
         }
+    };
+
+    let tail = match overlay {
+        Some(overlay) => quote! {
+            let api = #literal;
+            #overlay(api)
+        },
+        None => literal,
+    };
+
+    quote! {
+        let endpoints = Vec::from([#(#endpoints),*]);
+        #tail
     }
 }
 
@@ -402,6 +476,19 @@ fn option_string_tokens(value: Option<&str>) -> TokenStream {
     }
 }
 
+fn cross_origin_tokens(policy: &CrossOrigin) -> TokenStream {
+    match policy {
+        CrossOrigin::SameOrigin => quote! { CrossOrigin::same_origin() },
+        CrossOrigin::AllowOrigins(origins) => {
+            let origins = origins.iter();
+            quote! { CrossOrigin::allow_origins([#(#origins),*]) }
+        }
+        CrossOrigin::AllowWithoutCredentials => quote! { CrossOrigin::allow_without_credentials() },
+        CrossOrigin::DangerAllowAny => quote! { CrossOrigin::danger_allow_any() },
+        CrossOrigin::Deny => quote! { CrossOrigin::deny() },
+    }
+}
+
 fn string_vec_tokens(values: &[String]) -> TokenStream {
     let values = values.iter();
     quote! { vec![#(#values.to_string()),*] }
@@ -444,18 +531,23 @@ mod tests {
             request_suffix: None,
             version: None,
             env_mapping: None,
+            cross_origin: CrossOrigin::default(),
+            request_id_header: None,
+            secret_names: vec![],
+            default_pagination: None,
+            pagination_exceptions: vec![],
         }
     }
 
     #[test]
     fn emits_parseable_rust() {
-        let tokens = assemble_definition_module(&sample_api(), "sample", &["ListItemsResponse".to_string()]);
+        let tokens = assemble_definition_module(&sample_api(), "sample", &["ListItemsResponse".to_string()], None);
         assert!(validate_code(&tokens).is_ok());
     }
 
     #[test]
     fn emits_the_conventional_function_name() {
-        let tokens = assemble_definition_module(&sample_api(), "sample", &["ListItemsResponse".to_string()]);
+        let tokens = assemble_definition_module(&sample_api(), "sample", &["ListItemsResponse".to_string()], None);
         let code = format_code(&validate_code(&tokens).unwrap());
 
         assert!(code.contains("pub fn define_sample_api() -> RestApi"));
@@ -463,12 +555,170 @@ mod tests {
 
     #[test]
     fn emits_each_endpoint() {
-        let tokens = assemble_definition_module(&sample_api(), "sample", &["ListItemsResponse".to_string()]);
+        let tokens = assemble_definition_module(&sample_api(), "sample", &["ListItemsResponse".to_string()], None);
         let code = format_code(&validate_code(&tokens).unwrap());
 
         assert!(code.contains(r#"id: "ListItems".to_string()"#));
         assert!(code.contains("RestMethod::Get"));
         assert!(code.contains(r#"path: "/items".to_string()"#));
+    }
+
+    #[test]
+    fn emits_api_level_policy_fields() {
+        let mut api = sample_api();
+        api.cross_origin = CrossOrigin::allow_origins(["https://uploads.example.com"]);
+        api.request_id_header = Some("x-request-id".to_string());
+        api.secret_names = vec!["X-Pin".to_string()];
+
+        let tokens = assemble_definition_module(&api, "sample", &["ListItemsResponse".to_string()], None);
+        let code = format_code(&validate_code(&tokens).unwrap());
+
+        assert!(code.contains(r#"CrossOrigin::allow_origins(["https://uploads.example.com"])"#));
+        assert!(code.contains(r#"request_id_header: Some("x-request-id".to_string())"#));
+        assert!(code.contains(r#"secret_names: vec!["X-Pin".to_string()]"#));
+    }
+
+    #[test]
+    fn emits_same_origin_for_the_default_policy() {
+        let tokens =
+            assemble_definition_module(&sample_api(), "sample", &["ListItemsResponse".to_string()], None);
+        let code = format_code(&validate_code(&tokens).unwrap());
+
+        assert!(code.contains("cross_origin: CrossOrigin::same_origin()"));
+        assert!(code.contains("request_id_header: None"));
+    }
+
+    fn emit(overlay: Option<&str>) -> String {
+        let overlay = overlay.map(|value| parse_overlay_path(value).unwrap());
+        let tokens = assemble_definition_module(
+            &sample_api(),
+            "sample",
+            &["ListItemsResponse".to_string()],
+            overlay.as_ref(),
+        );
+        format_code(&validate_code(&tokens).unwrap())
+    }
+
+    /// The statements of the emitted `define_sample_api()`.
+    fn factory_statements(code: &str) -> Vec<syn::Stmt> {
+        let file = syn::parse_file(code).unwrap();
+        file.items
+            .into_iter()
+            .find_map(|item| match item {
+                syn::Item::Fn(function) if function.sig.ident == "define_sample_api" => {
+                    Some(function.block.stmts)
+                }
+                _ => None,
+            })
+            .expect("define_sample_api is emitted")
+    }
+
+    #[test]
+    fn an_overlay_is_applied_to_the_constructed_api_as_the_tail_expression() {
+        let code = emit(Some("crate::sample_pagination::apply"));
+        let statements = factory_statements(&code);
+
+        let [.., syn::Stmt::Local(binding), syn::Stmt::Expr(syn::Expr::Call(call), None)] =
+            statements.as_slice()
+        else {
+            panic!("factory does not end with `let api = ..; overlay(api)`:\n{code}");
+        };
+        let syn::Pat::Ident(name) = &binding.pat else { panic!("binding is not an ident") };
+        assert_eq!(name.ident, "api");
+        let initializer = &binding.init.as_ref().expect("binding is initialized").expr;
+        assert!(
+            matches!(&**initializer, syn::Expr::Struct(literal) if literal.path.is_ident("RestApi")),
+            "`api` is not bound to the `RestApi` literal"
+        );
+        let syn::Expr::Path(callee) = &*call.func else { panic!("callee is not a path") };
+        assert_eq!(path_text(&callee.path), "crate::sample_pagination::apply");
+        let arguments: Vec<_> = call.args.iter().collect();
+        assert!(
+            matches!(arguments.as_slice(), [syn::Expr::Path(argument)] if argument.path.is_ident("api")),
+            "overlay is not called with `api` alone"
+        );
+        assert_eq!(code.matches("crate::sample_pagination::apply(").count(), 1);
+    }
+
+    #[test]
+    fn without_an_overlay_the_factory_ends_with_the_literal() {
+        let code = emit(None);
+        let statements = factory_statements(&code);
+
+        let [.., syn::Stmt::Expr(syn::Expr::Struct(literal), None)] = statements.as_slice() else {
+            panic!("factory does not end with the `RestApi` literal:\n{code}");
+        };
+        assert!(literal.path.is_ident("RestApi"));
+        assert!(!code.contains("let api"));
+        assert!(!code.contains("--overlay"));
+    }
+
+    #[test]
+    fn an_overlay_changes_only_the_tail_and_the_regeneration_hint() {
+        let plain = emit(None);
+        let overlaid = emit(Some("crate::sample_pagination::apply"));
+
+        let stripped = overlaid
+            .replacen(" --overlay crate::sample_pagination::apply`", "`", 1)
+            .replacen("    let api = RestApi {\n", "    RestApi {\n", 1)
+            .replacen("    };\n    crate::sample_pagination::apply(api)\n", "    }\n", 1);
+        assert_eq!(stripped, plain);
+    }
+
+    #[test]
+    fn the_regeneration_hint_names_the_overlay() {
+        let code = emit(Some("crate::sample_pagination::apply"));
+
+        assert!(code.contains("--definitions-out <dir> --overlay crate::sample_pagination::apply`"));
+    }
+
+    #[test]
+    fn plain_function_paths_are_accepted_as_overlays() {
+        for value in [
+            "crate::openai_pagination::apply",
+            "::extern_crate::apply",
+            "super::apply",
+            "apply",
+        ] {
+            let path = parse_overlay_path(value).unwrap_or_else(|e| panic!("{value}: {e}"));
+            assert_eq!(path_text(&path), value);
+        }
+    }
+
+    #[test]
+    fn non_paths_and_generic_paths_are_rejected_as_overlays() {
+        for value in [
+            "",
+            "   ",
+            "not a path",
+            "crate::x::<T>",
+            "crate::x::apply::<RestApi>",
+            "crate::x::apply()",
+            "crate::x;",
+        ] {
+            let Err(error) = parse_overlay_path(value) else { panic!("{value:?} was accepted") };
+            assert!(
+                matches!(&error, GeneratorError::ConfigError(message) if message.contains("--overlay")),
+                "{value:?}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_invalid_overlay_writes_nothing() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+
+        let result = generate_definition_module(
+            &sample_api(),
+            "sample",
+            &[],
+            Some("crate::x::<T>"),
+            temp_dir.path(),
+            false,
+        );
+
+        assert!(result.is_err());
+        assert!(!temp_dir.path().join("mod.rs").exists());
     }
 
     /// Renders a bare expression inside a function so it parses as a file.
