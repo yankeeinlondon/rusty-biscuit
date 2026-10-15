@@ -66,9 +66,12 @@ packages:
     - messenger-cli
     - darkmatter-cli
     - darkmatter
+    - biscuit-tui
+    - reaper
+    - schematic-define
+    - claudine-gen
 
-message_to_agent: |-
-    Phase 7 adds parsed container event shell discovery in lib/src/composition/sequence/preflight/containers.rs. Terminal event placeholders require templates; group event roots are late. The audited root_lifecycle is installed on RootRun after graph approval. Graph lifecycle clones share settled template authorization; reread graphs settle only against original membership. Catalog ancestry includes the selected entry (catalog#name diagnostics), permitting distinct entries in the same catalog and independent sequence reuse. Closed ShellApprovalOptions membership travels through StepScope and CompositionExecutionRequest.closed_shell_approvals, including root retries, root proxies, and concurrent descendants; preserve it before policy evaluation so --yolo cannot approve new commands after execution begins. The shipped-example corpus now passively builds its approval graph. Native Windows template tests use the compiled argv recorder because echo is a shell builtin there, not a native executable. Phase 8 still owns the broader prompt/docs migration. Preserve separate seq bindings, caller input records, cancellation scopes, and RuntimeSnapshot.proxy_chain. No formatting, staging, branch commit, or lifecycle move was performed.
+message_to_agent: "Final verification is complete; implementation is ready for review. Required local gates and the 31-case shipped-prompt checkpoint pass. The Darkmatter documentation guard and sibling context/skill guidance now describe concurrent groups. Preserve separate seq/group bindings, caller provenance, cancellation scopes, and RuntimeSnapshot.proxy_chain. Review the Phase 9 log for 11 Messenger and 5 Darkmatter/DMLS tests over the L1 speed budget, three inherited failures outside the required opt-in prompt checkpoint, ignored cases, the existing local-runner freshness defect, and native Windows Ctrl-C/Windows-WSL2 L2 coverage gaps. Only macOS was exercised in Phase 9. No formatting, staging, commit, or lifecycle move was performed."
 source_files_during_phase_3:
     - claudine/cli/src/argv/partition.rs
     - claudine/cli/src/argv/partition/tests.rs
@@ -367,6 +370,448 @@ docs_created_during_phase_7: []
 skills_files_updated_during_phase_7:
     - .claude/skills/claudine/SKILL.md
     - .claude/skills/os/windows.md
+source_files_during_phase_8:
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/make-it-markdown.md
+    - claudine/cli/tests/fixtures/frozen_prompts/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/research_sequence_artifacts.rs
+    - claudine/cli/tests/l1/sequence_schema.rs
+    - claudine/cli/tests/level3/level3_linux_sequence_ctrl_c.rs
+    - claudine/cli/tests/level3/level3_sequence_ctrl_c.rs
+    - claudine/cli/tests/level3/level3_windows_sequence_ctrl_c.rs
+    - claudine/cli/tests/prompts/prompt_guide_defects.rs
+    - claudine/cli/tests/prompts/shipped_implement_router.rs
+    - claudine/cli/tests/prompts/shipped_prompt_contract.rs
+    - claudine/cli/tests/prompts/shipped_prompts.rs
+    - claudine/gen/tests/l1/agent_errors_check.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/sequence.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/sequence/mod.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/tests/l1/agent_errors_fleet.rs
+    - claudine/justfile
+docs_updated_during_phase_8:
+    - biscuit-tui/docs/components/_build.md
+    - biscuit-tui/docs/style-guide/_style-guide.md
+    - claudine/docs/getting-started/index.md
+    - claudine/docs/research/_TEMPLATE.md
+    - claudine/docs/research/acp/_fleet.md
+    - claudine/docs/research/agent-cli/_fleet.md
+    - claudine/docs/research/agent-errors/_fleet.md
+    - claudine/docs/research/agent-logging/_fleet.md
+    - claudine/docs/research/agent-models/_fleet.md
+    - claudine/docs/research/agent-permissions/_fleet.md
+    - claudine/docs/research/hooks/_fleet.md
+    - claudine/docs/research/local_runners/_fleet.md
+    - claudine/docs/research/mcp/_fleet.md
+    - claudine/docs/research/memory/_fleet.md
+    - claudine/docs/research/model-config/_fleet.md
+    - claudine/docs/research/model-serving-api-standards/_research.md
+    - claudine/docs/research/non-interactive-sessions/_fleet.md
+    - claudine/docs/research/plugins/_fleet.md
+    - claudine/docs/research/reasoning-level/_fleet.md
+    - claudine/docs/research/resume/_fleet.md
+    - claudine/docs/research/signals/_fleet.md
+    - claudine/docs/research/skills/_fleet.md
+    - claudine/docs/research/slash-commands/_fleet.md
+    - claudine/docs/research/steering/_fleet.md
+    - claudine/docs/research/subagents/_fleet.md
+    - claudine/docs/research/summary/acp.md
+    - claudine/docs/research/summary/agent-cli.md
+    - claudine/docs/research/summary/agent-logging.md
+    - claudine/docs/research/summary/agent-models.md
+    - claudine/docs/research/summary/agent-permissions.md
+    - claudine/docs/research/summary/agent-plugins.md
+    - claudine/docs/research/summary/agent-skills.md
+    - claudine/docs/research/summary/hooks.md
+    - claudine/docs/research/summary/local-runners.md
+    - claudine/docs/research/summary/model-config.md
+    - claudine/docs/research/summary/non-interactive-sessions.md
+    - claudine/docs/research/summary/session-resumption.md
+    - claudine/docs/research/summary/slash-commands.md
+    - claudine/docs/research/summary/steering.md
+    - claudine/docs/research/summary/subagents.md
+    - claudine/docs/research/summary/system-prompt.md
+    - claudine/docs/research/system-prompt/_fleet.md
+    - claudine/docs/research/usage/_fleet.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/flow-control/flow-control.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/looping.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/frontmatter-properties.md
+    - claudine/docs/topics/pre-flight-checks.md
+    - claudine/docs/topics/schemas.md
+    - claudine/docs/topics/timeouts.md
+    - claudine/features/2026-10-24-sequence-containers/implementation-log.md
+    - claudine/features/2026-10-24-sequence-containers/plan.md
+    - darkmatter/docs/inline/preflight-checks.md
+    - darkmatter/docs/research/parsing/overview.md
+    - prompts/_implement/implement-plan.md
+    - prompts/_prompt.md
+    - prompts/_reviews/feature-review.md
+    - prompts/review-loop.md
+    - reaper/docs/research/schemas.md
+    - schematic/docs/research/project-mgmt/canonical.md
+    - claudine/docs/research/summary/mcp.md
+    - claudine/docs/research/summary/plugins.md
+docs_created_during_phase_8:
+    - claudine/docs/research/_local-runner-tasks.yaml
+    - claudine/docs/research/_provider-tasks.yaml
+    - claudine/docs/research/acp/_research.md
+    - claudine/docs/research/agent-cli/_research.md
+    - claudine/docs/research/agent-errors/_research.md
+    - claudine/docs/research/agent-logging/_research.md
+    - claudine/docs/research/agent-models/_research.md
+    - claudine/docs/research/agent-permissions/_research.md
+    - claudine/docs/research/hooks/_research.md
+    - claudine/docs/research/local_runners/_research.md
+    - claudine/docs/research/mcp/_research.md
+    - claudine/docs/research/memory/_research.md
+    - claudine/docs/research/model-config/_research.md
+    - claudine/docs/research/non-interactive-sessions/_research.md
+    - claudine/docs/research/plugins/_research.md
+    - claudine/docs/research/reasoning-level/_research.md
+    - claudine/docs/research/resume/_research.md
+    - claudine/docs/research/signals/_research.md
+    - claudine/docs/research/skills/_research.md
+    - claudine/docs/research/slash-commands/_research.md
+    - claudine/docs/research/steering/_research.md
+    - claudine/docs/research/subagents/_research.md
+    - claudine/docs/research/system-prompt/_research.md
+    - claudine/docs/research/usage/_research.md
+skills_files_updated_during_phase_8:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/claudine/cli-reference.md
+    - .claude/skills/claudine/research-contracts.md
+    - .claude/skills/claudine/timeline.md
+source_files_during_phase_9:
+    - claudine/lib/src/composition/sequence/model.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - darkmatter/lib/tests/l1/current_root_documentation_contract.rs
+docs_updated_during_phase_9:
+    - claudine/features/2026-10-24-sequence-containers/plan.md
+    - claudine/features/2026-10-24-sequence-containers/implementation-log.md
+    - claudine/features/2026-10-24-sequence-containers/spec.md
+    - claudine/docs/topics/state-management/context-variables.md
+docs_created_during_phase_9: []
+skills_files_updated_during_phase_9:
+    - .claude/skills/messenger/research-contract.md
+    - .claude/skills/claudine/cli-commands.md
+source_code:
+    - claudine/cli/src/args.rs
+    - claudine/cli/src/argv/partition.rs
+    - claudine/cli/src/argv/partition/tests.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/mod.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline/tests.rs
+    - claudine/cli/src/commands/wrap/composition/preflight.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/captured.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/inherited.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/retained.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+    - claudine/cli/src/commands/wrap/exec/termination/unix.rs
+    - claudine/cli/src/commands/wrap/exec/termination/windows.rs
+    - claudine/cli/src/commands/wrap/exec/wiring/session.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/control_dispatch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/error_routing.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+    - claudine/cli/src/commands/wrap/harness_orch/shell_options.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/review.rs
+    - claudine/cli/src/commands/wrap/sequence/review/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run/tests.rs
+    - claudine/cli/src/completion/engine/tests.rs
+    - claudine/cli/src/completion/schema_completion/tests.rs
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/telemetry.rs
+    - claudine/cli/tests/common/drain_interrupt.rs
+    - claudine/cli/tests/common/owned_value_options.rs
+    - claudine/cli/tests/common/review_screen.rs
+    - claudine/cli/tests/common/terminal_interrupt.rs
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/make-it-markdown.md
+    - claudine/cli/tests/fixtures/frozen_prompts/prompts/review-loop.md
+    - claudine/cli/tests/fixtures/frozen_prompts/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md
+    - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/codex_app_server.rs
+    - claudine/cli/tests/l1/completion_ownership.rs
+    - claudine/cli/tests/l1/compose_caller_file_provenance.rs
+    - claudine/cli/tests/l1/compose_frontmatter_model.rs
+    - claudine/cli/tests/l1/compose_removed_validation_keys.rs
+    - claudine/cli/tests/l1/composition_outputs.rs
+    - claudine/cli/tests/l1/ctx_per_run.rs
+    - claudine/cli/tests/l1/document_environment_routes.rs
+    - claudine/cli/tests/l1/error_guards/transport-allow.toml
+    - claudine/cli/tests/l1/handoff_owners.rs
+    - claudine/cli/tests/l1/inline_completion_lifecycle.rs
+    - claudine/cli/tests/l1/launch_trigger_schemas.rs
+    - claudine/cli/tests/l1/lifecycle_downgrade_outcome.rs
+    - claudine/cli/tests/l1/lifecycle_message_drain.rs
+    - claudine/cli/tests/l1/lifecycle_message_drain_interrupt.rs
+    - claudine/cli/tests/l1/lifecycle_mixed_span_validation.rs
+    - claudine/cli/tests/l1/loop_cli.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/preflight_execution_parity.rs
+    - claudine/cli/tests/l1/provider_tail_notice.rs
+    - claudine/cli/tests/l1/provider_tail_ownership.rs
+    - claudine/cli/tests/l1/research_sequence_artifacts.rs
+    - claudine/cli/tests/l1/sequence_cli.rs
+    - claudine/cli/tests/l1/sequence_containers.rs
+    - claudine/cli/tests/l1/sequence_ctrl_c_windows.rs
+    - claudine/cli/tests/l1/sequence_errors_cli.rs
+    - claudine/cli/tests/l1/sequence_groups.rs
+    - claudine/cli/tests/l1/sequence_jit.rs
+    - claudine/cli/tests/l1/sequence_magic_reference.rs
+    - claudine/cli/tests/l1/sequence_overlay_pty.rs
+    - claudine/cli/tests/l1/sequence_perf.rs
+    - claudine/cli/tests/l1/sequence_prompt_property.rs
+    - claudine/cli/tests/l1/sequence_schema.rs
+    - claudine/cli/tests/l1/sequence_shell_templates.rs
+    - claudine/cli/tests/l1/sequence_sources_cli.rs
+    - claudine/cli/tests/l1/tts_prewarm.rs
+    - claudine/cli/tests/l1/wrap_compose_validation.rs
+    - claudine/cli/tests/l1/wrap_sigint.rs
+    - claudine/cli/tests/level2/level2_auto_complete_operation_file.rs
+    - claudine/cli/tests/level2/level2_lifecycle_control.rs
+    - claudine/cli/tests/level2/level2_perf_capture.rs
+    - claudine/cli/tests/level2/level2_sequence_container_ctrl_c.rs
+    - claudine/cli/tests/level2/level2_sequence_task_stream_capture.rs
+    - claudine/cli/tests/level2/main.rs
+    - claudine/cli/tests/level3/level3_linux_sequence_ctrl_c.rs
+    - claudine/cli/tests/level3/level3_sequence_ctrl_c.rs
+    - claudine/cli/tests/level3/level3_windows_sequence_ctrl_c.rs
+    - claudine/cli/tests/prompts/prompt_guide_defects.rs
+    - claudine/cli/tests/prompts/shipped_implement_router.rs
+    - claudine/cli/tests/prompts/shipped_prompt_contract.rs
+    - claudine/cli/tests/prompts/shipped_prompts.rs
+    - claudine/gen/tests/l1/agent_errors_check.rs
+    - claudine/justfile
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/audio.rs
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/bindings/containers.rs
+    - claudine/lib/src/composition/lifecycle/bindings/rename.rs
+    - claudine/lib/src/composition/lifecycle/bindings/rename/tests.rs
+    - claudine/lib/src/composition/lifecycle/bindings/tests.rs
+    - claudine/lib/src/composition/lifecycle/cancellation.rs
+    - claudine/lib/src/composition/lifecycle/context/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/parse.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/classify/tests.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/sequence.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/sequence/tests.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/tests.rs
+    - claudine/lib/src/composition/lifecycle/runtime.rs
+    - claudine/lib/src/composition/lifecycle/structured_shell.rs
+    - claudine/lib/src/composition/lifecycle/tests/audio_emission.rs
+    - claudine/lib/src/composition/lifecycle/tests/container_runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/grammar.rs
+    - claudine/lib/src/composition/lifecycle/tests/guard_runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/tests/nested_span.rs
+    - claudine/lib/src/composition/lifecycle/tests/parse_config.rs
+    - claudine/lib/src/composition/looping/actions/tests.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/looping/expression.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/preflight/tests.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/tests.rs
+    - claudine/lib/src/composition/reserved.rs
+    - claudine/lib/src/composition/runtime_state.rs
+    - claudine/lib/src/composition/runtime_state/tests.rs
+    - claudine/lib/src/composition/sequence/data.rs
+    - claudine/lib/src/composition/sequence/formal.rs
+    - claudine/lib/src/composition/sequence/grammar.rs
+    - claudine/lib/src/composition/sequence/mod.rs
+    - claudine/lib/src/composition/sequence/model.rs
+    - claudine/lib/src/composition/sequence/normalize.rs
+    - claudine/lib/src/composition/sequence/preflight/containers.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/runtime_fixture.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/reserved.rs
+    - claudine/lib/src/composition/sequence/source.rs
+    - claudine/lib/src/composition/sequence/task/container_regressions.rs
+    - claudine/lib/src/composition/sequence/task/group.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/sequence/task/shell.rs
+    - claudine/lib/src/composition/sequence/task/templates.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/composition/sequence/tests.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/src/diagnostics/registry.rs
+    - claudine/lib/src/harness/shell.rs
+    - claudine/lib/tests/l1/agent_errors_fleet.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/lib/tests/l1/lifecycle_lift_ready_guard.rs
+    - claudine/schemas/action.yaml
+    - claudine/schemas/claudine.yaml
+    - claudine/schemas/lifecycle.yaml
+    - darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+    - darkmatter/lib/src/markdown/compose/context/effective_state.rs
+    - darkmatter/lib/src/markdown/compose/expression/binding.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/tests/l1/current_root_documentation_contract.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - messenger/cli/src/research.rs
+    - messenger/cli/src/research_lifecycle.rs
+    - messenger/cli/tests/research_lifecycle_cli.rs
+    - messenger/justfile
+    - messenger/lib/src/research/refresh/check.rs
+    - messenger/lib/src/research/refresh/cleanup.rs
+    - messenger/lib/src/research/refresh/mod.rs
+    - messenger/lib/src/research/refresh/prepare.rs
+    - messenger/lib/src/research/refresh/promote.rs
+    - messenger/lib/src/research/refresh/runner.rs
+    - messenger/lib/src/research/refresh/select.rs
+    - messenger/lib/src/research/refresh/state.rs
+    - messenger/lib/tests/research_refresh.rs
+documentation:
+    - biscuit-tui/docs/components/_build.md
+    - biscuit-tui/docs/style-guide/_style-guide.md
+    - claudine/README.md
+    - claudine/docs/cli/index.md
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/dependencies.md
+    - claudine/docs/examples/sequence-containers.md
+    - claudine/docs/getting-started/index.md
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/docs/research/_TEMPLATE.md
+    - claudine/docs/research/_local-runner-tasks.yaml
+    - claudine/docs/research/_provider-tasks.yaml
+    - claudine/docs/research/acp/_fleet.md
+    - claudine/docs/research/acp/_research.md
+    - claudine/docs/research/agent-cli/_fleet.md
+    - claudine/docs/research/agent-cli/_research.md
+    - claudine/docs/research/agent-errors/_fleet.md
+    - claudine/docs/research/agent-errors/_research.md
+    - claudine/docs/research/agent-logging/_fleet.md
+    - claudine/docs/research/agent-logging/_research.md
+    - claudine/docs/research/agent-models/_fleet.md
+    - claudine/docs/research/agent-models/_research.md
+    - claudine/docs/research/agent-permissions/_fleet.md
+    - claudine/docs/research/agent-permissions/_research.md
+    - claudine/docs/research/hooks/_fleet.md
+    - claudine/docs/research/hooks/_research.md
+    - claudine/docs/research/local_runners/_fleet.md
+    - claudine/docs/research/local_runners/_research.md
+    - claudine/docs/research/mcp/_fleet.md
+    - claudine/docs/research/mcp/_research.md
+    - claudine/docs/research/memory/_fleet.md
+    - claudine/docs/research/memory/_research.md
+    - claudine/docs/research/model-config/_fleet.md
+    - claudine/docs/research/model-config/_research.md
+    - claudine/docs/research/model-serving-api-standards/_research.md
+    - claudine/docs/research/non-interactive-sessions/_fleet.md
+    - claudine/docs/research/non-interactive-sessions/_research.md
+    - claudine/docs/research/plugins/_fleet.md
+    - claudine/docs/research/plugins/_research.md
+    - claudine/docs/research/reasoning-level/_fleet.md
+    - claudine/docs/research/reasoning-level/_research.md
+    - claudine/docs/research/resume/_fleet.md
+    - claudine/docs/research/resume/_research.md
+    - claudine/docs/research/signals/_fleet.md
+    - claudine/docs/research/signals/_research.md
+    - claudine/docs/research/skills/_fleet.md
+    - claudine/docs/research/skills/_research.md
+    - claudine/docs/research/slash-commands/_fleet.md
+    - claudine/docs/research/slash-commands/_research.md
+    - claudine/docs/research/steering/_fleet.md
+    - claudine/docs/research/steering/_research.md
+    - claudine/docs/research/subagents/_fleet.md
+    - claudine/docs/research/subagents/_research.md
+    - claudine/docs/research/summary/acp.md
+    - claudine/docs/research/summary/agent-cli.md
+    - claudine/docs/research/summary/agent-logging.md
+    - claudine/docs/research/summary/agent-models.md
+    - claudine/docs/research/summary/agent-permissions.md
+    - claudine/docs/research/summary/agent-plugins.md
+    - claudine/docs/research/summary/agent-skills.md
+    - claudine/docs/research/summary/hooks.md
+    - claudine/docs/research/summary/local-runners.md
+    - claudine/docs/research/summary/mcp.md
+    - claudine/docs/research/summary/model-config.md
+    - claudine/docs/research/summary/non-interactive-sessions.md
+    - claudine/docs/research/summary/plugins.md
+    - claudine/docs/research/summary/session-resumption.md
+    - claudine/docs/research/summary/slash-commands.md
+    - claudine/docs/research/summary/steering.md
+    - claudine/docs/research/summary/subagents.md
+    - claudine/docs/research/summary/system-prompt.md
+    - claudine/docs/research/system-prompt/_fleet.md
+    - claudine/docs/research/system-prompt/_research.md
+    - claudine/docs/research/usage/_fleet.md
+    - claudine/docs/research/usage/_research.md
+    - claudine/docs/topics/completions/shell-completions.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/error-architecture.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/flow-control/flow-control.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/looping.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/frontmatter-properties.md
+    - claudine/docs/topics/pre-flight-checks.md
+    - claudine/docs/topics/schemas.md
+    - claudine/docs/topics/state-management/context-variables.md
+    - claudine/docs/topics/timeouts.md
+    - claudine/features/2026-10-24-sequence-containers/implementation-log.md
+    - claudine/features/2026-10-24-sequence-containers/plan.md
+    - claudine/features/2026-10-24-sequence-containers/spec.md
+    - claudine/schemas/README.md
+    - darkmatter/docs/inline/preflight-checks.md
+    - darkmatter/docs/research/parsing/overview.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - docs/dependencies.md
+    - messenger/cli/README.md
+    - messenger/docs/user-guide.md
+    - prompts/_implement/implement-plan.md
+    - prompts/_prompt.md
+    - prompts/_reviews/feature-review.md
+    - prompts/review-loop.md
+    - reaper/docs/research/schemas.md
+    - schematic/docs/research/project-mgmt/canonical.md
+completed_phase: 9
+implemented: true
 ---
 
 # Implementation Log for 2026-10-24-sequence-containers (9 phases)
@@ -2478,3 +2923,244 @@ Existing complementary coverage retained: `a_first_group_qualifies_with_every_le
 - All Phase 7 tasks (7.1–7.4) are checked. The requirement-to-test mapping, initial failures, fixes, skipped tests, existing slow tests, platform results, source inventory, and handoff are recorded above and in frontmatter. No unresolved Phase 7 implementation or test failure remains.
 - All requested plan/log frontmatter keys parse and retain a single occurrence. The cumulative `packages` list is unchanged because `claudine` and `claudine-cli` were already present. `human_review` is false. The spec's status is left for its author.
 - Implementation complete, ready for review. Phase 8 owns the remaining migration sweep. No formatting, staging, branch commit, or feature lifecycle move was performed.
+
+
+## Phase 8
+
+### Requirement-to-test map before edits
+
+- 8.1 migration audit: repository-wide searches include hidden skills, current docs, shipped artifacts, fixtures, Rust tests, and `fm.outputs`/`fm.state`; classify behavioral reads rather than renaming identifiers mechanically.
+- 8.2 shipped prompts: opt-in `shipped_prompt_contract`, `shipped_prompt_route_drift`, and `shipped_prompts` cover passive parsing, lifecycle walking, fixture drift, and normal hermetic CLI invocation. Existing L1 `shipped_lifecycle_artifacts_use_mapping_only_set` and the container example corpus/normal invocation cover shipped non-prompt artifacts. Prompt-specific additions stay in the declared opt-in target.
+- 8.3/8.4 documentation and skills: compare guidance with the parser, binding catalog, recursive runtime, cancellation, and closed shell approval implementation; run lifecycle-doc lint, all area L1 tests, lint, and tier coverage sequentially. No new parser, persisted representation, or production behavior is planned, so the file-format input matrix and persistence round trips are unchanged.
+
+Parallel scopes follow the plan: prompts/fixtures/tests, seven primary topic pages, and skill files. The primary agent owns the repository classification, supplementary topic drift, final gates, and metadata. No terminal/browser resource is needed for prose migration.
+
+### Repository-wide classification (8.1)
+
+Searches covered hidden skill files and the whole checkout, including research workflows outside the internal prompt folders. Broad token searches were narrowed by expression spans, block predicates, YAML keys, and command usage, then the surrounding documents and implementations were read. `fm.state`/`fm.outputs` have no remaining active runtime-global use; explicit authored-property documentation is retained.
+
+| Hits | Classification and action |
+| --- | --- |
+| Internal `prompts/review-loop.md`, `_prompt.md`, `_reviews/feature-review.md`, `_implement/implement-plan.md` | Migrate removed root failure policy, run-token guidance, unbound `next` input, and stale loop boundary read. Preserve explicitly authored report `previous`/`next` fields. Re-derive implement route fixture and hash when its prompt changes. |
+| Research fleets, summary prompt block predicates, research template and model-serving prompt under `claudine/docs/research/` | Migrate runtime row reads to `seq`; root lifecycle hooks need per-row prompt ownership, not just textual replacement. Remove root `fail_fast`. |
+| `biscuit-tui` component/style templates, Schematic project-management prompt, Reaper schema prompt, Darkmatter parsing overview | Migrate row/current/adjacent/boundary reads; remove schemas claiming generated frontmatter globals. Component terminal messages describe container completion. |
+| Current Claudine topic pages, getting-started guide, skill architecture/CLI references | Migrate retired bindings, serial group selectors, task stacks, sequence continuation policy, and outdated planned markers. Current docs own behavior, without links to feature snapshots. |
+| Three L3 sequence Ctrl-C fixtures | Remove `execution: parallel`; concurrency is implicit. Preserve their existing live tier and platform guards. |
+| Claudine rename/removed-grammar tests, literal agent-data tests, `loop_gate_ambient` authored `next`, lifecycle authored-state fixtures | Preserve: these assert rejection, literal transport, or ordinary authored properties. Old names in rename catalogs and parser errors remain intentional. |
+| Darkmatter template-discovery/execution/policy tests, frontmatter name-coercion tests, schema generated-object tests | Preserve: Darkmatter has a host-defined binding catalog; these explicitly supply their own `outputs`/`state` values or validate authored schema properties. They do not use Claudine's removed runtime globals. Darkmatter's Claudine-facing preflight examples migrate to `seq.outputs`. |
+| Internal Rust `sequence_id`, `total_steps`, retained task stack fields and `GroupExecution` | Preserve internal model/API identifiers; migrate misleading comments about accepted user grammar. Runtime binding projection already removes `sequence_id` and publishes `run_id`. |
+| `features/`, `fixes/`, `timeline.md`, old `plans/`/`reviews/`, captured `agent-output` and provider NDJSON | Historical snapshot or recorded provider data; preserve verbatim (apart from the new dated timeline entry). |
+| GitHub Actions `steps.*.outputs`, workflow `execution` names, Rust child-process `setup` module, GraphQL `state`, OpenAPI `total_steps`, cache outputs, loop-local `fail_fast`, benchmark `--fail-fast` | Unrelated grammar/code or unchanged document-loop policy; preserve. |
+
+The diagnostic regression `a_param_targeting_a_reserved_key_is_rejected_before_the_provider_runs` failed with the original `params: { seq: hijacked }` input because its public error still called the retired roots executor-owned. The message now names `seq`, `group`, and `loop`; the test retains the failed status and no-provider-launch assertions. Source edits otherwise repair comment drift, not runtime behavior.
+
+### Artifact migration and structural correction (8.2)
+
+- Migrated internal prompt grammar and row bindings, plus the three L3 Ctrl-C fixture declarations. The implementation prompt's stale root boundary read became `loop.is_last`; optional handoff reads and shell inputs are guarded/defaulted so strict preflight succeeds. Route/frozen copies were re-derived and the pinned route hash refreshed through the existing Darkmatter/biscuit-hash API. Authored report `previous`/`next` fields remain intact.
+- Research fleets needed a structural migration: their root hooks previously ran per body row, while container hooks now run once. Twenty-two `_fleet.md` coordinators now select shared formal task projections and per-topic `_research.md` prompt documents. Each row prompt owns its freshness and success checks. Two shared task projections retain canonical provider/runner rows and defaults; a parity test makes roster drift fail rather than silently forking metadata. No parser or task-source syntax was added. The three removed sequence `fail_fast: false` settings now follow mandatory unhandled-failure propagation; coordinators tell callers to correct failures and rerun, skipping current rows. This is a migration consequence, not a new failure-policy option.
+- Migrated 16 summary prompt predicates, the research authoring standard/model-serving prompt, biscuit-tui templates, Schematic's project-management prompt, Reaper's research prompt, and Darkmatter's parsing overview and Claudine-facing preflight examples. Component root terminal messages now describe container completion. The source graph corpus stages documents in a private repository and freezes its output-style include, so normal L1 never depends on live internal prompts.
+- Expanded docs beyond the seven required topic pages where the repository sweep found active drift: execution flow, schema behavior, preflight, looping, and getting started. Skills now document coordinator/row ownership and roster parity. Loaded the drift review; the skill audit's `sniff docs --package claudine` inventory succeeded.
+- Preserved the pre-existing local-runner prompt's unconditional initialization skip. It is an independent freshness-policy defect, not removed container grammar; no unrelated behavior change was introduced.
+
+Required opt-in prompt checkpoint: **31/31 passed**, including all `shipped_prompt_contract` and `shipped_prompt_route_drift` tests, current-grammar/retired-read/sequence corpus, actual shipped review-loop failure, optional `next_spec` present/absent, guide rules, persisted handoff, and mapping-only validation. Seven log-state cases were split into declared individual tests with a table-coverage guard; each targeted case took 2.5–2.9 seconds.
+
+The full opt-in prompt run also exposed three pre-existing stale completion-contract tests: `shipped_implement_prompts_transclude_finish_before_exit` expects a missing snippet; `shipped_implement_plan_final_phase_delivers_completion_flags` expects older instructions; `shipped_implement_plan_warns_when_final_phase_exits_without_flags` expects an absent warning branch. These are outside the required Phase 8 checkpoint and remain failures in the full opt-in prompt suite. Seven unchanged `pr_flow_rehearsal` cases took 5–7 seconds under load. Normal L1 excludes this opt-in binary by design.
+
+### Exact targeted tests and coverage
+
+| Requirement | Added or strengthened tests |
+| --- | --- |
+| Removed diagnostic vocabulary | `composition::sequence::task::tests::prompt_tasks::a_param_targeting_a_reserved_key_is_rejected_before_the_provider_runs` (failed before correction; passed afterward in 0.034 s) |
+| Passive shipped internal prompts | `shipped_prompts::internal_lifecycle_corpus_parses_under_current_grammar`, `shipped_prompts::shipped_prompt_corpus_parses_frontmatter`, `shipped_prompts::shipped_prompts_use_mapping_only_set`; existing full `shipped_prompt_contract` and `shipped_prompt_route_drift` modules |
+| Public prompt failure and optional input routes | `shipped_prompts::shipped_review_loop_stops_after_its_first_failed_prompt`; `shipped_prompt_contract::feature_review_next_spec_input_drives_refresh_paths`; `shipped_prompt_contract::feature_review_without_next_spec_omits_refresh_instructions`; `prompt_guide_defects::shipped_guide_teaches_lexical_sequence_bindings_and_containers` |
+| Handoff log variants, with one spawn per test | `implement_plan_logging_starts_missing_log`, `implement_plan_logging_starts_empty_log`, `implement_plan_logging_starts_whitespace_log`, `implement_plan_logging_preserves_handoff_and_routes`, `implement_plan_logging_preserves_frontmatter_only`, `implement_plan_logging_preserves_body_only`, `implement_plan_logging_preserves_first_phase`, `every_implement_log_case_has_a_test` in `shipped_prompt_contract` |
+| Research/template/summary corpus and row ownership | `research_sequence_artifacts::shipped_research_sequence_corpus_uses_lexical_row_bindings`; `research_sequence_artifacts::shipped_fleet_graphs_resolve_per_row_prompt_lifecycles` |
+| Canonical roster consistency | `research_sequence_artifacts::research_task_rosters_preserve_canonical_rows_and_templates` |
+| Actual shipped artifacts through normal CLI | `research_sequence_artifacts::shipped_component_sequence_renders_rows_through_the_normal_cli`; `research_sequence_artifacts::shipped_research_fleet_runs_row_freshness_and_success_through_normal_cli`; `research_sequence_artifacts::shipped_research_fleet_refuses_zero_exit_without_a_research_document` |
+
+The six research tests passed **6/6** (0.029–2.160 s). Their normal invocations observe rendered row names/paths, output files, repeat-run freshness skips, provider launch counts, negative exit status, and no audio publication. The missing-output regression preserves the original no-write/zero-exit input and asserts its existing invalid-path failure rather than inventing a new success path. The corpus calls the public removed-read validator, preserving ordinary prose such as “state.”; the graph checks executable row membership rather than incorrectly treating deduplicated prompt references as one reference per row.
+
+The first full L1 run found lifecycle tests still reading row hooks from `_fleet.md`; those tests and a generator gate test now read `_research.md`. The library execution fixture supplies `seq` through `StackExecutionContext.seq` instead of authored frontmatter. This keeps the actual row recovery/finalization policy under test. No failing assertions or cases were removed.
+
+New L1 tests are declared by `cli/tests/l1/main.rs`; prompt additions are compiled by the existing opt-in `prompts` target and `prompt-tests` feature. Existing L3 fixture tests retain their names, feature gates, and live `test-l3` recipe. No new terminal/browser test, target, feature, CI scope, or gate was added.
+
+### Final corpus and recipe audit
+
+- Found that `test-prompts` was documented but absent from the area justfile. Added the opt-in recipe for the existing `prompts` binary with `prompt-tests,test-fixtures`; ordinary L1 and CI remain unchanged. `just test-prompts shipped_prompt_route_drift::` passed **4/4** through the new recipe.
+- Strengthened the artifact corpus to inspect decoded `prompt:` text as well as the document body. This reproduced retired `state.name` predicates in the quoted YAML prompts `summary/mcp.md` and `summary/plugins.md`; both now use `seq.name`. All **18** summary prompts are migrated (the earlier 16 count covered multiline YAML only). A directory-to-list guard prevents added topic/summary artifacts from silently missing corpus coverage.
+- Lint identified two test-only Markdown conversions as infallible `TryFrom` calls. Replaced them with `Markdown::try_from_content`, preserving the corpus's promise to reject malformed frontmatter instead of forgiving it. No formatter was invoked.
+- Full area L1 passed **9,789/9,789** in **153.456 s** before the final corpus strengthening; the changed corpus and artifacts are rechecked below. The six new L1 tests took **0.041–3.419 s** in the full run. Five slow reports belonged to unchanged tests.
+
+### Final verification and handoff
+
+- Final strengthened research corpus/CLI selection: **6/6 passed** in **1.863 s**, all under two seconds. The quoted/native YAML prompt variants and original missing-output input are covered.
+- Area `just lint`: **passed** all five packages, diagnostic transport guards, and lifecycle documentation facets after correcting the test constructors. The shared lint recipe runs Clippy; no formatter was called.
+- `just test-prompts shipped_prompt_route_drift::`: **4/4 passed** through the newly added canonical wrapper. The broader required prompt checkpoint was **31/31 passed**. Three unrelated pre-existing failures in the full opt-in prompt suite remain explicitly listed above; they are not hidden by the normal L1 result.
+- Nine pre-existing ignored L1 tests remain: `compose_emits_first_stderr_byte_within_budget`, `bench_system_prompt_resolution_cold_and_warm`, `bench_resolve_and_prepare_step_by_step`, `bench_request_topology_probe_and_reuse`, `bench_raw_darkmatter_compose_passes`, `perf_compose_empty_partial_meets_target`, `perf_compose_long_prefix_meets_target`, `perf_inline_compose_empty_partial_meets_target`, and `perf_enter_compose_partial_meets_target`. No ignore, retry, timeout increase, tier move, or dropped case was introduced.
+- The full L1 run's unchanged slow-test identities were:
+  - `claudine-cli::l1 compose_initialize_staged_boot::early_catch_shells_cannot_run_or_enable_another_catch_shell`
+  - `claudine-cli::l1 compose_schema_cli::compose_unresolved_caller_file_fails_before_initialize_when_non_interactive`
+  - `claudine-cli::l1 provider_tail_notice::a_switch_whose_record_is_typed_unknown_is_not_called_known`
+  - `claudine-cli::l1 sequence_sources_cli::every_string_list_form_classifies_through_the_real_invocation_path`
+  - `claudine-cli::l1 sequence_sources_cli::yaml_json_json5_jsonl_and_ndjson_sources_produce_the_same_plan`
+
+- Reviewed the OS skill. This phase adds no platform-specific runtime behavior; the three OS-specific L3 fixtures only drop retired YAML selectors. Linux/native Windows/WSL2, terminal L2, and OS-injection L3 were not rerun for this prose/artifact/diagnostic migration. Hermetic CLI/filesystem L1 covers its observable behavior, without focusing any window. Cross-platform execution remains part of normal repository CI and Phase 9's final scope assessment.
+- `md get` read back every edited frontmatter key across **70** documents before the final two quoted-summary edits, and read back those two `prompt` keys afterward. Plan/log inventories include all **24** source/test/recipe inputs, **66** updated documents, **24** created documents, and **6** updated skill files; cumulative package membership is preserved.
+
+- Final `just check-tier-coverage claudine`: **passed, zero stranded tests**. `git diff --check` passed. Both plan/log inventory sets were compared against every changed/created file and matched exactly; all edited metadata keys parsed through `md get`.
+- All Phase 8 tasks (8.1–8.4) are checked. Implementation is complete, ready for review and Phase 9 final verification, with the pre-existing opt-in prompt failures, slow-test debt, and local-runner freshness defect recorded explicitly. `human_review` remains false because none requires a human decision before Phase 9. The handoff message replaces Phase 7's message. No formatting, staging, commit, or lifecycle move was performed.
+
+## Phase 9
+
+### Verification scope and requirement-to-test mapping before edits
+
+Phase 9 verifies existing behavior; no production, parser, configuration, or persistence change is planned. Existing public CLI, filesystem, runtime, grammar-matrix, and terminal tests are the starting regression coverage. Criteria 1–23 will be mapped to concrete test identities below. Required gates: Claudine L1/L2/lint, Messenger L1/lint, Darkmatter L1, tier coverage, and the CI plan. Gates run sequentially where rebuilding could replace Claudine fixture-enabled binaries. Prior phase changes and unrelated worktree edits are preserved. No formatting, staging, commit, or lifecycle move is authorized.
+
+Started `just test` in `claudine/`; full output is retained in `/tmp/sequence-phase9-claudine-test.log`. Prior opt-in prompt failures and slow tests remain explicit audit inputs, not passing evidence.
+
+### Robustness grep audit (9.3)
+
+Ran the named smell searches over Messenger refresh state/runner/prepare/select and Claudine sequence grammar/formal/normalize/source/model/task/group plus lifecycle parse/action-shape/actions. No fallback silently empties the matrix's required inputs. Messenger `RunRecord.status`, `recovery_attempts`, and `stages` are required; `invocations` defaults only for the explicitly specified legacy migration. `ledger_runs` is retained read-only legacy data; `launched` and `runner` are backward-compatible runner observations. The `.ok()` reads in `select::renewals` explicitly ignore unreadable renewal records (reported by cleanup), not run records; `prepare` reads an optional published baseline. Lifecycle defaults supply an absent suggestion suffix or omitted retry/proxy overlay after shape validation. Task defaults supply absent internal runtime state/deferred parameters/group outcome bindings; its `filter_map` projects known runtime keys, not malformed input elements. Lifecycle `filter_map` sites select action kinds or reorder validated entries. Required sequence/group/cancelled fields are validated before these execution paths.
+
+Existing matrix tests are `container_yaml_matrix::markdown_and_sequence_yaml_fields_matrix`, `sequence_task_shape_matrix_and_exclusivity`, `group_fields_matrix` and `group_and_catalog_file_fields_matrix` in sequence preflight tests, and Messenger `the_run_record_matrix_is_typed_for_every_load_bearing_field`. The latter exercises real persisted run records through public loading, including legacy admission counts, duplicates, null, invalid elements, and trailing content. No input format or load-bearing field changes in Phase 9; no new matrix or persistence semantics are introduced.
+
+### Acceptance-criteria audit (9.2)
+
+The table uses exact test function names, searchable in the declared Claudine L1 binary/library tests, L2 binary, opt-in prompts binary, and Messenger research integration target. No criterion lacks a test. Platform execution gaps are separate from missing tests (see 9.6).
+
+| Criterion | Concrete test identities |
+| --- | --- |
+| 1: nesting, references, cycles, ordered concurrent legs | `shipped_container_example_runs_through_the_normal_sequence_command`; `referenced_sequence_suffix_and_origin_are_preserved`; `sequence_reference_cycle_reports_the_active_chain`; `nested_group_legs_keep_memory_private_but_reread_shared_files_between_steps` |
+| 2: removed keys refused before effects | `nested_sequence_and_removed_task_keys`; `group_legs_require_unique_nonempty_names_and_execution_is_removed`; `sequence_task_shape_matrix_and_exclusivity`; CLI `criterion_2_fail_fast_*` tests |
+| 3: event order, blocked, skip, once-only cleanup | `root_events_wrap_all_children_once_and_expose_native_results`; `root_initialize_skip_precedes_invalid_static_preflight`; `preflight_failure_emits_blocked_then_finalize_without_start`; `initialize_skip_runs_no_children_or_finalize_and_records_skipped_leg`; `group_events_see_settled_summaries_and_finalize_before_publication` |
+| 4: failure propagation, retry, no-session resume | `unhandled_nested_failure_finalizes_innermost_first_and_never_starts_later_children`; `retry_restarts_legs_without_intermediate_finalize_or_duplicate_result`; `root_resume_reports_typed_no_session_error_and_cleans_up` |
+| 5: atomic/tolerant groups and cancellation opt-in | `default_fail_fast_withholds_mutations_outputs_and_unadmitted_legs`; `tolerated_failed_legs_merge_mutations_and_publish_native_named_results`; `sibling_failure_cancels_opted_container_descendants_and_preserves_other_legs`; `sibling_failure_terminates_an_opted_prompt_and_refuses_its_finalize_retry` |
+| 6: timeouts remain failures | `timed_out_nested_leg_uses_failure_retry_and_never_cancellation` |
+| 7: Ctrl-C and descendant cleanup (L2) | `level2_ctrl_c_cancels_group_descendants_and_finalizes_innermost_first` |
+| 8: group outcome timing, names, reserved variables | `group_events_see_settled_summaries_and_finalize_before_publication`; `group_fields_matrix`; `group_and_catalog_file_fields_matrix`; `group_legs_require_unique_nonempty_names_and_execution_is_removed` |
+| 9: sequence positions, shorthand, IDs and reserved keys | `sequence_binding_composes_typed_rows_shorthand_and_authored_namespaces`; `nested_prompt_observes_shared_run_and_shallow_neighbors`; `inline_sequence_preflight_preserves_nested_positions_and_duplicates`; `object_step_extracts_state_and_rejects_reserved_state_key` |
+| 10: hard rename and authored-property controls | `every_rename_row_is_typed_and_property_presence_preserves_data`; `parsed_surfaces_include_conditions_operands_and_shell_values`; `rename_presence_controls_apply_through_normal_preparation` |
+| 11: innermost roots and restoration | `inner_group_and_sequence_roots_are_lexical_and_restored_after_return`; `child_results_are_native_and_parent_position_is_restored`; `sequence_roots_shadow_completely_and_restore_without_merging` |
+| 12: body steps own no lifecycle | `body_only_steps_run_root_success_once`; `referenced_markdown_body_step_has_no_document_lifecycle` |
+| 13: finalization gates publication | `finalize_failure_discards_nested_native_result`; `group_finalize_error_discards_leg_mutations_and_result` |
+| 14: lift-ready parser | `criterion_14_deliberate_runtime_import_fails_the_guard` and lifecycle lift-ready import guard |
+| 15: removed ledger and Messenger command | `the_budget_subcommand_is_an_unknown_subcommand`; budget-option/completion absence checks in `sequence_errors_cli`; Messenger research CLI preparation tests; full Messenger gates |
+| 16: proxy cleanup ownership | `root_failure_proxy_runs_target_cleanup_without_source_cleanup`; `container_failure_proxy_skips_source_finalize_and_runs_target_finalize` |
+| 17: shipped prompt migration | `shipped_prompt_contract::*`; `shipped_prompt_route_drift::*`; `internal_lifecycle_corpus_parses_under_current_grammar`; `shipped_research_sequence_corpus_uses_lexical_row_bindings`; `shipped_fleet_graphs_resolve_per_row_prompt_lifecycles` |
+| 18: empty, skipped, reuse, cycles, write collisions | `empty_root_sequence_runs_one_lifecycle_with_empty_outputs`; `initialize_skip_runs_no_children_or_finalize_and_records_skipped_leg`; `sequence_reuse_is_legal_and_only_all_first_descendants_offer_bytes`; `mixed_reference_cycle_names_every_active_reference`; `nested_inline_write_back_collision_is_rejected` |
+| 19: cleanup, state isolation, cancellation terminality | `blocked_cleanup_cannot_run_shell_commands`; `group_finalize_error_discards_leg_mutations_and_result`; atomic/tolerant tests above; `interrupted_sequence_keeps_cleanup_errors_secondary_and_never_retries`; `cleanup_shell_timeout_stays_secondary_to_cancellation` |
+| 20: retry retention, adjacency, rereads | `two_retries_retain_mutations_and_publish_exactly_three_children_once`; `exhausting_two_retries_keeps_failure_and_publishes_nothing`; `retry_clears_child_outputs_and_finalizes_once_before_publication`; `document_retry_reenters_directly_without_finalizing_failed_attempt`; `document_resume_reenters_directly_without_finalizing_failed_attempt`; deterministic nested-leg test from criterion 1 |
+| 21: nested and closed approvals | `a_first_group_qualifies_with_every_leg_and_group_readers_are_templates`; `sequence_reuse_is_legal_and_only_all_first_descendants_offer_bytes`; `container_events_are_discovered_and_terminal_commands_require_templates`; `container_shells_use_event_time_values_and_lexical_group_outcomes`; `root_retry_keeps_approval_closed_when_a_referenced_task_changes`; `root_proxy_refuses_a_new_shell_after_approval_closes_even_with_yolo` |
+| 22: Messenger locks, interruption, stale and legacy records | `a_live_runner_refuses_a_second_run`; `the_runner_records_finished_interrupted_and_stopped`; `a_stale_active_run_is_recovered_explicitly_and_never_silently`; `cleanup_and_promotion_are_refused_during_a_live_run`; `a_ledger_era_exhausted_run_is_readable_resumable_and_never_promotable` |
+| 23: runtime-only retry overlay | `root_retry_retains_writes_clears_abandoned_outputs_and_finalizes_once`; `retry_clears_child_outputs_and_finalizes_once_before_publication`; group retry tests |
+
+No tests are added or renamed in Phase 9: its source edits correct comments only. Public behavior and all existing positive/negative/representation cases remain unchanged. The existing grammar, shipped-artifact corpus, normal CLI invocation, persisted-record tests, and L2 terminal boundary remain the relevant verification levels.
+
+### Comment and current-document drift pass (9.4)
+
+Reviewed the changed container grammar/model, preflight, lifecycle/binding/cancellation/runtime state, recursive task/group/sequence execution, root CLI orchestration, Messenger refresh/run-record ownership, and their current topic/skill guidance. Preserved internal legacy task-stack/serial-dispatch descriptions where the implementation still has those branches; those descriptions do not authorize retired authoring grammar. Separate `seq`/`group` channels, caller provenance, cancellation scopes, and `RuntimeSnapshot.proxy_chain` are retained.
+
+Corrected these stale comments in favor of the implementation:
+
+- `sequence/model.rs`: removed an obsolete future-phase narrative and stale feature link; described the shared typed model and separate lexical `seq` channel.
+- CLI `sequence/jit.rs`: override documentation no longer claims `seq` is frontmatter; mid-run compose errors enter container failure handling rather than the removed sequence `fail_fast` policy.
+- CLI `sequence/iterate.rs`: updated module output names and failure handling, pre-warm layer description, and late-required-property failure documentation.
+- CLI `sequence/mod.rs`: static preflight errors block the root before children; removed the obsolete comparison with sequence `fail_fast`.
+- `sequence/task/mod.rs`: runtime cell documentation now describes concurrent legs rather than presenting serial groups as current authoring behavior.
+
+These five files have comment-only Phase 9 edits. No behavior, format string, constant, test, target, dependency, or skill contract changes. No new targeted test is needed for the comment corrections; the required broad gates exercise the unchanged implementation. Current topic docs already describe implemented container execution, in-memory isolation, real-effect dry runs, cancellation, and closed approvals. No additional skill update is warranted.
+
+### Gate evidence (in progress)
+
+- Claudine `just test`: **9,789 passed, 9 pre-existing skips**, 151.575 s, exit 0. No failures or slow-test reports. Output: `/tmp/sequence-phase9-claudine-test.log`.
+- `just ci-local --plan`: exit 0. Output: `/tmp/sequence-phase9-ci-plan.log`. The plan contains existing package/environment/tier cells and governed gaps; Phase 9 changes no manifest, feature, tier, workflow, environment catalog, or CI policy. The five comment-only source files already belong to packages selected by earlier implementation work, so this phase introduces no new CI cell. The printed multi-environment plan is a scope preview, not evidence those tests executed. Windows/WSL2 L2 remain governed accepted gaps, not passing observations.
+- Started Claudine `just test-l2`; output: `/tmp/sequence-phase9-claudine-l2.log`. The criterion-7 fixture uses a headless tmux pane; other terminal fixtures use existing background spawn defaults. No focusing L3 recipe is run.
+
+### Other-OS assessment (9.6)
+
+Loaded the `os` skill and its build-host instructions. This final phase changes only Rust comments and implementation records; it adds no OS-specific code, process behavior, path handling, terminal behavior, or test fixtures. All required local gates run on macOS. No new Linux, native Windows, or WSL2 rig run is needed for those comment-only edits. Earlier Phase 6 evidence includes targeted Linux library cases and native Windows library/CLI container cases; those precede later host-neutral refinements and are **not final-tree receipts**. WSL2 has no local execution evidence for this feature.
+
+Final Linux/macOS execution beyond this local macOS evidence relies on ordinary PR CI. Native Windows and WSL2 rely on scoped nightly CI (or an explicitly requested all-OS run). Native Windows criterion-7 console Ctrl-C coverage remains unmet: its test explicitly reports the unavailable Unix tmux backend, and provisioning a non-focusing native console-control harness is the required follow-up. Windows/WSL2 L2 policy gaps are reported as gaps, never as passes. The spec's requirement is unchanged. No cross-check invocation, remote mutation, or remote evidence claim is made in Phase 9.
+
+- Claudine `just test-l2`: exit 0; CLI **287/287 passed** (46.075 s), generator **3/3 passed** (0.777 s). Criterion-7 Ctrl-C cleanup passed in 1.000 s. The 3,724 CLI and 250 generator entries excluded by the L2 filter are other-tier tests, not unexecuted L2 cases. No selected macOS L2 failure or capability skip was reported. Output: `/tmp/sequence-phase9-claudine-l2.log`.
+- Started Claudine `just lint`; output: `/tmp/sequence-phase9-claudine-lint.log`.
+
+### Final search correction
+
+The criterion-15 whole-repository search (including hidden skills, excluding feature/fix snapshots and timelines) found one remaining hit in `.claude/skills/messenger/research-contract.md`: a historical note literally named the removed commands. Loaded the Messenger skill and reworded that note to describe the removed workflow without the prohibited spellings. Legacy exhausted-record and leftover-file guidance is preserved. This is a skill-text correction, not parser/runtime behavior. The exact search was rerun after the edit; no source test or CI cell is added. Phase 9's skill inventory includes this correction; Claudine's skill architecture remains accurate.
+
+- Claudine `just lint`: **passed**, exit 0. Includes all five package Clippy checks, diagnostic transport checks (**9/9 passed**), and lifecycle documentation facets. No formatter was invoked. Output: `/tmp/sequence-phase9-claudine-lint.log`.
+- Started Messenger `just test`; output: `/tmp/sequence-phase9-messenger-test.log`.
+- Phase 9 inventory metadata was written surgically to plan/log and every edited key read back with `md get`: five comment-only Rust source inputs, three updated implementation documents, no created docs, one updated Messenger skill file. Cumulative inventories union all prior phase lists: **192 source inputs**, **104 documentation files**. All listed paths exist; cumulative package membership is preserved.
+
+A surrounding-text review then found two stale Messenger skill bullets still describing ledger-owned recovery and `state::apply_ledger`, which no longer exists. Replaced them with the implemented `prepare::resume`/runner status behavior, durable invocation counts, explicit stale recovery, and the distinction between zero exit and completed research. Verified against `prepare.rs`, `runner.rs`, and the existing `recovery_is_bounded`, `the_runner_records_finished_interrupted_and_stopped`, and `a_stale_active_run_is_recovered_explicitly_and_never_silently` tests. This resolves guidance drift in favor of code; no behavior change or new test is introduced.
+
+- Messenger `just test`: Nextest gate **passed**, exit 0; **721/721 passed**, **2 pre-existing skips**, 23.171 s. Output: `/tmp/sequence-phase9-messenger-test.log`. **11 unchanged tests exceeded the five-second L1 budget**; a passing Nextest result does not satisfy the separate speed requirement for those cases. No timeout override, ignore, retry, tier move, case deletion, or performance experiment is introduced. Desktop timeout fixtures wait for the production 3,000 ms timeout and use serialized environment guards; research fixtures perform repeated filesystem publication. Their speed debt is outside these comment/skill corrections and remains unresolved:
+
+  - `messenger tests::desktop_helpers::notify_send_stub::notice_only_timeout_maps_to_timeout_error`: 5.019 s.
+  - `messenger tests::desktop_helpers::snoretoast_stub::notice_only_timeout_maps_to_timeout_error`: 5.024 s.
+  - `messenger tests::desktop_helpers::terminal_notifier_stub::notice_only_timeout_maps_to_timeout_error`: 5.025 s.
+  - `messenger::research_publication a_generation_interrupted_after_selection_recovers_to_the_new_snapshot`: 6.159 s.
+  - `messenger tests::desktop_helpers::burnttoast_stub::notice_only_timeout_maps_to_timeout_error`: 10.026 s.
+  - `messenger::research_refresh a_verified_unchanged_renewal_is_accepted_without_a_changelog_entry`: 5.187 s.
+  - `messenger::research_refresh an_initial_publication_promotes_every_platform_together`: 6.207 s.
+  - `messenger::research_refresh an_unreadable_run_record_blocks_its_platform_and_names_its_path`: 5.924 s.
+  - `messenger::research_refresh automatic_renewal_is_refused_unless_everything_substantive_is_unchanged_and_rechecked`: 6.270 s.
+  - `messenger::research_publication a_generation_interrupted_before_selection_recovers_to_the_old_snapshot`: 20.266 s.
+  - `messenger::research_refresh an_interrupted_promotion_recovers_to_one_consistent_snapshot_and_completes_on_retry`: 15.772 s.
+
+- Started Messenger `just lint`; output: `/tmp/sequence-phase9-messenger-lint.log`.
+
+### Existing exclusions and limitations
+
+- Claudine's nine ignored L1 performance cases are unchanged: `compose_emits_first_stderr_byte_within_budget`, `bench_system_prompt_resolution_cold_and_warm`, `bench_resolve_and_prepare_step_by_step`, `bench_request_topology_probe_and_reuse`, `bench_raw_darkmatter_compose_passes`, `perf_compose_empty_partial_meets_target`, `perf_compose_long_prefix_meets_target`, `perf_inline_compose_empty_partial_meets_target`, and `perf_enter_compose_partial_meets_target`.
+- Messenger's two ignored credentialed integration cases are `smoke_test_slack_send` and `smoke_test_discord_send`; no messages are sent.
+- The full opt-in prompt binary still has the three previously recorded completion-contract failures: `shipped_implement_prompts_transclude_finish_before_exit`, `shipped_implement_plan_final_phase_delivers_completion_flags`, and `shipped_implement_plan_warns_when_final_phase_exits_without_flags`. These are outside ordinary L1 and the required shipped-prompt checkpoint. Its unchanged slow PR rehearsal cases and local-runner unconditional initialize skip remain as recorded in Phase 8. No unrelated prompt behavior is changed here.
+- OS-native keyboard-injection L3 and live-provider tests are not requested gates and are not run. Selected L2 uses headless/background harnesses. Native Windows Ctrl-C and governed Windows/WSL2 L2 gaps remain explicitly unmet, as detailed above.
+
+- Messenger `just lint`: **passed**, exit 0, library with `desktop,research` and CLI checks. Output: `/tmp/sequence-phase9-messenger-lint.log`.
+- Started root `just test darkmatter` for the schema changes; output: `/tmp/sequence-phase9-darkmatter-test.log`.
+
+### Darkmatter gate regression and targeted correction
+
+The initial full `just test darkmatter` run reproduced this failure before edits:
+
+```text
+FAIL darkmatter::l1 current_root_documentation_contract::every_required_page_explains_the_binding_time_model
+AC29 documentation contract:
+  claudine/docs/topics/composition.md: missing "**`ctx` is evaluated once for each composition run.** ... each sequence step (each task of a serial group; a parallel group shares one capture until a sibling re-enters) ..."
+```
+
+Requirement-to-test map before correction: the existing public documentation-contract test is the failing regression; its sibling `the_check_reports_each_missing_phrase_and_tolerates_reflow` verifies the guard cannot silently pass missing text. The declared `darkmatter/lib/tests/l1/main.rs` includes the module, its unmarked names run in L1, and there is no new test or feature gate. This is a documentation-assertion update, not a parser or configuration change.
+
+Loaded the Darkmatter skill. The composition page correctly describes concurrent groups, matching `open_group_run`/`open_leg_run`; the test's exact paragraph and the context-variables page/Claudine CLI skill still described the retired serial-group form. Updated those three copies to the composition page's concurrent-group wording. Preserved every other binding-time clause and the exact-paragraph guard. This resolves drift in favor of code rather than restoring removed user grammar. Phase 9 now includes one test assertion change, one additional current topic page, and one Claudine skill page beyond the earlier inventories. No production behavior changes.
+
+- Initial root `just test darkmatter`: **10,113 passed, 1 failed, 10 skipped**, 38.677 s, exit 100. The failure output and correction are recorded above; no other assertion failed.
+- Post-correction root invocation (`just test darkmatter current_root_documentation_contract`): the root recipe treats arguments as package/area selectors, so it selected the same four Darkmatter packages and ran the **entire** L1 gate, not a test-name filter. **10,114/10,114 passed**, 10 pre-existing skips, 64.279 s, exit 0. Output: `/tmp/sequence-phase9-darkmatter-regression.log`. A separate package-area `just test current_root_documentation_contract` is used for the exact targeted guard run below.
+- The five unchanged Darkmatter/DMLS tests over the five-second L1 budget in the passing full run were:
+
+  - `darkmatter markdown::compose::shell_expansion::probe::tests::installed_shells::injection_shaped_names_never_execute`: 5.926 s.
+  - `dmls::l1 claudine_schema_discovery::trigger_payload_items_and_values_complete_without_a_schema`: 5.843 s.
+  - `dmls::l1 claudine_schema_discovery::trigger_payload_keys_complete_without_a_schema`: 6.864 s.
+  - `dmls::l1 claudine_schema_discovery::trigger_payload_properties_hover_without_a_schema`: 6.902 s.
+  - `dmls::l1 claudine_schema_discovery::an_authored_redeclaration_wins_over_the_trigger_per_property`: 6.949 s.
+
+The corrected documentation-contract test itself passed in 0.073 s. No performance-related code or test policy was changed.
+
+- Exact targeted Darkmatter regression: package-area `just test current_root_documentation_contract` **2/2 passed**, 0.053 s, exit 0. This selects both the actual-page contract and the negative/reflow guard. Output: `/tmp/sequence-phase9-darkmatter-targeted.log`.
+- Darkmatter's ten unchanged ignored cases are `f35_6_rhythm_raw_samples`, `f23_code_surface_raw_samples`, `f35_7_link_policy_raw_samples` (measurement harnesses), `resolve_alias_ll` (user login-shell alias), and six DMLS alias-projection cases: `a_malformed_alias_target_is_parsed_once_and_reported_by_the_rejecting_alias`, `undeclared_properties_in_block_and_multi_line_expression_values_warn_at_their_own_ranges`, `tagged_anchored_and_aliased_expression_values_are_diagnosed_once_where_authored`, `an_aliased_dash_separated_key_fix_avoids_the_defining_scalars_quote`, `a_dash_separated_key_behind_an_unprovable_alias_offers_no_fix`, and `aliases_are_analyzed_in_the_definition_the_yaml_parser_resolved`.
+
+- `just check-tier-coverage claudine`: **passed**, exit 0; zero stranded tests. Output: `/tmp/sequence-phase9-tier.log`. The changed Darkmatter guard is already compiled by the declared L1 target and its targeted run proves tier selection.
+- Required opt-in shipped-prompt selection: `just test-prompts shipped_prompt_contract:: shipped_prompt_route_drift:: internal_lifecycle_corpus_parses_under_current_grammar shipped_prompt_corpus_parses_frontmatter shipped_prompts_use_mapping_only_set shipped_review_loop_stops_after_its_first_failed_prompt shipped_guide_teaches_lexical_sequence_bindings_and_containers`: **30/30 passed**, 2.487 s, exit 0. The 52 excluded cases are outside this name selection, including the three known opt-in failures listed above. Output: `/tmp/sequence-phase9-prompts.log`. A separate persisted-handoff case completes the prior phase's 31-case checkpoint.
+- Final `just ci-local --plan`: **passed**, exit 0. Compared canonical `{package, environment, gate}` identities with the initial preview: **73 cells before, 73 after, zero added or removed**. Output: `/tmp/sequence-phase9-ci-plan-final.log`. This includes all inherited implementation scope, not just Phase 9; no new cell, target, feature, workflow, environment, or policy was introduced.
+
+### Closing verification and final state
+
+- Persisted-handoff shipped prompt: **1/1 passed**, 1.156 s, exit 0 (`just test-prompts shipped_implement_plan_reads_persisted_handoff_before_provider_launch`). Combined required shipped-prompt checkpoint: **31/31 passed**. Output: `/tmp/sequence-phase9-prompt-handoff.log`.
+- All six Phase 9 tasks and the plan's overall definition-of-done checkboxes are checked. The criteria audit names concrete coverage for all 23 criteria. No new or renamed test exists; the targeted regression is the existing Darkmatter documentation contract, reproduced red before correction, then green alone and in the full gate.
+- Final Phase 9 inventory: **six Rust source/test files** (five comment-only changes and one documentation assertion), **four updated documentation files**, **no created docs**, and **two skill files**. Cumulative `source_code` is **193** entries and `documentation` is **105**; inventories preserve all earlier phases and package membership. The updated source/test files are listed in both plan/log frontmatter.
+- Set plan/log `completed_phase: 9` and `implemented: true`; spec `implemented: true` and `implemented_by: codex/gpt-6.1-sol`. Spec `status` remains the author's `finalized-spec`. `human_review` is false because no decision is needed before another implementation phase; this is the final phase. The handoff message replaces Phase 8's message and records review limitations.
+- Required local Nextest and lint gates pass after the documentation correction. This does **not** claim all L1 speed budgets or all-OS acceptance coverage are satisfied: the 16 unchanged slow cases, ignored cases, three inherited opt-in failures, local-runner freshness defect, and native Windows/WSL2 limitations are explicitly retained above.
+- Implementation complete, ready for review. No formatting, staging, commit, lifecycle move, or `just complete` was performed.
+
+Final integrity checks passed: `md get` parsed every edited plan/log/spec key; plan/log inventories match, contain unique existing paths, and preserve cumulative packages; no unchecked plan task or duplicate top-level frontmatter key remains. Spec status is unchanged. `git diff --check` passed, the index remains empty, and the final removed-budget-command search returned zero hits. All test/build/plan sessions have finished.

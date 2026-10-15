@@ -40,6 +40,8 @@ related:
     - 2026-10-25-loops-and-flow-control
     - 2026-10-26-task-inputs-and-providers
     - 2026-10-27-darkmatter-lifecycle-ownership
+implemented: true
+implemented_by: "codex/gpt-6.1-sol"
 ---
 
 # Sequence containers
