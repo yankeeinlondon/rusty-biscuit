@@ -26,13 +26,30 @@ reviewed_on: 2026-10-11
 review_iterations: 0
 clarified: false
 implemented: false
-message_to_agent: ''
 parent: ../../reviews/2026-07-31-macro-review/spec.md
 depends_on:
     - 2026-10-13-schematic-pagination
-refresh_required: true
+refresh_required: false
 related: []
 next_spec: 2026-10-15-schematic-definition-vocabulary
+human_review: false
+message_to_agent: |-
+  Phase 1 is complete: see implementation-log.md, inventory.md, prerequisite-interfaces.md,
+  reproduction.md, and spike/README.md in this feature directory. All 18 historical fixtures
+  live in schematic/gen/tests/fixtures/definition-baseline; just migration-check is non-mutating.
+  Raw snapshots were 8,449,975 bytes, so ordered registry schemas use biscuit-hash BLAKE3;
+  readable definitions/pagination plus API/endpoint fingerprints total 1,270,391 bytes.
+  Historical comparisons use JSON Values before typed deserialization; exact leaf exceptions
+  need a cause and current artifact comparisons never accept exemptions.
+  Implement the spike's disjoint Registration trait (JsonSchema + 'static), emitted beside
+  nominal declarations, with typed rust_path tokens and separate private wrapper metadata.
+  Foreign leaf adapters must live in the trait-owning crate because of Rust's orphan rules.
+  Production reserved structure must be Option<TypeRef>, not the isolated spike's Option<Value>.
+  Complete primitive and integer-map-key coverage in Phase 2; first canonical registration
+  fixes name/path/order, so exceptional naming must precede implicit discovery.
+  Preserve ABI 4, 94 pagers, 32 verification endpoints, manual retry, global-only paging hooks,
+  separately opened partition sessions, overlay reproduction, and the no-GraphQL frozen assertion.
+  Schema::full_path has a live WebSocket reader; retiring REST module_path must preserve that use.
 ---
 
 # Schematic definition API: builders and typed registration
@@ -41,7 +58,7 @@ next_spec: 2026-10-15-schematic-definition-vocabulary
 
 This is the builders-and-registration specification. Its sibling `2026-10-15-schematic-definition-vocabulary` adds further definition fields after this migration. “L1” means ordinary unit and integration tests that run without real provider services or terminal windows; “L2” means tests using real local terminal or browser infrastructure. Requirement labels are listed under Requirements; planning-default labels under Planning-time details; decision labels (D-numbers) come from section 15 of the parent review `2026-07-31-macro-review`. They are lookup aids, not substitutes for the contracts stated here.
 
-**Inline review note (2026-10-11).** The intended one-pass migration, typed registration, removal of unused OAuth scopes and endpoint pagination remain intact. This review corrects assumptions about Rust alias identity, descriptor validation after deserialization, registry ownership and migration ordering. The naming mechanism was ruled in D57 item 11 (`register` / `register_as` with `rust_path!`, R5). Earlier runtime and pagination specifications are drafts, so their proposed interfaces are dependencies to refresh, not claims about code already present.
+**Inline review note (2026-10-11; prerequisite facts refreshed 2026-10-14).** The intended one-pass migration, typed registration, removal of unused OAuth scopes and endpoint pagination remain intact. This review corrects assumptions about Rust alias identity, descriptor validation after deserialization, registry ownership and migration ordering. The naming mechanism was ruled in D57 item 11 (`register` / `register_as` with `rust_path!`, R5). Runtime and pagination interfaces now exist; the delivered-interface map below records the pagination review's verified migration baseline.
 
 **Author ruling note (2026-10-12).** The author ruling on `2026-10-11-schematic-generation-integrity` review 1, item 1 changes this spec in three places. (a) Endpoint identity is `(method, path)` permanently; REST selectors are withdrawn (D36 no longer applies), and no parameter, parameter location or parameter value ever distinguishes two endpoints. (b) The seven OpenAI `?beta=true` endpoints merge into their non-beta twins with an optional `beta` query parameter, and Gitea's `GetGitTreeRecursive` merges into Gitea `GetGitTree` with an optional `recursive` query parameter, following the GitHub precedent set by that ruling; fixed-value query declarations are therefore no longer needed and are not built (R29). (c) Every parameter declares its location, and a request body on `GET` fails validation (R31).
 
@@ -49,7 +66,7 @@ This is the builders-and-registration specification. Its sibling `2026-10-15-sch
 
 An API is described today by a hand-written `fn define_x_api() -> RestApi` that returns one struct literal, and each endpoint is a fixed nine-field `Endpoint { .. }` literal (parent section 2). Three things are wrong, all verified in the parent review (July evidence, re-checked in part on 2026-10-11 by this draft):
 
-1. **Ceremony without safety.** There are about 519 endpoint literals across the 18 REST APIs (OpenAI alone has 265; the parent's July figure of 253 is stale and is not used anywhere in this spec). The parent's July counts of defaulted fields (`oauth_scopes: None`, `headers: vec![]`, `params: None`, `request: None`, about 1,387 `.to_string()` calls) were taken on the smaller set and are re-measured at the start of the run (R18). The links between a definition and the Rust types it names are hand-typed strings: `ApiResponse::json_type("RepositoryInfo")` has no compile-time relationship to `pub struct RepositoryInfo`, and a parallel `SchemaRegistry` (`schematic/definitions/src/registry/mod.rs`) maps other hand-typed name strings to `schemars` schemas. `validate_completeness` compares one set of hand-written strings with another. The crate bends to fit strings (`pub type Commit = CommitInfo;` in `schematic/definitions/src/huggingface/types/stubs.rs` exists so a string resolves).
+1. **Ceremony without safety.** There are about 511 endpoint literals across the 18 REST APIs (OpenAI alone has 265; the parent's July figure of 253 is stale and is not used anywhere in this spec). The parent's July counts of defaulted fields (`oauth_scopes: None`, `headers: vec![]`, `params: None`, `request: None`, about 1,387 `.to_string()` calls) were taken on the smaller set and are re-measured at the start of the run (R18). The links between a definition and the Rust types it names are hand-typed strings: `ApiResponse::json_type("RepositoryInfo")` has no compile-time relationship to `pub struct RepositoryInfo`, and a parallel `SchemaRegistry` (`schematic/definitions/src/registry/mod.rs`) maps other hand-typed name strings to `schemars` schemas. `validate_completeness` compares one set of hand-written strings with another. The crate bends to fit strings (`pub type Commit = CommitInfo;` in `schematic/definitions/src/huggingface/types/stubs.rs` exists so a string resolves).
 2. **Dead or doubtful surface.** `Endpoint::oauth_scopes` has no `Some` in any shipped definition; the only non-test reader copies it into the `x-schematic` operation extension (`schematic/define/src/openapi/export/paths.rs:88`). `RestApi::auth_policy` is `None` in every shipped definition, but the generator does read it through `effective_auth_policy()` (`schematic/gen/src/codegen/api_struct/mod.rs:77`, `helpers.rs:7`) and an API-variant path (`api_struct/variant.rs`), so the parent's phrase "zero codegen consumers" is not accurate for `auth_policy` (see Risks). Several definitions also write the same environment variable twice (`openai/mod.rs`: `env_auth` and `env_mapping`).
 3. **A rewrite that must happen once.** The parent decided (D5, D42, D50) that the endpoint literals are rewritten in exactly one pass, and that the builder surface must already fit the response vocabulary of a later spec so no definition is rewritten twice. D52 (2026-10-11) split the original definition-API spec in two so that this pass, which is mechanical and large, is not entangled with the vocabulary work: this spec (4a) is the pass and the surface it needs; the vocabulary additions (typed path parameters, auth override, `deprecated`, rate limits, Basic shape, `oneOf` bodies, the self-contained by-name `Schema` serialization contract, OAuth2 grants, query-parameter fidelity) are the next spec, `2026-10-15-schematic-definition-vocabulary` (4b), and are added to the builders this spec creates as new methods and fields, so no definition is rewritten again.
 
@@ -173,7 +190,7 @@ Validated by: L1 round-trip test in `schematic-define` for each of the types; th
 
 ### Migration of the shipped definitions
 
-**R18. Every endpoint definition of the 18 REST APIs is rewritten to builders in one pass.** Count the endpoint literals at the start of the run (about 519, OpenAI 265; spec 3 or earlier work may have changed it), record the number per API, and rewrite all of them. Also re-measure the defaulted-field counts quoted in the Problem, the Basic and OAuth2 users, and the dependents. Definition functions take the context (R1). The WebSocket definitions are not rewritten. Hand-maintained endpoint tables in module docs and per-endpoint unit tests that assert "the literal says what it says" are kept only where they still test behavior; a test that only restates a builder call is deleted or replaced by the equivalence tests (log each).
+**R18. Every endpoint definition of the 18 REST APIs is rewritten to builders in one pass.** Count the endpoint literals at the start of the run (about 511, OpenAI 265; spec 3 or earlier work may have changed it), record the number per API, and rewrite all of them. Also re-measure the defaulted-field counts quoted in the Problem, the Basic and OAuth2 users, and the dependents. Definition functions take the context (R1). The WebSocket definitions are not rewritten. Hand-maintained endpoint tables in module docs and per-endpoint unit tests that assert "the literal says what it says" are kept only where they still test behavior; a test that only restates a builder call is deleted or replaced by the equivalence tests (log each).
 Validated by: R10/R24 per API; source-scan test (R13); count test asserting each rewritten API exposes the recorded endpoint count and id list.
 
 **R19. Pagination exceptions move onto endpoints and the exceptions table is removed.** For each of the 18 APIs, every entry spec 3 placed in the API-level exceptions table (D42) becomes an endpoint-level builder call; the API default strategy stays on the API; each API defines its own small strategy function in its module in `schematic-definitions` for the exceptions and declared endpoints it moves, with no shared preset layer (D55-4); the table type and its validation ("an exception id that matches no endpoint") are deleted. OpenAI's definitions are imported, so its pagination stays in the hand-written overlay module (`openai_pagination::apply(api)`, D57 item 4) that the importer never writes: the overlay is converted to set endpoint-level pagination on the imported endpoints it names, and an id it names that matches no imported endpoint remains a validation error. Generated Rust and OpenAPI are unchanged except for intended differences recorded in the implementation log (D42's criterion).
@@ -393,18 +410,18 @@ Each default is adopted by the implementer if the author has not ruled before pl
 
 ## Risks and failure modes
 
-- **Hidden behavior change in the rewrite.** A mistyped path or description in about 519 conversions is silent. Mitigation: R10, R24 and per-API batching (PD19). A conversion that cannot be verified by equality must fail the batch, not be waved through.
+- **Hidden behavior change in the rewrite.** A mistyped path or description in about 511 conversions is silent. Mitigation: R10, R24 and per-API batching (PD19). A conversion that cannot be verified by equality must fail the batch, not be waved through.
 - **Typed registration changes names.** The Rust identifier derived from `T` may differ from the string the old definition used (serde `rename` on a container changes the `schemars` name; an alias; a re-exported type). Unverified at drafting for all registered types. Mitigation: the equivalence tests compare descriptor-derived names with the old strings; mismatches become `register_as` registrations with `rust_path!` or `.schema_name` (D57 item 11) or PD2 collisions, each logged.
 - **Registered set must not grow.** Registering nested types automatically would add components to OpenAPI output. Default: preserve the old explicit registrations and their order, plus the existing nested `$defs` extraction behavior (R6). Suppressing nested components already exported today would itself be a regression; additions are explained diffs and review items. The one ruled exception is the container components (`Vec<..>`), dropped by D57 item 12 and listed per API in R24.
 - **`#[non_exhaustive]` is beyond D15 and causes churn.** Many in-repo test literals (R12) must move to builders or a helper. Fallback stated in R12; the construction guarantee is an Open Question with a default.
-- **Removing the old pagination types can break dependents and generated setters.** The 35 declared endpoints feed `page`/`per_page` setters that dependents may call. Mitigation: R20's byte comparison and dependent builds; spec 3's adoption rule (R7) keeps the setters.
+- **Removing the old pagination types can break dependents and generated controls.** The 35 legacy declarations remain, but the generated pager surface already uses authored `.page(..)` and `.page_size(..)` controls instead of adopted request fields. Mitigation: R20's byte comparison and dependent builds; preserve the delivered controls and `fetch_page()` result type rather than restoring removed request setters.
 - **Descriptor constraint may be wrong.** The optional structural component is designed before 4b exists. If 4b needs a different carrier, the descriptor type changes but no definition does (definitions never name the descriptor's fields). 4b's refresh checks this.
 - **Parent inaccuracy about `auth_policy`.** The parent says `auth_policy` has zero codegen consumers; the generator reads `effective_auth_policy()`. Removing the field would remove the way a definition states "several explicit auth methods". Ruled: keep it (D56-6).
 - **JSON snapshot ordering.** Map-like fields must serialize in a stable order or false diffs appear. Mitigation: sort when rendering the snapshot.
 - **GitLab request type change breaks dependents.** Making `ref` a caller-set query field changes a generated request type (R29). Mitigation: inventory dependents first, migrate them in this spec, build all dependents (R25).
 - **Merged endpoints may differ in the wire form.** With the new optional parameter set, a merged endpoint must send the same query string as the removed `?`-suffixed endpoint did (ordering with other query parameters, encoding). Mitigation: URL assertions in R29.
 - **An OpenAI beta schema is not a superset of its twin.** Then the pair cannot merge without losing data or inventing an indistinguishable union. Mitigation: the R29 schema gate stops that pair, logs it for the author, and keeps R28's hard error disabled until the author rules.
-- **Spec 3's output is unverified here.** The exceptions table's form, the resolution function, and how the 35 page-number declarations are expressed did not exist when this was drafted. R19-R21 and R27 are written against D42/D43 and spec 3's draft; the refresh must replace them with spec 3's actual names.
+- **Pagination migration can change resolved behavior.** The delivered-interface map below records the actual exceptions table, resolution/adoption functions, coverage, and tests. Preserve these results while changing their authoring location; legacy declarations alone do not establish that an endpoint is paginated.
 - **Spec 2's definition-side interface is unverified.** `CrossOrigin`, redaction sets, the request-id field and the harness may exist in some other form (R14, R15, PD3, PD4).
 - **Placeholders may not fit spec 5.** `Success`/`ErrorSet` are guesses at spec 5's needs (R13). Mitigation: `#[non_exhaustive]`, a single stored lowering point, and the refresh after review 1 of this spec before spec 5 is planned.
 - **Import regeneration may lose hand edits.** R22's reproduce-first proof guards against it.
@@ -435,7 +452,7 @@ Record each of these in `implementation-log.md`, as it occurs, for review 1:
 3. **`#[non_exhaustive]` on `Endpoint` and `RestApi`:** marked PROPOSED beyond D15; the author's pre-plan ruling or the default used, the churn and consumers migrated, whether the fallback was used, and a keep/drop recommendation.
 4. **`Schema::module_path`:** the PD21 outcome (removed or wired) and evidence.
 5. **The `EndpointParams` `Default` allow-list and the `oauth_scopes` removal evidence (grep output, dependents touched):** the final allow-list, and the other types that lost or kept `Default`.
-6. **The migration evidence:** the endpoint count found (expected about 519, OpenAI 265) per API; the per-API list of explained diffs from R24 with cause, including the dropped container components (D57 item 12); the size of the JSON baseline fixtures (PD20); the OpenAI conversion route and the reproduce-first result (R22).
+6. **The migration evidence:** the endpoint count found (expected about 511, OpenAI 265) per API; the per-API list of explained diffs from R24 with cause, including the dropped container components (D57 item 12); the size of the JSON baseline fixtures (PD20); the OpenAI conversion route and the reproduce-first result (R22).
 7. **The pagination removal:** the 35 declared endpoints as found, how each was converted, how the OpenAI overlay module was converted to endpoint-level pagination (D57 item 4), the per-API strategy function each module defines and where the pager-managed marker (R30) was used, every dependent call site changed, and any generated-output change (R20).
 8. **The descriptor constraint:** the final shape of the optional structural component and serde derives (R2), for 4b's refresh.
 9. **The builder surface contract with spec 5 and spec 4b:** the final text of the R13 table as implemented, the reserved names, and anything spec 5 or 4b will need that the placeholders do not give.
@@ -447,13 +464,59 @@ Record each of these in `implementation-log.md`, as it occurs, for review 1:
 15. **Tests deleted or replaced**, and doc, skill and command updates made.
 16. **Hosts and operating systems actually exercised**, and which of macOS, Linux, native Windows, WSL2 were not.
 
+## Delivered pagination interfaces and migration baseline
+
+Verified on 2026-10-14 from `2026-10-13-schematic-pagination` review 2, its implementation log, and the current source. This is a factual refresh of dependencies; the author decisions above remain in force.
+
+| Concern | Delivered interface or fact |
+| --- | --- |
+| Definition model | `schematic_define::pagination::{Strategy, PageStrategy, Collection, Pagination, PaginationException}`. `RestApi::default_pagination` is `Option<Strategy>`; `pagination_exceptions` is `Vec<PaginationException>`, each holding `endpoint` and `collection`. The four kind variants hold named structs. |
+| Resolution and controls | `resolve(&RestApi, &Endpoint) -> Resolution`; variants `NotAList`, `Unpaginated`, `Paginated`. `ResolutionOrigin::{Exception, ApiDefault, Unauthored}`. `caller_knobs(&Resolution)` describes the generated controls. Only GET with an explicit `Vec<T>` descriptor is inferred; aliases and wrappers require authorship. |
+| Adoption and validation | `param_adoptions`, `adopted_params`, `validate_strategy`, and `validate_pagination`; `PaginationDiagnostic` carries endpoint, alternate, and error. `PagerManagedRequiredWithoutDefault` and `AdoptionWithoutKnob` are separate errors. Generator entry points are `validate_rust_client`, `validate_openapi`, and `validate_postman`, returning structured `ValidationDiagnostic` values. |
+| Runtime and generated entry | `schematic-runtime` 0.1.0, ABI **4**, `EndpointSpec`, `Paginated`, `Pager`, `Pages`, and `SessionScope`. Existing generated endpoint calls forward authored controls and `pages`, `fetch_page`, `collect_all`, or `with_session`; generic request-object paging remains available. `fetch_page()` returns `Page<Item>`, not the endpoint wrapper. |
+| Capabilities and recovery | Runtime names include `AdjustablePageSize`, `Sessioned`, `Sessionless`, and `Renewable`. `Paginated` requires `Failure: Sync`; no provider `Clone` bound. `Pages::retry()` and `Items::retry()` are optional explicit recovery. Repeated iteration without retry retains the complete error and sends nothing; `AlreadyFailed` does not exist. Consuming fetch/collection helpers remain fail-fast. |
+| Definition/runtime integration | API fields are `cross_origin`, `request_id_header`, and `secret_names`. The permissive origin constructor is `CrossOrigin::danger_allow_any()`. There is no current `ParamDef::secret` field; apply the existing conditional planning default for secret forms rather than assuming that field was delivered. |
+| Import persistence | `ImportOptions::overlay` and `import --overlay <RUST_PATH>` with `--definitions-out` emit a generic overlay call. OpenAI uses `crate::openai_pagination::apply` in `definitions/src/openai_pagination.rs`, outside the importer-owned `openai/` directory. Re-import currently reproduces both committed OpenAI source files byte for byte. |
+| Counts | 18 REST APIs, 547 resolved endpoints, 265 OpenAI endpoints, **511 production endpoint literals** (EMQX shares 36 endpoint definitions between two APIs), 35 legacy declarations, 94 authored pagers, and 32 verification-task endpoints. Recount before migration; literals and resolved endpoints are different totals. |
+| Coverage to preserve | GitHub 9, GitLab 9, Gitea 8, Bitbucket 8, OpenAI 58, ElevenLabs 2 authored pagers. Bitbucket `GetSource` is binary and resolves `NotAList` despite its inert legacy pagination declaration; removing that metadata must not invent a pager or undo the earlier source-route merge. ElevenLabs `ListVoices` and EMQX `ListAuthUsers` remain definition gaps, not corrections assigned to this migration. |
+
+The three author rulings in pagination review 1 are migration invariants:
+
+- **Session opening:** reject partitions combined with `Session::opened_by_first_page()` as `partitioned-first-page-session`. Separately opened shared sessions with rotating handles remain supported; unpartitioned first-page sessions remain supported.
+- **Response callbacks:** paging runs the global JSON callback before extracting items and continuations, and skips the endpoint-specific typed callback. Ordinary sends still run both.
+- **Failure recovery:** retain specific errors and their evidence, allow explicit retry after every category, replace evidence on a failed retry, and preserve the failed position without redelivering earlier items. This ruling superseded the pagination snapshot's retry exclusion. Automatic retry policies are follow-up work, not part of this builder migration.
+
+Actual tests for the frozen-test retirement list and migration safety net:
+
+| Existing contract | Test or artifact to update or retain |
+| --- | --- |
+| No endpoint override / no GraphQL | `define/tests/cross_origin_policy.rs::endpoints_have_no_cross_origin_override_and_no_graphql_export`; replace only the cross-origin assertion when the endpoint override lands. |
+| Endpoint and parameter literal surface | `define/tests/endpoint_literal_surface.rs::endpoint_and_params_literals_compile_unchanged_and_behave_the_same`; one test covers both frozen literal shapes. |
+| No endpoint-literal changes during pagination | Historical implementation-log comparison; retire that constraint when builders land, replacing it with the definition/artifact baselines. |
+| Legacy metadata inert | `define/tests/pagination_tables.rs::legacy_pagination_metadata_does_not_change_resolution`; `gen/src/codegen/pagination/tests.rs::legacy_pagination_metadata_does_not_change_the_output`; `gen/tests/l1/e2e_generation.rs::legacy_pagination_metadata_emits_no_pager`. |
+| Table rules and exhaustive resolutions | `define/tests/pagination_tables.rs`, `define/tests/pagination_partitions.rs`, `gen/tests/l1/pagination_validation.rs`, and `definitions/tests/pagination_coverage/{main,forges,openai,others}.rs`. Replace table-specific mechanics while retaining list resolutions, controls, valid/invalid strategy siblings, and the exact unverified list. |
+| Fresh output, callbacks, retry, and sessions | `gen/tests/l1/fresh_output_compile.rs`; the fixture crate is compiled and executed offline. Its child-test registration guard must continue to cover every added child test. |
+| Re-import and committed generated clients | `gen/tests/l1/import_overlay.rs::reimporting_the_vendored_openai_document_reproduces_the_committed_definition`, plus the generic overlay tests; `schema/tests/pagination.rs` and `schema/tests/compile_fail.rs`. |
+
+The canonical area `just test` includes separate fresh-output and runtime compile-fail guards; `just test-schema` runs the excluded generated crate. `just check-drift` now uses nextest. `test-e2e` still uses the old runner and must not be used unchanged.
+
 ## Refresh notes
 
-`refresh_required: true`. Before this spec's plan is made, refresh it from the review 1 outcomes of specs 1, 2 and 3 (spec 3 most of all). The 2026-10-11 split (D52) moved the vocabulary work to spec 4b; D53 (no convenience methods), D54 (ownership clarifications), D55, D56 and D57 items 4, 11 and 12 (rulings of 2026-10-11) are folded in above; this spec was rewritten accordingly, and the PD numbers of the moved items were left to 4b. Things the earlier specs' outcomes may change:
+`refresh_required: false` after the 2026-10-14 pagination review 2 refresh. The delivered-interface map above resolves the pagination assumptions and records the current runtime/generator names. Phase 1 still rechecks the inventory before capturing its baseline. The 2026-10-11 split (D52) moved the vocabulary work to spec 4b; D53 (no convenience methods), D54 (ownership clarifications), D55, D56 and D57 items 4, 11 and 12 (rulings of 2026-10-11) are folded in above; this spec was rewritten accordingly, and the PD numbers of the moved items were left to 4b. The following checklist remains useful when validating the prerequisites and refreshing later specs:
 
 - **From spec 1:** the diagnostics format and validator API the builders call (PD2, R8-R9); whether the isolated compile check is a cargo-level or generator-level test (R1); whether duplicate id and `(method, path)` validation exists yet (the author ruling of 2026-10-12 makes same-API duplicate routes a hard error with no exceptions, and spec 1's fix cycle merges GitHub `GetGitTree`/`GetGitTreeRecursive` and collapses the Bitbucket source pair, so R29's merges must leave no duplicate); the state of `gen/schematic/` (deletion authorized 2026-10-12).
 - **From spec 2:** the `CrossOrigin` type and validator (R14, PD5); whether a definition-side request-id field and redaction interface exist and what they are called (R15, PD3, PD4); the managed-client mock harness available for R14; the final name of the runtime trait (assumed `EndpointSpec`) and package.
 - **From spec 3:** the pagination model's names, the exceptions-table form, the resolution function usable by R19's fixture, the list-recognition rule's exact input (R21), how the 35 page-number declarations and the OpenAI/EMQX adjustments were expressed (R20), the exact text and names of spec 3's tests listed in R27, and the true endpoint count (R18).
-- **Counts:** re-verify the ~519 endpoints (OpenAI 265), 18 REST APIs, the 35 declared endpoints, the `oauth_scopes`/`auth_policy` users, and the dependent list.
+- **Counts:** re-verify the ~511 endpoints (OpenAI 265), 18 REST APIs, the 35 declared endpoints, the `oauth_scopes`/`auth_policy` users, and the dependent list.
 - **Outcomes of this spec that change spec 4b and spec 5 (recorded for their refresh):** the descriptor's final structural carrier (R2), the builder surface and reserved names (R13, PD8), the JSON baseline fixtures (R24) and the serde derives that now exist on `RestApi`, `Endpoint`, `EndpointParams`, `ParamDef` and its style types (R17), so 4b keeps only the by-name `Schema` serialization contract, the pager-managed marker (R30) that 4b's `required` fidelity reads (D55-5), whether `#[non_exhaustive]` stayed, and the `auth_policy`/`oauth_scopes` outcome (PD17, D56-6).
 - **From the author's rulings at review 1:** any ruling on the planning details assigned here replaces the defaults; rulings on the accepted-gap candidates are added.
+
+## Refresh log
+
+### 2026-10-14 — Pagination review 2 and implementation log
+
+- Replaced draft-pagination assumptions with the delivered model, resolution/adoption, diagnostic, runtime ABI 4, generated-call, and importer-overlay interfaces so the builder migration starts from existing code.
+- Corrected the production endpoint-literal estimate to 511 and distinguished it from 547 resolved endpoints; recorded 94 authored pagers and the 32-endpoint verification task.
+- Recorded Bitbucket's binary `GetSource` exception to prevent inert legacy metadata from creating a new pager during removal; retained the existing definition-gap exclusions.
+- Carried forward the author's three settled rules for session partitions, paging callbacks, and optional explicit retry so moving pagination authorship preserves behavior.
+- Mapped the frozen tests and live regression guards to their real files and names, and recorded the current nextest recipes. No author decision, pipeline order, or new feature scope was changed.

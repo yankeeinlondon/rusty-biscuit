@@ -4,6 +4,67 @@ created: 2026-10-11
 phase: 1
 agent: codex/gpt-6.1-sol
 yolo: "true"
+source_files_during_phase_1:
+  - Cargo.lock
+  - schematic/define/src/cross_origin.rs
+  - schematic/define/src/pagination.rs
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/params/mod.rs
+  - schematic/define/src/params/param_def.rs
+  - schematic/define/src/types.rs
+  - schematic/define/tests/definition_serde.rs
+  - schematic/gen/Cargo.toml
+  - schematic/gen/examples/capture_definition_baseline.rs
+  - schematic/gen/examples/support/definition_snapshot.rs
+  - schematic/gen/tests/l1/artifact_drift.rs
+  - schematic/gen/tests/l1/definition_baseline.rs
+  - schematic/gen/tests/l1/main.rs
+  - schematic/justfile
+  - schematic/features/2026-10-14-schematic-definition-api/spike/Cargo.lock
+  - schematic/features/2026-10-14-schematic-definition-api/spike/Cargo.toml
+  - schematic/features/2026-10-14-schematic-definition-api/spike/examples/mismatched_type.rs
+  - schematic/features/2026-10-14-schematic-definition-api/spike/examples/misspelled_path.rs
+  - schematic/features/2026-10-14-schematic-definition-api/spike/examples/private_descriptor.rs
+  - schematic/features/2026-10-14-schematic-definition-api/spike/prove.py
+  - schematic/features/2026-10-14-schematic-definition-api/spike/src/bin/emitted_path_source.rs
+  - schematic/features/2026-10-14-schematic-definition-api/spike/src/lib.rs
+  - schematic/gen/tests/fixtures/definition-baseline/anthropic.json
+  - schematic/gen/tests/fixtures/definition-baseline/artificial-analysis-critpt.json
+  - schematic/gen/tests/fixtures/definition-baseline/artificial-analysis-data.json
+  - schematic/gen/tests/fixtures/definition-baseline/bitbucket.json
+  - schematic/gen/tests/fixtures/definition-baseline/elevenlabs.json
+  - schematic/gen/tests/fixtures/definition-baseline/emqx-basic.json
+  - schematic/gen/tests/fixtures/definition-baseline/emqx-bearer.json
+  - schematic/gen/tests/fixtures/definition-baseline/eversolo.json
+  - schematic/gen/tests/fixtures/definition-baseline/gitea.json
+  - schematic/gen/tests/fixtures/definition-baseline/github.json
+  - schematic/gen/tests/fixtures/definition-baseline/gitlab.json
+  - schematic/gen/tests/fixtures/definition-baseline/huggingface.json
+  - schematic/gen/tests/fixtures/definition-baseline/lmstudio.json
+  - schematic/gen/tests/fixtures/definition-baseline/ollama-native.json
+  - schematic/gen/tests/fixtures/definition-baseline/ollama-openai.json
+  - schematic/gen/tests/fixtures/definition-baseline/openai.json
+  - schematic/gen/tests/fixtures/definition-baseline/samsung-smart-tv.json
+  - schematic/gen/tests/fixtures/definition-baseline/unfolded-circle-core-rest.json
+docs_updated_during_phase_1:
+  - docs/dependencies.md
+  - schematic/define/README.md
+  - schematic/docs/dependencies.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+docs_created_during_phase_1:
+  - schematic/docs/definition-snapshots.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/inventory.md
+  - schematic/features/2026-10-14-schematic-definition-api/prerequisite-interfaces.md
+  - schematic/features/2026-10-14-schematic-definition-api/reproduction.md
+  - schematic/features/2026-10-14-schematic-definition-api/spike/README.md
+skills_files_updated_during_phase_1:
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+packages:
+  - schematic-define
+  - schematic-gen
 ---
 
 # Schematic definition API implementation plan
@@ -14,13 +75,22 @@ Replace REST definition literals and hand-typed schema references with required-
 
 Success means all R1–R31 have observable evidence: all shipped REST endpoints use builders, registries come from the same context assembly as definitions, generated Rust paths compile, invalid references and contradictory declarations fail with context, containers preserve their wire shape without becoming components, pagination resolutions and caller controls survive, all nine query-bearing paths are migrated (eight by merging into their same-route twins), and a request body on `GET` is rejected. Historical differences are individually explained; final committed Rust, OpenAPI, and Postman artifacts have no drift exemptions. The implementation log records decisions and evidence as they occur. The terminal state is **implementation complete, ready for review**, with platform evidence and any remaining limitations stated accurately.
 
-This is a conditional implementation plan. On 2026-10-11, the generation-integrity, runtime-envelope, and pagination specifications are marked `draft-spec` and `implemented: false`; the definition-API specification has `refresh_required: true`. The current code does not supply the reviewed runtime and pagination interfaces assumed below. Phase 1 must reconcile those outcomes before its baseline is captured. This plan does not implement the predecessor features, revise the specification snapshot, or treat their proposed interfaces as existing code.
+Prerequisite facts were refreshed on 2026-10-14 after pagination passed review 2. The runtime and pagination interfaces now exist; the specification's **Delivered pagination interfaces and migration baseline** section records their actual names, coverage, and frozen tests. Phase 1 rechecks that baseline against the execution tree rather than inventing substitute predecessor features. This plan does not implement the predecessor features or reopen their settled rulings.
 
 The author ruling of 2026-10-12 (`2026-10-11-schematic-generation-integrity` review 1, item 1) is incorporated: endpoint identity stays `(method, path)`, REST selectors are withdrawn, the `?`-suffixed Gitea and OpenAI endpoints merge into their twins with optional `recursive`/`beta` query parameters (no fixed-value query inputs are built), and every parameter declares its location with a `GET` body rejected (R29, R31).
 
 Waves are numbered globally. Each wave is an execution step: finish its tasks and checkpoint before starting the next. “Parallel” means the listed tasks may be assigned to separate subagents with disjoint file ownership; the coordinator integrates shared changes and runs the checkpoint. All agents operate non-interactively, without commits, `cargo fmt`, or focus-stealing terminal/browser windows. Single-task waves and per-API migration batches are sequential.
 
-Every phase gate runs `just test` and `just lint` from `schematic/`, with the definition/artifact comparisons available at that point. Use nextest recipes for L1, `just doctest` explicitly for documentation tests, and `just test-l2` only for real-terminal coverage. The current `test` recipe does not run doctests. Load the testing skills and Test Toolkit before authoring tests; use runtime fixture paths and CI-indexable repository reads. Do not use the existing `check-drift` or `test-e2e` recipes unchanged: they still invoke `cargo test`; migrate any required runner to nextest.
+Every phase gate runs `just test` and `just lint` from `schematic/`, with the definition/artifact comparisons available at that point. Use nextest recipes for L1, `just doctest` explicitly for documentation tests, and `just test-l2` only for real-terminal coverage. The current `test` recipe does not run doctests; it does run the fresh-output and runtime compile-fail guards separately. Load the testing skills and Test Toolkit before authoring tests; use runtime fixture paths and CI-indexable repository reads. `just check-drift` already uses nextest and may be used. Do not use `test-e2e` unchanged: it still invokes `cargo test`; migrate it if needed.
+
+### Delivered pagination contracts to preserve
+
+- Use `schematic_define::pagination::{resolve, caller_knobs, param_adoptions, adopted_params, validate_pagination}` and the actual `Resolution`/`PaginationDiagnostic` types. The API fields being migrated are `default_pagination: Option<Strategy>` and `pagination_exceptions: Vec<PaginationException>`. Strategy helpers already live in their provider modules; preserve them rather than creating a preset layer.
+- Preserve `schematic-runtime` ABI 4 and the primary generated endpoint-call surface. Adopted request fields are already removed; preserve authored `.page(..)`, `.page_size(..)`, cursor controls, and `fetch_page() -> Page<Item>` rather than restoring old request setters. Runtime capability names include `AdjustablePageSize`, `Sessioned`, `Sessionless`, and `Renewable`.
+- Carry forward pagination review 1's three author rulings: reject partitioned first-page sessions while retaining separately opened shared sessions; paging runs the global JSON callback only; retained errors allow optional explicit retry after every error category without redelivering earlier items. Preserve the `Failure: Sync` bound without adding `Clone`, buffered delivery counts, and adjustable-size retry checkpoints. Automatic retry policies remain outside this migration.
+- Capture the current 18-API baseline: 547 resolved endpoints, 511 production endpoint literals, 265 OpenAI endpoints, 35 inert legacy declarations, 94 authored pagers, and 32 verification-task endpoints. Bitbucket `GetSource` is binary and resolves `NotAList` despite a legacy declaration; metadata removal must not create a pager. ElevenLabs `ListVoices` and EMQX `ListAuthUsers` remain the existing definition gaps.
+- Preserve `ImportOptions::overlay`, the generic emitted overlay call, and `definitions/src/openai_pagination.rs`. `gen/tests/l1/import_overlay.rs` currently proves repeated OpenAI imports reproduce both committed source files. Use that passing result as the reproduction baseline before changing the emitter.
+- Use the specification's concrete frozen-test map for retirement. Retain coverage in `definitions/tests/pagination_coverage/`, the partition validation siblings, generated callback/retry/session tests in `gen/tests/l1/fresh_output_compile.rs`, and the generated child-test registration guard. Run `just test-schema` for the excluded crate's public paging and compile-fail tests.
 
 ## Phase 1 — Establish Contracts and Baselines
 
@@ -30,10 +100,10 @@ These rulings adopt the specification's defaults where available. They are plann
 
 | Item | Adopted rule or prerequisite |
 | --- | --- |
-| Prerequisite refresh | Read review 1 outcomes of `2026-10-11-schematic-generation-integrity`, `2026-10-12-schematic-runtime-envelope`, and `2026-10-13-schematic-pagination`. Record actual validator, diagnostic, compile-check, runtime, pagination, adoption, overlay, and frozen-test interfaces. If those outcomes are unavailable, mark dependent work not executable; do not fabricate substitute runtime or pagination features. |
+| Prerequisite refresh | Read predecessor review outcomes, including pagination review 2 and review 1's Human rulings. Start from the specification's delivered-interface and frozen-test maps; recheck actual validator, diagnostic, compile-check, runtime, pagination, adoption, and overlay interfaces before baseline capture. Do not fabricate substitute predecessor features. |
 | PD1 | Containers recurse to element/value registrations. Maps accept String and Serde-supported integer keys; reject unsupported keys with API, endpoint, and type context. String-like newtypes require an explicit supported-key contract. Option affects wire nullability and the Rust wrapper, while remaining transparent only for component registration. |
 | PD2 | Aggregate structured `DefinitionError::Collision { schema_name, first, second }` errors for each module group/API; fully qualified Rust type names are diagnostic text only. Render one line per collision using the specification's message unless the predecessor established a diagnostic format. |
-| PD3–PD5 | Use the predecessor's request-id field, secret/redaction fields, CrossOrigin type, and exact-origin validator. Lowercase and validate one API request-id header. Parameter `.secret()` sets the existing field. Add header sugar only where its storage exists. Endpoint cross-origin replaces the API policy wholesale; runtime callers may only tighten it. |
+| PD3–PD5 | Use the predecessor's `request_id_header`, `secret_names`, `CrossOrigin`, and exact-origin validation. Lowercase and validate one API request-id header. There is no delivered `ParamDef::secret` field; apply the specification's conditional default for secret forms. Endpoint cross-origin replaces the API policy wholesale; runtime callers may only tighten it. |
 | PD6 | Keep `EndpointParams::Default`, preferring `EndpointParams::new()` in examples. Audit all other public definition defaults and record an exact allow-list with reasons. Endpoint, RestApi, and their builders have no public Default; generated request types retain theirs. |
 | PD7–PD8 | Endpoint constructor requires id, method, and path; typestate requires description and one success shape. API constructor requires context, name, and base URL; typestate requires description and an explicit authentication choice. Adopt Design-table names, cover every authored HTTP verb and request form, and yield pagination names to the predecessor. Reserve `.path_param`, `.public`, `.auth`, `.deprecated`, `.rate_limit`, and the later response vocabulary names. |
 | R12 proposal | Adopt `#[non_exhaustive]` on Endpoint and RestApi after every external consumer and emitter has migrated. Do not introduce it in the additive builder phase. Any use of the spec's source-scan-only fallback must be justified by concrete churn evidence and flagged for review; it weakens the construction guarantee. |
@@ -48,24 +118,24 @@ These rulings adopt the specification's defaults where available. They are plann
 
 ### Wave 1 — Refresh and Inventory (Parallel)
 
-- [ ] **Refresh Interfaces**
-  - Record predecessor review outcomes and the actual API names in the implementation log, including EndpointSpec, CrossOrigin, pagination resolution/adoption, the generic overlay hook, and isolated compile checking.
+- [x] **Refresh Interfaces**
+  - Record predecessor review outcomes, including pagination review 2 and its three author rulings, and the actual API names in the implementation log, including EndpointSpec, CrossOrigin, pagination resolution/adoption, the generic overlay hook, and isolated compile checking.
   - Map the six R27 frozen tests to their actual names and locations; preserve the no-GraphQL half of the runtime surface test.
   - Own the contract/log document; no source changes. Exit requires a completed prerequisite interface map or an explicit dependency hold.
-- [ ] **Inventory Consumers**
+- [x] **Inventory Consumers**
   - Use sniff for repository/dependency discovery and text searches for concrete call sites. Record all REST API names, endpoint counts and ordered ids, registry entries/order, container components, defaulted fields, Basic/OAuth2 users, and five WebSocket definitions.
-  - Recount the expected approximately 519 endpoints, 265 OpenAI endpoints, 36 container registrations, 35 legacy pagination declarations, and nine query-bearing paths; treat observed inventory as authoritative.
+  - Recount the current baseline of 547 resolved endpoints / 511 production endpoint literals, 265 OpenAI endpoints, 36 container registrations, 35 legacy pagination declarations, 94 authored pagers, 32 verification-task endpoints, and nine query-bearing paths; treat observed inventory as authoritative.
   - Inventory GitLab repository-file request users before its field location changes, users of every request type and client method R29 removes (Gitea GetGitTreeRecursive, the seven OpenAI Beta* endpoints, including schematic-gen L1 tests naming them), GET endpoints declaring a request body, all Default implementations, oauth_scopes/auth_policy/module_path readers, external literals, registry lookups, and generated-schema dependents. Own an inventory artifact, not the shared log file.
 
 Checkpoint: predecessor contracts and inventory agree; actual counts and consumers replace estimates throughout the execution checklist. Missing prerequisites stop baseline capture and dependent implementation, while preserving the inventory for later use.
 
 ### Wave 2 — Resolve Design Risks (Parallel, Once Only)
 
-- [ ] **Registration Spike**
+- [x] **Registration Spike**
   - Build one small throwaway stable-Rust prototype covering a nominal type, serde-renamed nominal type, alias/re-export, foreign type, primitives, Value, Vec, Option, HashMap, and nested containers. Prove private descriptors, ordered idempotent registration, collision aggregation, destination-context validation, and fully qualified emitted paths.
   - Resolve dispatch without overlapping blanket `T: JsonSchema` and container implementations. Candidate: a local registration trait with nominal implementations emitted by a declarative helper/import emitter, and disjoint implementations for containers/primitives/Value. JsonSchema supplies schema names; the nominal implementation supplies the Rust identifier. Do not introduce a second schema registration list merely to implement this trait. If a simpler schemars-supported dispatcher meets every contract, prefer it and document how it distinguishes nominal wrappers from containers.
   - Prove rust_path spelling/resolution and T identity, including a negative mismatched-T case; select the exact registration bounds and descriptor wrapper metadata. Reject designs relying on type_name parsing, specialization, or a new deriving proc-macro. Record chosen public signatures before Phase 2.
-- [ ] **Reproduction Proof**
+- [x] **Reproduction Proof**
   - On one host, run the unchanged OpenAI import with identical recipe options and pinned inputs into a temporary destination; compare mod.rs and types.rs byte for byte. Regenerate Rust/OpenAPI/Postman into temporary trees and compare their complete file sets with committed artifacts.
   - Classify differences as tool/version/options, nondeterminism, stale artifacts, or legitimate authored changes. Define a repeatable generic transform for legitimate import differences and prove reproduction before migration; never overwrite evidence to make the test green.
   - Preserve the hand-written overlay. This one-time reproduction investigation is not repeated later as a spike; later re-import and drift checks are regression validation.
@@ -74,7 +144,7 @@ Checkpoint: stable registration design compiles, required negative cases fail as
 
 ### Wave 3 — Capture Safety Nets (Sequential)
 
-- [ ] **Capture Baselines**
+- [x] **Capture Baselines**
   - Add plain serde support first to RestApi, Endpoint, EndpointParams, ParamDef, QueryParamType, ParamStyle, and necessary inner runtime/pagination types (R17). Round-trip each type without changing authored definition behavior.
   - Capture unchanged definition JSON plus ordered registry schemas, and resolved pagination for every list endpoint and the 35 declarations. Include GET Vec recognition, POST arrays requiring explicit list authorship, aliases, and adopted caller controls.
   - Add a reusable non-mutating `just migration-check` recipe/helper: regenerate all three outputs into temporary directories, compare file sets/bytes, and compare historical definitions as JSON values before any changed-model deserialization. Accept only named API/endpoint/field or registry-entry differences with causes; never broad response/schema ignores.
@@ -179,7 +249,7 @@ Phase gate: R22 passes, OpenAI's original count/order (less exactly the merged B
 
 - [ ] **Convert Providers**
   - Use Phase 1's smallest-first inventory for every remaining REST API. For each batch, migrate its definition function, ordered typed registrations, lookup assembly, headers/auth/params, and every endpoint in one pass. Neither WebSocket definitions nor type-module stored-form tests are wholesale rewritten.
-  - Move pagination exceptions to endpoint builders and author each API's small strategy function in its own module. Convert all 35 Gitea/GitHub/GitLab/Bitbucket declarations; preserve page/per_page setters or the predecessor's equivalent caller controls. No shared presets.
+  - Move pagination exceptions to endpoint builders and retain each API's existing strategy functions in its own module. Remove or convert all 35 Gitea/GitHub/GitLab/Bitbucket legacy declarations according to their current resolved behavior, preserving the 94 authored pagers and their controls across all APIs. Bitbucket GetSource's binary non-list remains a non-list; its inert declaration is removed without authoring a pager. No shared presets.
   - Merge Gitea GetGitTreeRecursive into GetGitTree with an optional `recursive` query parameter, and convert the GitLab ref query input, within their API batches; migrate the inventoried users of the removed Gitea request type. Migrate inventoried GitLab call sites in the same batch, preserving git_ref where possible; log unavoidable source changes.
   - Handle aliases/re-exports/foreign types with register_as/rust_path and schema_name only where needed. Preserve explicit registry order and nested components; enumerate dropped container components by API and name.
   - End each batch with original endpoint count/ordered-id assertions (less exactly the endpoints R29 merges, listed by id), R10 JSON comparison, R19 pagination-resolution comparison, R24 generated-byte/file-set comparison, isolated compile checks, and affected dependent tests. Regenerate affected committed outputs before ordinary drift tests. Fix failures before the next batch and log the last completed API for unattended recovery.
@@ -274,3 +344,14 @@ Keep legal repeated parameters in distinct locations distinct; this table does n
   - Phase 2 owns the descriptor JSON matrix; Phase 5 owns the JSON and YAML import matrices. One test per format walks its entire applicable matrix from a real-tool fixture, making one edit per cell and asserting the public definition/API validation outcome. The unedited control proves the fields affect output; assert endpoint presence, schema/path/shape, and emitted query values rather than just serde success.
   - Preserve duplicate keys and trailing content using textual mutations; a parsed JSON Value cannot represent duplicate keys. Use fixture variants for legal non-component/wrapper states. Unknown malformed data must not turn into empty successful output.
   - Audit affected read paths for `#[serde(default)]`, Option where absence/null differ, `filter_map(.. as_str())`, `unwrap_or_default()`, and `.ok()` swallowing load-bearing errors. Any review finding reports every other cell in its row and column. Matrix evidence is required at the owning phase's gate, not deferred to final review.
+
+
+## Refresh log
+
+### 2026-10-14 — Pagination review 2 and implementation log
+
+- Replaced the obsolete prerequisite hold with the delivered interface map and the three settled pagination rulings, while retaining Phase 1's execution-tree verification.
+- Updated inventory expectations to distinguish 547 resolved endpoints from 511 production literals, and recorded 94 pagers and 32 verification-task endpoints.
+- Clarified that removal of Bitbucket GetSource's inert legacy declaration preserves its binary non-list behavior; retained existing provider-local helpers and definition-gap exclusions.
+- Added the actual resolution/adoption, ABI 4, capability, recovery, overlay, and frozen-test contracts that migration must preserve.
+- Corrected runner advice: check-drift already uses nextest; test-e2e still needs conversion if used. No implementation, pipeline-order change, or new feature scope was introduced.
